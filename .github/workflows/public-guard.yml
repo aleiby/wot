@@ -25,6 +25,8 @@ jobs:
           python-version: "3.12"
       - name: Deny retail files, private roots, LFS pointers and machine paths
         run: python3 Tools/public/leak_guard.py --tree . --verbose
+      - name: An export commit's tree matches its receipt (files, modes, bytes)
+        run: python3 Tools/public/check_export_receipt.py --tree . --export-commits-only
 
   gitleaks:
     if: ${{ github.repository == 'aleiby/wot' }}

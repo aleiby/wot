@@ -1431,12 +1431,14 @@ Tools/import/world_fractal_split.py
 Tools/local.example.json
 Tools/public/MANIFEST.md
 Tools/public/binary-allowlist.sha256
+Tools/public/check_export_receipt.py
 Tools/public/export_public_tree.py
 Tools/public/leak_guard.py
 Tools/public/provenance_scan.py
 Tools/public/public-files.txt
 Tools/public/scaffold/gitattributes
 Tools/public/scaffold/gitignore
+Tools/public/test_check_export_receipt.py
 Tools/public/test_export_public_tree.py
 Tools/public/test_leak_guard.py
 Tools/public/test_provenance_scan.py

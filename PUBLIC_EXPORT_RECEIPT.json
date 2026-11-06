@@ -1,8 +1,8 @@
 {
-  "source_commit": "84a7485f47b2da3697d4e836ee5a058ec8c58b0b",
+  "source_commit": "3e9cd8c1fd961c6b88f3bcf541d2710193bbc585",
   "source_kind": "commit",
-  "source_tree": "84a7485f47b2da3697d4e836ee5a058ec8c58b0b",
-  "file_count": 1538,
+  "source_tree": "3e9cd8c1fd961c6b88f3bcf541d2710193bbc585",
+  "file_count": 1540,
   "paths": [
     ".gitattributes",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -1439,10 +1439,12 @@
     "Tools/local.example.json",
     "Tools/public/MANIFEST.md",
     "Tools/public/binary-allowlist.sha256",
+    "Tools/public/check_export_receipt.py",
     "Tools/public/export_public_tree.py",
     "Tools/public/leak_guard.py",
     "Tools/public/provenance_scan.py",
     "Tools/public/public-files.txt",
+    "Tools/public/test_check_export_receipt.py",
     "Tools/public/test_export_public_tree.py",
     "Tools/public/test_leak_guard.py",
     "Tools/public/test_provenance_scan.py",
@@ -1547,7 +1549,7 @@
     {
       "mode": "100644",
       "path": ".gitattributes",
-      "sha256": "9ba9e6896e917d2c390d99c544bb13d0ae575d9065a66d8a7a529713fbea0f52",
+      "sha256": "ce2e388e8a3d14d4873b993e87b5f0470221b3761c1a3412d1eec4cdaed6ad23",
       "source_path": "Tools/public/scaffold/gitattributes"
     },
     {
@@ -1573,7 +1575,7 @@
     {
       "mode": "100644",
       "path": ".github/workflows/public-guard.yml",
-      "sha256": "ffbf843e8cecc58a91001c685d3365adbda74c8f65e2dee43310e4d04eac1ca4"
+      "sha256": "5febd73f43448894fb8981e9f248c1868b0ba387a973a47e0bc227d4724b6d5a"
     },
     {
       "mode": "100644",
@@ -8723,6 +8725,11 @@
     },
     {
       "mode": "100644",
+      "path": "Tools/public/check_export_receipt.py",
+      "sha256": "feba4c4f82391dd68412866e322e073f2d6e311efe9847538ba0d59a9497ab4d"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/public/export_public_tree.py",
       "sha256": "ea63c1204398cd2847b097d292355780791b52f338dd991cd9f864e89a82cc6f"
     },
@@ -8739,7 +8746,12 @@
     {
       "mode": "100644",
       "path": "Tools/public/public-files.txt",
-      "sha256": "cdbfb546e159ac227bd33cf689da3650ac8bee611b0855cf867b7b81ad8d34bf"
+      "sha256": "dbd0d9bfdd4c330146c63fa8d6fb724a5dd3987430e79b2a86a8bfebca8def26"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/public/test_check_export_receipt.py",
+      "sha256": "37a70e6e8bf10b4bdb717644e8da0840451803046537184a8f0be66f4f936cb5"
     },
     {
       "mode": "100644",

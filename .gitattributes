@@ -2,7 +2,11 @@
 * text=auto
 
 # Byte-pinned fixtures, generated code, schemas, and release trust artifacts
-# must not be changed by checkout line-ending conversion.
+# must not be changed by checkout line-ending conversion. Anything whose
+# sha256 is recorded in a manifest belongs here: a CRLF checkout (the Git for
+# Windows default) makes a correct file fail its own digest.
+ThirdParty/** -text
+EnginePatches/** -text
 Tools/dist/fixtures/** -text
 Tools/dist/neutral-support-assets-v1.json -text
 Source/**/Generated/** -text
