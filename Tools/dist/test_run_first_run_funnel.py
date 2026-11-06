@@ -78,6 +78,32 @@ class ReducedFunnelContractTests(unittest.TestCase):
             "update-bad-build-rolls-back", "interrupted-swap", "mac-uninstall",
         ))
 
+    def test_boot_failure_poll_never_lists_the_content_cache(self):
+        # Listing ContentCache while the game builds it holds a handle under
+        # `building`, which makes Windows refuse the game's publish rename.
+        with tempfile.TemporaryDirectory(dir=_repo_tmp()) as temp:
+            state = Path(temp)
+            receipt = state / "UpdaterState" / funnel.BOOT_FAILURE_LEAF
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text("{}", encoding="utf-8")
+            decoy = (state / "ContentCache" / "building" / "blobs"
+                     / funnel.BOOT_FAILURE_LEAF)
+            decoy.parent.mkdir(parents=True)
+            decoy.write_text("{}", encoding="utf-8")
+            listed = []
+            real_walk = os.walk
+
+            def recording_walk(top, *args, **kwargs):
+                for directory, subdirectories, files in real_walk(top, *args, **kwargs):
+                    listed.append(Path(directory))
+                    yield directory, subdirectories, files
+
+            with mock.patch.object(funnel.os, "walk", recording_walk):
+                self.assertEqual(funnel._boot_failures(state), [receipt])
+            self.assertFalse(any("ContentCache" in path.parts for path in listed),
+                             listed)
+            self.assertEqual(funnel._boot_failures(state / "absent"), [])
+
     def test_process_heartbeat_reader_uses_only_new_complete_valid_records(self):
         with tempfile.TemporaryDirectory(dir=_repo_tmp()) as temp:
             state = Path(temp)

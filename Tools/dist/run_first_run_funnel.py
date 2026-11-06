@@ -3795,7 +3795,22 @@ def _require_win_profile_has_no_game_data(profile: Path) -> dict:
 
 
 def _boot_failures(state_root: Path) -> list[Path]:
-    return sorted(state_root.rglob(BOOT_FAILURE_LEAF)) if state_root.exists() else []
+    """Boot-failure receipts anywhere under the state root except the cache.
+
+    This runs every ~0.1 s while the game builds its cache. Listing
+    ContentCache would hold a directory handle inside `building`, and Windows
+    refuses the game's `building` -> `current` publish rename while any other
+    process has a handle open below that directory.
+    """
+    if not state_root.exists():
+        return []
+    found = []
+    for directory, subdirectories, files in os.walk(state_root):
+        subdirectories[:] = [name for name in subdirectories
+                             if name != "ContentCache"]
+        if BOOT_FAILURE_LEAF in files:
+            found.append(Path(directory) / BOOT_FAILURE_LEAF)
+    return sorted(found)
 
 
 def _manifests(state_root: Path) -> list[Path]:
@@ -5530,8 +5545,10 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
                     deadline = time.monotonic() + args.cell_timeout
                     while time.monotonic() < deadline:
                         client.poll_failure()
+                        # A shared read never blocks the game deleting or
+                        # renaming the blob while it rebuilds.
                         if (manifest_path.is_file() and blob.is_file()
-                                and hashlib.sha256(blob.read_bytes()).hexdigest()
+                                and hashlib.sha256(_read_shared_bytes(blob)).hexdigest()
                                     == damaged["sha256"]):
                             break
                         time.sleep(0.1)

@@ -60,14 +60,18 @@ with Browse. The game reads its data but never runs it and never downloads it
 for you. Keep the installer after setup. Some updates rebuild the game's
 converted data from it, and the game asks for it again if it can't find it.
 
-- Windows: download `WoT-Win64-guarded-shipping-<commit>.zip` from the
-  [latest release](https://github.com/aleiby/wot/releases/latest), extract its single
-  `WoT Reborn` folder anywhere you can write to, keep the folder together, and
-  run `WoT Reborn.exe`. The replaceable game is under `Game`; saves,
-  preferences, converted content, and logs are under `Data` in the same folder.
-- Mac: download `WoT-Mac-guarded-shipping-<commit>.dmg` from the
-  [latest release](https://github.com/aleiby/wot/releases/latest), open it, drag `WoT.app`
-  to Applications, then open it from Applications.
+- Windows: download
+  [WoT-Reborn-Windows.zip](https://github.com/aleiby/wot/releases/latest/download/WoT-Reborn-Windows.zip),
+  extract its single `WoT Reborn` folder anywhere you can write to, keep the
+  folder together, and run `WoT Reborn.exe`. The replaceable game is under
+  `Game`; saves, preferences, converted content, and logs are under `Data` in
+  the same folder.
+- Mac: download
+  [WoT-Reborn-Mac.dmg](https://github.com/aleiby/wot/releases/latest/download/WoT-Reborn-Mac.dmg),
+  open it, drag `WoT.app` to Applications, then open it from Applications.
+
+Both links always fetch the current version; every version is also listed on
+the [Releases page](https://github.com/aleiby/wot/releases).
 
 On first launch the game finds the installer in your Downloads folder by
 itself; click Browse if it is somewhere else.
