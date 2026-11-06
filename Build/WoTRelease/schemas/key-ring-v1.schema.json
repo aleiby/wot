@@ -1,0 +1,73 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/key-ring-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "One shape, two roles. wot-offline-root-ring-v1 holds keys that sign RELEASE RINGS; wot-release-key-ring-v1 holds keys that sign release manifests. The role lives in the format string, and the reader must state which one it wanted, so a release ring can never stand in for a root ring.",
+  "properties": {
+    "epoch": {
+      "description": "monotonic; an older-but-valid ring is a rollback attempt, not staleness",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "format": {
+      "enum": [
+        "wot-offline-root-ring-v1",
+        "wot-release-key-ring-v1"
+      ]
+    },
+    "keys": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "first_sequence": {
+            "description": "canonical JSON carries integers only up to int64",
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "key_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_sequence": {
+            "description": "inclusive; must be >= first_sequence",
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "public_key": {
+            "description": "raw Ed25519 public key, never PEM or DER",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "first_sequence",
+          "key_id",
+          "last_sequence",
+          "public_key"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "revoked_key_ids": {
+      "description": "checked BEFORE presence, so a revoked id stays unusable while its entry remains",
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "epoch",
+    "format",
+    "keys",
+    "revoked_key_ids"
+  ],
+  "title": "WoT key ring v1",
+  "type": "object"
+}

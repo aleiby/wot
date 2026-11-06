@@ -1,0 +1,3 @@
+{"epoch": 6, "event": "phase-ready", "phase": "Ready", "pid": 1, "ts_utc": "2026-09-29T00:00:00Z"}
+{"detail": "map=Battle3_01 parts=2 sections=92", "epoch": 0, "event": "world-projected", "phase": "Ready", "pid": 1, "ts_utc": "2026-09-29T00:00:01Z"}
+{"detail": "package=/WoTNeutralShells/WoTMapShell12 created=900", "epoch": 0, "event": "world-physics-completed", "phase": "Ready", "pid": 1, "ts_utc": "2026-09-29T00:00:02Z"}

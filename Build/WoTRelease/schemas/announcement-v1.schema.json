@@ -1,0 +1,113 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/announcement-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "PERMANENTLY FROZEN. A v1 client must be able to parse every future v1 announcement, or an obsolete build could never learn that it is obsolete. This field set therefore never grows; everything that varies between releases lives behind key_ring and manifest.",
+  "properties": {
+    "announcement_domain": {
+      "description": "must equal the domain compiled into the client; a different domain is never adopted from the network",
+      "minLength": 1,
+      "type": "string"
+    },
+    "format": {
+      "const": "wot-announcement-v1"
+    },
+    "key_id": {
+      "description": "names the release key that signed the inner manifest",
+      "minLength": 1,
+      "type": "string"
+    },
+    "key_ring": {
+      "additionalProperties": false,
+      "description": "the root-signed release key ring",
+      "properties": {
+        "sha256": {
+          "description": "lower-case hex; upper case is not canonical",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "canonical JSON carries integers only up to int64",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "url": {
+          "description": "HTTPS only; a signed artifact never points at plaintext",
+          "pattern": "^https://",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "size",
+        "url"
+      ],
+      "type": "object"
+    },
+    "key_ring_epoch": {
+      "description": "monotonic; a raised epoch invalidates older rings immediately",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "manifest": {
+      "additionalProperties": false,
+      "description": "the release-key-signed inner manifest",
+      "properties": {
+        "sha256": {
+          "description": "lower-case hex; upper case is not canonical",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "canonical JSON carries integers only up to int64",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "url": {
+          "description": "HTTPS only; a signed artifact never points at plaintext",
+          "pattern": "^https://",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "size",
+        "url"
+      ],
+      "type": "object"
+    },
+    "minimum_gate_protocol": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "platform": {
+      "enum": [
+        "Win64",
+        "Mac"
+      ]
+    },
+    "release_sequence": {
+      "description": "ordered within the domain; strictly greater is newer, equal is current, lower is discarded",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "announcement_domain",
+    "format",
+    "key_id",
+    "key_ring",
+    "key_ring_epoch",
+    "manifest",
+    "minimum_gate_protocol",
+    "platform",
+    "release_sequence"
+  ],
+  "title": "WoT announcement v1",
+  "type": "object"
+}

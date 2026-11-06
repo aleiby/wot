@@ -1,0 +1,39 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/component-identity-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A component identified separately from the tree it ships beside, because it is promoted by a different transaction: the tree is swapped as a directory, the candidate root image is replaced in place by the service.",
+  "properties": {
+    "component_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "format": {
+      "const": "wot-component-identity-v1"
+    },
+    "name": {
+      "description": "a bare file name; never a path",
+      "minLength": 1,
+      "pattern": "^[^/\\\\:]+$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "size": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "component_id",
+    "format",
+    "name",
+    "sha256",
+    "size"
+  ],
+  "title": "WoT component identity v1",
+  "type": "object"
+}

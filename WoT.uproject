@@ -1,0 +1,59 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "Game",
+	"Description": "WoT Reborn — a multiplayer engine for The Wheel of Time (1999)",
+	"Modules": [
+		{
+			"Name": "WoT",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "GPULightmass",
+			"Enabled": true
+		},
+		{
+			"Name": "NNEDenoiser",
+			"Enabled": false
+		},
+		{
+			"Name": "OnlineSubsystemSteam",
+			"Enabled": true
+		},
+		{
+			"Name": "SteamSockets",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemEOS",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			],
+			"TargetAllowList": [
+				"Game",
+				"Editor"
+			]
+		},
+		{
+			"Name": "EOSShared",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64",
+				"Mac"
+			],
+			"TargetAllowList": [
+				"Game",
+				"Editor"
+			]
+		}
+	]
+}

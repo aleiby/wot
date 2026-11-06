@@ -1,0 +1,203 @@
+{
+  "format": "shipping-subsystem-dormancy-v1",
+  "guard_define": "WOT_GUARDED_BOOTSTRAP",
+  "policies": [
+    {
+      "activation_prerequisite": "WOT_GUARDED_BOOTSTRAP",
+      "bootstrap_policy": "compiled-inert-in-guarded-shipping",
+      "class": "UWoTBSPProofSubsystem",
+      "comment": "Actual BSP proof behavior owner; the plan name exists at Testing/WoTBSPProofHarness and is compile-time inert in guarded Shipping.",
+      "forbidden_pre_activation": [
+        "command-line proof paths",
+        "file writes",
+        "world delegates",
+        "world mutation"
+      ],
+      "header": "Testing/WoTBSPProofHarness.h",
+      "implementation": "Testing/WoTBSPProofHarness.cpp"
+    },
+    {
+      "activation_prerequisite": "HasAdoptedAuthenticatedEarlyUI",
+      "bootstrap_policy": "authenticated-bootstrap-state-machine-and-neutral-ui",
+      "class": "UWoTBootstrapSubsystem",
+      "comment": "The only bootstrap-active game subsystem. After the explicit preference dependency and one-shot authenticated facade adoption, pre-activation work is limited to the injected update/acquisition/cache state machine, disk probes, immutable progress snapshots, verified resume persistence, and neutral Slate.",
+      "forbidden_pre_activation": [
+        "gameplay or materialized-world consumers",
+        "OSS sessions or advertisement",
+        "payload resource reads",
+        "normal front-end construction",
+        "automatic retry or alternate announcement fetch"
+      ],
+      "header": "WoTBootstrapSubsystem.h",
+      "implementation": "WoTBootstrapSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "authorized-world-ready",
+      "class": "UWoTDynamicLightSubsystem",
+      "comment": "Actual dynamic-light registry and tick owner.",
+      "forbidden_pre_activation": [
+        "tick registration",
+        "light registration",
+        "world actor enumeration"
+      ],
+      "header": "WoTDynamicLightSubsystem.h",
+      "implementation": "WoTDynamicLightSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "WOT_GUARDED_BOOTSTRAP",
+      "bootstrap_policy": "compiled-inert-in-guarded-shipping",
+      "class": "UWoTEOFProbeSubsystem",
+      "comment": "Additional diagnostic subsystem discovered by the no-exclusion scan; the behavior owner is Testing/WoTEOFProbe and is compile-time inert in guarded Shipping.",
+      "forbidden_pre_activation": [
+        "command-line probe path",
+        "actor spawn",
+        "timers",
+        "screenshots"
+      ],
+      "header": "Testing/WoTEOFProbe.h",
+      "implementation": "Testing/WoTEOFProbe.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "atomic-world-exposure-only",
+      "class": "UWoTEventSubsystem",
+      "comment": "Actual event registry owner; corresponds directly to the plan's UWoTEventSubsystem.",
+      "forbidden_pre_activation": [
+        "tag registration",
+        "event dispatch",
+        "timer-driven trigger dispatch"
+      ],
+      "header": "WoTEvents.h",
+      "implementation": "WoTEvents.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "authorized-world-ready",
+      "class": "UWoTFogGateSubsystem",
+      "comment": "Actual fog behavior owner; corresponds directly to the plan's UWoTFogGateSubsystem.",
+      "forbidden_pre_activation": [
+        "tick",
+        "fog actor enumeration",
+        "camera lookup"
+      ],
+      "header": "WoTFogLight.h",
+      "implementation": "WoTFogLight.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "authorized-world-ready",
+      "class": "UWoTFractalSubsystem",
+      "comment": "Actual procedural simulation and live texture owner.",
+      "forbidden_pre_activation": [
+        "asset resolution",
+        "world delegates",
+        "simulation tick",
+        "actor enumeration"
+      ],
+      "header": "WoTFractalSubsystem.h",
+      "implementation": "WoTFractalSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "WOT_GUARDED_BOOTSTRAP",
+      "bootstrap_policy": "compiled-inert-in-guarded-shipping",
+      "class": "UWoTNetTestSubsystem",
+      "comment": "Actual test socket/ticker owner at Testing/WoTNetTestSubsystem; compile-time inert in guarded Shipping.",
+      "forbidden_pre_activation": [
+        "socket bind",
+        "ticker registration",
+        "file writes",
+        "world mutation"
+      ],
+      "header": "Testing/WoTNetTestSubsystem.h",
+      "implementation": "Testing/WoTNetTestSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTPayloadBootstrapActive",
+      "bootstrap_policy": "authenticated-capability-and-live-lease",
+      "class": "UWoTPayloadSubsystem",
+      "comment": "Actual immutable cache lease and typed payload consumer owner.",
+      "forbidden_pre_activation": [
+        "command-line or CVar payload paths",
+        "package delegates",
+        "world delegates",
+        "blob reads"
+      ],
+      "header": "WoTPayloadSubsystem.h",
+      "implementation": "WoTPayloadSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "HasAdoptedAuthenticatedEarlyUI",
+      "bootstrap_policy": "authenticated-early-ui-only-until-cache-activation",
+      "class": "UWoTPreferencesSubsystem",
+      "comment": "Typed player-preference owner; pre-activation work is limited to the one-shot EarlyUI take/adoption and neutral Slate, locale, accessibility, input, and bootstrap-audio setters.",
+      "forbidden_pre_activation": [
+        "full-preference file reads or writes",
+        "payload or world access",
+        "OSS access",
+        "config reopen",
+        "object or package lookup"
+      ],
+      "header": "WoTPreferencesSubsystem.h",
+      "implementation": "WoTPreferencesSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "CanUseAuthorizedWorld",
+      "bootstrap_policy": "ready-session-only",
+      "class": "UWoTSessionSubsystem",
+      "comment": "Actual OSS session/invite/travel owner: LAN on the Null OSS; internet on OnlineSubsystemEOS, which is never the default service.",
+      "forbidden_pre_activation": [
+        "OSS access",
+        "invite registration",
+        "session advertisement",
+        "join or travel",
+        "EOS platform creation (OnlineSubsystemEOS is created by name only by an authorized internet action)",
+        "EOS Connect Device ID creation or login",
+        "EOS lobby advertisement or search",
+        "EOS P2P listen or connect"
+      ],
+      "header": "WoTSessionSubsystem.h",
+      "implementation": "WoTSessionSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "WOT_GUARDED_BOOTSTRAP",
+      "bootstrap_policy": "compiled-inert-in-guarded-shipping",
+      "class": "UWoTShotSubsystem",
+      "comment": "Actual screenshot/gallery capture owner; compile-time ShouldCreateSubsystem false in guarded Shipping.",
+      "forbidden_pre_activation": [
+        "command-line shot paths",
+        "timers",
+        "world enumeration",
+        "screenshots"
+      ],
+      "header": "WoTShotSubsystem.h",
+      "implementation": "WoTShotSubsystem.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "authorized-world-ready",
+      "class": "UWoTUnderwaterAudioSubsystem",
+      "comment": "Actual underwater-audio polling owner; corresponds directly to the plan name.",
+      "forbidden_pre_activation": [
+        "timer",
+        "listener lookup",
+        "audio component mutation"
+      ],
+      "header": "WoTAmbientSound.h",
+      "implementation": "WoTAmbientSound.cpp"
+    },
+    {
+      "activation_prerequisite": "IsWoTBootstrapWorldReady",
+      "bootstrap_policy": "atomic-world-exposure-only",
+      "class": "UWoTZoneIndex",
+      "comment": "UWoTZoneIndex is a marker-only subsystem; AWoTZoneVolume in WoTZoneVolume.cpp is the actual registration/query behavior owner.",
+      "forbidden_pre_activation": [
+        "zone registration",
+        "world actor enumeration",
+        "water or pain lookup"
+      ],
+      "header": "WoTZoneVolume.h",
+      "implementation": "WoTZoneVolume.cpp"
+    }
+  ]
+}

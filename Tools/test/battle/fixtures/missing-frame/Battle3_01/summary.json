@@ -1,0 +1,1 @@
+{"map": "Battle3_01", "status": "passed", "phase_started": true, "objective_complete": false, "events": [{"event": "host-listening"}, {"event": "client-joined"}, {"event": "teams-selected"}, {"event": "team-ready"}, {"event": "battlefield-open"}]}

@@ -1,0 +1,77 @@
+# Public-tree guard: leak checks, secret scanning and the pure-Python tests.
+# It runs only in aleiby/wot itself; forks skip it.
+# Hosted runners cannot build Unreal Engine 5.8; engine builds run on the
+# maintainers' machines.
+name: public-guard
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  leak-guard:
+    if: ${{ github.repository == 'aleiby/wot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deny retail files, private roots, LFS pointers and machine paths
+        run: python3 Tools/public/leak_guard.py --tree . --verbose
+
+  gitleaks:
+    if: ${{ github.repository == 'aleiby/wot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  python-tests:
+    if: ${{ github.repository == 'aleiby/wot' }}
+    # Pinned: ubuntu-latest (26.04) has no Python 3.9, and 3.9 is the oldest
+    # Python the release tools support (the macOS system Python).
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip numpy pillow
+      - name: Unit tests of the pure-Python tools
+        # Tools/ directories are namespace packages: modules are named
+        # explicitly (discovery cannot start inside them), and each module's
+        # own directory goes on PYTHONPATH because some tests import their
+        # siblings by bare name while others use relative imports.
+        run: |
+          set -o pipefail
+          # Known failures, tracked in https://github.com/aleiby/wot/issues/13: they
+          # still run and print, but do not fail the job. Remove a module when fixed.
+          known_failing=" Tools.build.test_public_blob_exemptions Tools.dist.test_automation_test_names Tools.dist.test_cache_v3_production_closure Tools.dist.test_run_first_run_funnel Tools.dist.test_smoke_shipping_release "
+          status=0
+          for module in $(git ls-files 'Tools/test_*.py' 'Tools/**/test_*.py' | sed -e 's|\.py$||' -e 's|/|.|g'); do
+            directory=$(echo "$module" | sed -e 's|\.test_[^.]*$||' -e 's|\.|/|g')
+            if ! PYTHONPATH="$directory" python -m unittest "$module" 2>&1 | tail -3; then
+              if [[ "$known_failing" == *" $module "* ]]; then
+                echo "KNOWN FAILURE (issue #13): $module"
+              else
+                echo "FAILED: $module"
+                status=1
+              fi
+            fi
+          done
+          exit $status

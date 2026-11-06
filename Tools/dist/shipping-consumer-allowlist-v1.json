@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "path": "Source/WoT/Tests/.*",
+      "symbol": "DT_WoTAnimSequences|DA_WoTFractalCatalog|DA_WoTHUDFonts|UWoTMeshPayloadLayout|UWoTBSPPayloadAssetUserData",
+      "justification": "Editor automation oracle fixtures are not reachable from the guarded Shipping target."
+    },
+    {
+      "path": "Tools/import/.*",
+      "symbol": "DT_WoTAnimSequences|DA_WoTFractalCatalog|DA_WoTHUDFonts|UWoTMeshPayloadLayout|UWoTBSPPayloadAssetUserData",
+      "justification": "Developer oracle generation only; guarded stripped orchestration skips these assets or invokes the explicit non-generation branch."
+    }
+  ]
+}

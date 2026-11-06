@@ -1,0 +1,324 @@
+{
+  "assets": [
+    {
+      "package": "/Game/WoT/Materials/M_WoT_World",
+      "relative_path": "Content/WoT/Materials/M_WoT_World.uasset",
+      "sha256": "c065f242f77fc79c5dcb79361f9e6cb54bb24d50e0e7b36ab248451a506294a7",
+      "size": 41248
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_WorldMasked",
+      "relative_path": "Content/WoT/Materials/M_WoT_WorldMasked.uasset",
+      "sha256": "dc818bb3d00f7b14d7af8ebfedb49c8eee50268222d71ef1de8a249d447f8757",
+      "size": 41564
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_WorldWave",
+      "relative_path": "Content/WoT/Materials/M_WoT_WorldWave.uasset",
+      "sha256": "14432291befc0bdf5434f68daf14da140ea1768884cdb194733ffb3b1862df8f",
+      "size": 84082
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_WorldWaveMasked",
+      "relative_path": "Content/WoT/Materials/M_WoT_WorldWaveMasked.uasset",
+      "sha256": "64dffef1e20513d9b34f7bcc17ce6b59ff797c0af28733dbf743d15d11058fea",
+      "size": 84398
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_WorldWaveTranslucent",
+      "relative_path": "Content/WoT/Materials/M_WoT_WorldWaveTranslucent.uasset",
+      "sha256": "40bf87e8e50ac96af18e9363604f6e97d28d21fdb184c0a569fc8135a876bb57",
+      "size": 75551
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_WorldWaveModulated",
+      "relative_path": "Content/WoT/Materials/M_WoT_WorldWaveModulated.uasset",
+      "sha256": "c9ad5dd5e4620ee0f28e0f80e66987e6ce265dbde9d31fe3dfb2ee3813d7407b",
+      "size": 72622
+    },
+    {
+      "package": "/Game/WoT/Materials/MI_WoT_MoverWaveRuntime",
+      "relative_path": "Content/WoT/Materials/MI_WoT_MoverWaveRuntime.uasset",
+      "sha256": "0d24e54fd3a97a141ee0aad9fe33f8abe6ef20eef55d18ed09feb90f74d287db",
+      "size": 5000
+    },
+    {
+      "package": "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeMasked",
+      "relative_path": "Content/WoT/Materials/MI_WoT_MoverWaveRuntimeMasked.uasset",
+      "sha256": "6c32c75abc536e37b40ef8eea6769879c47199707289819acf929920c6520053",
+      "size": 5169
+    },
+    {
+      "package": "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeTranslucent",
+      "relative_path": "Content/WoT/Materials/MI_WoT_MoverWaveRuntimeTranslucent.uasset",
+      "sha256": "a712c5433d3f1f8ea768b28fd23fac3ae8901381c95725b65eecf4f0b815f8a7",
+      "size": 5390
+    },
+    {
+      "package": "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeModulated",
+      "relative_path": "Content/WoT/Materials/MI_WoT_MoverWaveRuntimeModulated.uasset",
+      "sha256": "da72861aa2d690c2394b02ec56c82a442931317aceeea439a9bb59ff8d49a905",
+      "size": 5366
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshTranslucent",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshTranslucent.uasset",
+      "sha256": "c1e697eca565e47c2d8f362e46e27970b65693a74dbe44fa52afefd0d041ed33",
+      "size": 17968
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_CoronaAdd",
+      "relative_path": "Content/WoT/Materials/M_WoT_CoronaAdd.uasset",
+      "sha256": "b77ea39d40955cbd372a27b27ccaeb9c821cbeb2a1f09a557871ffe188627387",
+      "size": 8088
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_CoronaMod",
+      "relative_path": "Content/WoT/Materials/M_WoT_CoronaMod.uasset",
+      "sha256": "d22613b18aa63d9da2437bb2fd46b43449f6a61ae7d71693fe104f727c7b6f84",
+      "size": 8559
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_Master",
+      "relative_path": "Content/WoT/Materials/M_WoT_Master.uasset",
+      "sha256": "953e727cfa232f43430689350bff5d6b1ec8fcc8152e67fa15db7e737a0888d4",
+      "size": 6267
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshLit",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshLit.uasset",
+      "sha256": "27a81b7fcc2793d26958a4cf5bf6bb5b2c36f3741b7703ddf8f29ea5be831780",
+      "size": 59965
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshLit2S",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshLit2S.uasset",
+      "sha256": "5910c7bed56d1b1d3db7ff68455969d0b1038f4b51ee850e254a2b176d6e77bf",
+      "size": 53831
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshLitMasked",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshLitMasked.uasset",
+      "sha256": "4f8bfc1180468008e4c3c99ca0cd8c2ce80733492bf5097916ee0eef0de938f5",
+      "size": 53896
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshLitT",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshLitT.uasset",
+      "sha256": "fcdb6cef860589fb629a713947c58651bc8d610b0ba8976de2343de67e79d53d",
+      "size": 59071
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MoverLit",
+      "relative_path": "Content/WoT/Materials/M_WoT_MoverLit.uasset",
+      "sha256": "2801f9d7c30aded3df4a540f22f579e3507b555a321915791c118137ebf31778",
+      "size": 99052
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MoverLitMasked",
+      "relative_path": "Content/WoT/Materials/M_WoT_MoverLitMasked.uasset",
+      "sha256": "ea1ff91e63b39503ab6306bd29fd3afc55747ce63ab8f24ddb66257c1bacf505",
+      "size": 99396
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshModulate",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshModulate.uasset",
+      "sha256": "4cde86537c64fb2a57245c09f331181421bdd78e3711bc4a02efaa974ba2c076",
+      "size": 6515
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_MeshFBAddGlow",
+      "relative_path": "Content/WoT/Materials/M_WoT_MeshFBAddGlow.uasset",
+      "sha256": "ac878f8d98bae34afbf6566a5f399721e767b0659e2b480a2b9bf55571a39f36",
+      "size": 9194
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_ParticleAdd",
+      "relative_path": "Content/WoT/Materials/M_WoT_ParticleAdd.uasset",
+      "sha256": "ecb2293fa8f0bf57027c243f04ca0362328fac5e6c13bddf5fe5752cadafc62a",
+      "size": 6930
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_ParticleMod",
+      "relative_path": "Content/WoT/Materials/M_WoT_ParticleMod.uasset",
+      "sha256": "62290ade73aa18bb8002a77bd34cb8b1e19c87d7830ba57400e1c6b782861da3",
+      "size": 7401
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryWorld",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryWorld.uasset",
+      "sha256": "f6720e0d3c90d35e0e35a5a20be182521a7918f572fd07a873f28096b79ab62f",
+      "size": 41241
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryWorld_TwoSided",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryWorld_TwoSided.uasset",
+      "sha256": "ba864980443fe389cac782f8bc6bc55a882b3be3f85518bbc7eac6f2db1104fd",
+      "size": 41328
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryMasked",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryMasked.uasset",
+      "sha256": "e1b59c73ae55e093bf4c6ce1f89ff2aeb4ba3df158ffa6546e48803f2374aae1",
+      "size": 41532
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryMasked_TwoSided",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryMasked_TwoSided.uasset",
+      "sha256": "c8f81547ed8839b37110cb56491d926d0e43d78315545a5f3ea1fb1c67d24249",
+      "size": 41619
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryTranslucent",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryTranslucent.uasset",
+      "sha256": "fc408906e9874cb7b0ebdfd44c6009feaee3107712008e779bb75b6e9801fd9c",
+      "size": 32742
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryTranslucent_TwoSided",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryTranslucent_TwoSided.uasset",
+      "sha256": "3e0398806cf2ab6ba945c709694a82b93063edb05f160ab15a6ccc27c9788074",
+      "size": 32829
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryModulated",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryModulated.uasset",
+      "sha256": "4c6b9088c8e5e6b51bbb09ad8cce96a7f66a7e8d31d7228aae474089bc846e63",
+      "size": 29743
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryModulated_TwoSided",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryModulated_TwoSided.uasset",
+      "sha256": "cdc47efb799baabf482eacd56e13ba452241506063190a1d62f3967ca5325b49",
+      "size": 29830
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryTranslucent_SceneBlend",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryTranslucent_SceneBlend.uasset",
+      "sha256": "cc1b6c360677e9f8c9df42dbf9ca11e798ffd89330e827d16141b8a415a2fa34",
+      "size": 31732
+    },
+    {
+      "package": "/Game/WoT/Materials/Instances/MI_GammaBoundary",
+      "relative_path": "Content/WoT/Materials/Instances/MI_GammaBoundary.uasset",
+      "sha256": "797e8252ed43e463b1082a0711ab996389e4bfbfa0449129d46c40e1800aba9b",
+      "size": 2642
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_VolumeFog",
+      "relative_path": "Content/WoT/Materials/M_WoT_VolumeFog.uasset",
+      "sha256": "31edd69136606195096c451f825d5f3c470c38c73521a6b46e978debcc26d1b7",
+      "size": 11734
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_Decal",
+      "relative_path": "Content/WoT/Materials/M_WoT_Decal.uasset",
+      "sha256": "78d260a509f91e353f83d1c60e5725326151652ffb527364e12e8e7f059fae73",
+      "size": 8446
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntryTranslucent_Mirror",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntryTranslucent_Mirror.uasset",
+      "sha256": "5a474faa88e3a201a344177330bc15b89ec2b3b5e1a1c503b7b5ea52ed3fef47",
+      "size": 34941
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_SkyWindow",
+      "relative_path": "Content/WoT/Materials/M_WoT_SkyWindow.uasset",
+      "sha256": "a68012061a8290a9047a9057fef4eeb58df7de0a0a4790048b82e618efe26ad5",
+      "size": 7601
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntrySkyModulate",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntrySkyModulate.uasset",
+      "sha256": "7930be0a7c9ccd660f5becaa04afc055af36b9d67b937d1869ee7c7731a5a8fe",
+      "size": 30263
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_EntrySkyAdd",
+      "relative_path": "Content/WoT/Materials/M_WoT_EntrySkyAdd.uasset",
+      "sha256": "75d89f66be7290c960e376ab88f92dee79f4217abe4c219921f7e72be79ca9a5",
+      "size": 30238
+    },
+    {
+      "package": "/Game/WoT/Materials/MPC_WoTDynamicLights",
+      "relative_path": "Content/WoT/Materials/MPC_WoTDynamicLights.uasset",
+      "sha256": "775339467228f99f2b677e69819dba2c44972a8dea21f73eede88facf83a73c2",
+      "size": 4461
+    },
+    {
+      "package": "/Game/WoT/Materials/MPC_WoTLightWave",
+      "relative_path": "Content/WoT/Materials/MPC_WoTLightWave.uasset",
+      "sha256": "6405e3781eafbad009034e0705564aee983b622e97a7757fe50614b59d48adeb",
+      "size": 2331
+    },
+    {
+      "package": "/Game/WoT/Materials/MPC_WoTDisplay",
+      "relative_path": "Content/WoT/Materials/MPC_WoTDisplay.uasset",
+      "sha256": "93abfc73f6da2b86990c1849c60e10c25ce93a48fb4c37a02cb2711d89dd502d",
+      "size": 1543
+    },
+    {
+      "package": "/Game/WoT/Textures/WOTDetail/T_WoT_Neutral",
+      "relative_path": "Content/WoT/Textures/WOTDetail/T_WoT_Neutral.uasset",
+      "sha256": "fc76db4a6efc5c97afbfb66b35d62f2549ee20f8b69e7a15401ffc5cacaf15fb",
+      "size": 11180
+    },
+    {
+      "package": "/Game/WoT/Materials/M_WoT_GammaBoundary",
+      "relative_path": "Content/WoT/Materials/M_WoT_GammaBoundary.uasset",
+      "sha256": "4889321ad83c20fb39e7c95ae75e2f28f450cee7f6111660297332e6c2eba5b9",
+      "size": 7191
+    }
+  ],
+  "format": "wot-neutral-support-asset-authority-v1",
+  "hard_dependencies": [
+    "/Game/WoT/Materials/MPC_WoTDynamicLights",
+    "/Game/WoT/Materials/MPC_WoTLightWave",
+    "/Game/WoT/Materials/MPC_WoTDisplay",
+    "/Game/WoT/Textures/WOTDetail/T_WoT_Neutral",
+    "/Game/WoT/Materials/M_WoT_GammaBoundary"
+  ],
+  "roots": [
+    "/Game/WoT/Materials/M_WoT_World",
+    "/Game/WoT/Materials/M_WoT_WorldMasked",
+    "/Game/WoT/Materials/M_WoT_WorldWave",
+    "/Game/WoT/Materials/M_WoT_WorldWaveMasked",
+    "/Game/WoT/Materials/M_WoT_WorldWaveTranslucent",
+    "/Game/WoT/Materials/M_WoT_WorldWaveModulated",
+    "/Game/WoT/Materials/MI_WoT_MoverWaveRuntime",
+    "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeMasked",
+    "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeTranslucent",
+    "/Game/WoT/Materials/MI_WoT_MoverWaveRuntimeModulated",
+    "/Game/WoT/Materials/M_WoT_MeshTranslucent",
+    "/Game/WoT/Materials/M_WoT_CoronaAdd",
+    "/Game/WoT/Materials/M_WoT_CoronaMod",
+    "/Game/WoT/Materials/M_WoT_Master",
+    "/Game/WoT/Materials/M_WoT_MeshLit",
+    "/Game/WoT/Materials/M_WoT_MeshLit2S",
+    "/Game/WoT/Materials/M_WoT_MeshLitMasked",
+    "/Game/WoT/Materials/M_WoT_MeshLitT",
+    "/Game/WoT/Materials/M_WoT_MoverLit",
+    "/Game/WoT/Materials/M_WoT_MoverLitMasked",
+    "/Game/WoT/Materials/M_WoT_MeshModulate",
+    "/Game/WoT/Materials/M_WoT_MeshFBAddGlow",
+    "/Game/WoT/Materials/M_WoT_ParticleAdd",
+    "/Game/WoT/Materials/M_WoT_ParticleMod",
+    "/Game/WoT/Materials/M_WoT_EntryWorld",
+    "/Game/WoT/Materials/M_WoT_EntryWorld_TwoSided",
+    "/Game/WoT/Materials/M_WoT_EntryMasked",
+    "/Game/WoT/Materials/M_WoT_EntryMasked_TwoSided",
+    "/Game/WoT/Materials/M_WoT_EntryTranslucent",
+    "/Game/WoT/Materials/M_WoT_EntryTranslucent_TwoSided",
+    "/Game/WoT/Materials/M_WoT_EntryModulated",
+    "/Game/WoT/Materials/M_WoT_EntryModulated_TwoSided",
+    "/Game/WoT/Materials/M_WoT_EntryTranslucent_SceneBlend",
+    "/Game/WoT/Materials/Instances/MI_GammaBoundary",
+    "/Game/WoT/Materials/M_WoT_VolumeFog",
+    "/Game/WoT/Materials/M_WoT_Decal",
+    "/Game/WoT/Materials/M_WoT_EntryTranslucent_Mirror",
+    "/Game/WoT/Materials/M_WoT_SkyWindow",
+    "/Game/WoT/Materials/M_WoT_EntrySkyModulate",
+    "/Game/WoT/Materials/M_WoT_EntrySkyAdd"
+  ]
+}

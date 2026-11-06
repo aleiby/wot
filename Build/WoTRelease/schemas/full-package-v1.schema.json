@@ -1,0 +1,89 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/full-package-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The offline-root-signed manual escape hatch: what a user installs by hand when the ordinary update path cannot run. Signed by the offline root directly, never by a release key, because it is the only artifact that can move an installation between announcement domains. The recovery fields are present in every package and empty in ordinary ones, so the field set stays closed and a reader never has to guess which shape it is looking at.",
+  "properties": {
+    "format": {
+      "const": "wot-full-package-v1"
+    },
+    "install_class": {
+      "description": "'standard' applies field-wise maxima within the current domain and can never change it",
+      "enum": [
+        "standard",
+        "recovery-domain"
+      ]
+    },
+    "installed_tree_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "minimum_gate_protocol": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "next_announcement_public_key": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "const": ""
+        }
+      ],
+      "description": "recovery-domain only; MUST be empty for a standard package"
+    },
+    "next_domain": {
+      "description": "recovery-domain only; MUST be empty for a standard package, and must differ from release_domain",
+      "type": "string"
+    },
+    "package_sequence": {
+      "description": "full packages never go backwards",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "platform": {
+      "enum": [
+        "Win64",
+        "Mac"
+      ]
+    },
+    "release_domain": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "release_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "release_sequence": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "signer_key_id": {
+      "description": "an offline-root key id",
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "install_class",
+    "installed_tree_sha256",
+    "minimum_gate_protocol",
+    "next_announcement_public_key",
+    "next_domain",
+    "package_sequence",
+    "platform",
+    "release_domain",
+    "release_manifest_sha256",
+    "release_sequence",
+    "signer_key_id"
+  ],
+  "title": "WoT full package v1",
+  "type": "object"
+}

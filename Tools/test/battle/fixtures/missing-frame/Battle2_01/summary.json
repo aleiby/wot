@@ -1,0 +1,1 @@
+{"map": "Battle2_01", "status": "passed", "phase_started": true, "objective_complete": true, "events": [{"event": "host-listening"}, {"event": "client-joined"}, {"event": "teams-selected"}, {"event": "team-ready"}, {"event": "battlefield-open"}, {"event": "seal-captured"}, {"event": "seal-banked"}, {"event": "objective-complete"}]}

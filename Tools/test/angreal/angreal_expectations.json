@@ -1,0 +1,3507 @@
+{
+ "schema": "wot-angreal-expectations-v1",
+ "spec": "exports/script (shipped 333B). Every observable cites the .uc lines it is derived from.",
+ "variants": [
+  "Shift@aimed"
+ ],
+ "census": {
+  "obtainable": [
+   "AMA",
+   "Absorb",
+   "AirBurst",
+   "AirShield",
+   "Balefire",
+   "Champion",
+   "Dart",
+   "Decay",
+   "Disguise",
+   "DistantEye",
+   "EarthShield",
+   "EarthTremor",
+   "ExpWard",
+   "FireShield",
+   "Fireball",
+   "Fork",
+   "Guardian",
+   "Heal",
+   "Ice",
+   "Levitate",
+   "Lightning",
+   "Minion",
+   "Reflect",
+   "RemoveCurse",
+   "Seeker",
+   "Shield",
+   "Shift",
+   "SoulBarb",
+   "SpiritShield",
+   "SwapPlaces",
+   "Taint",
+   "Target",
+   "Tracer",
+   "TrapDetect",
+   "WallOfAir",
+   "WaterShield",
+   "Whirlwind"
+  ],
+  "not_obtainable": {
+   "Fireworks": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "Illusion": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LGBlue": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LGGreen": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LGPurple": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LGRed": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LGYellow": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "LightGlobe": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   },
+   "Special": {
+    "obtainable": false,
+    "why": "no default inventory, no reachable spawn-pool entry and no placed pickup in the 19 MP maps; only the admin-gated AllAngreal/SA cheats list it (WOTPlayer.uc:5413-5422 OKToCheat, :5941-5965, ArtifactNames :7163-7200)"
+   }
+  },
+  "extras_not_on_checklist": {
+   "AndilayRoot": {
+    "sources": [
+     "fixed-pickup"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_05",
+     "Arena_06",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_03",
+     "Battle2_05",
+     "Battle4_01"
+    ],
+    "evidence": [
+     {
+      "source": "fixed-pickup",
+      "map": "Arena_01",
+      "actor": "AndilayRoot3",
+      "cite": "exports/t3d/Arena_01.t3d:30224"
+     },
+     {
+      "source": "fixed-pickup",
+      "map": "Arena_01",
+      "actor": "AndilayRoot2",
+      "cite": "exports/t3d/Arena_01.t3d:60492"
+     },
+     {
+      "source": "fixed-pickup",
+      "map": "Arena_01",
+      "actor": "AndilayRoot4",
+      "cite": "exports/t3d/Arena_01.t3d:60509"
+     }
+    ]
+   },
+   "DartForsaken": {
+    "sources": [
+     "fixed-pickup"
+    ],
+    "maps": [
+     "Arena_06"
+    ],
+    "evidence": [
+     {
+      "source": "fixed-pickup",
+      "map": "Arena_06",
+      "actor": "DartForsaken0",
+      "cite": "exports/t3d/Arena_06.t3d:23501"
+     }
+    ]
+   },
+   "LegionInvSeeker": {
+    "sources": [
+     "fixed-pickup"
+    ],
+    "maps": [
+     "Arena_12"
+    ],
+    "evidence": [
+     {
+      "source": "fixed-pickup",
+      "map": "Arena_12",
+      "actor": "LegionInvSeeker0",
+      "cite": "exports/t3d/Arena_12.t3d:20194"
+     }
+    ]
+   }
+  },
+  "budgets": "no BudgetInfo lists an angreal (exports/script/WOT/*Budget.uc: only WOT.SealInventory, WOTPawns.*, WOTTraps.*)",
+  "tool": "Tools/test/angreal/angreal_census.py"
+ },
+ "order": [
+  "Absorb",
+  "AirBurst",
+  "AirShield",
+  "Balefire",
+  "Dart",
+  "Decay",
+  "Disguise",
+  "EarthShield",
+  "EarthTremor",
+  "FireShield",
+  "Fireball",
+  "Fork",
+  "Heal",
+  "Ice",
+  "Levitate",
+  "Lightning",
+  "Reflect",
+  "RemoveCurse",
+  "Seeker",
+  "Shield",
+  "Shift",
+  "SoulBarb",
+  "SpiritShield",
+  "SwapPlaces",
+  "Taint",
+  "Target",
+  "Tracer",
+  "TrapDetect",
+  "WallOfAir",
+  "WaterShield",
+  "Whirlwind",
+  "Shift@aimed",
+  "Minion",
+  "Guardian",
+  "Champion",
+  "DistantEye",
+  "ExpWard",
+  "AMA"
+ ],
+ "classes": [
+  {
+   "class": "AMA",
+   "uc": "exports/script/Angreal/AngrealInvAMA.uc",
+   "cpp_class": "WoTAngrealInvAMA",
+   "family": "spawner",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTAngrealAMAProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealAMAProjectile.uc:56-97 (Placing: PHYS_Falling lob, Landed/HitWall -> Place); :167-182 defaults (speed=200, Physics=PHYS_Falling, LifeSpan=0, bAlwaysRelevant)"
+    },
+    {
+     "kind": "caster_reflector_absent",
+     "cls": [
+      "WoTNoCastReflector",
+      "WoTNoBadEffectsReflector"
+     ],
+     "where": "host",
+     "cite": "exports/script/Angreal/AngrealAMAProjectile.uc:56-133,169,180 (Waiting.BeginPlay never runs; trip radius stays CollisionRadius 12)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvAMA.uc:35 ProjectileClassName=AngrealAMAProjectile; :44-45 MaxInitialCharges=3 MaxCharges=5 (MinInitialCharges inherits 1, AngrealInventory.uc:1339)",
+    "exports/script/Angreal/ProjectileLauncher.uc:171-228 one launch -> UseCharge (:218); GenericProjectile.CreationSucceeded always true (GenericProjectile.uc:156-159)",
+    "exports/script/Angreal/AngrealAMAProjectile.uc:33-43 global (non-simulated) Touch: any Pawn/Projectile touching the 12x10 mine spawns an AMAPearl; :49 ProcessTouch is a no-op",
+    "exports/script/Angreal/AngrealAMAProjectile.uc:111-115 Waiting.BeginPlay (SetCollisionSize(TriggerRadius)) is a state BeginPlay, never invoked by GotoState -> retail trip radius stays CollisionRadius=12 (:180)",
+    "exports/script/Angreal/AMAPearl.uc:161-200 ProjTouch -> AffectPawn; :425-508 AffectPawn installs NoCastReflector+NoBadEffectsReflector for Duration; :591 FinalScale=20, :595 Duration=8, :607-608 ReflectorClasses, :613 ProjCollisionRadius=28 (-> 560 uu dome)",
+    "exports/script/WOT/WOTPlayer.uc:7282 BaseEyeHeight=42, :7286-7287 Collision 17x46 (mine spawns at eye height, lands ~80 uu toward the aim point)"
+   ],
+   "cpp_default_mismatches": [
+    "bExplode: .uc inherits True (GenericProjectile.uc:445, no override in AngrealAMAProjectile.uc) vs C++ false (Source/WoT/Projectiles/WoTAngrealAMAProjectile.cpp:25) - benign, ProcessTouch is a no-op (AngrealAMAProjectile.uc:49)"
+   ],
+   "notes": "Land-mine trap: the only shipped outcome of THIS cast is the mine lobbed ~80 uu ahead of the caster; it persists (LifeSpan=0) until a pawn/projectile touches it. Retail trip radius = the 12 uu collision (the TriggerRadius=150 enlargement sits in a state BeginPlay that never runs). PORT DIVERGENCE (not recorded as one in PORT_NOTES): C++ Arm() applies TriggerRadius=150 as a ProjTouch tripwire (WoTAngrealAMAProjectile.cpp:82-88), so the CASTER (~80 uu away) trips it right after landing: expect in the port a WoTAMAPearl projectile and WoTNoCastReflector+WoTNoBadEffectsReflector on the caster (and on the target if within ~560 uu of the mine) for ~8.6 s. Harness follow-up for the retail path: teleport the target onto the mine -> AMAPearl dome -> both pawns (caster is inside the 560 uu dome) get the two reflectors for 8 s.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_05",
+     "Arena_06",
+     "Arena_09",
+     "Arena_11",
+     "Battle2_01",
+     "Battle2_05",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:27501",
+     "exports/t3d/Arena_01.t3d:27536",
+     "exports/t3d/Arena_05.t3d:89402"
+    ]
+   },
+   "window_s": 3.0,
+   "post_wait_s": 10.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvAMA.uc:35 ProjectileClassName=AngrealAMAProjectile; :44-45 MaxInitialCharges=3 MaxCharges=5 (MinInitialCharges inherits 1, AngrealInventory.uc:1339)"
+  },
+  {
+   "class": "Absorb",
+   "uc": "exports/script/Angreal/AngrealInvAbsorb.uc",
+   "cpp_class": "WoTAngrealInvAbsorb",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    2
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 8,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTAbsorbReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvAbsorb.uc:32-33; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; exports/script/Angreal/AbsorbReflector.uc:234 RemoteRole=ROLE_SimulatedProxy"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast: InstallReflectorEffect per ReflectorClass with Duration via Owner.ProcessEffect, then Super.Cast + UseCharge (one charge per press)",
+    "exports/script/Angreal/InstallReflectorEffect.uc:44-56 Spawn reflector, LifeSpan=Duration, Install(caster)",
+    "exports/script/Angreal/AngrealInvAbsorb.uc:30-57 Duration=8, AbsorbReflector, MaxInitialCharges=2, MaxCharges=5, MinChargeGroupInterval=7, InventoryGroup=50",
+    "exports/script/WOT/AngrealInventory.uc:489 MP charges RandRange(Min,Max); :1339-1340 MinInitialCharges=1; :1347 ChargeCost=1; :287-358 UseCharge",
+    "exports/script/WOT/DefaultCastReflector.uc:28-62 one Cast per fire press; :76-85 release -> UnCast (no-op for installers)",
+    "exports/script/Angreal/AbsorbReflector.uc:30-47 projectile hit: steal + destroy proj unexploded + one-shot UnInstall",
+    "exports/script/Angreal/AbsorbReflector.uc:50-68 deleterious non-projectile effect: steal + one-shot",
+    "exports/script/Angreal/AbsorbReflector.uc:71-133 Install steals the first removable deleterious non-projectile leech/reflector already on the caster",
+    "exports/script/Angreal/AbsorbReflector.uc:136-171 StealArtifact: DeleteInventory from player owner, AddCharges(1), PickupQuery+GiveTo",
+    "exports/script/Angreal/AbsorbReflector.uc:221-235 NonStealable AirBurst, UnAffectedProjs, Priority=170, bRemoveExisting"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected by the cast. Reflector lasts 8 s OR until the first weave it eats (one-shot). FOLLOW-UP hostile cast: target fires a Fireball (grant it >=2 charges so GoEmpty doesn't strip it on launch) at the caster within 8 s -> caster health unchanged, fireball destroyed without exploding (AbsorbReflector.uc:32-37); the target's WoTAngrealInvFireball leaves the target inventory and lands in the caster's with remaining+1 charges (uc:145-165) = caster_inventory_gain / target_inventory_loss [WoTAngrealInvFireball] (read the target's inv on the host snapshot); WoTAbsorbReflector then disappears (uc:39-41). AirBurst is never stolen (uc:224; the weave is still eaten); DistantEye/WallOfAir/EarthTremorRock/LavaRock/AMAPearl/MashadarGuide/MachinShin pass through (uc:225-231). If the caster already carries a removable deleterious non-projectile leech/reflector at cast time, Absorb immediately steals that artifact and self-uninstalls (uc:71-133), so the reflector would not persist. MP RandRange float->int truncation makes the max initial charge near-impossible.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_05",
+     "Arena_06",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:37553",
+     "exports/t3d/Arena_02.t3d:49642",
+     "exports/t3d/Arena_02.t3d:49667"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast: InstallReflectorEffect per ReflectorClass with Duration via Owner.ProcessEffect, then Super.Cast + UseCharge (one charge per press)"
+  },
+  {
+   "class": "AirBurst",
+   "uc": "exports/script/Angreal/AngrealInvAirBurst.uc",
+   "cpp_class": "WoTAngrealInvAirBurst",
+   "family": "instant",
+   "charge_cost": 0,
+   "initial_charges_mp": [
+    999,
+    999
+   ],
+   "grant_charges": 999,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 50,
+    "max": 110
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 0,
+    "max": 0
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "target_health_drop",
+     "min": 10,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvAirBurst.uc:130-141,172-194 (eye-height line of RangeX=120 along ViewRotation, LineCheck vs victim cylinder), :213-215,224 (Damage = MinDamage + (Max-Min)*Scalar, 10..20), :227-243 (DamageEffect via ProcessEffect)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAirBlastFX"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvAirBurst.uc:114-124 (SprayerBlower + AirBlastProj; AirBlastProj expands ParticleSprayer, NOT a projectile)",
+     "why": "visual only; no snapshot field for non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvAirBurst.uc:61-75 Cast: NextCastTime gate (60/RoundsPerMinute=0.5s), Burst(), UseCharge() once per press",
+    "exports/script/Angreal/AngrealInvAirBurst.uc:343-389 defaults: RangeX=120 RangeY=20 MaxDamage=20 MinDamage=10 RoundsPerMinute=120 Min/MaxInitialCharges=999 ChargeCost=0",
+    "exports/script/Angreal/AngrealInvAirBurst.uc:254,362-364 push gated on PushableTypes = Carcass/BounceableDecoration/BreakableDecoration only -> pawns are damaged but NOT pushed",
+    "exports/script/WOT/AngrealInventory.uc:333,353-357 CurCharges -= ChargeCost (0) so never GoEmpty",
+    "exports/script/WoTPawns/AesSedai.uc:88 (and Forsaken.uc:84, Hound.uc:85, Whitecloak.uc:82) DefaultAngrealInventory=AngrealInvAirBurst; exports/script/WOT/giWOT.uc:74-97 grants it on spawn; exports/script/WOT/giMP.uc:55 GivePawnAngreal refuses a class already carried",
+    "exports/script/WOT/DamageEffect.uc:31 Initialize(int DDamage) truncates damage to int",
+    "exports/script/WOT/WOTPlayer.uc:7282,7286-7287 BaseEyeHeight=42 CollisionRadius=17 CollisionHeight=46"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Every MP player already carries Air Pulse (999 charges); GivePawnAngreal is a no-op for it (Source/WoT/WoTGameMode.cpp:761-766 default grant, :779-783 duplicate refusal), so just select it. Charges stay 999 (ChargeCost 0). One burst per press (hold irrelevant). Hit needs target surface within ~120uu of the caster's eye along the aim line (centre range <= ~120). Aimed at the centre the hit point lies on the aim line, so Y=Z=0 and damage = 10 + 10*(1 - d/120), d = eye-to-cylinder-entry distance (range 80 -> ~14, range 50 -> ~16). No push, no target movement on a player. C++ rounds damage (RoundToInt, WoTAngrealInvAirBurst.cpp:131); UE1 truncates it (DamageEffect int), so the two can differ by 1 HP.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory"
+    ],
+    "maps": [],
+    "evidence": [
+     "exports/script/WoTPawns/AesSedai.uc:88 via exports/script/WOT/giWOT.uc:83-89",
+     "exports/script/WoTPawns/Forsaken.uc:84 via exports/script/WOT/giWOT.uc:83-89",
+     "exports/script/WoTPawns/Hound.uc:85 via exports/script/WOT/giWOT.uc:83-89"
+    ]
+   },
+   "window_s": 3.0,
+   "lane_distance": 80,
+   "charge_cite": "exports/script/Angreal/AngrealInvAirBurst.uc:61-75 Cast: NextCastTime gate (60/RoundsPerMinute=0.5s), Burst(), UseCharge() once per press"
+  },
+  {
+   "class": "AirShield",
+   "uc": "exports/script/Angreal/AngrealInvAirShield.uc",
+   "cpp_class": "WoTAngrealInvAirShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTIgnoreAirElementReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvAirShield.uc:29-30; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/IgnoreElementReflector.uc:48-58; Source/WoT/Inventory/WoTIgnoreElementReflector.cpp:25-41",
+     "why": "install appear-rings actor on the caster; snapshot lists no non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvAirShield.uc:27-52 Duration=20, IgnoreAirElementReflector, DT_Lifespan, MaxInitialCharges=3, MaxCharges=10, InventoryGroup=64",
+    "exports/script/Angreal/IgnoreElementReflector.uc:33-60 Install: TriggerEvent, RemoveDeleteriousEffects, AppearEffect",
+    "exports/script/Angreal/IgnoreElementReflector.uc:75-86 TakeDamage dropped when DamageType contains the element",
+    "exports/script/Angreal/IgnoreElementReflector.uc:93-122 IgnoreEffect: deleterious foreign effect dropped, source projectile destroyed unexploded",
+    "exports/script/Angreal/IgnoreElementReflector.uc:141-176 install-time cleanse of same-element removable deleterious leeches/reflectors",
+    "exports/script/Angreal/IgnoreElementReflector.uc:184-189 Priority=255, bRemoveExisting",
+    "exports/script/Angreal/IgnoreAirElementReflector.uc:25-49 ignores bElementAir sources; IgnoredDamageType=Air",
+    "exports/script/Angreal/GenericProjectile.uc:225-263 projectile damage arrives as a DamageEffect via ProcessEffect (SourceAngreal set)",
+    "exports/script/Legend/LegendActorComponent.uc:18 RemoteRole=ROLE_None (retail element reflectors are server-only)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. Retail reflector is server-only (ROLE_None); client presence comes from the port's replicated components. FOLLOW-UP hostile cast within 20 s: target fires Dart (AngrealInvDart = Fire+Air; DamageType AxFxx: AngrealDartProjectile.uc:114-117) at the caster -> caster health unchanged, dart destroyed without exploding (IgnoreElementReflector.uc:102-114). Contrast: a Fireball (Fire only) still hits for ~40. Cleanse rider (not in base setup): an Air-sourced Whirlwind leech already on the caster is removed at cast (caster_leech_removed).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:37553",
+     "exports/t3d/Arena_02.t3d:37573",
+     "exports/t3d/Arena_03.t3d:49615"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "Balefire",
+   "uc": "exports/script/Angreal/AngrealInvBalefire.uc",
+   "cpp_class": "WoTAngrealInvBalefire",
+   "family": "instant",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "target",
+    "hold_s": 2.2
+   },
+   "range": {
+    "min": 200,
+    "max": 1500
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "target_dead",
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvBalefire.uc:109 Scalar=min(held/PrimeTime,1), :310-322 pawn branch DE.Initialize(Damage*Scalar) + DE.Invoke() (bypasses ProcessEffect), :434 Damage=400"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 100,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvBalefire.uc:125-135,226-255 (DidIndeedHit: victim centre in front of the eye and within its own cylinder half-extents; no far cap, pierces walls)"
+    },
+    {
+     "kind": "caster_moved",
+     "min": 30,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvBalefire.uc:123 Pawn(Owner).AddVelocity(Kickback(1000) * -Normal(vector(ViewRotation)) * Scalar)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTBalefireCorona"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvBalefire.uc:68-69 GatherEffect spawned on Cast (while held)",
+     "why": "no snapshot field for non-projectile actors"
+    },
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTBeamEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvBalefire.uc:116-117 BalefireLine on release (C++: AWoTBeamEffect Config=BalefireLine, 1.2s)",
+     "why": "no snapshot field for non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvBalefire.uc:62-72 Cast: only starts charging (CastTime, GatherEffect, bCasting)",
+    "exports/script/Angreal/AngrealInvBalefire.uc:75-138 UnCast: fires on RELEASE; UseCharge() once at :137",
+    "exports/script/Angreal/AngrealInvBalefire.uc:93-97,258-269 released before PrimeTime/2 (1.0s) -> FinishCharging sleeps until 1.0s then fires at Scalar 0.5",
+    "exports/script/Angreal/AngrealInvBalefire.uc:431-471 defaults: Damage=400 PrimeTime=2 StreakLength=8000 Kickback=1000 VisualOffset=50 BalefireableTypes(0)=PlayerPawn Min/Max 3/5 MaxCharges=10",
+    "exports/script/Angreal/AngrealInvBalefire.uc:377-394 Tick removes the 'Balefired' carcass"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Hold >= 2.0s for full power (400 dmg). Any release still kills a 100-HP target: before 1.0s it auto-fires at 1.0s with 200 dmg. Damage lands on release, not on press. The beam ignores walls and has no range cap. The caster recoils backward. Aiming slightly down at the target centre gives a small upward component, so the caster also hops. Displacement depends on physics (C++ uses LaunchCharacter, WoTAngrealInvBalefire.cpp:150), so min 30 is conservative. The target's carcass is removed. In giMPBattle, same-team friendly-fire scaling (giMPBattle.uc:461-463) could reduce damage; use arena.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:63089",
+     "exports/t3d/Arena_02.t3d:23399",
+     "exports/t3d/Arena_02.t3d:33899"
+    ]
+   },
+   "window_s": 4.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvBalefire.uc:75-138 UnCast: fires on RELEASE; UseCharge() once at :137"
+  },
+  {
+   "class": "Champion",
+   "uc": "exports/script/Angreal/AngrealInvChampion.uc",
+   "cpp_class": "WoTAngrealInvChampion",
+   "family": "spawner",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    1
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 400,
+    "max": 2000
+   },
+   "preconditions": [
+    "Caster must NOT already own a live same-team Champion helper (ResourceSpawner.uc:40-46,76-104); otherwise LimitWarning and no charge. Kill leftovers between runs (Sitter Health=300, Sitter.uc:58).",
+    "Keep range >= 400. A Hound caster's Legion has CollisionRadius=100 (Legion.uc:526), so its centre is 167 uu out and its edge 267 uu; a closer target makes the retail Spawn fail (ResourceSpawner.uc:53-56,67-70)."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "pawn_spawned",
+     "cls": [
+      "WoTNPCCharacter"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvChampion.uc:32-35 (GetTroop Champion); ResourceSpawner.uc:49-54; WOT/WOTPlayer.uc:7266,7269,7272,7275 (Sitter/BATrolloc/Legion/Questioner); C++ WoTResourceSpawnerInv.cpp:132 (AWoTNPCCharacter)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ResourceSpawner.uc:58-61; Source/WoT/Inventory/WoTResourceSpawnerInv.cpp:154",
+     "why": "no current snapshot field lists non-projectile, non-pawn actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvChampion.uc:32-35 GetResourceClass = GetTroop(Owner,'Champion')",
+    "exports/script/Angreal/AngrealInvChampion.uc:44 MaxCharges=5",
+    "exports/script/Angreal/ResourceSpawner.uc:34-73 Cast (UseCharge :65); :76-104 HaveHelper; :119 SpawnSeparation=50",
+    "exports/script/WOT/AngrealInventory.uc:1339-1340 Min/MaxInitialCharges=1; :1347 ChargeCost=1",
+    "exports/script/WOT/WOTPlayer.uc:7266 AesSedai Champion=Sitter",
+    "exports/script/WoTPawns/SisterAssets.uc:65 (Sitter CollisionRadius=17); Legion.uc:526-527 (R=100,H=110)",
+    "Source/WoT/Inventory/WoTAngrealInvChampion.h:19 tier 'Champion'; WoTResourceSpawnerInv.cpp:97-158 CastArtifact"
+   ],
+   "cpp_default_mismatches": [
+    "Quote: .uc sets the Thom Merrilin text (AngrealInvChampion.uc:49); C++ ctor never sets it -> base '[Quote Missing]' (Source/WoT/Inventory/WoTInventory.h:96; WoTAngrealInvChampion.cpp:3-20)"
+   ],
+   "notes": "An AesSedai caster (port default) summons a Sitter; Forsaken = BATrolloc; Hound = Legion; Whitecloak = Questioner. The summon spawns in front of the caster along its facing, on the caster's team, and persists until killed (no LifeSpan). Snapshot cls is WoTNPCCharacter. The port uses AlwaysSpawn (WoTCreatureData.cpp:970) and ZeroRotator; retail used Owner.Rotation and could fail on encroachment. Do not assert target damage from the summon.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_05",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_05.t3d:89266",
+     "exports/t3d/Battle2_03.t3d:141746",
+     "exports/t3d/Battle2_04.t3d:65490"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvChampion.uc:44 MaxCharges=5"
+  },
+  {
+   "class": "Dart",
+   "uc": "exports/script/Angreal/AngrealInvDart.uc",
+   "cpp_class": "WoTAngrealInvDart",
+   "family": "projectile",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    20,
+    70
+   ],
+   "grant_charges": 20,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.5
+   },
+   "range": {
+    "min": 200,
+    "max": 900
+   },
+   "preconditions": [
+    "giMPArena, or giMPBattle after play has begun with caster and target on different non-neutral teams (giMPBattle.uc:440-463 ReduceDamage zeroes/scales damage otherwise)"
+   ],
+   "expected_charge_delta": {
+    "min": 2,
+    "max": 4
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTDartProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvDart.uc:106 bAutoFire=True, :113 RoundsPerMinute=320; exports/script/Angreal/ProjectileLauncher.uc:160-168 Tick re-fires while held"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 20,
+     "cite": "exports/script/Angreal/AngrealDartProjectile.uc:117 Damage=10 per dart, :116 speed=2000; exports/script/Angreal/GenericProjectile.uc:170-206 ProcessTouch -> ProcessDamage",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvDart.uc:104-119 defaults (bAutoFire, RPM 320, Min 20 / Max 70 / MaxCharges 100)",
+    "exports/script/Angreal/ProjectileLauncher.uc:109-117 Cast -> AttemptCast; :150-157 AttemptCast gate Level.TimeSeconds > NextCastTime; :218-222 UseCharge + NextCastTime += 60/RPM (0.1875 s)",
+    "exports/script/Angreal/AngrealInvDart.uc:40-102 GiveTo/SetColor picks Red/Yellow/Green/Purple/BlueDart by PlayerColor (port: single WoTDartProjectile class, hue only)",
+    "exports/script/WOT/AngrealInventory.uc:287-358 UseCharge (-ChargeCost per launch)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Hold-to-fire repeater: launches at press then every 0.1875 s (+ up to one server tick) while held; hold_s=0.5 -> nominally 3 darts (2-4 with tick/release jitter), charge delta == darts fired, 10 HP per dart (no splash, DamageRadius 0). Target survives (100 HP).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPArena.uc:12",
+     "exports/script/WOT/giMPBattle.uc:188",
+     "exports/t3d/Arena_01.t3d:21354"
+    ]
+   },
+   "window_s": 2.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvDart.uc:104-119 defaults (bAutoFire, RPM 320, Min 20 / Max 70 / MaxCharges 100)"
+  },
+  {
+   "class": "Decay",
+   "uc": "exports/script/Angreal/AngrealInvDecay.uc",
+   "cpp_class": "WoTAngrealInvDecay",
+   "family": "leech",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 600
+   },
+   "preconditions": [
+    "Target must be targetable: bTargetsFriendlies=False, so in giMPBattle caster and target must be on different teams (AngrealInventory.uc:815-830); giMPArena is fine",
+    "Target must be found by FindBestTarget (aim at its centre with clear LOS) - the seeker requires a destination or the launch fails with no charge used (LaunchProjectileEffect.uc:79-82, ProjectileLauncher.uc:224-227)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 15,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTDecayProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealDecayProjectile.uc:185-186 speed=75 MaxSpeed=800, :190 LifeSpan=0; exports/script/Angreal/SeekingProjectile.uc:425-427 Speed += Acceleration(16)*dt, :769 bAlwaysRelevant"
+    },
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTDecreaseHealthLeech",
+      "WoTDecreaseCommonChargesLeech",
+      "WoTDecreaseUncommonChargesLeech",
+      "WoTDecreaseRareChargesLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealDecayProjectile.uc:96-149 ProcessDamage attaches each LeechClasses entry; :174-178 Duration=15, LeechClasses(0..3)"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 5,
+     "cite": "exports/script/WOT/DecreaseHealthLeech.uc:32-51 DamagePerHit(1)*Iterations per AffectResolution; exports/script/Angreal/AngrealDecayProjectile.uc:126-133 PlayerDamageRate=0.2 (:183) -> 5 HP/s for 15 s",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvDecay.uc:34 ProjectileClassName, :41 RPM 30, :42-44 Min 3 / Max 5 / MaxCharges 10, :47 bTargetsFriendlies=False",
+    "exports/script/Angreal/SeekingProjectile.uc:751-771 defaults (Acceleration=16, ReachTolerance=12, bUsesDestination/bRequiresDestination, MaxTargetAngle 22.5)",
+    "exports/script/WOT/DefaultTargetingReflector.uc:71-118 FindBestTarget (direct trace along view first)",
+    "exports/script/Angreal/DecreaseCommonChargesLeech.uc:60-88 (-1 charge of each common angreal per 1 s), DecreaseUncommonChargesLeech.uc:16-44 (per 3 s), DecreaseRareChargesLeech.uc:16-44 (per 5 s)"
+   ],
+   "cpp_default_mismatches": [
+    "PlayerDamageRate=0.2 / NPCDamageRate=0.1 (AngrealDecayProjectile.uc:183-184, applied :126-133) are not C++ fields; the health leech keeps its default AffectResolution 0.2 (Source/WoT/Inventory/WoTDecreaseHealthLeech.cpp:16) - identical for player targets, NPC rate deferred (Source/WoT/Projectiles/WoTDecayProjectile.cpp:29-31)"
+   ],
+   "notes": "Slow accelerating seeker: s(t)=75t+8t^2 to the target's surface (~R-23 uu) -> ~2.8 s at 300 uu, ~5.0 s at 600 uu; wait for impact before asserting. No impact damage (ProcessDamage overridden). After impact: -1 HP every 0.2 s for 15 s (up to 75 HP; the target survives from 100 HP). Charge leeches drain the target's own angreal (1/s common, 1/3 s uncommon, 1/5 s rare) - only observable if the target holds angreal (grant one to the target first to see its inv charges fall).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:62988",
+     "exports/t3d/Arena_02.t3d:23399",
+     "exports/t3d/Arena_02.t3d:34361"
+    ]
+   },
+   "window_s": 7.0,
+   "lane_distance": 450,
+   "charge_cite": "exports/script/Angreal/AngrealInvDecay.uc:34 ProjectileClassName, :41 RPM 30, :42-44 Min 3 / Max 5 / MaxCharges 10, :47 bTargetsFriendlies=False"
+  },
+  {
+   "class": "Disguise",
+   "uc": "exports/script/Angreal/AngrealInvDisguise.uc",
+   "cpp_class": "WoTAngrealInvDisguise",
+   "family": "self",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    15,
+    20
+   ],
+   "grant_charges": 10,
+   "cast": {
+    "aim": "self",
+    "hold_s": 2.5
+   },
+   "range": {
+    "min": 100,
+    "max": 900
+   },
+   "preconditions": [
+    "the target must be the nearest living pawn to the caster (GetClosestPawn, AngrealInvDisguise.uc:152-173), so no NPC or other pawn can be closer",
+    "caster and target must be DIFFERENT player classes (e.g. AesSedai vs Forsaken; Mesh differs per class: WoTPawns/AesSedai.uc, Forsaken.uc, Hound.uc, Whitecloak.uc). Same class means the same Mesh, so no visible mesh change."
+   ],
+   "expected_charge_delta": {
+    "min": 3,
+    "max": 3
+   },
+   "effect_duration_s": null,
+   "observables": [],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvDisguise.uc:119-122 AppearEffect in PlayerColor on cast",
+     "why": "no snapshot field for non-projectile actors"
+    },
+    {
+     "kind": "caster_mesh_changed",
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvDisguise.uc:104-123 Cast -> AcquireAppearance(Owner, GetClosestPawn()); :285-294 CopyDisguisePawnProperties Dest.Mesh = Source.Mesh (also DrawScale/MultiSkins/collision/eye height)",
+     "why": "needs a target of another player class: `faction` net-test verb (pending build)",
+     "requires": "distinct_player_classes"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvDisguise.uc:79-90 Tick: ChargeTimer counts DOWN from 0 -> first UseCharge on first tick, then every 1s",
+    "exports/script/Angreal/AngrealInvDisguise.uc:137-145 UnCast -> RevertAppearance on release; :93-97 GoEmpty also reverts",
+    "exports/script/Angreal/AngrealInvDisguise.uc:313-321 SetCollisionSize + AdjustToNewCollisionHeight; won't-fit aborts with Failed()",
+    "exports/script/Angreal/AngrealInvDisguise.uc:460-487 defaults Min/Max 15/20 MaxCharges=60 DurationType=DT_Charge"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Hold-to-cast. While held, the caster takes the target's mesh (and skins and team). It reverts on release, so compare the mesh during the hold, not after. Charges for a 2.5s hold: ticks at ~0, 1, 2s = 3. All four MP classes share WOTPlayer collision (17/46), so the fit check passes. The SP-only physics copy is NM_Standalone-gated (:252-263, :340-353), so it doesn't apply in MP.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Battle2_01.t3d:41813",
+     "exports/t3d/Battle2_01.t3d:41873",
+     "exports/t3d/Battle2_01.t3d:42933"
+    ]
+   },
+   "window_s": 4.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvDisguise.uc:79-90 Tick: ChargeTimer counts DOWN from 0 -> first UseCharge on first tick, then every 1s"
+  },
+  {
+   "class": "DistantEye",
+   "uc": "exports/script/Angreal/AngrealInvDistantEye.uc",
+   "cpp_class": "WoTAngrealInvDistantEye",
+   "family": "other",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    7
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 200,
+    "max": 2000
+   },
+   "preconditions": [
+    "Caster must not already have a placed eye (Eye == None, AngrealInvDistantEye.uc:46). If an eye is already out, the cast takes the view-toggle branch instead (uc:61-79)."
+   ],
+   "expected_charge_delta": {
+    "min": 0,
+    "max": 0
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTDistantEyeProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvDistantEye.uc:46-58 (Spawn AngrealDistantEyeProjectile at Owner.Location + (SpawnOffset >> ViewRotation)); AngrealDistantEyeProjectile.uc:296-300 (PHYS_None, LifeSpan=0, bAlwaysRelevant); C++ WoTAngrealInvDistantEye.cpp:61-86"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvDistantEye.uc:43-59 first Cast: DropSound, spawn eye, NO UseCharge",
+    "exports/script/Angreal/AngrealInvDistantEye.uc:102 UnCast is empty (release does nothing)",
+    "exports/script/Angreal/AngrealInvDistantEye.uc:215 SpawnOffset=(48,0,96); :217 MovementTolerance=10; :223-225 Min/MaxInitialCharges=3/7, MaxCharges=10",
+    "exports/script/Angreal/AngrealDistantEyeProjectile.uc:77-95 Destroyed -> ServerDestroyed -> NotifyEyeDestroyed + SourceAngreal.UseCharge (the ONLY charge spend)",
+    "exports/script/Angreal/AngrealDistantEyeProjectile.uc:65-74 TakeDamage, Health=50 (:292)",
+    "exports/script/Angreal/AngrealDistantEyeProjectile.uc:102-116,238-278 Open/Close install/remove DistantEyeCastReflector + DistantEyeLeech on the caster (second cast only)",
+    "exports/script/WOT/AngrealInventory.uc:1347 ChargeCost=1 (inherited)",
+    "Source/WoT/Projectiles/WoTDistantEyeProjectile.cpp:28-29 bAlwaysRelevant, InitialLifeSpan=0; :288 UseCharge on destroy"
+   ],
+   "cpp_default_mismatches": [
+    "bInfo: .uc True (AngrealInvDistantEye.uc:222); C++ false (Source/WoT/Inventory/WoTAngrealInvDistantEye.cpp:32). Deliberate, per the in-code P29/G37 ruling (AI hint flag only)."
+   ],
+   "notes": "The first cast only places a stationary, persistent eye ~48 uu ahead of and 96 uu above the caster along the view. It spends no charge and does nothing to the target. The charge is spent when the eye is destroyed (50 damage, drop, or reset). The eye persists after the test: clean it up by resetting or dropping the artifact, which costs 1 charge via the destroy path. A second cast (caster standing still) swaps the caster's view into the eye and installs caster_reflector WoTDistantEyeCastReflector + caster_leech WoTDistantEyeLeech. Moving more than 10 uu exits (uc:119-151).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Battle3_02"
+    ],
+    "evidence": [
+     "exports/t3d/Battle3_02.t3d:19248",
+     "exports/t3d/Battle3_02.t3d:19266",
+     "exports/t3d/Battle3_02.t3d:19284"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvDistantEye.uc:43-59 first Cast: DropSound, spawn eye, NO UseCharge"
+  },
+  {
+   "class": "EarthShield",
+   "uc": "exports/script/Angreal/AngrealInvEarthShield.uc",
+   "cpp_class": "WoTAngrealInvEarthShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTIgnoreEarthElementReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvEarthShield.uc:23-24; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/IgnoreElementReflector.uc:48-58; Source/WoT/Inventory/WoTIgnoreElementReflector.cpp:25-41",
+     "why": "install appear-rings actor on the caster; snapshot lists no non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvEarthShield.uc:21-46 Duration=20, IgnoreEarthElementReflector, DT_Lifespan, MaxInitialCharges=3, MaxCharges=10, InventoryGroup=64",
+    "exports/script/Angreal/IgnoreElementReflector.uc:33-60,75-86,93-122,141-176,184-189 install/cleanse, damage + effect filtering, Priority=255",
+    "exports/script/Angreal/IgnoreEarthElementReflector.uc:25-49 ignores bElementEarth sources; IgnoredDamageType=Earth"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. Retail reflector is server-only (ROLE_None); client presence is the port's replication. FOLLOW-UP hostile cast within 20 s: target casts Earth Tremor (AngrealInvEarthTremor, Earth only) at the caster -> caster takes no Earth Tremor damage or effects; a Fireball (Fire) still hits for ~40.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_06",
+     "Arena_07",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:37573",
+     "exports/t3d/Arena_03.t3d:49615",
+     "exports/t3d/Arena_04.t3d:26504"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "EarthTremor",
+   "uc": "exports/script/Angreal/AngrealInvEarthTremor.uc",
+   "cpp_class": "WoTAngrealInvEarthTremor",
+   "family": "projectile",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 180,
+    "max": 250
+   },
+   "preconditions": [
+    "Flat floor, default zone gravity (-950): the lob is Velocity=(vector(ViewRot)+(0,0,0.3))*500 under PHYS_Falling, so with aim-at-centre it lands <= ~290 uu from the caster; only R <= ~255 gives a direct hit",
+    "giMPArena, or giMPBattle after play has begun with different teams (giMPBattle.uc:440-463)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 15,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTEarthTremorProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealEarthTremorProjectile.uc:61-74 lob velocity; :154-189 defaults (speed=500, Damage=30, DamageRadius=280, MomentumTransfer=10000, PHYS_Falling, bBounce)"
+    },
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTEarthTremorRock"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealEarthTremorProjectile.uc:89-118 simulated Explode spawns EarthTremor; exports/script/Angreal/EarthTremor.uc:108-204 centre + 4 rings (70/140/210/280 uu, 0.2 s apart), :216 LifeSpan=15 given to every rock"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 30,
+     "cite": "exports/script/Angreal/GenericProjectile.uc:195-204 direct hit ProcessDamage(Damage=30) (AngrealEarthTremorProjectile.uc:163)",
+     "where": "both"
+    },
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTEarthTremorLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/EarthTremorRock.uc:101-133 rock SetLocation onto floor (touch-notifying), :136-186 Touch attaches EarthTremorLeech (DamagePerHit=Damage 5, :294) to any WOTPlayer touching a 30x46 rock (:301-302)"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 45,
+     "cite": "exports/script/Angreal/EarthTremorLeech.uc:12-43 -> DecreaseHealthLeech.uc:32-51 5 HP per 0.2 s while touching (the direct 30 plus at least three leech ticks); death is NOT guaranteed: EarthTremorRock.uc:189-214 UnTouch removes the leech, and each tick's Momentum (RelativeUp*MomentumTransfer, EarthTremorRock.uc:166) knocks the victim about, so it can slide off the rock alive",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvEarthTremor.uc:29 ProjectileClassName, :34 RPM 90, :35-37 Min 3 / Max 5 / MaxCharges 10",
+    "exports/script/Angreal/AngrealEarthTremorProjectile.uc:149-152 GetMinRange=300 (AI safe range; not reachable by an aim-at-centre human cast)",
+    "exports/script/Angreal/GenericProjectile.uc:299-323 splash radius 280 excludes HitActor, momentum = MomentumTransfer*CurDamage (:318)",
+    "exports/script/Angreal/EarthTremorRock.uc:189-214 UnTouch removes that rock's leech; :250-256 non-pawn damage only",
+    "exports/script/WOT/WOTPlayer.uc:7282,7286-7289 eye 42, collision 17x46, Mass 175"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "At 180-250 uu the lob hits the target directly (30 HP), the centre rock lands under it and a stationary target then loses 25 HP/s -> dead ~3 s after impact (flight ~0.45 s). IgnoredPawn is never set on rocks and splash ignores bHurtsOwner, so the CASTER is also exposed: splash ~5 HP at 250 uu (~13 at 180) with a large knock-back (10000*CurDamage/175 uu/s) that normally throws it clear, but if it stays put a ring-2/ring-3 rock (140/210 uu behind the impact on the flight line) lands on it and it gets an EarthTremorLeech too. Harness: teleport the caster >=350 uu from the impact right after launch if caster survival matters. At R>=280 it lands short: target gets only splash (~14-24) and a leech only if within a rock.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_04.t3d:26504",
+     "exports/t3d/Arena_05.t3d:89770",
+     "exports/t3d/Arena_06.t3d:23511"
+    ]
+   },
+   "window_s": 5.5,
+   "lane_distance": 220,
+   "charge_cite": "exports/script/Angreal/AngrealInvEarthTremor.uc:29 ProjectileClassName, :34 RPM 90, :35-37 Min 3 / Max 5 / MaxCharges 10"
+  },
+  {
+   "class": "ExpWard",
+   "uc": "exports/script/Angreal/AngrealInvExpWard.uc",
+   "cpp_class": "WoTAngrealInvExpWard",
+   "family": "spawner",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    5,
+    10
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "The ward traces only 200 uu along the view for WORLD geometry (actors ignored); aiming at a target's centre >=~100 uu away hits nothing -> CreationSucceeded false -> Failed(), no charge. Aim at the floor instead: pitch <= -27 deg (use -30: floor ~152 uu ahead, outside the 120 uu splash) or face a wall <200 uu away"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 60,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTExpWardProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealExpWardProjectile.uc:58-110 PreBeginPlay trace (:68) + place (:75); :113-116 CreationSucceeded=bCorrectlyPlaced; :262-295 defaults (TraceDist 200, LifeSpan 60, Physics None)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvExpWard.uc:27 ProjectileClassName, :32 RPM 240 (no bAutoFire -> one ward per press), :33-35 Min 5 / Max 10 / MaxCharges 25",
+    "exports/script/Angreal/LaunchProjectileEffect.uc:134-141 bSuccess=CreationSucceeded, failed projectile destroyed; exports/script/Angreal/ProjectileLauncher.uc:216-227 no UseCharge on failure",
+    "exports/script/Angreal/AngrealExpWardProjectile.uc:179-188 Waiting ignores Touch for ActivationTime=1 s then SetCollision(True); :172-176 Expired -> Explode (MP LifeSpan 60; :105-109 permanent only in standalone)",
+    "exports/script/Angreal/AngrealExpWardProjectile.uc:271-274 DamageRadius=120, bHurtsOwner=True (no IgnoredPawn), Damage=50, :275 MomentumTransfer 6000"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Trap: this cast only places a ward on the surface (no pawn effect). Follow-up to test it: after >=1 s, teleport the target onto the ward (within ~41 uu) -> direct 50 HP + splash 120 uu (caster included if within 120; bHurtsOwner=True, so the caster can trip it too). Untouched, it auto-detonates at 60 s. Aim-at-target casts fail with 0 charge used (fail message).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:52353",
+     "exports/t3d/Arena_02.t3d:23473",
+     "exports/t3d/Arena_02.t3d:33986"
+    ]
+   },
+   "window_s": 3.0,
+   "aim_mode": "floor",
+   "charge_cite": "exports/script/Angreal/AngrealInvExpWard.uc:27 ProjectileClassName, :32 RPM 240 (no bAutoFire -> one ward per press), :33-35 Min 5 / Max 10 / MaxCharges 25"
+  },
+  {
+   "class": "FireShield",
+   "uc": "exports/script/Angreal/AngrealInvFireShield.uc",
+   "cpp_class": "WoTAngrealInvFireShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTIgnoreFireElementReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvFireShield.uc:23-24; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/IgnoreElementReflector.uc:48-58; Source/WoT/Inventory/WoTIgnoreElementReflector.cpp:25-41",
+     "why": "install appear-rings actor on the caster; snapshot lists no non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvFireShield.uc:21-47 Duration=20, IgnoreFireElementReflector, DT_Lifespan, MaxInitialCharges=3, MaxCharges=10, MaxChargesInGroup=2, InventoryGroup=64",
+    "exports/script/Angreal/IgnoreElementReflector.uc:33-60,75-86,93-122,141-176,184-189 install/cleanse, damage + effect filtering, Priority=255",
+    "exports/script/Angreal/IgnoreFireElementReflector.uc:25-49 ignores bElementFire sources; IgnoredDamageType=Fire",
+    "exports/script/Angreal/GenericProjectile.uc:225-263 projectile damage arrives as a DamageEffect via ProcessEffect (SourceAngreal set)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. Retail reflector is server-only (ROLE_None); client presence is the port's replication. FOLLOW-UP hostile cast within 20 s: target fires a Fireball (Fire; Damage 40) at the caster -> caster health unchanged, fireball destroyed without exploding (IgnoreElementReflector.uc:102-114). Dart, Seeker, Balefire and Lightning all contain Fire, so they are ignored too.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:23399",
+     "exports/t3d/Arena_02.t3d:34361",
+     "exports/t3d/Arena_02.t3d:34387"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "Fireball",
+   "uc": "exports/script/Angreal/AngrealInvFireball.uc",
+   "cpp_class": "WoTAngrealInvFireball",
+   "family": "projectile",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    10,
+    20
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "giMPArena, or giMPBattle after play has begun with different teams (giMPBattle.uc:440-463)",
+    "No water between caster and target (fireball fizzles on entering water, AngrealFireballProjectile.uc:190-194)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTFireballProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvFireball.uc:28 ProjectileClassName; exports/script/Angreal/AngrealFireballProjectile.uc:210 speed=1000 (straight, GenericProjectile.uc:121-129)"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 40,
+     "cite": "exports/script/Angreal/AngrealFireballProjectile.uc:211 Damage=40; exports/script/Angreal/GenericProjectile.uc:195-204 direct ProcessDamage, splash excludes HitActor (:308)",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvFireball.uc:33 RPM 90, :34-36 Min 10 / Max 20 / MaxCharges 35",
+    "exports/script/Angreal/AngrealFireballProjectile.uc:196-231 defaults (DamageRadius 220, MomentumTransfer 3500)",
+    "exports/script/Angreal/ProjectileLauncher.uc:171-228 single launch per press (bAutoFire false), UseCharge :218"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Direct hit = exactly 40 HP (target survives at 60). Splash radius 220: keep range >= 300 so the caster is outside the blast. Flight ~0.3-0.9 s.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:522",
+     "exports/t3d/Arena_01.t3d:21354",
+     "exports/t3d/Arena_01.t3d:30241"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvFireball.uc:33 RPM 90, :34-36 Min 10 / Max 20 / MaxCharges 35"
+  },
+  {
+   "class": "Fork",
+   "uc": "exports/script/Angreal/AngrealInvFork.uc",
+   "cpp_class": "WoTAngrealInvFork",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTForkRTSReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvFork.uc:79-80; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; exports/script/Angreal/ReturnToSenderReflector.uc:309 RemoteRole=ROLE_SimulatedProxy (inherited)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvFork.uc:77-104 Duration=20, ForkRTSReflector, MaxInitialCharges=3, MaxCharges=5, MaxChargesInGroup=3, MinChargeGroupInterval=3 (InventoryGroup inherited 1)",
+    "exports/script/Angreal/ForkRTSReflector.uc:23-45 spawn same-class ForkedCopy; Super.OnReflectedTouch returns the original to the sender; ForkedCopy.Touch(Owner) still hits the caster",
+    "exports/script/Angreal/ForkRTSReflector.uc:65-69 Priority=150 (bRemoveExisting/UnAffectedTypes inherited)",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:160-187 non-seeking: server spawns same-class projectile aimed at Instigator, original destroyed unexploded; seeking: velocity reversed",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:194-233 seekers only handled when Destination==caster",
+    "exports/script/WOT/AngrealInventory.uc:489 MP RandRange; :1347 ChargeCost=1"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected by the cast. NOT one-shot: persists the full 20 s (no removed-kind exists; poll for absence after ~20.5 s if wanted). FOLLOW-UP hostile cast: target fires a Fireball (Damage 40, radius 220, speed 1000: AngrealFireballProjectile.uc:206-211) at the caster -> BOTH are hit: caster health drops ~40 (the ForkedCopy touched onto the caster) AND a WoTFireballProjectile flies back and hits the sender, whose health drops ~40. Range >220 keeps each explosion's splash off the other pawn. Seeking weaves are forked only if seeking the caster; UnAffectedTypes (AMA, DistantEye, ExpWard, Tracer, WallOfAir, EarthTremorRock, MashadarGuide, MachinShin, AMAPearl: ReturnToSenderReflector.uc:298-306) pass untouched.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_06",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:526",
+     "exports/t3d/Arena_02.t3d:23530",
+     "exports/t3d/Arena_02.t3d:23557"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "Guardian",
+   "uc": "exports/script/Angreal/AngrealInvGuardian.uc",
+   "cpp_class": "WoTAngrealInvGuardian",
+   "family": "spawner",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    1
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 400,
+    "max": 2000
+   },
+   "preconditions": [
+    "Caster must NOT already own a live same-team Captain helper (ResourceSpawner.uc:40-46,76-104). For a Hound caster, it must not own a live MashadarGuide tagged AngrealSpawned (AngrealInvGuardian.uc:56-79). Otherwise the cast prints LimitWarning and spends no charge. Kill leftovers between runs.",
+    "Keep range >= 400 so the retail summon spot never encroaches the target (ResourceSpawner.uc:53-56,67-70).",
+    "Hound caster only: the retail path needs a flat floor for the MashadarCrack decal to align, else Failed() (MashadarArenaSpawner.uc:45-51,101-104)."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "pawn_spawned",
+     "cls": [
+      "WoTNPCCharacter"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvGuardian.uc:32-47 (GetTroop Captain); ResourceSpawner.uc:49-54; WOT/WOTPlayer.uc:7265,7268,7274 (Sister/Myrddraal/Archer); C++ WoTAngrealInvGuardian.cpp:54 -> WoTResourceSpawnerInv.cpp:132 (AWoTNPCCharacter). NOT for a Hound caster - see notes"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ResourceSpawner.uc:58-61; Source/WoT/Inventory/WoTResourceSpawnerInv.cpp:154",
+     "why": "no current snapshot field lists non-projectile, non-pawn actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvGuardian.uc:32-47 GetResourceClass = GetTroop(Owner,'Captain'); MashadarFocusPawn diverts to MashadarArenaSpawner and returns None",
+    "exports/script/Angreal/AngrealInvGuardian.uc:50-53 SuperCast; :56-79 HaveHelper Mashadar variant",
+    "exports/script/Angreal/AngrealInvGuardian.uc:88 MaxCharges=5",
+    "exports/script/WoTPawns/MashadarArenaSpawner.uc:53 MashadarGuide spawn, :75-79 hidden MashadarFocusPawn, :85-86 SuperCast+UseCharge",
+    "exports/script/Angreal/ResourceSpawner.uc:34-73 Cast; :76-104 HaveHelper; :119 SpawnSeparation=50",
+    "exports/script/WOT/AngrealInventory.uc:1339-1340 Min/MaxInitialCharges=1; :1347 ChargeCost=1",
+    "exports/script/WOT/WOTPlayer.uc:7265 AesSedai Captain=Sister; :7271 Hound Captain=MashadarFocusPawn",
+    "exports/script/WoTPawns/SisterAssets.uc:65-66 CollisionRadius=17 Height=46",
+    "Source/WoT/Inventory/WoTAngrealInvGuardian.cpp:45-55 CastArtifact, :57-108 CastMashadar (AWoTMashadarGuide, AlwaysSpawn :81, UseCharge :107)"
+   ],
+   "cpp_default_mismatches": [
+    "Quote: .uc sets the dust-man text (AngrealInvGuardian.uc:93); C++ ctor never sets it -> base '[Quote Missing]' (Source/WoT/Inventory/WoTInventory.h:96; WoTAngrealInvGuardian.cpp:10-27)"
+   ],
+   "notes": "An AesSedai caster (port default) summons a Sister; Forsaken = Myrddraal; Whitecloak = Archer. For a Hound caster, retail spawns a MashadarGuide projectile, a MashadarManager and a HIDDEN MashadarFocusPawn pawn (MashadarArenaSpawner.uc:53-86). The port spawns only an AWoTMashadarGuide (Source/WoT/Projectiles/WoTMashadarGuide.h:52, an AWoTProjectile). So for Hound, expect projectile cls WoTMashadarGuide and NO pawn_spawned. This is a divergence: the port never creates retail's hidden focus pawn. The summon is on the caster's team and lives until killed; the port's AlwaysSpawn never fails on encroachment.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_05",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_05.t3d:89534",
+     "exports/t3d/Battle2_01.t3d:41873",
+     "exports/t3d/Battle2_02.t3d:243193"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvGuardian.uc:88 MaxCharges=5"
+  },
+  {
+   "class": "Heal",
+   "uc": "exports/script/Angreal/AngrealInvHeal.uc",
+   "cpp_class": "WoTAngrealInvHeal",
+   "family": "self",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    7
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 200,
+    "max": 900
+   },
+   "preconditions": [
+    "caster Health != 100 (retail gate is exactly ==100): at full health Cast() returns silently with no heal and no charge. Create with the server plain-damage verb on the CASTER (e.g. 30 dmg -> 70 HP) before casting. Don't use Decay/Taint: Decay's DecreaseHealthLeech keeps draining and masks the rise, and Taint makes UseCharge self-damage."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "caster_health_rise",
+     "min": 10,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvHeal.uc:41-50 IncreaseHealthEffect(HealingAmount=10) via ProcessEffect then UseCharge; exports/script/Angreal/IncreaseHealthEffect.uc:38-48; exports/script/WOT/DefaultHealthReflector.uc:23-33 Health += Amount, capped at 100"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvHeal.uc:35-38 'if Health == 100 return' (no Failed, no charge)",
+    "exports/script/Angreal/AngrealInvHeal.uc:73-99 defaults: HealingAmount=10 Min/Max 3/7 MaxCharges=10"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Exactly +min(10, 100-Health). Pre-damage by >= 10 so the full +10 shows. Self-only; target and range are irrelevant. C++ gate is Health >= 100 (WoTAngrealInvHeal.cpp:42) vs retail == 100. This differs only above 100 HP, which DefaultHealthReflector's cap prevents. C++ also inlines IncreaseHealthEffect (no ProcessEffect interception).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:62887",
+     "exports/t3d/Arena_01.t3d:62954",
+     "exports/t3d/Arena_02.t3d:23530"
+    ]
+   },
+   "window_s": 3.0,
+   "setup": [
+    {
+     "damage": {
+      "who": "caster",
+      "amount": 30
+     }
+    }
+   ],
+   "charge_cite": "exports/script/Angreal/AngrealInvHeal.uc:35-38 'if Health == 100 return' (no Failed, no charge)"
+  },
+  {
+   "class": "Ice",
+   "uc": "exports/script/Angreal/AngrealInvIce.uc",
+   "cpp_class": "WoTAngrealInvIce",
+   "family": "leech",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "bTargetsFriendlies=False: in giMPBattle caster and target on different teams (AngrealInventory.uc:815-830)",
+    "Target found by FindBestTarget (aim at centre, clear LOS) or the launch fails with no charge (LaunchProjectileEffect.uc:79-82)",
+    "Target Health > 0 (AngrealIceProjectile.uc:109)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 7,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTIceProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealIceProjectile.uc:149 speed=300, :152 LifeSpan=0; exports/script/Angreal/SeekingProjectile.uc:769 bAlwaysRelevant"
+    },
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTIceLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealIceProjectile.uc:97-137 ProcessDamage attaches IceLeech for Duration=7 (:141-142); exports/script/Angreal/IceLeech.uc:219 RemoteRole=ROLE_SimulatedProxy"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvIce.uc:33 ProjectileClassName, :39-41 Min 3 / Max 5 / MaxCharges 10, :43 bTargetsFriendlies=False (RPM inherits 60)",
+    "exports/script/Angreal/IceLeech.uc:80-135 AttachTo pins OriginalLocation, SetCollision(true,false,false); :171-197 Tick SetLocation(OriginalLocation) every tick; :207 MeltTime=2; :217 bRemoveExisting"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "No damage. Target is frozen in place for 7 s (location re-pinned each tick; last 2 s melting). Seeker s(t)=300t+8t^2 -> ~0.9 s at 300 uu, ~2.7 s at 900 uu. Optional negative check: the target's position should not change during the freeze even if it tries to move.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_07",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:23484",
+     "exports/t3d/Arena_02.t3d:23512",
+     "exports/t3d/Arena_02.t3d:33950"
+    ]
+   },
+   "window_s": 4.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvIce.uc:33 ProjectileClassName, :39-41 Min 3 / Max 5 / MaxCharges 10, :43 bTargetsFriendlies=False (RPM inherits 60)"
+  },
+  {
+   "class": "Levitate",
+   "uc": "exports/script/Angreal/AngrealInvLevitate.uc",
+   "cpp_class": "WoTAngrealInvLevitate",
+   "family": "movement",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    10,
+    30
+   ],
+   "grant_charges": 10,
+   "cast": {
+    "aim": "self",
+    "hold_s": 2.5
+   },
+   "range": {
+    "min": 200,
+    "max": 900
+   },
+   "preconditions": [
+    "caster not being Whirlwinded (AngrealInvLevitate.uc:44)"
+   ],
+   "expected_charge_delta": {
+    "min": 3,
+    "max": 3
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "caster_movemode",
+     "mode": 5,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvLevitate.uc:85-87 Owner.SetPhysics(PHYS_Flying) every tick while bLevitate"
+    },
+    {
+     "kind": "caster_moved",
+     "min": 16,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvLevitate.uc:89-99 hover target = ground (TraceRecursive straight down) + RiseHeight(24) + CollisionHeight, Velocity.Z = +/-LevitateSpeed(96) outside a 2uu deadband"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvLevitate.uc:42-54 Cast (records InitialPhysics, bLevitate=True); :57-65 UnCast restores InitialPhysics on release",
+    "exports/script/Angreal/AngrealInvLevitate.uc:101-106 ChargeTimer counts DOWN from 0: first UseCharge on the first tick, then every 60/RoundsPerMinute=1s",
+    "exports/script/Angreal/AngrealInvLevitate.uc:114-140 defaults RiseHeight=24 LevitateSpeed=96 Min/Max 10/30 MaxCharges=50 bDisplayIcon",
+    "exports/script/Angreal/LevitateLeech.uc is NOT used by this artifact (no reference from AngrealInvLevitate)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Hold-to-cast. The caster rises ~24uu within ~0.25s and holds there in Flying (5) while held, then reverts to its initial mode (Walking) on release and drops back. Charges for a 2.5s hold: ticks at ~0, 1, 2s = 3. No leech or reflector is involved. Target and range are irrelevant.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_03",
+     "Battle3_02"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_03.t3d:43844",
+     "exports/t3d/Arena_03.t3d:43863",
+     "exports/t3d/Arena_03.t3d:44111"
+    ]
+   },
+   "window_s": 4.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvLevitate.uc:101-106 ChargeTimer counts DOWN from 0: first UseCharge on the first tick, then every 60/RoundsPerMinute=1s"
+  },
+  {
+   "class": "Lightning",
+   "uc": "exports/script/Angreal/AngrealInvLightning.uc",
+   "cpp_class": "WoTAngrealInvLightning",
+   "family": "leech",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    10,
+    20
+   ],
+   "grant_charges": 10,
+   "cast": {
+    "aim": "none",
+    "hold_s": 2.5
+   },
+   "range": {
+    "min": 60,
+    "max": 170
+   },
+   "preconditions": [
+    "target surface within AttachmentRange=180uu of the caster (centre range <= ~197), with line of sight from the caster's eye to the target's centre/top/bottom (AngrealInvLightning.uc:311-313,395-399)"
+   ],
+   "expected_charge_delta": {
+    "min": 2,
+    "max": 2
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTDecreaseHealthLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvLightning.uc:242-247,303-321 AttemptLatch on first tick (LatchDelay zeroed at :78), :403-432 AddVictim; exports/script/Angreal/LightningLeech.uc:86-89 spawns DecreaseHealthLeech on the victim"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 25,
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvLightning.uc:271,287-292 DPS = MaxDamageRate(25) * 0.9^NumVictims * (1 - Dist/900); exports/script/WOT/DecreaseHealthLeech.uc:32-50,89 1 HP per AffectResolution (=1/DPS)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTBeamEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/LightningLeech.uc:62-70,167-173 PathStreak LightningStreak02 caster->victim (C++ bolt AWoTBeamEffect Config=LightningStreak02)",
+     "why": "no snapshot field for non-projectile actors"
+    },
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTPawnSkinOverlay"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvLightning.uc:74-76 LightningSkinEffect on the caster while casting",
+     "why": "no snapshot field for non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvLightning.uc:70-85 Cast (aura start, InstallNotifiers), :88-105 UnCast (RemoveAll strips victims' leeches on release)",
+    "exports/script/Angreal/AngrealInvLightning.uc:229-253 Tick: ChargeTimer += dt; UseCharge when >= 60/RoundsPerMinute (1.0s) -> first charge at t=1.0s",
+    "exports/script/Angreal/AngrealInvLightning.uc:585-621 defaults: AttachmentRange=180 MaxEffectiveRange=900 MaxDamageRate=25 PercentStrain=0.9 LatchDelay=0.3 Min/Max 10/20 MaxCharges=30",
+    "exports/script/Angreal/AngrealInvLightning.uc:496-525 installs LightningDamageNotifyer + NotifyInWaterReflector reflectors on the caster; exports/script/Angreal/LightningLeech.uc:241-257 NotifyInWaterReflector on the victim"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Hold-to-cast aura, no aim needed. Latches on the first tick, drains while held, and releases on UnCast. For 60-170uu, DPS is ~18-21, so ~45-52 HP over a 2.5s hold (min 25 is conservative). Charge drain is 1/s starting at 1.0s, so 2.5s gives 2. C++ folds LightningLeech into a plain UWoTDecreaseHealthLeech (WoTAngrealInvLightning.cpp:292-309) and has no LightningDamageNotifyer or NotifyInWaterReflector classes. Snapshots therefore show only WoTDecreaseHealthLeech on the target and no caster reflectors. UE1 would show LightningLeech+DecreaseHealthLeech plus NotifyInWaterReflector on the target, and LightningDamageNotifyer+NotifyInWaterReflector on the caster. Keep both players out of water (water shocks).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:523",
+     "exports/t3d/Arena_01.t3d:27501",
+     "exports/t3d/Arena_01.t3d:63055"
+    ]
+   },
+   "window_s": 4.0,
+   "lane_distance": 120,
+   "charge_cite": "exports/script/Angreal/AngrealInvLightning.uc:229-253 Tick: ChargeTimer += dt; UseCharge when >= 60/RoundsPerMinute (1.0s) -> first charge at t=1.0s"
+  },
+  {
+   "class": "Minion",
+   "uc": "exports/script/Angreal/AngrealInvMinion.uc",
+   "cpp_class": "WoTAngrealInvMinion",
+   "family": "spawner",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    1
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 400,
+    "max": 2000
+   },
+   "preconditions": [
+    "Caster must NOT already own a live same-team helper of this troop type (HaveHelper gate, ResourceSpawner.uc:40-46,76-104); a repeat cast only prints LimitWarning and spends no charge. Between runs the harness must kill the previous summon with plain server damage (or use a fresh caster).",
+    "Retail UE1 Spawn fails (-> Failed(), no charge, ResourceSpawner.uc:56,67-70) if the summon spot encroaches the target; keep range >= 400 (summon centre sits CasterRadius17 + SummonRadius + 50 uu along the caster's facing, ResourceSpawner.uc:53)."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "pawn_spawned",
+     "cls": [
+      "WoTNPCCharacter"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ResourceSpawner.uc:49-54 (Spawn(ResourceClass, Owner, 'AngrealSpawned', Owner.Location+Offset)); AngrealInvMinion.uc:32-35 (GetTroop Grunt); WOT/WOTPlayer.uc:7264,7267,7270,7273 (Grunt = Warder/Trolloc/Minion/Soldier); C++ Source/WoT/Inventory/WoTResourceSpawnerInv.cpp:132 SpawnCreature -> AWoTNPCCharacter (Source/WoT/AI/WoTNPCCharacter.h:66)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ResourceSpawner.uc:58-61; Source/WoT/Inventory/WoTResourceSpawnerInv.cpp:154 (replicated, Source/WoT/WoTAppearEffect.cpp:12)",
+     "why": "no current snapshot field lists non-projectile, non-pawn actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvMinion.uc:32-35 GetResourceClass = GetTroop(Owner,'Grunt')",
+    "exports/script/Angreal/AngrealInvMinion.uc:44 MaxCharges=5 (no ChargeCost/InitialCharges override)",
+    "exports/script/Angreal/ResourceSpawner.uc:34-73 Cast: HaveHelper gate, spawn, AppearEffect, team copy (62), Super.Cast + UseCharge (64-65), Failed on spawn failure (69)",
+    "exports/script/Angreal/ResourceSpawner.uc:76-104 HaveHelper (Tag AngrealSpawned, IsA type, Health>0, same Owner, same team)",
+    "exports/script/Angreal/ResourceSpawner.uc:119 SpawnSeparation=50",
+    "exports/script/WOT/AngrealInventory.uc:1339-1340 Min/MaxInitialCharges=1; :1347 ChargeCost=1; :489 MP charges = RandRange(Min,Max)",
+    "exports/script/WOT/WOTPlayer.uc:4076-4104 GetTroop keyed on PlayerClass.Name (set =Class at :2772)",
+    "exports/script/WoTPawns/Warder.uc:510-512 Health=150 CollisionRadius=17 (AesSedai grunt)",
+    "Source/WoT/WoTGameMode.cpp:76 default pawn AWoTAesSedai -> Warder row; Source/WoT/AI/WoTCreatureData.cpp:71-86 troop table verbatim"
+   ],
+   "cpp_default_mismatches": [
+    "Quote: .uc sets the Trollocs-leaped text (AngrealInvMinion.uc:49); C++ ctor never sets it, so the CDO keeps base '[Quote Missing]' (Source/WoT/Inventory/WoTInventory.h:96; WoTAngrealInvMinion.cpp:3-21)"
+   ],
+   "notes": "Summon depends on the CASTER's faction: AesSedai (port default) = Warder, Forsaken = Trolloc, Hound = Minion, Whitecloak = Soldier. The summon spawns in front of the caster along its facing (between caster and target), on the caster's team, owned by the caster. It has no LifeSpan and lives until killed, so clean it up. Snapshot cls is WoTNPCCharacter for every troop (the mesh field should carry the troop, e.g. Warder). The port spawns with AlwaysSpawn (WoTCreatureData.cpp:970), so unlike retail it never fails on encroachment. Do not assert target damage: how the helper's AI treats the target depends on team assignment.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_08",
+     "Arena_09",
+     "Battle2_01",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:23399",
+     "exports/t3d/Arena_02.t3d:23530",
+     "exports/t3d/Arena_02.t3d:23557"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvMinion.uc:44 MaxCharges=5 (no ChargeCost/InitialCharges override)"
+  },
+  {
+   "class": "Reflect",
+   "uc": "exports/script/Angreal/AngrealInvReflect.uc",
+   "cpp_class": "WoTAngrealInvReflect",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 5,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTReturnToSenderReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvReflect.uc:105-106; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; exports/script/Angreal/ReturnToSenderReflector.uc:309 RemoteRole=ROLE_SimulatedProxy"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvReflect.uc:103-132 Duration=5, ReturnToSenderReflector, MaxInitialCharges=3, MaxCharges=5, MaxChargesInGroup=2, MinChargeGroupInterval=3",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:38-85 OnReflectedTouch: reflect; Instigator/SourcePawn=caster; seeker re-targeted at SourcePawn",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:160-187 AdjustVelocity: non-seeking -> new same-class projectile aimed at Instigator, original destroyed unexploded + bAbortProcessTouch",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:194-233 seekers only reflected when Destination==caster",
+    "exports/script/Angreal/ReturnToSenderReflector.uc:295-310 UnAffectedTypes, Priority=160, bRemoveExisting",
+    "exports/script/WOT/AngrealInventory.uc:489 MP RandRange; :1347 ChargeCost=1"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected by the cast. Only 5 s: a follow-up must ARRIVE within ~5 s of the cast. Not one-shot: reflects every affectable weave while installed. FOLLOW-UP hostile cast: target fires a Fireball (speed 1000, Damage 40: AngrealFireballProjectile.uc:206-211) at the caster -> caster health unchanged; a WoTFireballProjectile heads back and hits the sender, whose health drops ~40. A Seeker/Decay/SoulBarb seeking the caster is reversed and re-seeks the sender (uc:62-69,165-171). UnAffectedTypes (AMA, DistantEye, ExpWard, Tracer, WallOfAir, EarthTremorRock, MashadarGuide, MachinShin, AMAPearl) are not reflected. Absorb (Priority 170) outranks Reflect (160) when both are installed.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:27468",
+     "exports/t3d/Arena_01.t3d:63123",
+     "exports/t3d/Arena_02.t3d:23399"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "RemoveCurse",
+   "uc": "exports/script/Angreal/AngrealInvRemoveCurse.uc",
+   "cpp_class": "WoTAngrealInvRemoveCurse",
+   "family": "self",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 200,
+    "max": 900
+   },
+   "preconditions": [
+    "Optional, needed only for caster_leech_removed: the caster must carry a removable leech from ANOTHER artifact. Grant the target AngrealInvDecay (WoTAngrealInvDecay) and have it fire at the caster. On hit, AngrealDecayProjectile attaches DecreaseCommon/Uncommon/RareChargesLeech + DecreaseHealthLeech, 15s each (AngrealDecayProjectile.uc:114-147,174-178). Cast Unravel within ~5s. Without this the cast still succeeds (charge + pearl + reflectors)."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 2
+   },
+   "effect_duration_s": 2.5,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTRCAMAPearl"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/RemoveCurseLeech.uc:17-28 spawns RCAMAPearl on the caster; exports/script/Angreal/RCAMAPearl.uc:12 expands AMAPearl; exports/script/Angreal/AMAPearl.uc:12 expands AngrealProjectile; lifecycle AMAPearl.uc:278-364 (~0.16s expand to FinalScale 3 + Duration 2.5s + FadeTime 0.2s)"
+    },
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTNoCastReflector",
+      "WoTNoBadEffectsReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AMAPearl.uc:425-478 AffectPawn installs ReflectorClasses (:607-608 NoCastReflector, NoBadEffectsReflector) with Duration 2.5; caster is always touched (pearl sits on caster, WOT/AngrealProjectile.uc:165-176)"
+    },
+    {
+     "kind": "caster_leech_removed",
+     "cls": [
+      "WoTDecreaseHealthLeech",
+      "WoTDecreaseCommonChargesLeech",
+      "WoTDecreaseUncommonChargesLeech",
+      "WoTDecreaseRareChargesLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AMAPearl.uc:436-443 RemoveCurseEffect on touched pawn; exports/script/Angreal/RemoveCurseEffect.uc:31-43 removes every bRemovable leech whose SourceAngreal != this artifact (only with the Decay precondition)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvRemoveCurse.uc:13 expands LeechAttacher; :26-53 defaults LeechClasses(0)=RemoveCurseLeech Min/Max 3/5 MaxCharges=10",
+    "exports/script/Angreal/LeechAttacher.uc:36-76 Cast attaches RemoveCurseLeech to the caster (Duration 0 = no lifespan) then UseCharge at :75",
+    "exports/script/Angreal/RCAMAPearl.uc:17-26 pearl Destroyed() unattaches the parent RemoveCurseLeech; :28-42 FinalScale=3 InitialScaleRate=20 Duration=2.5 FadeTime=0.2",
+    "exports/script/Angreal/AMAPearl.uc:613 ProjCollisionRadius=28 (x scale 3 = 84uu touch radius; grows to ~95 while fading)",
+    "exports/script/Angreal/RemoveCurseEffect.uc:46-58 strips removable reflectors not ours; :61-67 untaints all carried angreal",
+    "exports/script/Angreal/DecreaseRareChargesLeech.uc:28-31,48 Decay drains 1 charge of every Rare artifact (Unravel is bRare) per 5s"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast, always spends 1 charge. Without the Decay precondition the delta is exactly 1. With it, the Decay rare-charge leech can drain 1 more (hence max 2). Keep the target > ~110uu away, or it too is touched: CeaseUsingAngreal, cleansed, and sealed with NoCast+NoBadEffects. Reflectors live 2.5s and the pearl ~2.9s. C++ folds RemoveCurseLeech away (WoTAngrealInvRemoveCurse.cpp:43-61 spawns AWoTRCAMAPearl directly), so no caster_leech RemoveCurseLeech appears in C++; retail would show it for ~2.9s. Clearing the Taint flag (bTainted) is a further effect that the snapshot can't show.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:23399",
+     "exports/t3d/Arena_02.t3d:34361",
+     "exports/t3d/Arena_02.t3d:34387"
+    ]
+   },
+   "window_s": 3.5,
+   "setup": [
+    {
+     "precast": {
+      "class": "Decay",
+      "by": "target",
+      "wait_s": 5.0
+     }
+    }
+   ],
+   "charge_cite": "exports/script/Angreal/AngrealInvRemoveCurse.uc:13 expands LeechAttacher; :26-53 defaults LeechClasses(0)=RemoveCurseLeech Min/Max 3/5 MaxCharges=10"
+  },
+  {
+   "class": "Seeker",
+   "uc": "exports/script/Angreal/AngrealInvSeeker.uc",
+   "cpp_class": "WoTAngrealInvSeeker",
+   "family": "projectile",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    10
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "bTargetsFriendlies=False: in giMPBattle different teams and play begun (AngrealInventory.uc:815-830, giMPBattle.uc:440-463)",
+    "Target found by FindBestTarget or the launch fails with no charge (LaunchProjectileEffect.uc:79-82)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTSeekerProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealSeekerProjectile.uc:99 speed=150; exports/script/Angreal/SeekingProjectile.uc:425-427 accelerates 16 uu/s^2 to MaxSpeed 1200 (:766)"
+    },
+    {
+     "kind": "target_health_drop",
+     "min": 60,
+     "cite": "exports/script/Angreal/AngrealSeekerProjectile.uc:100 Damage=60; exports/script/Angreal/SeekingProjectile.uc:609-621 explodes only on touching its Destination -> GenericProjectile.uc:195-204 direct ProcessDamage",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvSeeker.uc:29 ProjectileClassName, :35-37 Min 3 / Max 10 / MaxCharges 20, :40 bTargetsFriendlies=False",
+    "exports/script/Angreal/AngrealSeekerProjectile.uc:96-116 defaults (DamageRadius 240, MomentumTransfer 2000)",
+    "exports/script/Angreal/SeekingProjectile.uc:768 LifeSpan=300"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Exactly 60 HP on the target (splash excludes the hit actor); target survives at 40. Splash radius 240 -> keep range >= 300 so the caster is clear. s(t)=150t+8t^2 -> ~1.7 s at 300 uu, ~4.7 s at 900 uu.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:21354",
+     "exports/t3d/Arena_01.t3d:30241",
+     "exports/t3d/Arena_01.t3d:62921"
+    ]
+   },
+   "window_s": 5.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvSeeker.uc:29 ProjectileClassName, :35-37 Min 3 / Max 10 / MaxCharges 20, :40 bTargetsFriendlies=False"
+  },
+  {
+   "class": "Shield",
+   "uc": "exports/script/Angreal/AngrealInvShield.uc",
+   "cpp_class": "WoTAngrealInvShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [
+    "caster has no ShieldReflector at a full 50-point pool; otherwise Cast() calls Failed() and spends no charge (AngrealInvShield.uc:35-38). A fresh pawn satisfies this."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTShieldReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvShield.uc:33-43,71; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvShield.uc:33-43 Cast: Failed() when ShieldHitPoints == ShieldReflector.default.MaxShieldHitPoints, else Super.Cast (install + UseCharge)",
+    "exports/script/Angreal/AngrealInvShield.uc:69-95 ShieldReflector, DT_Shield, bCommon, bElementAir, MaxInitialCharges=3, MaxCharges=10, Priority=1, MinChargeGroupInterval=4, InventoryGroup=53; no Duration => 0 = permanent (ReflectorInstaller.uc:13-14; InstallReflectorEffect.uc:23-31,53)",
+    "exports/script/Angreal/ShieldReflector.uc:33-58 Install sets owner ShieldHitPoints=MaxShieldHitPoints, then Super.Install",
+    "exports/script/Angreal/ShieldReflector.uc:61-73 UnInstall zeroes owner ShieldHitPoints",
+    "exports/script/Angreal/ShieldReflector.uc:78-138 TakeDamage: 50/50 split with alternating rounding; pool <=0 spills overflow to player and uninstalls",
+    "exports/script/Angreal/ShieldReflector.uc:161-168 ShieldReduceDamagePct=50, MaxShieldHitPoints=50, Priority=225, bRemoveExisting",
+    "exports/script/WOT/Reflector.uc:232-248 bRemoveExisting uninstalls same-class reflectors during Install"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. No time limit: a 50-point pool worn away by damage. Retail reflector is server-only (ROLE_None); client presence is the port's replication. FOLLOW-UP hostile cast: target fires a Fireball (Damage 40) at the caster -> caster health drops ~20, not 40 (pool 50->30); a 2nd hit drops ~20 (pool 10); a 3rd drops ~30 and breaks the shield (WoTShieldReflector disappears). An immediate recast on a full pool fails with 0 charge delta. RETAIL RECAST QUIRK (possible unrecorded divergence): recasting over a partly worn shield sets ShieldHitPoints=50 (ShieldReflector.uc:37). Super.Install's bRemoveExisting (Reflector.uc:233-245) then runs the OLD reflector's UnInstall, which zeroes the pawn-level pool (uc:65). So retail leaves the new shield at 0, and it breaks on the next hit at full damage. The port keeps the pool per reflector, so a recast gives a full 50 (WoTShieldReflector.cpp:13, .h:27). PORT_NOTES.md:3728 says 're-cast replenishes' and does not mention the retail zeroing. Minor: the abstract AWoTReflectorInstaller defaults Duration=20 (WoTReflectorInstaller.h:23, .cpp:9), while ReflectorInstaller.uc leaves it at 0. This is harmless because every concrete class sets it (Shield sets 0 at WoTAngrealInvShields.cpp:93).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_06",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:21354",
+     "exports/t3d/Arena_01.t3d:30241",
+     "exports/t3d/Arena_02.t3d:23473"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvShield.uc:33-43 Cast: Failed() when ShieldHitPoints == ShieldReflector.default.MaxShieldHitPoints, else Super.Cast (install + UseCharge)"
+  },
+  {
+   "class": "Shift",
+   "uc": "exports/script/Angreal/AngrealInvShift.uc",
+   "cpp_class": "WoTAngrealInvShift",
+   "family": "movement",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 400,
+    "max": 900
+   },
+   "preconditions": [
+    "160uu straight ahead along the caster's ViewRotation must be clear of blocking actors (no pawn within ~34uu horizontally of the destination). View pitch should be level (0): the offset follows ViewRotation incl. pitch."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "caster_moved",
+     "min": 150,
+     "where": "both",
+     "cite": "exports/script/Angreal/ShiftEffect.uc:127-141 Destination = Location + (160,0,0) >> ViewRotation; ActorFits then SetLocation; :192 ShiftDistance=160"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ShiftEffect.uc:157-160 AppearEffect Blue/Gold on success",
+     "why": "no snapshot field for non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvShift.uc:29-54 Cast: ShiftEffect via ProcessEffect; success -> Super.Cast + UseCharge, else Failed() (no charge)",
+    "exports/script/Angreal/AngrealInvShift.uc:56-81 defaults Min/Max 3/5 MaxCharges=10",
+    "exports/script/Legend/Util.uc:400-443 ActorFits checks only blocking ACTORS (not world geometry) within radius-sum horizontally",
+    "exports/script/Angreal/ShiftEffect.uc:154 ShiftOutOfLeechesAndReflectors; :162-166 SetPhysics(PHYS_Falling) if not in water"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Instant 160uu teleport along the view. Cast with a level view: do NOT pitch the view down at the target centre. The C++ destination test (WoTAngrealInvShift.cpp:55-67) is a capsule overlap that includes WorldStatic, so even a few uu of downward pitch overlaps the floor and the C++ cast Fails with no move and no charge. Retail ActorFits ignores world geometry and SetLocation's FindSpot corrects small floor penetration, so retail succeeds. If facing the target, keep range >= 400 so the destination stays clear of it. Movemode flips to Falling for about a tick (too brief for 10 Hz).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_06",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_03",
+     "Battle2_05",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:525",
+     "exports/t3d/Arena_02.t3d:23484",
+     "exports/t3d/Arena_02.t3d:23512"
+    ]
+   },
+   "window_s": 3.0,
+   "aim_mode": "level",
+   "charge_cite": "exports/script/Angreal/AngrealInvShift.uc:29-54 Cast: ShiftEffect via ProcessEffect; success -> Super.Cast + UseCharge, else Failed() (no charge)"
+  },
+  {
+   "class": "SoulBarb",
+   "uc": "exports/script/Angreal/AngrealInvSoulBarb.uc",
+   "cpp_class": "WoTAngrealInvSoulBarb",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "bTargetsFriendlies=False: in giMPBattle caster and target on different teams (AngrealInventory.uc:815-830)",
+    "Target found by FindBestTarget or the launch fails with no charge (LaunchProjectileEffect.uc:79-82)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 15,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTSoulBarbProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealSoulBarbProjectile.uc:143 speed=300; exports/script/Angreal/SeekingProjectile.uc:769 bAlwaysRelevant"
+    },
+    {
+     "kind": "target_reflector",
+     "cls": [
+      "WoTRarityBasedDamageReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealSoulBarbProjectile.uc:113-128 Explode installs RarityBasedDamageReflector on HitActor for Duration=15 (:142)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvSoulBarb.uc:28 ProjectileClassName, :34-36 Min 3 / Max 5 / MaxCharges 10, :39 bTargetsFriendlies=False",
+    "exports/script/Angreal/RarityBasedDamageReflector.uc:21-64 ChargeUsed -> self damage TAINT_COMMON/UNCOMMON/RARE (5/10/20, AngrealInventory.uc:1329-1331)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Impact does 0 damage (Damage unset). Effect only bites when the target spends a charge within 15 s: follow-up = grant the target a common angreal (e.g. Fireball) and have it cast -> target_health_drop >= 5 (10 uncommon, 20 rare) per charge. Seeker s(t)=300t+8t^2 -> ~0.9-2.7 s.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_03",
+     "Arena_08",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:524",
+     "exports/t3d/Arena_01.t3d:27501",
+     "exports/t3d/Arena_03.t3d:43788"
+    ]
+   },
+   "window_s": 4.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvSoulBarb.uc:28 ProjectileClassName, :34-36 Min 3 / Max 5 / MaxCharges 10, :39 bTargetsFriendlies=False"
+  },
+  {
+   "class": "SpiritShield",
+   "uc": "exports/script/Angreal/AngrealInvSpiritShield.uc",
+   "cpp_class": "WoTAngrealInvSpiritShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTIgnoreSpiritElementReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvSpiritShield.uc:23-24; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/IgnoreElementReflector.uc:48-58; Source/WoT/Inventory/WoTIgnoreElementReflector.cpp:25-41",
+     "why": "install appear-rings actor on the caster; snapshot lists no non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvSpiritShield.uc:21-46 Duration=20, IgnoreSpiritElementReflector, DT_Lifespan, MaxInitialCharges=3, MaxCharges=10, InventoryGroup=64",
+    "exports/script/Angreal/IgnoreElementReflector.uc:33-60,75-86,93-122,141-176,184-189 install/cleanse, damage + effect filtering, Priority=255",
+    "exports/script/Angreal/IgnoreSpiritElementReflector.uc:25-49 ignores bElementSpirit sources; IgnoredDamageType=Spirit"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. Retail reflector is server-only (ROLE_None); client presence is the port's replication. FOLLOW-UP hostile cast within 20 s: target fires Soul Barb (Spirit) at the caster -> no WoTRarityBasedDamageReflector appears on the caster (AngrealSoulBarbProjectile.uc:119 installs it through ProcessEffect, which the shield drops) and the barb is destroyed. Cleanse rider (not in base setup): an existing Soul Barb reflector on the caster (bDeleterious, RarityBasedDamageReflector.uc:69) is removed when the shield goes up.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_05",
+     "Arena_06",
+     "Arena_08",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:37573",
+     "exports/t3d/Arena_03.t3d:44214",
+     "exports/t3d/Arena_03.t3d:44240"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "SwapPlaces",
+   "uc": "exports/script/Angreal/AngrealInvSwapPlaces.uc",
+   "cpp_class": "WoTAngrealInvSwapPlaces",
+   "family": "movement",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    2,
+    4
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "Target found by FindBestTarget (bTargetsFriendlies default True, so teammates are fine) or the launch fails with no charge (LaunchProjectileEffect.uc:79-82)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTSwapPlacesProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealSwapPlacesProjectile.uc:151-152 speed=750 MaxSpeed=1000; exports/script/Angreal/SeekingProjectile.uc:769 bAlwaysRelevant"
+    },
+    {
+     "kind": "positions_swapped",
+     "tol": 32,
+     "cite": "exports/script/Angreal/AngrealSwapPlacesProjectile.uc:93-121 Explode -> SwapPlacesEffect(InitiatingPawn, HitActor); exports/script/Angreal/SwapPlacesEffect.uc:164-191 Source.SetLocation(DestinationLoc) / Destination.SetLocation(SourceLoc)",
+     "where": "both"
+    },
+    {
+     "kind": "caster_moved",
+     "min": 250,
+     "cite": "exports/script/Angreal/SwapPlacesEffect.uc:164-176",
+     "where": "both"
+    },
+    {
+     "kind": "target_moved",
+     "min": 250,
+     "cite": "exports/script/Angreal/SwapPlacesEffect.uc:178-191",
+     "where": "both"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "host",
+     "cite": "exports/script/Angreal/SwapPlacesEffect.uc:409-434 AppearEffect on each swapped pawn",
+     "why": "no snapshot field lists non-projectile effect actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvSwapPlaces.uc:30 ProjectileClassName, :34-36 Min 2 / Max 4 / MaxCharges 10, :38-39 NonTargetableTypes MashadarTrailer/AngrealIllusionProjectile",
+    "exports/script/Angreal/SwapPlacesEffect.uc:120-157 fit checks only when sizes differ (same-size players skip), :194-206 rotations/ViewRotations swapped too, :213-250 seekers retargeted"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Both players are the same size so no fit check; the swap happens on impact (~0.4-1.1 s flight). Positions are the pawns' locations at impact time (both stationary -> exact start positions). No damage. caster_moved/target_moved min assumes range >= 300.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_05",
+     "Arena_07",
+     "Arena_08",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_03",
+     "Battle2_05",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:27468",
+     "exports/t3d/Arena_01.t3d:27501",
+     "exports/t3d/Arena_02.t3d:23512"
+    ]
+   },
+   "window_s": 3.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvSwapPlaces.uc:30 ProjectileClassName, :34-36 Min 2 / Max 4 / MaxCharges 10, :38-39 NonTargetableTypes MashadarTrailer/AngrealIllusionProjectile"
+  },
+  {
+   "class": "Taint",
+   "uc": "exports/script/Angreal/AngrealInvTaint.uc",
+   "cpp_class": "WoTAngrealInvTaint",
+   "family": "other",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    2
+   ],
+   "grant_charges": 2,
+   "cast": {
+    "aim": "target",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 600
+   },
+   "preconditions": [
+    "bTargetsFriendlies=False: in giMPBattle caster and target on different teams (AngrealInventory.uc:815-830)",
+    "Target found by FindBestTarget or the launch fails with no charge (LaunchProjectileEffect.uc:79-82)",
+    "For any effect the target must hold at least one angreal: GivePawnAngreal the target e.g. a Fireball (common) before the cast"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTTaintProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealTaintProjectile.uc:94 speed=150, :98 LifeSpan=0; exports/script/Angreal/SeekingProjectile.uc:769 bAlwaysRelevant"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "item_tainted",
+     "where": "host",
+     "cite": "exports/script/Angreal/AngrealTaintProjectile.uc:47-61 TaintAllAngrealEffect on HitActor; exports/script/Angreal/TaintAllAngrealEffect.uc:20-37 sets bTainted on every held AngrealInventory",
+     "why": "snapshot inv rows carry cls/charges only; bTainted replicates to the owning client only (AngrealInventory.uc:180-185)"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvTaint.uc:29 ProjectileClassName, :38-39 MaxInitialCharges 2 / MaxCharges 10 (Min inherits 1 -> MP RandRange(1,2) truncates to 1), :41 bTargetsFriendlies=False",
+    "exports/script/WOT/AngrealInventory.uc:293-331 UseCharge on a tainted item damages its user TAINT_COMMON/UNCOMMON/RARE = 5/10/20 (:1329-1331)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Permanent taint, no impact damage, no leech/reflector. The current snapshot can only confirm the projectile. Proxy follow-up: after impact have the target cast its tainted angreal -> target_health_drop >= 5 per charge (common). Seeker s(t)=150t+8t^2 -> ~1.7 s at 300 uu, ~3.3 s at 600 uu.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_01",
+     "Arena_02",
+     "Arena_03",
+     "Arena_05",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_01.t3d:63156",
+     "exports/t3d/Arena_02.t3d:23530",
+     "exports/t3d/Arena_02.t3d:23557"
+    ]
+   },
+   "window_s": 5.5,
+   "lane_distance": 500,
+   "setup": [
+    {
+     "give": {
+      "who": "target",
+      "class": "WoTAngrealInvFireball",
+      "charges": 5
+     }
+    }
+   ],
+   "charge_cite": "exports/script/Angreal/AngrealInvTaint.uc:29 ProjectileClassName, :38-39 MaxInitialCharges 2 / MaxCharges 10 (Min inherits 1 -> MP RandRange(1,2) truncates to 1), :41 bTargetsFriendlies=False"
+  },
+  {
+   "class": "Target",
+   "uc": "exports/script/Angreal/AngrealInvTarget.uc",
+   "cpp_class": "WoTAngrealInvTarget",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    2
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 15,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTAutoTargetReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvTarget.uc:30-31; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17 (port replicates every reflector)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvTarget.uc:28-54 Duration=15, AutoTargetReflector, bOffensive, MaxInitialCharges=2, MaxCharges=5, MinChargeGroupInterval=5, InventoryGroup=66",
+    "exports/script/Angreal/AutoTargetReflector.uc:21-46 FindBestTarget = nearest targetable actor over AllActors (no FOV/LOS)",
+    "exports/script/Angreal/AutoTargetReflector.uc:99-149 IsTargetable && CanReachDestination (world trace, else path nodes)",
+    "exports/script/Angreal/AutoTargetReflector.uc:163-169 Priority=128, bRemovable, bRemoveExisting, bDisplayIcon",
+    "exports/script/WOT/DefaultTargetingReflector.uc:27-55,122-126 targetable = WOTPawn/WOTPlayer/Illusion/MashadarTrailer/Legion, never Owner or bHidden",
+    "exports/script/Angreal/ProjectileLauncher.uc:74-101,193-197 launchers call FindBestTarget only when ProjectileClass.bUsesDestination",
+    "exports/script/Legend/LegendActorComponent.uc:18 RemoteRole=ROLE_None (retail AutoTargetReflector is server-only)"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; nothing happens to the target from the cast itself. Retail AutoTargetReflector inherits RemoteRole=ROLE_None (server-only); client visibility is a port property (all UWoTReflector replicate), so if the client check fails, the host check is the parity-authoritative one. FOLLOW-UP (by the caster, within 15 s): turn the caster's view AWAY from the target (e.g. yaw+180) and cast Seeker (WoTAngrealInvSeeker; bUsesDestination SeekingProjectile.uc:762) -> the WoTSeekerProjectile still acquires the target (nearest reachable player, no FOV/LOS) and homes on it; a control run without Find Target gets no destination (MaxTargetAngle 22.5, SeekingProjectile.uc:765). Seeker is slow (speed 150, AngrealSeekerProjectile.uc:99), so allow several seconds. Non-seeking launchers (Fireball/Dart) are unaffected.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_03",
+     "Arena_06",
+     "Arena_12",
+     "Battle2_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_03.t3d:44018",
+     "exports/t3d/Arena_06.t3d:23533",
+     "exports/t3d/Arena_12.t3d:82479"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "Tracer",
+   "uc": "exports/script/Angreal/AngrealInvTracer.uc",
+   "cpp_class": "WoTAngrealInvTracer",
+   "family": "other",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    2,
+    4
+   ],
+   "grant_charges": 2,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 900
+   },
+   "preconditions": [
+    "The level must contain a Seal (in Pickup state or carried by a pawn other than the caster) - i.e. a Citadel/giMPBattle map; artifacts/damage cannot create one. With no seal GetBestTarget returns None, the seeker requires a destination and the cast fails with 0 charge used (LaunchProjectileEffect.uc:79-82)"
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTTracerProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvTracer.uc:37-128 GetBestTarget = nearest reachable seal (else nearest unreachable); exports/script/Angreal/AngrealTracerProjectile.uc:137-159 defaults (speed 1, Acceleration 150, MaxSpeed 500, LifeSpan 0); SeekingProjectile.uc:769 bAlwaysRelevant"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvTracer.uc:163 ProjectileClassName, :168-170 Min 2 / Max 4 / MaxCharges 10",
+    "exports/script/Angreal/AngrealTracerProjectile.uc:50-62 SetDestination tracks the seal / its carrier, :65-96 Timer re-targets dropped/picked-up seals"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Info artifact: ignores view aim and the target pawn entirely; no pawn effect. Retail's pawn loop does not skip the caster (a seal-carrying caster would target itself); the port skips the owner as a ruled divergence (Source/WoT/Inventory/WoTAngrealInvTracer.cpp:98-108).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Battle2_01.t3d:41829",
+     "exports/t3d/Battle2_01.t3d:41900",
+     "exports/t3d/Battle2_01.t3d:42957"
+    ]
+   },
+   "window_s": 3.5,
+   "context": "battle",
+   "charge_cite": "exports/script/Angreal/AngrealInvTracer.uc:163 ProjectileClassName, :168-170 Min 2 / Max 4 / MaxCharges 10"
+  },
+  {
+   "class": "TrapDetect",
+   "uc": "exports/script/Angreal/AngrealInvTrapDetect.uc",
+   "cpp_class": "WoTAngrealInvTrapDetect",
+   "family": "self",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    5,
+    15
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 200,
+    "max": 2000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 15,
+   "observables": [
+    {
+     "kind": "caster_leech",
+     "cls": [
+      "WoTTrapDetectLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/LeechAttacher.uc:36-76 (AttachLeechEffect per LeechClasses[i] on Owner, then Super.Cast + UseCharge); AngrealInvTrapDetect.uc:30-31 (Duration=15, LeechClasses(0)=TrapDetectLeech); AttachLeechEffect.uc:83-95 (LifeSpan=Duration, AttachTo victim); TrapDetectLeech.uc:300 RemoteRole=ROLE_SimulatedProxy; C++ WoTAngrealInvTrapDetect.cpp:37-53, UWoTLeech replicated (WoTLeech.cpp:17)"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvTrapDetect.uc:13 expands LeechAttacher; :30 Duration=15; :31 LeechClasses(0)=TrapDetectLeech; :38-40 Min/MaxInitialCharges=5/15, MaxCharges=20",
+    "exports/script/Angreal/LeechAttacher.uc:36-76 Cast; :95 Priority=20",
+    "exports/script/Angreal/TrapDetectLeech.uc:60-111 detection/heartbeat run client-side only in MP; :203-222 only deployed Traps / non-waiting ExpWards count; :293 DetectRadius=1000; :299-300 bDisplayIcon, bRemoveExisting",
+    "exports/script/WOT/AngrealInventory.uc:1347 ChargeCost=1"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-only: attaches a 15 s TrapDetectLeech to the caster whether or not any traps exist, and does nothing to the target. The leech expires on its own after 15 s, so its removal is observable ~15 s later. Visual and audio cues need a deployed trap within 1000 uu and are client-side presentation only. The port attaches the leech directly (WoTAngrealInvTrapDetect.cpp:46-49) instead of through the caster's ProcessEffect reflector chain (LeechAttacher.uc:53-71). The result is the same when no reflectors are active.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Battle2_01",
+     "Battle2_03",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Battle2_01.t3d:41851",
+     "exports/t3d/Battle2_01.t3d:41862",
+     "exports/t3d/Battle2_01.t3d:42946"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvTrapDetect.uc:13 expands LeechAttacher; :30 Duration=15; :31 LeechClasses(0)=TrapDetectLeech; :38-40 Min/MaxInitialCharges=5/15, MaxCharges=20"
+  },
+  {
+   "class": "WallOfAir",
+   "uc": "exports/script/Angreal/AngrealInvWallOfAir.uc",
+   "cpp_class": "WoTAngrealInvWallOfAir",
+   "family": "other",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    10,
+    20
+   ],
+   "grant_charges": 10,
+   "cast": {
+    "aim": "target",
+    "hold_s": 1.0
+   },
+   "range": {
+    "min": 300,
+    "max": 1500
+   },
+   "preconditions": [
+    "FindBestTarget must find a WOTPawn/WOTPlayer within MaxAngle=22.5 deg of the view (AngrealInvWallOfAir.uc:49-56,87-90, DefaultTargetingReflector.uc:71-118); otherwise Failed(), no charge."
+   ],
+   "expected_charge_delta": {
+    "min": 2,
+    "max": 2
+   },
+   "effect_duration_s": 1.0,
+   "observables": [
+    {
+     "kind": "projectile",
+     "cls": [
+      "WoTWallOfAirProjectile"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvWallOfAir.uc:62-65 (Spawn AngrealWallOfAirProjectile, Source=Owner, Destination=target); AngrealWallOfAirProjectile.uc:83 (kept at PctDistFromSource=0.333 of the way, :152), :157-160 (bNetTemporary=False, LifeSpan=0); C++ WoTAngrealInvWallOfAir.cpp:65-73"
+    },
+    {
+     "kind": "caster_leech",
+     "cls": [
+      "WoTDestroyOnDestroyLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvWallOfAir.uc:68 InstallDestroyLeech(WOA, Owner) (:93-126); C++ WoTAngrealInvWallOfAir.cpp:77"
+    },
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTDestroyOnDestroyLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvWallOfAir.uc:69 InstallDestroyLeech(WOA, A, true); C++ WoTAngrealInvWallOfAir.cpp:78"
+    }
+   ],
+   "pending_build_observables": [],
+   "citations": [
+    "exports/script/Angreal/AngrealInvWallOfAir.uc:45-91 Cast: wall + two DestroyOnDestroyLeeches, Super.Cast + UseCharge (:79-80)",
+    "exports/script/Angreal/AngrealInvWallOfAir.uc:160-174 Tick: while WOA exists, CastTimer (starts 0) -= dt; <=0 -> += 60/RPM and UseCharge -> a 2nd charge on the first tick, then one per 1.5 s",
+    "exports/script/Angreal/AngrealInvWallOfAir.uc:129-157 UnCast (fire release) destroys wall + both leeches",
+    "exports/script/Angreal/AngrealInvWallOfAir.uc:178 MaxAngle=22.5; :185 RoundsPerMinute=40; :186-188 Min/MaxInitialCharges=10/20, MaxCharges=40",
+    "exports/script/Angreal/AngrealWallOfAirProjectile.uc:58-87 Tick (self-destroys if either pawn dead); :90-97 Destroyed -> SourceAngreal.UnCast",
+    "exports/script/Angreal/DestroyOnDestroyLeech.uc:23-43 leech destroys the wall when removed",
+    "Source/WoT/Inventory/WoTAngrealInvWallOfAir.cpp:170-185 Tick drain matches retail"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Sustained, hold-to-keep: the wall (75 uu collision) sits 1/3 of the way from caster to target and exists only while fire is held. Release destroys the wall and both leeches, so poll during the hold. Charges: 1 at cast + 1 on the first Tick (CastTimer starts at 0) + 1 per 1.5 s held. A 1.0 s hold spends 2; a ~1.6-2.9 s hold spends 3. No damage to anyone. The wall destroys angreal projectiles that cross it (not tested here).",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:527",
+     "exports/t3d/Arena_02.t3d:23484",
+     "exports/t3d/Arena_02.t3d:23512"
+    ]
+   },
+   "window_s": 2.5,
+   "charge_cite": "exports/script/Angreal/AngrealInvWallOfAir.uc:45-91 Cast: wall + two DestroyOnDestroyLeeches, Super.Cast + UseCharge (:79-80)"
+  },
+  {
+   "class": "WaterShield",
+   "uc": "exports/script/Angreal/AngrealInvWaterShield.uc",
+   "cpp_class": "WoTAngrealInvWaterShield",
+   "family": "reflector",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    1,
+    3
+   ],
+   "grant_charges": 3,
+   "cast": {
+    "aim": "self",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 300,
+    "max": 1000
+   },
+   "preconditions": [],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 20,
+   "observables": [
+    {
+     "kind": "caster_reflector",
+     "cls": [
+      "WoTIgnoreWaterElementReflector"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvWaterShield.uc:23-24; exports/script/Angreal/ReflectorInstaller.uc:55-76; exports/script/Angreal/InstallReflectorEffect.uc:44-56; Source/WoT/Inventory/WoTReflector.cpp:17"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/IgnoreElementReflector.uc:48-58; Source/WoT/Inventory/WoTIgnoreElementReflector.cpp:25-41",
+     "why": "install appear-rings actor on the caster; snapshot lists no non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge",
+    "exports/script/Angreal/AngrealInvWaterShield.uc:21-46 Duration=20, IgnoreWaterElementReflector, DT_Shield (retail quirk; lifetime is still Duration=20), MaxInitialCharges=3, MaxCharges=10, InventoryGroup=64",
+    "exports/script/Angreal/IgnoreElementReflector.uc:33-60,93-122,141-176,184-189 install/cleanse, effect filtering, Priority=255",
+    "exports/script/Angreal/IgnoreWaterElementReflector.uc:32-70 install zeroes every ZoneInfo.ZoneVelocity, restored on UnInstall",
+    "exports/script/Angreal/IgnoreWaterElementReflector.uc:82-106 ignores bElementWater sources; TakeDamage also drops 'drowned'",
+    "exports/script/Angreal/IgnoreWaterElementReflector.uc:114-120 IgnoredDamageType=Water"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Self-cast; aim irrelevant; target unaffected. DT_Shield changes only the HUD timer type; the reflector still expires after Duration=20. Retail reflector is server-only (ROLE_None); client presence is the port's replication. FOLLOW-UP hostile cast within 20 s: target fires Decay (AngrealInvDecay = Water+Spirit) at the caster -> no WoTDecreaseHealthLeech or WoTDecrease*ChargesLeech appears on the caster, and the projectile is destroyed. Drowning damage is also ignored. The retail ZoneVelocity-zeroing hack (uc:17-70) is global; no current snapshot field shows it.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_05",
+     "Arena_06",
+     "Arena_07",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_02",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:37573",
+     "exports/t3d/Arena_03.t3d:49615",
+     "exports/t3d/Arena_04.t3d:26471"
+    ]
+   },
+   "window_s": 3.0,
+   "charge_cite": "exports/script/Angreal/ReflectorInstaller.uc:38-77 Cast installs reflectors then UseCharge"
+  },
+  {
+   "class": "Whirlwind",
+   "uc": "exports/script/Angreal/AngrealInvWhirlwind.uc",
+   "cpp_class": "WoTAngrealInvWhirlwind",
+   "family": "leech",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    10,
+    20
+   ],
+   "grant_charges": 10,
+   "cast": {
+    "aim": "target",
+    "hold_s": 3.5
+   },
+   "range": {
+    "min": 300,
+    "max": 1500
+   },
+   "preconditions": [
+    "FindBestTarget must find the target within MaxAngle=22.5 deg, and it must be a WOTPawn/WOTPlayer (AngrealInvWhirlwind.uc:60-69,115-118); otherwise Failed(), no charge.",
+    "Target must not already carry a WhirlwindLeech (bSingular, WhirlwindLeech.uc:245); a failed attach gives Failed() (uc:97-106)."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": 3.5,
+   "observables": [
+    {
+     "kind": "target_leech",
+     "cls": [
+      "WoTWhirlwindLeech"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/AngrealInvWhirlwind.uc:71-95 (WhirlwindLeech attached to BestTarget via AttachLeechEffect); WhirlwindLeech.uc:246 RemoteRole=ROLE_SimulatedProxy; C++ WoTAngrealInvWhirlwind.cpp:58-60, UWoTLeech replicated (WoTLeech.cpp:17)"
+    },
+    {
+     "kind": "target_movemode",
+     "mode": 0,
+     "where": "host",
+     "cite": "exports/script/Angreal/WhirlwindLeech.uc:62-63,131 (Owner.SetPhysics(PHYS_None) on attach and every tick); C++ WoTWhirlwindLeech.cpp:79 DisableMovement (MOVE_None); restored on release (uc:83-97, cpp:105-110)"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTWhirlwindFunnel"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/WhirlwindLeech.uc:145-149 (simulated Tick spawns WhirlwindSprayer per instance); Source/WoT/Inventory/WoTWhirlwindLeech.cpp:216",
+     "why": "no current snapshot field lists non-projectile, non-pawn actors (the funnel is local presentation on each instance)"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvWhirlwind.uc:55-119 Cast: attaches leech, Super.Cast, NO UseCharge",
+    "exports/script/Angreal/AngrealInvWhirlwind.uc:142-164 Tick: DesiredLocation = Owner.Location + InitialDistance along ViewRotation (:149); ChargeTimer += dt, UseCharge each 60/RPM = 3.0 s (:157-162)",
+    "exports/script/Angreal/AngrealInvWhirlwind.uc:124-137 UnCast (release) removes the leech",
+    "exports/script/Angreal/AngrealInvWhirlwind.uc:230 MaxAngle=22.5; :236 RoundsPerMinute=20; :237-239 Min/MaxInitialCharges=10/20, MaxCharges=40",
+    "exports/script/Angreal/WhirlwindLeech.uc:116-142 eases victim toward DesiredLocation (AlignmentSpeed=2), spins it, SetLocation only if ActorFits",
+    "devtree/U2Radiosity/Engine/Src/UnLevAct.cpp:859-860 UE1 SetLocation->FarMoveActor->FindSpot keeps the victim out of world geometry",
+    "Source/WoT/Inventory/WoTAngrealInvWhirlwind.cpp:94-125 Tick drain matches retail"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Charges drain only while fire is held: 0 at cast, then 1 per 3.0 s (a 3.5 s hold spends 1; a hold under 3 s spends 0). The harness aims level at the target's centre, which puts DesiredLocation almost on the target's own position (at most ~BaseEyeHeight 42 uu lower and ~2 uu nearer). So do NOT assert target_moved: retail FindSpot keeps the victim grounded. PORT RISK: the port moves the victim with an unswept SetActorLocation (WoTWhirlwindLeech.cpp:299-301). Under a downward aim this could sink the target up to ~42 uu into the floor, so watch target z. Target movemode is authoritative on the host; the client's copy of the target's mode may lag or differ. The target spins and takes no damage. Release removes the leech and restores physics.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_03",
+     "Arena_04",
+     "Arena_07",
+     "Arena_09",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_03",
+     "Battle2_04",
+     "Battle2_05",
+     "Battle3_01",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/t3d/Arena_02.t3d:23484",
+     "exports/t3d/Arena_03.t3d:43844",
+     "exports/t3d/Arena_03.t3d:43863"
+    ]
+   },
+   "window_s": 5.0,
+   "charge_cite": "exports/script/Angreal/AngrealInvWhirlwind.uc:55-119 Cast: attaches leech, Super.Cast, NO UseCharge"
+  },
+  {
+   "class": "Shift@aimed",
+   "uc": "exports/script/Angreal/AngrealInvShift.uc",
+   "cpp_class": "WoTAngrealInvShift",
+   "family": "movement",
+   "charge_cost": 1,
+   "initial_charges_mp": [
+    3,
+    5
+   ],
+   "grant_charges": 5,
+   "cast": {
+    "aim": "none",
+    "hold_s": 0.2
+   },
+   "range": {
+    "min": 400,
+    "max": 900
+   },
+   "preconditions": [
+    "160uu straight ahead along the caster's ViewRotation must be clear of blocking actors (no pawn within ~34uu horizontally of the destination). View pitch should be level (0): the offset follows ViewRotation incl. pitch."
+   ],
+   "expected_charge_delta": {
+    "min": 1,
+    "max": 1
+   },
+   "effect_duration_s": null,
+   "observables": [
+    {
+     "kind": "caster_moved",
+     "min": 150,
+     "where": "both",
+     "cite": "exports/script/Angreal/ShiftEffect.uc:127-141 Destination = Location + (160,0,0) >> ViewRotation; ActorFits then SetLocation; :192 ShiftDistance=160; exports/script/Angreal/ShiftEffect.uc:127-141; exports/script/Legend/Util.uc:400-440"
+    }
+   ],
+   "pending_build_observables": [
+    {
+     "kind": "effect_actor",
+     "cls": [
+      "WoTAppearEffect"
+     ],
+     "where": "both",
+     "cite": "exports/script/Angreal/ShiftEffect.uc:157-160 AppearEffect Blue/Gold on success",
+     "why": "no snapshot field for non-projectile actors"
+    }
+   ],
+   "citations": [
+    "exports/script/Angreal/AngrealInvShift.uc:29-54 Cast: ShiftEffect via ProcessEffect; success -> Super.Cast + UseCharge, else Failed() (no charge)",
+    "exports/script/Angreal/AngrealInvShift.uc:56-81 defaults Min/Max 3/5 MaxCharges=10",
+    "exports/script/Legend/Util.uc:400-443 ActorFits checks only blocking ACTORS (not world geometry) within radius-sum horizontally",
+    "exports/script/Angreal/ShiftEffect.uc:154 ShiftOutOfLeechesAndReflectors; :162-166 SetPhysics(PHYS_Falling) if not in water"
+   ],
+   "cpp_default_mismatches": [],
+   "notes": "Shift cast with the view aimed at the target's centre (a few degrees of downward pitch, as when a player looks at an opponent). Retail ShiftEffect.Invoke (exports/script/Angreal/ShiftEffect.uc:127-141) moves the victim 160 uu along ViewRotation if Util.ActorFits (exports/script/Legend/Util.uc:400-440: blocking ACTORS only, world geometry ignored) and SetLocation succeeds, so a destination a few uu into the floor still shifts. Expect the same outcome as Shift.",
+   "obtainable": true,
+   "census": {
+    "sources": [
+     "default-inventory",
+     "fixed-pickup",
+     "spawn-pool"
+    ],
+    "maps": [
+     "Arena_02",
+     "Arena_06",
+     "Arena_09",
+     "Arena_11",
+     "Arena_12",
+     "Battle2_01",
+     "Battle2_03",
+     "Battle2_05",
+     "Battle3_02",
+     "Battle4_01"
+    ],
+    "evidence": [
+     "exports/script/WOT/giMPBattle.uc:525",
+     "exports/t3d/Arena_02.t3d:23484",
+     "exports/t3d/Arena_02.t3d:23512"
+    ]
+   },
+   "window_s": 3.0,
+   "aim_mode": "target",
+   "charge_cite": "exports/script/Angreal/AngrealInvShift.uc:29-54 Cast: ShiftEffect via ProcessEffect; success -> Super.Cast + UseCharge, else Failed() (no charge)",
+   "variant_of": "Shift"
+  }
+ ],
+ "rules": {
+  "frag_limit": 20,
+  "frag_limit_cite": "exports/script/WOT/giMPArena.uc:20; original/System/Default.ini:450",
+  "time_limit_default": 0,
+  "time_limit_cite": "original/System/Default.ini:451; giCombatBase.uc:10,25,33-34",
+  "change_levels": true,
+  "change_levels_cite": "exports/script/WOT/giMPArena.uc:21; Default.ini:452",
+  "restart_delay_s": 15,
+  "restart_delay_cite": "exports/script/WOT/WOTPlayer.uc:242,3837-3860,7251; original/System/User.ini:322",
+  "respawn_delay_s": 1.0,
+  "respawn_delay_cite": "exports/script/WOT/WOTPlayer.uc:115,3607-3640,3738,7126",
+  "game_restart_delay_s": 15,
+  "game_restart_delay_cite": "exports/script/WOT/giCombatBase.uc:9,166-185",
+  "expected_next_map": {
+   "Arena_01": "Arena_02",
+   "Arena_02": "Arena_03",
+   "Arena_03": "Arena_04",
+   "Arena_09": "Arena_11",
+   "Arena_11": "Arena_12",
+   "Arena_12": "Arena_01"
+  },
+  "rotation_cite": "giCombatBase.uc:207-227 RestartGame -> giWOT.uc:57-67 NextMap = GetMapName(MapPrefix 'Arena_' (giMPArena.uc:24), Map, +1) over original/Maps/Arena_*.wot"
+ }
+}

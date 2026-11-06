@@ -1,0 +1,29 @@
+name: Idea or request
+description: Propose something that is not a faithful-port bug.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is a faithful port: simulation (movement, timing, damage, cadence) stays
+        locked to the original, and intentional differences are recorded in `PORT_NOTES.md`.
+        Presentation and tooling can improve freely. Ideas that change play are tracked
+        here as `enhancement` issues rather than going into the port.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this?
+      options:
+        - Presentation (rendering, audio, UI polish) that does not change play
+        - Tooling, build or pipeline
+        - Documentation
+        - Gameplay change (would differ from the original)
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you want, why, and how it relates to what the original game does.
+    validations:
+      required: true

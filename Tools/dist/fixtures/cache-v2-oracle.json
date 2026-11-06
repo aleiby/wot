@@ -1,0 +1,76 @@
+{
+  "cache_sha256": "91b08cb67c6ae859ed5f53973c81233337ac6561844547a4e659c0257a7b9e87",
+  "cache_version": 2,
+  "entries": {
+    "texture:Test__Stone": {
+      "blob": "blobs/be/beeb911f980bf649779c78e7511daa1c6cf01aa769b06addf9cd9fba1af8a750.blob",
+      "encoding": "ue1-p8-mips-rgba-palette-v1",
+      "height": 2,
+      "masked": true,
+      "mip_count": 2,
+      "mips": [
+        {
+          "expanded_byte_length": 16,
+          "height": 2,
+          "stored_byte_length": 4,
+          "width": 2
+        },
+        {
+          "expanded_byte_length": 4,
+          "height": 1,
+          "stored_byte_length": 1,
+          "width": 1
+        }
+      ],
+      "name": "Stone",
+      "package": "Test",
+      "palette_colors": 256,
+      "sha256": "beeb911f980bf649779c78e7511daa1c6cf01aa769b06addf9cd9fba1af8a750",
+      "size": 1073,
+      "type": "textures",
+      "width": 2
+    }
+  },
+  "format": "wot-payload-cache",
+  "hash_algorithm": "sha256",
+  "limits": {
+    "max_blob_size": 268435456,
+    "max_bsp_indices": 6000000,
+    "max_bsp_sections": 4096,
+    "max_bsp_slot_name_bytes": 1024,
+    "max_bsp_vertices": 2000000,
+    "max_entries": 10000,
+    "max_texture_dimension": 8192,
+    "max_total_expanded_bytes": 2147483648
+  },
+  "skipped": [],
+  "sources": [
+    {
+      "path": "Textures/Test.utx",
+      "sha256": "2c03297bc1d412edc6c5d58fdcd82ceddad25b5abeb6e6bf482935ea1b0c2a24",
+      "size": 20,
+      "type": "textures"
+    }
+  ],
+  "summary": {
+    "entries": {
+      "bsps": 0,
+      "meshes": 0,
+      "sounds": 0,
+      "textures": 1
+    },
+    "logical_payload_bytes": 1073,
+    "source_packages": {
+      "bsps": 0,
+      "meshes": 0,
+      "sounds": 0,
+      "textures": 1
+    },
+    "total_expanded_bytes": 20,
+    "unique_blob_bytes": 1073,
+    "unique_blobs": 1
+  },
+  "types": [
+    "textures"
+  ]
+}

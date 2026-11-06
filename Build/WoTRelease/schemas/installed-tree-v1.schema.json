@@ -1,0 +1,86 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/installed-tree-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The signed inventory of an installed tree. It describes SHAPE as well as content: a tree with an extra file, a file turned into a symlink, or a mode quietly widened is not the tree that was signed even if every listed digest still matches. Entries are strictly ordered by path, so the derived root digest depends only on the tree and never on the emitter's iteration order. The inventory may never list itself or its signature sidecar.",
+  "properties": {
+    "entries": {
+      "description": "strictly increasing by path; case-insensitive duplicates refused",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "link_target": {
+            "description": "non-escaping relative target for a symlink; empty otherwise",
+            "type": "string"
+          },
+          "mode": {
+            "description": "permission bits only; setuid/setgid/sticky are REFUSED, not masked",
+            "maximum": 511,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "tree-relative, forward-slashed, no '.'/'..', no drive or stream qualifier",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(^|/)\\.\\.?(/|$))[^\\x00-\\x1f]+$",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "const": ""
+              }
+            ],
+            "description": "content digest for files; empty for directories and links"
+          },
+          "size": {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "file",
+              "directory",
+              "symlink"
+            ]
+          }
+        },
+        "required": [
+          "link_target",
+          "mode",
+          "path",
+          "sha256",
+          "size",
+          "type"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "format": {
+      "const": "wot-installed-tree-v1"
+    },
+    "platform": {
+      "enum": [
+        "Win64",
+        "Mac"
+      ]
+    },
+    "version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "entries",
+    "format",
+    "platform",
+    "version"
+  ],
+  "title": "WoT installed tree v1",
+  "type": "object"
+}

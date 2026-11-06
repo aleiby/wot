@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "wot-innoextract-dependencies",
+  "version-string": "1.9.0",
+  "description": "Pinned third-party dependencies for the vendored innoextract 1.9 static library. Manifest mode with a fixed builtin-baseline so every contributor resolves identical versions from the same vcpkg registry commit; this is what makes a from-scratch build reproducible rather than dependent on whatever a package manager happens to serve today.",
+  "homepage": "https://github.com/aleiby/wot",
+  "builtin-baseline": "40f3c709db80acf154ac4b17a1f83c564ebd022e",
+  "dependencies": [
+    {
+      "name": "boost-iostreams",
+      "features": [ "bzip2", "lzma", "zlib" ]
+    },
+    "boost-filesystem",
+    "boost-date-time",
+    "boost-algorithm",
+    "boost-config",
+    "boost-container",
+    "boost-core",
+    "boost-foreach",
+    "boost-format",
+    "boost-integer",
+    "boost-lexical-cast",
+    "boost-ptr-container",
+    "boost-range",
+    "boost-smart-ptr",
+    "boost-static-assert",
+    "boost-typeof",
+    "boost-unordered",
+    "boost-utility",
+    "liblzma",
+    "zlib",
+    "bzip2"
+  ]
+}

@@ -1,0 +1,165 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Styling/SlateTypes.h"
+#include "WoTGameSettings.h"
+#include "Widgets/SCompoundWidget.h"
+
+class FWoTFrontEndPresentationAuthority;
+class SScrollBox;
+class STextBlock;
+class UWoTPreferencesSubsystem;
+
+enum class EWoTSettingsPage : uint8
+{
+	Controls,
+	Hardware
+};
+
+/** Resolves an authenticated retail localization id to display text. */
+DECLARE_DELEGATE_RetVal_OneParam(FText, FWoTSettingsTextResolver, FName);
+
+/** The one editable-binding slot a capture targets. */
+enum class EWoTBindingSlot : uint8
+{
+	Primary,
+	Secondary
+};
+
+// One Controls or Hardware screen. The widget owns the draft, the key capture
+// and the 15-second video confirmation; UWoTPreferencesSubsystem stays the only
+// persistence owner. Nothing here reads a command, CVar or path from a draft.
+class SWoTSettingsScreen : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SWoTSettingsScreen)
+		: _Page(EWoTSettingsPage::Controls)
+		, _Preferences(nullptr)
+	{}
+		SLATE_ARGUMENT(EWoTSettingsPage, Page)
+		SLATE_ARGUMENT(UWoTPreferencesSubsystem*, Preferences)
+		SLATE_ARGUMENT(TSharedPtr<FWoTFrontEndPresentationAuthority>,
+			PresentationAuthority)
+		SLATE_ATTRIBUTE(FSlateFontInfo, HeadingFont)
+		SLATE_ATTRIBUTE(FSlateFontInfo, BodyFont)
+		SLATE_EVENT(FWoTSettingsTextResolver, TextResolver)
+		/** Back or a completed Save: the caller navigates. */
+		SLATE_EVENT(FSimpleDelegate, OnBack)
+		SLATE_EVENT(FSimpleDelegate, OnSaved)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual ~SWoTSettingsScreen() override;
+
+	/** Escape/back: cancels a live key capture first, then reverts an
+	 * unconfirmed video preview, then leaves the screen. Always handled. */
+	bool HandleBack();
+	bool IsCapturingBinding() const { return CaptureAction.IsSet(); }
+
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnPreviewKeyDown(
+		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply OnKeyDown(
+		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FReply OnPreviewMouseButtonDown(
+		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FReply OnMouseWheel(
+		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual void Tick(
+		const FGeometry& AllottedGeometry, const double InCurrentTime,
+		const float InDeltaTime) override;
+
+	static constexpr double VideoConfirmationSeconds = 15.0;
+
+#if WITH_AUTOMATION_TESTS
+	/** The Mouse Sensitivity slider's eight steps (its labels are "%gx"). */
+	static TArray<float> SensitivityStepsForTesting();
+	const FWoTGameSettings& DraftForTesting() const { return Draft; }
+	void SetDraftForTesting(const FWoTGameSettings& NewDraft) { Draft = NewDraft; }
+	void BeginCaptureForTesting(EWoTManagedBinding Action, EWoTBindingSlot Slot)
+		{ BeginCapture(Action, Slot); }
+	FString ErrorTextForTesting() const { return ErrorText.ToString(); }
+	FString StatusTextForTesting() const { return StatusText.ToString(); }
+	bool IsAwaitingVideoConfirmationForTesting() const { return VideoConfirmDeadline > 0.0; }
+	double VideoConfirmDeadlineForTesting() const { return VideoConfirmDeadline; }
+	FReply SaveForTesting() { return Save(); }
+	FReply KeepVideoForTesting() { return KeepVideo(); }
+	FReply RevertVideoForTesting() { return RevertVideo(); }
+	FReply ResetBindingsForTesting() { return ResetBindings(); }
+	TSharedPtr<SWidget> SaveButtonForTesting() const { return SaveButton; }
+	TSharedPtr<SWidget> BackButtonForTesting() const { return BackButton; }
+	TSharedPtr<SWidget> BodyScrollForTesting() const { return BodyScroll; }
+	bool IsAvailableForTesting() const { return Preferences.IsValid(); }
+	FText ResolvedRetailTextForTesting(const TCHAR* Key) const
+		{ return Retail(Key); }
+	FText ActionLabelForTesting(EWoTManagedBinding Action) const
+		{ return ActionLabel(Action); }
+	float VSyncGlyphSizeForTesting() const { return BodyCheckBoxGlyphSize; }
+	TSharedPtr<SWidget> WindowModeLabelForTesting() const
+		{ return WindowModeLabel; }
+	TSharedPtr<SWidget> WindowModeControlForTesting() const
+		{ return WindowModeControl; }
+#endif
+
+private:
+	TSharedRef<SWidget> BuildBody();
+	TSharedRef<SWidget> BuildControlsBody();
+	TSharedRef<SWidget> BuildHardwareBody();
+	TSharedRef<SWidget> BuildBindingRow(EWoTManagedBinding Action);
+	TSharedRef<SWidget> BuildBindingButton(EWoTManagedBinding Action, EWoTBindingSlot Slot);
+	TSharedRef<SWidget> BuildLabel(const FText& Text);
+	TSharedRef<SWidget> BuildChoiceRow(const FText& Label,
+		TSharedRef<SWidget> Control, TSharedPtr<SWidget>* LabelCapture = nullptr);
+
+	FText Retail(const TCHAR* Key) const;
+	FText ActionLabel(EWoTManagedBinding Action) const;
+	FText BindingText(EWoTManagedBinding Action, EWoTBindingSlot Slot) const;
+	FSlateFontInfo Body() const { return BodyFont.Get(FSlateFontInfo()); }
+	FSlateFontInfo Heading() const { return HeadingFont.Get(FSlateFontInfo()); }
+
+	void BeginCapture(EWoTManagedBinding Action, EWoTBindingSlot Slot);
+	void CancelCapture();
+	bool CommitCapturedKey(const FKey& Key);
+	FReply ResetBindings();
+	FReply Save();
+	FReply Back();
+	FReply KeepVideo();
+	FReply RevertVideo();
+	bool CommitDraft();
+	bool VideoDiffersFromConfirmed() const;
+	void RevertDraftVideoToConfirmed();
+	void SetError(const FText& Text);
+	void SetStatus(const FText& Text);
+
+	EWoTSettingsPage Page = EWoTSettingsPage::Controls;
+	TWeakObjectPtr<UWoTPreferencesSubsystem> Preferences;
+	TSharedPtr<FWoTFrontEndPresentationAuthority> PresentationAuthority;
+	TAttribute<FSlateFontInfo> HeadingFont;
+	TAttribute<FSlateFontInfo> BodyFont;
+	FWoTSettingsTextResolver TextResolver;
+	FSimpleDelegate OnBack;
+	FSimpleDelegate OnSaved;
+
+	FWoTGameSettings Confirmed;
+	FWoTGameSettings Draft;
+	FText ErrorText;
+	FText StatusText;
+	TOptional<EWoTManagedBinding> CaptureAction;
+	EWoTBindingSlot CaptureSlot = EWoTBindingSlot::Primary;
+	double VideoConfirmDeadline = 0.0;
+	double LastTickTime = 0.0;
+	bool bVideoPreviewLive = false;
+
+	TSharedPtr<SWidget> SaveButton;
+	TSharedPtr<SWidget> BackButton;
+	TSharedPtr<SScrollBox> BodyScroll;
+	TSharedPtr<SWidget> WindowModeLabel;
+	TSharedPtr<SWidget> WindowModeControl;
+	FCheckBoxStyle BodyCheckBoxStyle;
+	float BodyCheckBoxGlyphSize = 0.0f;
+	TArray<TSharedPtr<FString>> ResolutionItems;
+	TArray<TSharedPtr<FString>> WindowModeItems;
+	TArray<TSharedPtr<FString>> QualityItems;
+	TArray<TSharedPtr<FString>> FrameRateItems;
+	TArray<TSharedPtr<FString>> BrightnessItems;
+};

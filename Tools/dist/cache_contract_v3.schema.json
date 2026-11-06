@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "maxProperties": 65536,
+  "properties": {
+    "payload": {
+      "$ref": "#/$defs/payload"
+    },
+    "signature": {
+      "maxLength": 1048576,
+      "pattern": "^[0-9a-f]{128}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "payload",
+    "signature"
+  ],
+  "title": "WoT cache-contract-v3 signed envelope",
+  "type": "object",
+  "x-wot-contract": {
+    "canonical_json_limits": {
+      "container_depth": 32,
+      "container_members": 65536,
+      "document_bytes": 4194304,
+      "integer_max": 9223372036854775807,
+      "integer_min": -9223372036854775808,
+      "string_utf8_bytes": 1048576
+    },
+    "generic_importer": "generic-authored-v1"
+  },
+  "$defs": {
+    "audit": {
+      "additionalProperties": false,
+      "maxProperties": 65536,
+      "properties": {
+        "audit_rule": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "runtime_consumer": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "audit_rule",
+        "runtime_consumer"
+      ],
+      "type": "object"
+    },
+    "fact": {
+      "additionalProperties": false,
+      "maxProperties": 65536,
+      "properties": {
+        "audit_rule": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "domain": {
+          "enum": [
+            "texture",
+            "sound",
+            "music",
+            "mesh",
+            "animation",
+            "bsp",
+            "world",
+            "font",
+            "procedural",
+            "registry",
+            "localization",
+            "class_default",
+            "front_end_world"
+          ]
+        },
+        "fact_id": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "importer": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "outputs": {
+          "items": {
+            "$ref": "#/$defs/output"
+          },
+          "maxItems": 65536,
+          "type": "array"
+        },
+        "runtime_consumer": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "required": [
+        "audit_rule",
+        "domain",
+        "fact_id",
+        "importer",
+        "outputs",
+        "runtime_consumer",
+        "source"
+      ],
+      "type": "object"
+    },
+    "output": {
+      "additionalProperties": false,
+      "maxProperties": 65536,
+      "properties": {
+        "logical_id": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "max_decoded_size": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "schema": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "logical_id",
+        "max_decoded_size",
+        "schema"
+      ],
+      "type": "object"
+    },
+    "payload": {
+      "additionalProperties": false,
+      "maxProperties": 65536,
+      "properties": {
+        "audit_set": {
+          "items": {
+            "$ref": "#/$defs/audit"
+          },
+          "maxItems": 65536,
+          "type": "array"
+        },
+        "contract_id": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "contract_version": {
+          "const": 3
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/fact"
+          },
+          "maxItems": 65536,
+          "type": "array"
+        },
+        "format": {
+          "const": "cache-contract-v3"
+        },
+        "key_id": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "type": "string"
+        },
+        "release_sequence": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "startup_critical_logical_ids": {
+          "items": {
+            "maxLength": 1048576,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 65536,
+          "minItems": 1,
+          "type": "array"
+        },
+        "startup_critical_logical_ids_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "audit_set",
+        "contract_id",
+        "contract_version",
+        "facts",
+        "format",
+        "key_id",
+        "release_sequence",
+        "startup_critical_logical_ids",
+        "startup_critical_logical_ids_sha256"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "maxProperties": 65536,
+      "properties": {
+        "export": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "pattern": "^[^.]+(?:\\.[^.]+)*$",
+          "type": "string"
+        },
+        "package": {
+          "maxLength": 1048576,
+          "minLength": 1,
+          "pattern": "^(?:[^./\\\\]+/)*[^./\\\\]+(?:\\.[^./\\\\]+)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "export",
+        "package"
+      ],
+      "type": "object"
+    }
+  }
+}
