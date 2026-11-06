@@ -1,5 +1,6 @@
 # Exact reviewed non-text files in the public export, sorted by path.
 d16663632954c2403b6188908ad6f1191771988cc6d0d84542b5bee4b21914f0  Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json.sig
+131dced28c0781d3e20ce5ce7e8072fb628abeb1ad6358644f01d855878bac4c  Source/WoT/UI/Resources/WoTSetupBackdropDefault.png
 e19ab8c5e8238e6455d9ccb9175817be7fd62b9cdd1eef20f63dd88e0ec469ab  ThirdParty/dmgbuild/1.6.5/dmgbuild-1.6.5-py3-none-any.whl
 fbacbb0bd5193ab3e66e5a47fff63619f15e374ffbec8ae29744251a6c8f05b5  ThirdParty/dmgbuild/1.6.5/ds_store-1.3.1-py3-none-any.whl
 504ab8ac546f35bbd75ad014d6ad977c426660aa721f2cd3acf3dc2f664141bd  ThirdParty/dmgbuild/1.6.5/mac_alias-2.2.2-py3-none-any.whl

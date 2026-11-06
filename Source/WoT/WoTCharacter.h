@@ -184,8 +184,8 @@ enum class EWoTPlayerMovementConstraint : uint8
 // jump arc (41-frame airtime => gravity -950, GravityScale set accordingly) and
 // derived UE1's pure-exponential-friction braking (no constant decel term). The
 // CMC retains that braking model; UWoTCharacterMovement ports retail's distinct
-// held-Walking acceleration and 30% decay branch directly. See PORT_NOTES
-// "Feel validation" + exports/reference/measurements.json.
+// held-Walking acceleration and 30% decay branch directly. See
+// exports/reference/measurements.json.
 // Artifact use: exec UseAngreal/CeaseUsingAngreal → server RPCs → the
 // inventory component's cast gate (WOTPlayer's replication block routed
 // ServerUseAngreal/CeaseUsingAngreal the same way).

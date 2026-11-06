@@ -21,10 +21,24 @@
 #include "TimerManager.h"
 #include "UnrealClient.h"
 
+// The default backdrop's PNG bytes (Tools/build/generate_setup_backdrop.py
+// writes this from Resources/WoTSetupBackdropDefault.png).
+#include "Generated/WoTSetupBackdropDefault.inl"
+
+static_assert(sizeof(WoTSetupBackdropDefault::Png)
+		== static_cast<SIZE_T>(WoTSetupBackdropDefault::PngSize),
+	"the embedded default backdrop does not match its recorded size; regenerate it");
+
 namespace
 {
 // The saved backdrop is tiny; anything larger is not ours.
 constexpr int64 WoTSetupBackdropMaxFileBytes = 1024 * 1024;
+
+#if WITH_AUTOMATION_TESTS
+// Set by specs to stand in for the compiled-in default (an unusable one).
+TOptional<TArray<uint8>> GWoTSetupBackdropDefaultForTesting;
+#endif
+
 // Separable box blur, three passes (close to a Gaussian), then the capture's
 // mean luminance is scaled to the menu screen's own. Measured 2026-10-05 on
 // the live menu: the screen averages ~13/255 (dark navy), the raw linear
@@ -91,6 +105,37 @@ void WoTSetupBackdropBoxBlur(TArray<FVector3f>& Pixels)
 uint8 WoTSetupBackdropChannel(float Value)
 {
 	return static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value), 0, 255));
+}
+
+// Decodes backdrop PNG bytes (a saved capture or the compiled-in default).
+// The header is checked before decoding: a small, highly compressible file
+// must not expand into a huge image.
+bool WoTSetupBackdropDecode(TConstArrayView<uint8> Compressed, TArray<FColor>& OutBackdrop)
+{
+	OutBackdrop.Reset();
+	FImage Image;
+	FIntPoint Declared;
+	if (Compressed.IsEmpty() || Compressed.Num() > WoTSetupBackdropMaxFileBytes
+		|| !WoTSetupBackdrop::ReadPngSize(Compressed, Declared)
+		|| Declared != FIntPoint(WoTSetupBackdrop::Width, WoTSetupBackdrop::Height)
+		|| !FImageUtils::DecompressImage(Compressed.GetData(), Compressed.Num(), Image)
+		|| Image.SizeX != WoTSetupBackdrop::Width || Image.SizeY != WoTSetupBackdrop::Height
+		|| Image.NumSlices != 1)
+	{
+		return false;
+	}
+	Image.ChangeFormat(ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	const TArrayView64<FColor> Colors = Image.AsBGRA8();
+	if (Colors.Num() != WoTSetupBackdrop::Width * WoTSetupBackdrop::Height)
+	{
+		return false;
+	}
+	OutBackdrop.Append(Colors.GetData(), static_cast<int32>(Colors.Num()));
+	for (FColor& Color : OutBackdrop)
+	{
+		Color.A = 255;
+	}
+	return true;
 }
 }
 
@@ -236,38 +281,44 @@ bool WoTSetupBackdrop::Load(const FString& InPath, TArray<FColor>& OutBackdrop)
 {
 	OutBackdrop.Reset();
 	TArray<uint8> Compressed;
-	FImage Image;
-	FIntPoint Declared;
-	// The header is checked before decoding: a small, highly compressible file
-	// must not expand into a huge image.
-	if (!UWoTPreferencesSubsystem::LoadSideFileBytes(
+	return UWoTPreferencesSubsystem::LoadSideFileBytes(
 			InPath, WoTSetupBackdropMaxFileBytes, Compressed)
-		|| Compressed.IsEmpty()
-		|| !ReadPngSize(Compressed, Declared) || Declared != FIntPoint(Width, Height)
-		|| !FImageUtils::DecompressImage(Compressed.GetData(), Compressed.Num(), Image)
-		|| Image.SizeX != Width || Image.SizeY != Height || Image.NumSlices != 1)
-	{
-		return false;
-	}
-	Image.ChangeFormat(ERawImageFormat::BGRA8, EGammaSpace::sRGB);
-	const TArrayView64<FColor> Colors = Image.AsBGRA8();
-	if (Colors.Num() != Width * Height)
-	{
-		return false;
-	}
-	OutBackdrop.Append(Colors.GetData(), static_cast<int32>(Colors.Num()));
-	for (FColor& Color : OutBackdrop)
-	{
-		Color.A = 255;
-	}
-	return true;
+		&& WoTSetupBackdropDecode(Compressed, OutBackdrop);
 }
+
+bool WoTSetupBackdrop::Default(TArray<FColor>& OutBackdrop)
+{
+#if WITH_AUTOMATION_TESTS
+	if (GWoTSetupBackdropDefaultForTesting.IsSet())
+	{
+		return WoTSetupBackdropDecode(
+			GWoTSetupBackdropDefaultForTesting.GetValue(), OutBackdrop);
+	}
+#endif
+	return WoTSetupBackdropDecode(MakeArrayView(WoTSetupBackdropDefault::Png), OutBackdrop);
+}
+
+#if WITH_AUTOMATION_TESTS
+void WoTSetupBackdrop::SetDefaultPngForTesting(const TArray<uint8>* Png)
+{
+	if (Png != nullptr)
+	{
+		GWoTSetupBackdropDefaultForTesting = *Png;
+	}
+	else
+	{
+		GWoTSetupBackdropDefaultForTesting.Reset();
+	}
+}
+#endif
 
 TArray<FColor> WoTSetupBackdrop::Current()
 {
+	// The player's own capture wins; a fresh install (no capture yet) shows the
+	// default that ships with the game; the gradient only if neither decodes.
 	FString Saved;
 	TArray<FColor> Backdrop;
-	if (Path(Saved) && Load(Saved, Backdrop))
+	if ((Path(Saved) && Load(Saved, Backdrop)) || Default(Backdrop))
 	{
 		return Backdrop;
 	}

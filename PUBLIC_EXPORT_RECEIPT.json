@@ -1,8 +1,8 @@
 {
-  "source_commit": "3e9cd8c1fd961c6b88f3bcf541d2710193bbc585",
+  "source_commit": "60de317099184486614207916e9cd5f243f800cf",
   "source_kind": "commit",
-  "source_tree": "3e9cd8c1fd961c6b88f3bcf541d2710193bbc585",
-  "file_count": 1540,
+  "source_tree": "60de317099184486614207916e9cd5f243f800cf",
+  "file_count": 1555,
   "paths": [
     ".gitattributes",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -589,6 +589,8 @@
     "Source/WoT/Traps/WoTTrapBurst.h",
     "Source/WoT/Traps/WoTWall.cpp",
     "Source/WoT/Traps/WoTWall.h",
+    "Source/WoT/UI/Generated/WoTSetupBackdropDefault.inl",
+    "Source/WoT/UI/Resources/WoTSetupBackdropDefault.png",
     "Source/WoT/UI/SWoTBootstrapScreen.cpp",
     "Source/WoT/UI/SWoTBootstrapScreen.h",
     "Source/WoT/UI/WoTReleaseNotes.cpp",
@@ -614,6 +616,8 @@
     "Source/WoT/Updater/WoTInstallerLocations.h",
     "Source/WoT/Updater/WoTReleaseIdentity.cpp",
     "Source/WoT/Updater/WoTReleaseIdentity.h",
+    "Source/WoT/Updater/WoTRememberedInstaller.cpp",
+    "Source/WoT/Updater/WoTRememberedInstaller.h",
     "Source/WoT/WoT.Build.cs",
     "Source/WoT/WoT.cpp",
     "Source/WoT/WoTActorRotator.cpp",
@@ -957,6 +961,8 @@
     "Source/WoTBootstrapCoreTests/WoTBootstrapCoreTests.Build.cs",
     "Source/WoTEditor.Target.cs",
     "Source/WoTGuardedEngineTests.Target.cs",
+    "Source/WoTGuardedEngineTests/Private/WoTGuardedCacheDecodeSpec.cpp",
+    "Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTests.h",
     "Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTestsMain.cpp",
     "Source/WoTGuardedEngineTests/WoTGuardedEngineTests.Build.cs",
     "Source/WoTLaunch/Private/Tests/WoTEarlyUITests.cpp",
@@ -1083,6 +1089,7 @@
     "Tools/build/build_innoextract_native.py",
     "Tools/build/check_innoextract_link.py",
     "Tools/build/fetch_innoextract_libs.py",
+    "Tools/build/generate_setup_backdrop.py",
     "Tools/build/provision_ue58_source.py",
     "Tools/build/prune_stale_module_intermediates.py",
     "Tools/build/record_build_receipt.py",
@@ -1090,6 +1097,7 @@
     "Tools/build/test_build_innoextract_native.py",
     "Tools/build/test_check_innoextract_link.py",
     "Tools/build/test_fetch_innoextract_libs.py",
+    "Tools/build/test_generate_setup_backdrop.py",
     "Tools/build/test_prune_stale_module_intermediates.py",
     "Tools/build/test_public_blob_exemptions.py",
     "Tools/build/test_record_build_receipt.py",
@@ -1155,8 +1163,11 @@
     "Tools/dist/build_payload_cache.py",
     "Tools/dist/build_stripped_pak.py",
     "Tools/dist/cache-v3-importer-outputs-v1.json",
+    "Tools/dist/cache_content_label.py",
     "Tools/dist/cache_contract_v3.py",
     "Tools/dist/cache_contract_v3.schema.json",
+    "Tools/dist/cache_decode_gate.py",
+    "Tools/dist/cache_lineage.py",
     "Tools/dist/check_cache_v3_production_closure.py",
     "Tools/dist/check_lazy_payload_consumers.py",
     "Tools/dist/check_shipping_consumer_allowlist.py",
@@ -1311,7 +1322,10 @@
     "Tools/dist/test_bootstrap.py",
     "Tools/dist/test_bsp_payload.py",
     "Tools/dist/test_build_stripped_pak.py",
+    "Tools/dist/test_cache_content_label.py",
     "Tools/dist/test_cache_contract_v3.py",
+    "Tools/dist/test_cache_decode_gate.py",
+    "Tools/dist/test_cache_lineage.py",
     "Tools/dist/test_cache_v3_production_closure.py",
     "Tools/dist/test_check_lazy_payload_consumers.py",
     "Tools/dist/test_check_shipping_consumer_allowlist.py",
@@ -1447,6 +1461,7 @@
     "Tools/public/test_check_export_receipt.py",
     "Tools/public/test_export_public_tree.py",
     "Tools/public/test_leak_guard.py",
+    "Tools/public/test_port_notes_references.py",
     "Tools/public/test_provenance_scan.py",
     "Tools/reference/README.md",
     "Tools/reference/capture_original_shots.ps1",
@@ -1575,7 +1590,7 @@
     {
       "mode": "100644",
       "path": ".github/workflows/public-guard.yml",
-      "sha256": "5febd73f43448894fb8981e9f248c1868b0ba387a973a47e0bc227d4724b6d5a"
+      "sha256": "eb00fa3f3db3ee3c268c61629b94013c48934990603f7c7ef69dcb800dc563b3"
     },
     {
       "mode": "100644",
@@ -1611,7 +1626,7 @@
     {
       "mode": "100644",
       "path": "Build/WoTRelease/cache-v3-production-descriptor.json",
-      "sha256": "1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e"
+      "sha256": "bb601c131a0f3a7a32932b4d28415bab552f5ce62e38dfe58208cc4e84fd05e4"
     },
     {
       "mode": "100644",
@@ -1681,7 +1696,7 @@
     {
       "mode": "100644",
       "path": "Config/DefaultEngine.ini",
-      "sha256": "d41d25a123a52a3a3449d23c5784793fa638c79a23cc30f15714e19506e5149e"
+      "sha256": "a193c634bab941d264938f29a8047ad66e9b1fb0c2f2e1d8182b0aeb2cffd7a1"
     },
     {
       "mode": "100644",
@@ -1701,7 +1716,7 @@
     {
       "mode": "100644",
       "path": "Config/Windows/WindowsEngine.ini",
-      "sha256": "4c53e6d56b57167ddd3256a5e61c7ac6f688ab29b186718475e9a2a1ad702a2e"
+      "sha256": "0b1d7071d10c25281f419842e83bb4236ab4f87ef45ed3c965ffa1feda039ea9"
     },
     {
       "mode": "100644",
@@ -1726,12 +1741,12 @@
     {
       "mode": "100644",
       "path": "PORT_NOTES.md",
-      "sha256": "ebd219a7938541166233ffb20392658c4c2f689310ecfb467590e7942794f287"
+      "sha256": "d8c520931bd40f2552afe83bda20e7177ae0da4dbddf2f07f7e547678cb0b91e"
     },
     {
       "mode": "100644",
       "path": "README.md",
-      "sha256": "54d3d170cd6671aeb973a17aff88ab72fa980243c720c9703a4d7bc7b451dc50"
+      "sha256": "e498a7e48a95cfb73e878289c9bd8c8cdb42a4f82b4062d59db250d78a349cb3"
     },
     {
       "mode": "100644",
@@ -1776,7 +1791,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/AI/WoTCasterComponent.h",
-      "sha256": "5af05bf9bcae9afa8ed4de38a9a7f97dbabc00ec13fdda23b01e32143f67bbc3"
+      "sha256": "29194bfc7ad008d7bf5f072fb481c716ca1041cde1d896c06907dfb2d7e07a23"
     },
     {
       "mode": "100644",
@@ -1901,7 +1916,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/AI/WoTRangeBands.cpp",
-      "sha256": "4ba2165380852950bd1c67992b35dc7fb977f5be6b4b54ecd32f72761ecc6392"
+      "sha256": "4c1cac341f8d4d54e500603a8eb537f4ba474d6b4cf9738a1bd6524a5b42468a"
     },
     {
       "mode": "100644",
@@ -1981,12 +1996,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/FrontEnd/WoTFrontEndSceneMaterializer.cpp",
-      "sha256": "9167b10e73ecfc0b176765bc5175ab3fbfe68888dc1b8c86a697de0183037866"
+      "sha256": "88960f735f084284471298255fd80dceed1467b41f1de30721e3bca1cd76812f"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/FrontEnd/WoTFrontEndSceneMaterializer.h",
-      "sha256": "531fb1a6d3b12c4f7d21b805156d924ada8a7c1bde12f54516ddc7b5fe1c5f9a"
+      "sha256": "5d7a94d90f27aeaeb2a23a039ddb8d8a98c10b4e0f9b847e71e07b743e2b57d6"
     },
     {
       "mode": "100644",
@@ -2236,7 +2251,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Inventory/WoTAngrealInvLightGlobe.h",
-      "sha256": "511c9f51fc7f176e352e794e00a7b1ac517dec221546025524abb9a78a5c9a35"
+      "sha256": "33eabc3b9f48223ccb8db057d8ca7f5b4c1582c9214de1187f954f6442396bc9"
     },
     {
       "mode": "100644",
@@ -2361,7 +2376,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Inventory/WoTAngrealInvTracer.cpp",
-      "sha256": "fe21c1bdb52c04756fc68c2b4acd56d73c54b654f26982c82d70a89729ef33c2"
+      "sha256": "1cda2a1a63614035de3a7436f42faa1ae3d54fdbc1aa4ee0a75e895ce7f67de8"
     },
     {
       "mode": "100644",
@@ -2416,7 +2431,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Inventory/WoTAngrealSpawnPool.h",
-      "sha256": "f80af7eaf0e60617dc52ee9fa470d0d845c36f9bf69703fdbecb36d2e8a8dccc"
+      "sha256": "dd8ff043758d4a10898b45d1427c61f376026b4a265e7f97121dd256b303d989"
     },
     {
       "mode": "100644",
@@ -2586,7 +2601,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Inventory/WoTLeech.h",
-      "sha256": "e0ff8814867ef28d5d530cefb00e8cca1c7bccba97672a6777b999d4167efa46"
+      "sha256": "5e8188c4a721271b82d21e1984c5ada90e6e6005be81f44e514d74a1475e9c57"
     },
     {
       "mode": "100644",
@@ -2801,7 +2816,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Payload/WoTCacheLease.h",
-      "sha256": "7eb0e2731fcbc81231d4019126472563a6d8f58f3fe4798bca026342c1e70fce"
+      "sha256": "0ca533b5c96f2df7d655a333feb0feaf808eb46b05e81c36f3059605e2106731"
     },
     {
       "mode": "100644",
@@ -2841,7 +2856,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Payload/WoTPayloadActivation.h",
-      "sha256": "56b8b7f1c5a94b33c76d2a19799469d56d0b0c997f6f375955680a1c4af50fdb"
+      "sha256": "34fd0b204da5a87963669e7468d52f5d2bebc031dea9eb0597aad84581b6adf5"
     },
     {
       "mode": "100644",
@@ -2891,7 +2906,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Payload/WoTRuntimeRegistry.h",
-      "sha256": "87904276563030f738367914d3ee305da91f42437858293ac6fa37523a78c832"
+      "sha256": "5f9d6dd8c9f165c502685e11463f74a9bcceec671d79e6824aafc2df29d3a5db"
     },
     {
       "mode": "100644",
@@ -3061,7 +3076,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Projectiles/WoTExpWardProjectile.cpp",
-      "sha256": "3c8aa393f8a25ea544b2428e5788be9808a984dce75599d966e30b00faa1dbc5"
+      "sha256": "dabeacccf199229ec4b8c80d013b4d9000927a7357d3adcbc88b259ba73dce50"
     },
     {
       "mode": "100644",
@@ -3441,7 +3456,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTCacheBootstrapOperationTests.cpp",
-      "sha256": "16294c3eabd174640a0d85505b244c641ac1752b851a21db0f853b6181aa3acb"
+      "sha256": "922940ca482b381a1aa7fcd2612c30e6efbbc84f8d0fb90ca7ade6aedbec22f0"
     },
     {
       "mode": "100644",
@@ -3571,7 +3586,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTFractalTests.cpp",
-      "sha256": "35b40e60c268aba505794661cc0d5946192dcfb4782a83530276b437cd79c6c0"
+      "sha256": "a045303abe5a6ae42e3b6421b76455236f87e5b6f845efc66b1de038150dcb29"
     },
     {
       "mode": "100644",
@@ -3706,7 +3721,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTGameBootstrapWorkerTests.cpp",
-      "sha256": "9d0f27ae59baa753979be57542ca76b35a734a7527777eb2fa3ea50c7c485fce"
+      "sha256": "2bda4d62e75cc014e5651bdf9bbf5489dff927096c10ba99ef8ea7895b74ab30"
     },
     {
       "mode": "100644",
@@ -3776,7 +3791,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTInventoryTests.cpp",
-      "sha256": "b97eeb26cffdbb917c4430917f0f91dc9c18ad9287fad4a8547b2a60c17f8d4e"
+      "sha256": "24ec414f38f0a5fe373a0aea829211d8f1aa2738ae0bba40abf2ef191f58c5bb"
     },
     {
       "mode": "100644",
@@ -3876,7 +3891,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTNetTests.cpp",
-      "sha256": "d6e5f3a333cee0df3909d51ed8e392912f6465d584d0469c3d7440d50c35a25a"
+      "sha256": "2ddf88ae2c2819c8ea8d77fb4a4e2ae161ac7544ad3c3a6f045134c0fa3b6d4e"
     },
     {
       "mode": "100644",
@@ -4041,7 +4056,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTPickupSkinTests.cpp",
-      "sha256": "4e480238b07080f271014885485b5f70f392f32876c7f4ce5250d223efd0551b"
+      "sha256": "eca084b677591c64cde5f728da46b82a1115dc5ab1f9c3f27f4537539c83173d"
     },
     {
       "mode": "100644",
@@ -4116,7 +4131,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTRetailTableBuilderTests.cpp",
-      "sha256": "3b79f48e891d82602b8078de62aae356c650a8f2cf4f74df3903c46ef581299d"
+      "sha256": "0ae72bbbbe24453ff5bf4798a74f998d9264c0932e7620ac2dbcfe5b3525b13a"
     },
     {
       "mode": "100644",
@@ -4166,7 +4181,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTSealCarryTests.cpp",
-      "sha256": "0d13b031077a662eef207a08fac15fae8c42008b156502eff194d56c8ebf5a75"
+      "sha256": "fab40641ee3ac1062706f4fd04bad8c3f95a0d710441e4205639433586eeb326"
     },
     {
       "mode": "100644",
@@ -4181,7 +4196,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTSetupBackdropTests.cpp",
-      "sha256": "c4b135f43bd4475787e2928ef86277d5728caf1e29bfc7f0a10fe9d65cce6437"
+      "sha256": "7f0d7b7a3c44b1bf0e5f8b533c510c357b691077f84b0c847a3b4ee320d095d3"
     },
     {
       "mode": "100644",
@@ -4351,7 +4366,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTWorldMaterializerTestData.cpp",
-      "sha256": "3f3ae3f8bdf3b7fb4e170eff46914f5ef7f78c10c86e82ada497818ab70a9105"
+      "sha256": "e415fc66649ccd0b23436b17aa446cafb79c2ee40a815bce344d9b0520141936"
     },
     {
       "mode": "100644",
@@ -4416,7 +4431,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Traps/WoTSpear.cpp",
-      "sha256": "d839f81c9f6af6f78fae0eaf729fe99eb93aad9a4cac1c57ff97bb4c71b506cf"
+      "sha256": "3b1339785cf1ca97813a048af9ffdf6c6871837681c98e92e7367ab58304cd45"
     },
     {
       "mode": "100644",
@@ -4475,13 +4490,23 @@
     },
     {
       "mode": "100644",
+      "path": "Source/WoT/UI/Generated/WoTSetupBackdropDefault.inl",
+      "sha256": "5f82610a3fa3ada2ef464db77e73417ef8f807cafa93d296469123bdc45a7d6f"
+    },
+    {
+      "mode": "100644",
+      "path": "Source/WoT/UI/Resources/WoTSetupBackdropDefault.png",
+      "sha256": "131dced28c0781d3e20ce5ce7e8072fb628abeb1ad6358644f01d855878bac4c"
+    },
+    {
+      "mode": "100644",
       "path": "Source/WoT/UI/SWoTBootstrapScreen.cpp",
       "sha256": "6e80ef81453e4fb628355ffefb0be89d8d7f2b88892a3cf3816b9bf819fabdec"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/UI/SWoTBootstrapScreen.h",
-      "sha256": "f8c14cc5089aa50cc0056fb5b3232d79ec16a5691f2c86739ff9e2e01ccda7ff"
+      "sha256": "f04391e160b3bf9a7a678dc314c9aafcb35ccb63c172e39e3980f60469d68756"
     },
     {
       "mode": "100644",
@@ -4496,12 +4521,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/UI/WoTSetupBackdrop.cpp",
-      "sha256": "b818b4b639fb6f1d5768f900683e7bef03f63f09b4ac7e4fdd0603f02a728edc"
+      "sha256": "6ab9a70051364267377205310679bc6a1a2e3221748838a27c1692744b9ca53f"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/UI/WoTSetupBackdrop.h",
-      "sha256": "acb55b44e843cdd0f606d68a9c2206318f061b30c8d1e591aa1a4cce45491e55"
+      "sha256": "4b4d4a15bc52e42363b4e11deff55fdde97acc266dd681bc609cd366b88bd6cc"
     },
     {
       "mode": "100644",
@@ -4536,12 +4561,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTCacheBootstrapOperation.cpp",
-      "sha256": "4e43eb2f9336686017cc729610248a1797485b2576731f39820ca69a9eac559f"
+      "sha256": "8d13161c89549555321525eedcdbe8287354e43e43f469138b842cf678fb34d3"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTCacheBootstrapOperation.h",
-      "sha256": "9cc6e641c97c3dcdb9809073057edfc9d23185cf06a7c94ac687bf8f2ac234a3"
+      "sha256": "ed80ef605fa79c149bb0f876df269e86a7c43c45471af55a51fa27a33fa8d16b"
     },
     {
       "mode": "100644",
@@ -4551,7 +4576,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTGameBootstrapWorker.cpp",
-      "sha256": "ed74c1358ef278b175af94187a90d6435771f023131a3fd1fd1c29c752782873"
+      "sha256": "4aec17daeb053df4b09c46eb342579924a06f1ee456345bb9669d5e097d6949e"
     },
     {
       "mode": "100644",
@@ -4571,12 +4596,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTInstallerAcquisition.cpp",
-      "sha256": "8120e8c82a356471e870f46d80c49f7b37ae2f72997298ec4b229292984f9261"
+      "sha256": "becf1a3ef6d04cda9d08fe41886aa94b9a2b8564f481ed6e2e7ca2805e274c44"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTInstallerAcquisition.h",
-      "sha256": "41553a857ac64c36be86cb75f51815a377976c82401d195cc1a3eba259489095"
+      "sha256": "419dc1428f0567d877b62bb87ec5f120bd609b224c167e561ebe4e0e5d7136a0"
     },
     {
       "mode": "100644",
@@ -4597,6 +4622,16 @@
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTReleaseIdentity.h",
       "sha256": "6fd453f9a2692ae49ddfbf4f220cdeac6370d0875e98e60e3e5c5b77e3cbedfe"
+    },
+    {
+      "mode": "100644",
+      "path": "Source/WoT/Updater/WoTRememberedInstaller.cpp",
+      "sha256": "51f93946089a85d533045027248c86c62a1fdeaf0fda51e902b322391ecb1ba7"
+    },
+    {
+      "mode": "100644",
+      "path": "Source/WoT/Updater/WoTRememberedInstaller.h",
+      "sha256": "f50ab0d9d9370a9228c411cf4d96fae6f03108cb6c95ad1a30aaeb8baaf1bdf7"
     },
     {
       "mode": "100644",
@@ -4661,7 +4696,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTAnimTableBuilder.cpp",
-      "sha256": "4476983ff0b7f653b2b275143984896b33ea8ef446084c2160222d8a4c05a167"
+      "sha256": "f18dabee225ceb06ea9a8193c6e3604310bcdc1541d9aeb861cd541be0ff5e31"
     },
     {
       "mode": "100644",
@@ -4806,7 +4841,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTBootstrapSubsystem.cpp",
-      "sha256": "98ea4641a27daa979c288be974d2a8a07b28c60f841947e43f9a49fa8ac86731"
+      "sha256": "11d822c071d81db5aa06fb5c0488bc63afe78da54c602d5ace300ac7fb5251df"
     },
     {
       "mode": "100644",
@@ -4836,7 +4871,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTBreakableDecoration.cpp",
-      "sha256": "1f570d2992708bf7e21af98a8eee247a4bce167e8ed0b2cd566afaf4a929bd9d"
+      "sha256": "ba96e8456f67fcab788f3ec75519481a5ccf9353849b3e91b566b37887b62a2a"
     },
     {
       "mode": "100644",
@@ -4876,7 +4911,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTCarcass.cpp",
-      "sha256": "9c7ba98a816cb3d6ec9c171c7cff0db26d0b7a92dc1419ef821c745a0a807919"
+      "sha256": "fdb42a598ccd2270c5cc8a24e3aa9d89d7549f09b79ca24f35a1b1b416d98e0d"
     },
     {
       "mode": "100644",
@@ -4901,7 +4936,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTCharacter.h",
-      "sha256": "17918269d46fb1a17d3b8c472db0e6bcadab1ba6cdc31016630f7cf9d7411f90"
+      "sha256": "1686e7ae032bfcd0775a6719dfa3552ad66efdda796b6fda7495ffa61466a064"
     },
     {
       "mode": "100644",
@@ -5076,17 +5111,17 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTExplodingWall.cpp",
-      "sha256": "bc61b9d826d08cd6bc78eb5e2216057f634068525ff0f35bf94d8ee1d47cfb4f"
+      "sha256": "b56be7fd6cb52abdf1e320c7f6a21bbc5f03bb3f65e2ebba9b903696225f49a7"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/WoTExplodingWall.h",
-      "sha256": "eb8bb702ada74735edb0ecd2c780873ffee8af59140ba080b6be031f573ccafb"
+      "sha256": "21e74fd4f2053e7e49edd0982273a9c9f8302cb7cee33dba72b2f45d1f46ba44"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFactionCharacters.cpp",
-      "sha256": "da9625aa5a9bb23226fde696f021e223c7d13f828a94b04fd4f3b43f4318dad2"
+      "sha256": "319bb5f0a7995db40a7a551335312e8fad54fad03d1afef4b00517a3e150ba6a"
     },
     {
       "mode": "100644",
@@ -5111,7 +5146,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFootsteps.h",
-      "sha256": "568ee755482472d925e08d837d3b61039845e5611b51fbfaab0a06d873bd83f9"
+      "sha256": "7a47c3e967909a03e7f603e6c2be3a1313fa7359cb2c4fb26367ff8edf9bbdb9"
     },
     {
       "mode": "100644",
@@ -5136,12 +5171,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFractalSubsystem.cpp",
-      "sha256": "f5f199231ada67b04eb9ab371522e9d43c732d79159942e76934e5ac8095c5ad"
+      "sha256": "dcbbdd23b7ec0e8b57cddbf9038ef8f40874a7798c029e24acaefd5ee4568b59"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFractalSubsystem.h",
-      "sha256": "93e6756ae2886040c0bba6389230fa1438a05798c6cc3da3047c921fd672333d"
+      "sha256": "7b221d2a1c592990690a4584a1dc7b55c6429a38284a60199c5b5024ef771097"
     },
     {
       "mode": "100644",
@@ -5366,7 +5401,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTLightGlobe.h",
-      "sha256": "a4c1bdbd25256edaf0ababb7a1404c8d6a38f0552920dada40fa26e9b8eab4d5"
+      "sha256": "fbacbd3319ce62908f01499729f65f8100f583b990bb290e721a5821989e8be1"
     },
     {
       "mode": "100644",
@@ -5436,7 +5471,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTMenuStyle.cpp",
-      "sha256": "512f6591adcad93998a5482637b2f92b2a9aa611c6b60da97923d667195461dc"
+      "sha256": "fcf54b4e706bf757fa2de0a43bdc09876326d83318b1e232f9c5dcd0c6437f46"
     },
     {
       "mode": "100644",
@@ -5561,12 +5596,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTPayloadSubsystem.cpp",
-      "sha256": "f7daf90c6eaba83cb623691a58ada625af1e0286b174466759503c82b934142f"
+      "sha256": "5d637e5ff483ad02aede6007944be32078878f86b043f6fdad5a0e99f6fe97bc"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/WoTPayloadSubsystem.h",
-      "sha256": "b4bddfe18de1fdc0e486b96618d40c1e8134d3e9792cfd23cc488aa8f2acdf0e"
+      "sha256": "b29e71ec44d4b112a71e560bce5999d7a8746a6a36714fa8ed4d0cd324c2ba16"
     },
     {
       "mode": "100644",
@@ -5686,7 +5721,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTSealAltar.cpp",
-      "sha256": "9f8c938e985f97ae952cd1b745870436544af67f7087e9cfa58477e9a25720ad"
+      "sha256": "f82ae7ed0bac6e479952cb948711f72e85927c9c2832c232d2b461395587c39e"
     },
     {
       "mode": "100644",
@@ -5716,7 +5751,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTShotSubsystem.cpp",
-      "sha256": "ec2777eb2245627d61eb276a4e6ce9d0fcd898081a4f1b518f4c55747d5fd81c"
+      "sha256": "50546ef055d77d22f8f06bae0f2ac5bb3341744e59822719a3da39d82a8c6464"
     },
     {
       "mode": "100644",
@@ -5766,7 +5801,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTSoundTableBuilder.cpp",
-      "sha256": "c2a78dd8315f54650832ef524d761040fba00dcfa534c1d1c78295b0baa8b1aa"
+      "sha256": "d2e32161b9545737183d26c6a9b5b6671593c3703c613a216bf8e32b9b4c07ff"
     },
     {
       "mode": "100644",
@@ -5926,7 +5961,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/World/WoTMapDisplay.h",
-      "sha256": "90353b9800057c54dd9a131f8898b93075fedcc777fe331ff339409f1c0b61e0"
+      "sha256": "45463c4157c9c0cf553d34b41e1210e1abdf58c7d0261c736ea7967abac5129b"
     },
     {
       "mode": "100644",
@@ -5941,7 +5976,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/World/WoTRuntimeActorVisuals.cpp",
-      "sha256": "c29307c724a4df1f72b94749b90c79c4c26d1f17a98f97a310c8eb961664b960"
+      "sha256": "2edf4783fa95a3f57cef33dbc5becdf581ae1795c2e484e14e6ec4af2f47894b"
     },
     {
       "mode": "100644",
@@ -5951,7 +5986,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/World/WoTRuntimeBSPRenderer.cpp",
-      "sha256": "5e58bb8d896012ea860949e7f4dd8239788b33f91d30874fe9d0a82317e0108c"
+      "sha256": "def34127c731afeb66d62c55db83c59f1e120d9bd6a27de74dccc16f5aa44f99"
     },
     {
       "mode": "100644",
@@ -6016,12 +6051,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/World/WoTWorldMaterializer.cpp",
-      "sha256": "d7601a7e5d62a2d4a96a5bfa9e55deca659a023aaaeb534afa0080d6846e4a0b"
+      "sha256": "84621015c2564190d1308849d01531d3ebc830032394d7338f7f739aff33a4ff"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/World/WoTWorldMaterializer.h",
-      "sha256": "c32f533f646e21970f90db70a7c0658b24e8381c4de22a13f179696ef3b4a43b"
+      "sha256": "f48bfb82824c6b5ec194e47338dbc6b8929da59e2d6c63a1751a3b884d54904d"
     },
     {
       "mode": "100644",
@@ -6066,7 +6101,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTBootstrapCore/Private/Ed25519.cpp",
-      "sha256": "44d38d08c4780487bb8dc5a6be8ea50b53cc4fbf70ff4a992597ea6391dda938"
+      "sha256": "84ca15b9616c378799fd8edb3d998a1563a9aa2d7af81aefc8d621b8e6a69a6d"
     },
     {
       "mode": "100644",
@@ -6116,7 +6151,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTBootstrapCore/Private/Tests/CryptoTests.cpp",
-      "sha256": "5b97a2bd1e851f9632c02dada75219173dababba973cbc7515c22d4cd439641c"
+      "sha256": "016ac8de847aaf296b54b14c4501cdfedcf8813770245c62a786af148ac98c47"
     },
     {
       "mode": "100644",
@@ -6201,7 +6236,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTBootstrapCore/Public/WoTBootstrapCore/ArtifactTypes.h",
-      "sha256": "dd004f2d7c35742172856c90a7a38a7eb410dfbfe562cc53de4151537ec239ff"
+      "sha256": "60713a23dd938c397ac0bedde84a98808c5105385335092b3964df9ce82ac5e8"
     },
     {
       "mode": "100644",
@@ -6315,8 +6350,18 @@
     },
     {
       "mode": "100644",
+      "path": "Source/WoTGuardedEngineTests/Private/WoTGuardedCacheDecodeSpec.cpp",
+      "sha256": "1b5c8c86373715486530fe24022793becf942fe7f8605a7bf981b1f089588dec"
+    },
+    {
+      "mode": "100644",
+      "path": "Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTests.h",
+      "sha256": "4e8af8ad7bcde7fa01887de9de57abf4b9d385ddeca70be3ad702b507d68b6f2"
+    },
+    {
+      "mode": "100644",
       "path": "Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTestsMain.cpp",
-      "sha256": "adbd5412b4fdf30d9958add6f4d9178fd2489a05455877f1d92b650e34370ebf"
+      "sha256": "914bee205804be00701f89d5da896e1451b94b981300cb25fa9682ab40785c25"
     },
     {
       "mode": "100644",
@@ -6361,7 +6406,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Private/CacheBuilder.cpp",
-      "sha256": "f25a530fdba80b0ad44499eb55a02872e6a02bd7c992d31642d14c8d372bc5cb"
+      "sha256": "df5a084b8126eee0a588955563f9b48f2bc5a0ac2e9949e1253cff1f95b729fc"
     },
     {
       "mode": "100644",
@@ -6461,7 +6506,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Private/Tests/CacheBuilderTests.cpp",
-      "sha256": "fd0dcf62dd723aa1226425d78745c24c00c1e003b98e95ee9a8bca27ef136deb"
+      "sha256": "061956577370abe0644f6d684dc3eede98aabd1d4e902a3531e2227a6e6fec7e"
     },
     {
       "mode": "100644",
@@ -6531,12 +6576,12 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Public/WoTRetailReader/CacheBuilder.h",
-      "sha256": "da49d40f9178d0a21cc25814dc62df7125a224cc332c115a29d2913eb855c456"
+      "sha256": "883b458dd18ebf4d4fea2c20bd2677a2d390fcd243fa9fcb74cfe4b9a5022422"
     },
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Public/WoTRetailReader/CacheManifest.h",
-      "sha256": "a0b3cf5e56ccb3b313f7340c67f81b214b7b93af459475f12a5a31d2edefb067"
+      "sha256": "39d60431219a92b2c94b8a5a7de5e95a9334040bce443280105e8c6ef1c780f3"
     },
     {
       "mode": "100644",
@@ -6556,7 +6601,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Public/WoTRetailReader/FrontEndDescriptorSidecar.h",
-      "sha256": "aa4a7e6cce603fdd2a5fbbc47a873ee70a754dc61ad90da291412b074ed4583b"
+      "sha256": "49f27e626c05001282c1efb66df415fdd81c3661cb0dad643301f8277b3051e6"
     },
     {
       "mode": "100644",
@@ -6945,6 +6990,11 @@
     },
     {
       "mode": "100644",
+      "path": "Tools/build/generate_setup_backdrop.py",
+      "sha256": "a31f538ee440bb6c37e5b28788aaa0284517b65e01f9d138430a88a8a4e6cd82"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/build/provision_ue58_source.py",
       "sha256": "f68214f129554be126d1596cf2474f6c5325d42abc4698e3c72b9722f6baa2a7"
     },
@@ -6980,13 +7030,18 @@
     },
     {
       "mode": "100644",
+      "path": "Tools/build/test_generate_setup_backdrop.py",
+      "sha256": "76ed0caead41f00a653d73358c388260a85abdea3bf4989e335d5df0ded0a1ea"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/build/test_prune_stale_module_intermediates.py",
       "sha256": "9d0a8cafc653feb208bd6d4f3d213f3a0877defb79dc51cfba0730fb24ef4ed2"
     },
     {
       "mode": "100644",
       "path": "Tools/build/test_public_blob_exemptions.py",
-      "sha256": "bbc7234d9a26c942ba7a62fb075f5612c74b5ad34c97a4b136fa58958bb49e66"
+      "sha256": "144fa68c00d87637e31c474a270107b9776110693f833aac03b19b3e79d86413"
     },
     {
       "mode": "100644",
@@ -7106,17 +7161,17 @@
     {
       "mode": "100644",
       "path": "Tools/convert/lightmap_atlas.py",
-      "sha256": "5029fb5b44930cc0eb92957c2c6485174aaa092d0d4d678681cad5fe08178b97"
+      "sha256": "34320ba3a787849222e58add2a260b10bba6023bba818c64f4b7f0375950f46d"
     },
     {
       "mode": "100644",
       "path": "Tools/convert/lightmaps.py",
-      "sha256": "742033f8db4ac3a49a237be580e77f8b84570d1f6d26fcd9dfe38b9bbf1fac41"
+      "sha256": "1fa39f05c8776a33063eeb88569f62779ea5af63867b0db12f479c22baaf5c6e"
     },
     {
       "mode": "100644",
       "path": "Tools/convert/mesh2glb.py",
-      "sha256": "57fd51306f51950fc2a1e18697c76ca8a4e5ee0a61f5404acb4eb46f74bf3700"
+      "sha256": "4e6ddfe4867f250ffe3919a48603df21161ea9f87d2270d8414c60512e3afacf"
     },
     {
       "mode": "100644",
@@ -7171,7 +7226,7 @@
     {
       "mode": "100644",
       "path": "Tools/convert/skybake.py",
-      "sha256": "def766448169d73a02e5c001506122916bd63d0aada211a69e6bcea220f13b6d"
+      "sha256": "617ef1d8e4fa151ca620d1d5e7d910bd370000d1ec1e5bcf204f6e68ea1cf44e"
     },
     {
       "mode": "100644",
@@ -7286,7 +7341,7 @@
     {
       "mode": "100755",
       "path": "Tools/dist/bootstrap.py",
-      "sha256": "0a8bf44efa991491194b03f17717a7ba0a5a13125456ad4596e9a7db0b6e3d32"
+      "sha256": "3fcd19fde3af21e3c8a73f92cdf711fd6bb86f9202f49554e7230c1d365f667e"
     },
     {
       "mode": "100644",
@@ -7296,12 +7351,17 @@
     {
       "mode": "100644",
       "path": "Tools/dist/build_stripped_pak.py",
-      "sha256": "a3c6aec89fb371451768995387c4a8a1207fb7e67935b0f261dbe4d8e765e2e8"
+      "sha256": "7059b423ce6ac19541bfc695af10abb8df5d7d987daf7621c55cec94baf635da"
     },
     {
       "mode": "100644",
       "path": "Tools/dist/cache-v3-importer-outputs-v1.json",
       "sha256": "63a333a7d7cffe985958e5790272ebfe0c844fe64c6920361a79c883817e8044"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/dist/cache_content_label.py",
+      "sha256": "7634d17d4738d8eeb806e36d3bdaa1f77cf02f5e8b408bd0ae4802fd53ac4d1d"
     },
     {
       "mode": "100644",
@@ -7312,6 +7372,16 @@
       "mode": "100644",
       "path": "Tools/dist/cache_contract_v3.schema.json",
       "sha256": "c18bebb05646cd696972cd39a3dac6653db3db8e98e0ba20793840ea52d3c23b"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/dist/cache_decode_gate.py",
+      "sha256": "f7f2cf93371762f8504ecbb636cd46fdfd19f974fb67dfcf0d0d4aed09753be9"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/dist/cache_lineage.py",
+      "sha256": "2f7530efe1c1201c96689fb5989025d69b03e7c07d4782280aa2ea31449098fc"
     },
     {
       "mode": "100644",
@@ -7896,7 +7966,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/frozen_importer_oracle.py",
-      "sha256": "a3b6b10059da4bd3ff9c578fd78f41cb55e3e5aa584f3032dc7b91348a36443b"
+      "sha256": "f570b64cb957fc5e7015d5abcc03f534677aa7a1be8f9d27142834b877062291"
     },
     {
       "mode": "100644",
@@ -7921,7 +7991,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/generate_frontend_entry_descriptor.py",
-      "sha256": "aa46a21a887b52ea6bc1f638720ab417b8b559c2c30619b4f3c2f7101e091b21"
+      "sha256": "60b0d22a13055d146b54bb041e05446c065d00da59de8452afd6629112cc3e46"
     },
     {
       "mode": "100644",
@@ -7976,7 +8046,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/publish_release.py",
-      "sha256": "ce51bb37764ff391dec967abe79363cf9ac4989dca8f6acd4d2e1ce6e96de946"
+      "sha256": "ecf7b44b0e4b0d319c8443ba8fcfae288d6017d9c5b05f5062b92a57efbd09ea"
     },
     {
       "mode": "100644",
@@ -7986,17 +8056,17 @@
     {
       "mode": "100644",
       "path": "Tools/dist/release_crypto.py",
-      "sha256": "a7d8a6f9dd8751ef9f97175537bc08e1df219f1b8d7f311b7bf9ec2dfc05426e"
+      "sha256": "f78075db75b06cd9c52e95a31e015af8aeff3733c21f9f31aaea5e05e434eb58"
     },
     {
       "mode": "100644",
       "path": "Tools/dist/release_formats.py",
-      "sha256": "f35cf68e1485629b553dbac1205c58e114e1fe3dd0fe4ce7022c813ec6c56910"
+      "sha256": "23826c370dadaae7acce142ca307bb729373c856426af42805b429e49b25750f"
     },
     {
       "mode": "100644",
       "path": "Tools/dist/release_test_fixtures.py",
-      "sha256": "3e52712f9f19e6af2cfe60d59feb73593238c5e2619cfc7eb3116f691da79213"
+      "sha256": "1c15ea49dc4ef078487691f6d9dd1337831526f7074f944ff0024162129b4df4"
     },
     {
       "mode": "100644",
@@ -8041,7 +8111,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/sign_release.py",
-      "sha256": "8df7d88b7a621b456ebaec3256e409f2a81d9a2c464a5d05be76030fc0ee98a4"
+      "sha256": "18672d690668ab2fc4631e8984f6ea828412536d6ba83acb4ed0a34ab70985f1"
     },
     {
       "mode": "100644",
@@ -8051,7 +8121,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/smoke_shipping_release.py",
-      "sha256": "d9202e5af04bc902f504af1ac0f8bacc329dd63a09200092d8c8dea3a0d99584"
+      "sha256": "0cf7d62e37638274cf7b8f47ac6cabab90df90b4d9548f97c223661895e8bd1e"
     },
     {
       "mode": "100644",
@@ -8085,13 +8155,28 @@
     },
     {
       "mode": "100644",
+      "path": "Tools/dist/test_cache_content_label.py",
+      "sha256": "12f6dd59bf2ae46aa296f4c69cf61032044457ffa60245b4a9f87eba6bc0ed23"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/dist/test_cache_contract_v3.py",
       "sha256": "7c6383de563e9ee494bbfecc0aadc0d6b7f91aed05da305722fb9e5f5a51bb37"
     },
     {
       "mode": "100644",
+      "path": "Tools/dist/test_cache_decode_gate.py",
+      "sha256": "1bec91267119529d1c6ca56965bce87fa109d92214754221ece6131cadbca11f"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/dist/test_cache_lineage.py",
+      "sha256": "1e95d57f6d61d1f55e75ccbb541e14b9f314107a52f1c95da253580153f412ac"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/dist/test_cache_v3_production_closure.py",
-      "sha256": "8681cd4f05d8d8a29807d46e4cb8d16bef36fe7ee7db75c8164d168db6d78332"
+      "sha256": "50b189391012e15b55949894ba37019eaecf9dce7190d5fa28c43ebba625605d"
     },
     {
       "mode": "100644",
@@ -8166,7 +8251,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_publish_release.py",
-      "sha256": "2e19989a9ea45f1faceb44ff68fc8b83f557dfb43acd834bf5eb7ddb56944efa"
+      "sha256": "11f55f0d55b8ff2586f12d66dbf919025931592d6eef0c924b64e2934b78181e"
     },
     {
       "mode": "100644",
@@ -8181,7 +8266,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_release_formats.py",
-      "sha256": "a17a2a461823577d54b3e652c4e4fa5304c85174fa472d823654ff588e8af641"
+      "sha256": "c8eaf64d4f4d5055a4549415951e208279dbb414f247ba5327faaf65a4aad5e0"
     },
     {
       "mode": "100644",
@@ -8191,7 +8276,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_run_first_run_funnel.py",
-      "sha256": "bd07e7d3bc40d350511dbe50e1bdae1d3f7b1799ed9a320e2aaf7f192f128689"
+      "sha256": "2b2c1c8b74916ea760aa841798dd17f8e166145746131c3fbac53e145f4a8bdd"
     },
     {
       "mode": "100644",
@@ -8206,7 +8291,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_sign_release.py",
-      "sha256": "932756c3a2812270f9ae8b89010359352d590eb0740fc278ca3de64a914ff71e"
+      "sha256": "c15bf64b984453795e746e0840cbfca7fa7132fd4ded258a2191d2628428ee8f"
     },
     {
       "mode": "100644",
@@ -8216,7 +8301,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_smoke_shipping_release.py",
-      "sha256": "d037893e4501fc15333dd3874a6a6d07ab3909fbbf68ca208ae34718e6c22841"
+      "sha256": "47a817a2108070c276ac081b7529da43f00b4fb2de91d9f577b05e974ab03795"
     },
     {
       "mode": "100644",
@@ -8236,12 +8321,12 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_verify_release.py",
-      "sha256": "80230e1f09a08f0dfed45bd9895459e0502aa92974c94cef1586dce7287677f8"
+      "sha256": "ead20580a893a56b24396add19880a43d4dbc18f188ba02cf2471033e5a9acd8"
     },
     {
       "mode": "100644",
       "path": "Tools/dist/test_windows_launcher.py",
-      "sha256": "419489edd02a8638095fd86313e60dc3060fcd87a6672d3489c498dd2232a62c"
+      "sha256": "647bee0cc942bd6606f2038e66f3e26aa36c05fc68ff3c629f85ded14575ec90"
     },
     {
       "mode": "100644",
@@ -8261,7 +8346,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/verify_release.py",
-      "sha256": "98e0870a85fab9030a59d31d2f8d4be1698e711c3d959cca55f20b9036d79a9f"
+      "sha256": "888fae987bdafa1a9aec47e5b18f9d87db6f3674ce919455e064503829d65709"
     },
     {
       "mode": "100644",
@@ -8311,7 +8396,7 @@
     {
       "mode": "100644",
       "path": "Tools/import/dynamic_light_material.py",
-      "sha256": "7b762212760d35194b50089b493a157342a0c9ae6c6bb775a15ef33f0d5ceb4a"
+      "sha256": "196f465de22ab43261c76ddabe57aab40c622c9b9f9bcd9b7e0b5da76cc30622"
     },
     {
       "mode": "100644",
@@ -8341,7 +8426,7 @@
     {
       "mode": "100755",
       "path": "Tools/import/import_all.py",
-      "sha256": "2cddceac8f55fd0c595f2118d77224e2bfe41462d66dcf1497eb12d3b484bc3e"
+      "sha256": "a39f7b33a4435ff93e64196a16f1f68950263f3cdf06e863c1fcd19dd9aa96b8"
     },
     {
       "mode": "100644",
@@ -8366,12 +8451,12 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_breakable_decorations.py",
-      "sha256": "19d2a51ee23a6fc190de14cad8ad6b41b0a7a2b302a3d50c181eb27eee03fba0"
+      "sha256": "8b78c0c093056a308ff6635d9c15ffe3913a2a9dd57d66e3c9ea94fc38157682"
     },
     {
       "mode": "100644",
       "path": "Tools/import/import_exploding_walls.py",
-      "sha256": "6932a511cef43ab29a26f806a9c5bf0f17f1ae276a4b564d93be1caecdc41787"
+      "sha256": "201d49c41a8434f752f111fead328c6a9651d407c9a1b11c75eadc33cdf75600"
     },
     {
       "mode": "100644",
@@ -8381,12 +8466,12 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_flame_fx.py",
-      "sha256": "7d4776bf56087d8e5153159fe07a3f48c8fc65d0f72c01e483c14184bf97fcb1"
+      "sha256": "9fa16127ce5e279a5ab66cdd1f99c36783865f0b6db667ea4f656dc7146eb208"
     },
     {
       "mode": "100644",
       "path": "Tools/import/import_flipbooks.py",
-      "sha256": "275808edc260c50dfadab40074dafe50205c5826c73501146824d312ae5bacbc"
+      "sha256": "09db5548c6413eca13632cc1bccce6d98bc6802ec4d163f99d26bf729ad0ccfb"
     },
     {
       "mode": "100644",
@@ -8401,7 +8486,7 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_gore_fx.py",
-      "sha256": "d2e26ae55d262c744ede39fabca8835e58a4e95672914189b0444a674bf54e2b"
+      "sha256": "687716001032fed8b8ccbed530948069aa09848d7bb2dbf2ce09b2b851294bd6"
     },
     {
       "mode": "100644",
@@ -8421,12 +8506,12 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_map.py",
-      "sha256": "792512e54eac342cb94b3314d80d0b4bef3cfc3374e760210c78e1fd925a68af"
+      "sha256": "ab6155dc6f99af827da6987dafad8f47d9432587ef5ffc593379c6e150c3a796"
     },
     {
       "mode": "100644",
       "path": "Tools/import/import_mashadar_guides.py",
-      "sha256": "41c507d8b78a2a8e659da2dc23f0647e9e818ef81a3b6d192a5fc43ed87b2d4f"
+      "sha256": "dddbef6c1d584a1b5b32007c7e15d3948dce81989c54ce8e79b64b835d6a4972"
     },
     {
       "mode": "100644",
@@ -8456,7 +8541,7 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_pickups.py",
-      "sha256": "8b0fba53014d20ec4cd0c1e0c4d4eed98167e271716def1cad3230bbe3ddaaa6"
+      "sha256": "4eea753c064c89db2cba131af473ab707b84892b8e9e22429f9cd6bb4efa9ccb"
     },
     {
       "mode": "100644",
@@ -8506,7 +8591,7 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_water_zones.py",
-      "sha256": "69b7f437d7cb46b2e146891ca2bc94793d194e00c0c719b727744a2b93d8966b"
+      "sha256": "93c97edee2a305b8f4315f0f7eab62db40cbcce4aefa86bbd88c86be0cd437da"
     },
     {
       "mode": "100644",
@@ -8721,7 +8806,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/binary-allowlist.sha256",
-      "sha256": "da08c7f4d8e4a14cdc33a5ebe903a153360488781c313912ceb1509ff76e22d3"
+      "sha256": "8589e1eea4380b623c0b300cf12b12bacbef97b4343ef04b56bc3e3d8d7fa515"
     },
     {
       "mode": "100644",
@@ -8746,7 +8831,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/public-files.txt",
-      "sha256": "dbd0d9bfdd4c330146c63fa8d6fb724a5dd3987430e79b2a86a8bfebca8def26"
+      "sha256": "d7252bcb1169b89451149bf149846267a7044469ed3954ab2f832d500b9b78f5"
     },
     {
       "mode": "100644",
@@ -8762,6 +8847,11 @@
       "mode": "100644",
       "path": "Tools/public/test_leak_guard.py",
       "sha256": "4e44cc9ffda9b4609d6d8492f13f3c9ab5b839ddce064a4b67b73235651d0ef5"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/public/test_port_notes_references.py",
+      "sha256": "c6358a0037eef37c1798ecd32b29dc806e15813a46a4aa42c37383b15b7fa3d6"
     },
     {
       "mode": "100644",
@@ -8786,7 +8876,7 @@
     {
       "mode": "100644",
       "path": "Tools/reference/drift_correct.py",
-      "sha256": "c85c0ec0dce923b249fcd6ca8746e1ec76e2dc2400f760fd9d21c07e7e676af9"
+      "sha256": "e89dd08ca194a1ebf2ead6369e351a83d3c50dcd1dca3f813a336cf394c8dc80"
     },
     {
       "mode": "100644",
@@ -8801,7 +8891,7 @@
     {
       "mode": "100644",
       "path": "Tools/reference/findspot_adjust.py",
-      "sha256": "e1d566e4f81e202ef0657ad1fa0054fe844af786a68ccf2f2241e3ea2a7a9b43"
+      "sha256": "d8ee92b836fc8c6bda5517d9827db788d7e22cae385429941c7cf4425529d1b1"
     },
     {
       "mode": "100644",
@@ -8836,7 +8926,7 @@
     {
       "mode": "100644",
       "path": "Tools/test/angreal/angreal_expectations.json",
-      "sha256": "0442aec3c309c1e9b54817d1fb513c90bdf3ce49cab5752ab969ecf1a08b1290"
+      "sha256": "f398a6dda44ad633c4f99cbda8bcd7bb5dad17b53c3ae349376fe6de037fe020"
     },
     {
       "mode": "100644",
@@ -9071,7 +9161,7 @@
     {
       "mode": "100644",
       "path": "Tools/test/gamma/corona_gate_sweep.py",
-      "sha256": "49fa385efc4b095073ddcd1bea5e873b05ba404d6ca2a11107503b46b0bd3642"
+      "sha256": "7a8137e97c7994896d36528da34fe6626fa17c7e0bb39570c7482d747268cf0f"
     },
     {
       "mode": "100644",
@@ -9166,17 +9256,17 @@
     {
       "mode": "100644",
       "path": "Tools/test/probe_mover_encroachingon.py",
-      "sha256": "dfae230fcbc1dd7a38023dfd4e03c3787c7a1c6a8c541b3e573fc6914a6e6b50"
+      "sha256": "c6ea41a727b48663cd6dbb0e445afc587baac87c529a4a3563f71b1062a3fc83"
     },
     {
       "mode": "100644",
       "path": "Tools/test/probe_pawn_takedamage_momentum.py",
-      "sha256": "fed46dfa74397c3bfb9577879c5c943583984bec356219b032c83d360c940629"
+      "sha256": "66fc33c2b0d7d72cf5b5b7de9357e2281a6654591007c391de76dfc824803c62"
     },
     {
       "mode": "100644",
       "path": "Tools/test/probe_respawntime.py",
-      "sha256": "23c462e346d175896cc08381193c08c3bb0f9106a97accacbac95b32efe725c2"
+      "sha256": "db9a9887c3ab4d7cada8fa1252bcc538933ba3b0b609ee9f0f8970dc2d42f126"
     },
     {
       "mode": "100644",

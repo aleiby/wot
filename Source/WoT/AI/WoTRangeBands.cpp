@@ -101,7 +101,7 @@ FWoTRangeBandSet FWoTRangeBandSet::CasterDefault(float HoldRange)
 	// Reached / Reachable / Visible → HOLD at the weave range and cast. A caster
 	// never closes to melee; the moment it can engage (reachable straight-line or
 	// simply visible) it stops at HoldRange and drives the weave — the fix for
-	// the point-blank fizzle (PORT_NOTES slice 3a). AcquiredVisible casts via the
+	// the point-blank fizzle (PORT_NOTES "Range-band handling"). AcquiredVisible casts via the
 	// offensive notifier (AngrealUser PerformUse, AngrealUser.uc:396).
 	FWoTRangeBand HoldCast;
 	HoldCast.bActive = true;

@@ -57,6 +57,15 @@ TEST_TWIN_FORMAT = "wot-guarded-test-twin-v1"
 RELEASE_IDENTITY_FORMAT = "wot-release-identity-v1"
 RELEASE_IDENTITY_VERSION = 1
 RELEASE_IDENTITY_MAX_BYTES = 4 * 1024
+# The signed per-platform record of the cache a release builds (CacheLineageV1):
+# which content revision and label it stamps, and the manifest it produces from
+# the pinned installer and contract. The next release's cache gate compares its
+# own Shipping cache against it.
+CACHE_LINEAGE_FORMAT = "wot-cache-lineage-v1"
+CACHE_LINEAGE_FIELDS = (
+    "contract_sha256", "format", "installer_sha256", "label", "manifest_sha256",
+    "platform", "release_sequence", "revision",
+)
 
 # Guarded build configurations (WoT.Target.cs:15-60). Test compiles the
 # WOT_BOOTSTRAP_TEST_IDENTITIES/ENDPOINTS seams the first-run funnel drives;
@@ -100,6 +109,10 @@ INT32_MAX = 2 ** 31 - 1
 # BootstrapTrust.generated.h:82-97 (generated from bootstrap-trust-v1.json).
 KEY_RING_ASSET = "WoT-root-key-ring-v1.json"
 RELEASE_NOTES_ASSET = "WoT-release-notes-v1.json"
+PLAYER_DOWNLOAD_ASSETS = {
+    "Win64": "WoT-Reborn-Windows.zip",
+    "Mac": "WoT-Reborn-Mac.dmg",
+}
 RELEASE_NOTES_FORMAT = "wot-release-notes-v1"
 RELEASE_NOTES_MAX_BYTES = 256 * 1024
 RELEASE_NOTES_MAX_ENTRY_BYTES = 16 * 1024
@@ -208,6 +221,10 @@ def manifest_asset(platform: str) -> str:
     return f"WoT-{platform}-release-manifest-v2.json"
 
 
+def cache_lineage_asset(platform: str) -> str:
+    return f"WoT-{platform}-cache-lineage-v1.json"
+
+
 def update_archive_asset(platform: str, sequence: int, commit: str) -> str:
     return f"WoT-{platform}-update-r{sequence}-{commit}.zip"
 
@@ -236,6 +253,24 @@ def guarded_install_dmg_asset(commit: str, configuration: str) -> str:
         raise FormatError(f"unknown guarded configuration {configuration!r}")
     flavor = "guarded-shipping" if configuration == SHIPPING_CONFIGURATION else "guarded"
     return f"WoT-Mac-{flavor}-{commit}.dmg"
+
+
+def player_download_asset_sources(verified_or_platforms) -> Dict[str, str]:
+    """Map fixed player downloads to their commit-named Shipping sources."""
+    platforms = getattr(verified_or_platforms, "platforms", verified_or_platforms)
+    if not platforms or any(
+            result.configuration != SHIPPING_CONFIGURATION
+            for result in platforms.values()):
+        return {}
+    sources = {}
+    for platform, fixed_name in PLAYER_DOWNLOAD_ASSETS.items():
+        result = platforms.get(platform)
+        if result is None:
+            continue
+        source_name = result.install_zip if platform == "Win64" else result.dmg
+        if source_name is not None:
+            sources[fixed_name] = source_name
+    return sources
 
 
 def main_executable_matches_configuration(relative: str, platform: str,
@@ -631,6 +666,63 @@ def sha256_file(path: Path) -> Tuple[str, int]:
             digest.update(chunk)
             size += len(chunk)
     return digest.hexdigest(), size
+
+
+# ---------------------------------------------------------------------------
+# Cache lineage (signed by the release key under CacheLineageV1)
+# ---------------------------------------------------------------------------
+
+def _check_cache_lineage(document, platform: str, what: str) -> dict:
+    if platform not in PLATFORMS:
+        raise FormatError(f"{what}: unknown platform {platform!r}")
+    require_exact_members(document, CACHE_LINEAGE_FIELDS, what)
+    if read_string(document, "format", what) != CACHE_LINEAGE_FORMAT:
+        raise FormatError(f"{what}.format is not {CACHE_LINEAGE_FORMAT}")
+    if read_string(document, "platform", what) != platform:
+        raise FormatError(f"{what}.platform is not {platform}")
+    if read_unsigned(document, "release_sequence", what) > INT64_MAX:
+        raise FormatError(f"{what}.release_sequence exceeds int64")
+    revision = read_unsigned(document, "revision", what)
+    if revision < 1:
+        raise FormatError(f"{what}.revision must be at least 1")
+    for key in ("label", "installer_sha256", "contract_sha256", "manifest_sha256"):
+        parse_lower_hex(document.get(key), 32, f"{what}.{key}")
+    content_label = _dist_module("cache_content_label")
+    try:
+        expected = content_label.label(revision)
+    except ValueError as exc:
+        raise FormatError(f"{what}.revision: {exc}") from exc
+    if document["label"] != expected:
+        raise FormatError(
+            f"{what}.label is not the content label of revision {revision}")
+    return document
+
+
+def build_cache_lineage(*, platform: str, release_sequence: int, revision: int,
+                        label: str, installer_sha256: str, contract_sha256: str,
+                        manifest_sha256: str) -> dict:
+    """The closed lineage record; refuses any value parse_cache_lineage would."""
+    document = {
+        "contract_sha256": contract_sha256,
+        "format": CACHE_LINEAGE_FORMAT,
+        "installer_sha256": installer_sha256,
+        "label": label,
+        "manifest_sha256": manifest_sha256,
+        "platform": platform,
+        "release_sequence": release_sequence,
+        "revision": revision,
+    }
+    what = f"{platform} cache lineage"
+    _check_cache_lineage(document, platform, what)
+    canonical_bytes(document, what)
+    return document
+
+
+def parse_cache_lineage(raw: bytes, platform: str) -> dict:
+    """Read one platform's lineage asset: canonical bytes and the closed schema."""
+    what = (cache_lineage_asset(platform) if platform in PLATFORMS
+            else "cache lineage")
+    return _check_cache_lineage(parse_canonical(raw, what), platform, what)
 
 
 # ---------------------------------------------------------------------------

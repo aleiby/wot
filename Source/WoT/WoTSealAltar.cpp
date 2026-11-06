@@ -255,8 +255,8 @@ float AWoTSealAltar::BankedSealOffset(int32 Rank, int32 Count) const
 	// (i*2 - (SealGoal-1)) along the altar's yaw: 34 uu apart, a 102 uu row for
 	// the default 4-seal goal, filled from one end, so a partly filled altar
 	// looks lopsided and on a default 48 uu altar (Battle2_02's 96 uu pedestal)
-	// slot 0's centre sits past the edge. Divergences (PORT_NOTES "Banked seals
-	// fit the altar", "Banked seals sit centred on the altar"): centre the seals
+	// slot 0's centre sits past the edge. Divergence
+	// (PORT_NOTES "Banked seals fit and center on the altar"): centre the seals
 	// actually banked, and keep retail spacing while that row fits inside the
 	// altar's collision radius, else compress it until each seal's mesh (about
 	// half its collision radius wide) stays on the altar. Presentation only:

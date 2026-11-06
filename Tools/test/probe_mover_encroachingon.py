@@ -18,7 +18,7 @@ PlayTakeHitSound + KilledBy all called in the later revision's order — shipped
 333B matches its EncroachingOn structure 1:1.  Companion one-off probes of
 Mover.MakeGroupReturn ('Open'/'Close' + follower recursion), MakeGroupStop
 (state-freeze + follower chain), and PostBeginPlay also matched.  See
-PORT_NOTES "G26+G27" entry.
+PORT_NOTES "Mover group commands in custom movers".
 
 Run from repo root:  python3 Tools/test/probe_mover_encroachingon.py
 """

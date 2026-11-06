@@ -45,7 +45,7 @@ AWoTExpWardProjectile::AWoTExpWardProjectile()
 	ActivationTime = 1.0f;
 	InitialLifeSpan = 60.0f;          // MP auto-detonate; standalone -> permanent
 
-	// N2 divergence from the raw bNetTemporary default (PORT_NOTES §8): a stationary,
+	// Divergence from the raw bNetTemporary default (PORT_NOTES "Explosive Ward uses a persistent channel"): a stationary,
 	// long-lived, ≤16-on-the-field ward rides a PERSISTENT channel so a server-only
 	// early detonation (proximity/shot/Trigger before its 60s) propagates its Destroy
 	// to clients instead of leaving a ≤60s lingering ghost. It then inherits the base

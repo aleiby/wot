@@ -353,7 +353,7 @@ void AWoTSpear::EnterReseting()
 	// (Spear.uc:210-223) is retail-dead in MP: it reads the MANAGER's Touching[], but EndEditingResource's
 	// SetCollision(false,false,false) (uc:100) removed the manager from the UE1 collision hash
 	// in the original engine, so victims only ever touch the BLOCKERS — intentionally not ported
-	// (PORT_NOTES "P27+G30"); the trigger re-arms in Waiting.
+	// (PORT_NOTES); the trigger re-arms in Waiting.
 	Phase = EWoTSpearPhase::Reseting;
 	ApplyPhasePresentation();
 	SetBlockers(false, false, false, TriggerRadius, TriggerRadius);

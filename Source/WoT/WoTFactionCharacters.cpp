@@ -1,7 +1,7 @@
 #include "WoTFactionCharacters.h"
 
 // Values from each faction's shipped defaultproperties (exports/script/WoTPawns/<Class>.uc).
-// Mesh paths follow the deterministic import layout (PORT_NOTES "Mesh binding pass").
+// Mesh paths follow the deterministic import layout.
 
 AWoTAesSedai::AWoTAesSedai()
 {

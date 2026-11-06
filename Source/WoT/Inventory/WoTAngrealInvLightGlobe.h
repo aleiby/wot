@@ -15,7 +15,7 @@ class AWoTWeaveSpriteEffect;
 // owner is dead), drops/empties tear it down, and GiveTo folds the owner's
 // color through the WoTPlayerColorFX seam (retail's WOTPlayer.PlayerColor +
 // mesh-name faction map). A visible pickup shows the LightGlobeStar glow
-// sprite at the rotated GlowOffset. Riders (PORT_NOTES "P04"): the WaysZone
+// sprite at the rotated GlowOffset. Riders (PORT_NOTES "Light Sphere pixies"): the WaysZone
 // AI legs are SP-scope (WaysZone is authored only by the Mission_08 maps and
 // no NPC MP loadout carries this artifact), so GetPriority is the retail
 // every-other-case -MaxInt; the SP tutorial's Trigger->Tag turn-off author is

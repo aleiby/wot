@@ -19,7 +19,7 @@ whose test contains a (0,0,0) vector constant BEFORE the AddVelocity call;
 the later HitLocation == vect(0,0,0) compare is AFTER AddVelocity either way,
 so ordering is decisive.
 
-Result (2026-07-17): see PORT_NOTES "Damage-dispatch wave" entry.
+Result: the retail build includes the zero-momentum guard.
 
 Run from repo root:  python3 Tools/test/probe_pawn_takedamage_momentum.py
 """

@@ -9,7 +9,7 @@ water-zone actor's authored EntrySound/ExitSound (Engine.ZoneInfo defaults both
 None; WOT.WaterZone authors none either — its sound imports are commented out,
 WaterZone.uc:9-12 — so only ~16 zones across 8 MP maps sound at all). The
 shipped EntryActor/ExitActor visual chain (WaterImpact -> WaterRing) is
-MESH-LESS in retail 333B and is not ported (PORT_NOTES "Water-splash slice").
+MESH-LESS in retail 333B and is not ported.
 
 Idempotent: stamps overwrite, including clearing to None where unauthored.
 The stdlib section imports without `unreal` for dry-runs:

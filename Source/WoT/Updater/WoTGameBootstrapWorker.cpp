@@ -37,6 +37,7 @@
 #include "WoTCacheBootstrapOperation.h"
 #include "WoTGameUpdateTransports.h"
 #include "WoTInstallerLocations.h"
+#include "WoTRememberedInstaller.h"
 #include "WoTUpdateTransports/WoTPlatformHttpHop.h"
 
 #include <cstdlib>
@@ -884,6 +885,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			EWoTOriginalGameNeededReason::Missing;
 		FString Detail;
 		EWoTInstallerSource FoundSource = EWoTInstallerSource::Adjacent;
+		/** The held installer's canonical path when Verified is set. */
+		FString FoundCanonicalPath;
 		bool bNeedsStabilityPass = false;
 	};
 
@@ -1449,6 +1452,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			return TEXT("downloads");
 		case EWoTInstallerSource::Picked:
 			return TEXT("picked");
+		case EWoTInstallerSource::Remembered:
+			return TEXT("remembered");
 		case EWoTInstallerSource::Adjacent:
 		default:
 			return TEXT("adjacent");
@@ -1539,11 +1544,125 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				InstallerSourceName(Source), *Leaf, LexToString(Error.Code)));
 	}
 
+	/** Reads the remembered Browse pick once per content flow. The record is
+	 * untrusted: anything but a well-formed v1 record is ignored, and a stale
+	 * one is kept on disk (see TrackRememberedInstaller). */
+	void LoadRememberedInstallerRecord(const FWork& Work)
+	{
+		RememberedInstaller.Reset();
+		RememberedInstallerRecordPath.Reset();
+		bRememberedInstallerRejected = false;
+		FWoTRememberedInstallerRead Read = WoTReadRememberedInstaller(
+			Deps.UserStateRoot,
+			Deps.bHasUserStateRootIdentity ? &Deps.UserStateRootIdentity
+				: nullptr);
+		if (!Read.IgnoredReason.IsEmpty())
+		{
+			WoTRecordBootstrapHeartbeat(TEXT("remembered-installer-ignored"),
+				Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+				TEXT("reason=") + Read.IgnoredReason);
+		}
+		if (Read.CanonicalInstallerPath.IsSet())
+		{
+			RememberedInstallerRecordPath =
+				MoveTemp(Read.CanonicalInstallerPath.GetValue());
+		}
+	}
+
+	/**
+	 * Admits the remembered path to this sweep after exactly the
+	 * canonicalization a Browse pick gets. A record whose path no longer
+	 * canonicalizes to itself (a link or rename above the installer since it
+	 * was recorded) is skipped for the rest of the flow; an unreachable parent
+	 * (an unplugged drive, an offline share) is retried on the next sweep.
+	 *
+	 * Nothing here deletes the record. A missing or unreachable installer is
+	 * most often a drive that is temporarily away, and deleting would make the
+	 * player browse again once it is back. A wrong or changed file is never
+	 * used, and the record is replaced the next time a Browse pick builds the
+	 * cache, which the player must do anyway in that case. Reads stay
+	 * side-effect free.
+	 */
+	void TrackRememberedInstaller(const FWork& Work,
+		TSet<FString>& UnavailableThisSweep,
+		TSet<FString>& ProbedUnavailableSlots)
+	{
+		if (RememberedInstaller.IsSet() || bRememberedInstallerRejected
+			|| RememberedInstallerRecordPath.IsEmpty())
+		{
+			return;
+		}
+		ProbedUnavailableSlots.Add(InstallerUnavailableSlotKey(
+			EWoTInstallerSource::Remembered, RememberedInstallerRecordPath));
+		TWoTBootstrapResult<FString> Canonical =
+			WoTCanonicalizeInstallerPickPath(RememberedInstallerRecordPath);
+		if (Canonical.IsError())
+		{
+			RecordInstallerLocationUnavailable(Work,
+				EWoTInstallerSource::Remembered, RememberedInstallerRecordPath,
+				Canonical.GetError(), UnavailableThisSweep);
+			return;
+		}
+		if (!Canonical.GetValue().Equals(
+				RememberedInstallerRecordPath, ESearchCase::CaseSensitive))
+		{
+			bRememberedInstallerRejected = true;
+			WoTRecordBootstrapHeartbeat(TEXT("remembered-installer-ignored"),
+				Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+				TEXT("reason=not-canonical"));
+			return;
+		}
+		FTrackedInstallerLocation Tracked;
+		Tracked.Location.Source = EWoTInstallerSource::Remembered;
+		Tracked.Location.CanonicalPath = MoveTemp(Canonical).GetValue();
+		Tracked.Location.bRequirePinnedName = false;
+		RememberedInstaller = MoveTemp(Tracked);
+	}
+
+	/** A remembered location whose parent changed identity mid-flow is
+	 * dropped silently instead of failing the bootstrap like a pick: the
+	 * player never chose it in this session, so the normal search continues. */
+	void RejectRememberedInstaller(const FWork& Work,
+		const FWoTBootstrapError& Error, TSet<FString>& UnavailableThisSweep)
+	{
+		bRememberedInstallerRejected = true;
+		if (RememberedInstaller.IsSet())
+		{
+			RecordInstallerLocationUnavailable(Work,
+				EWoTInstallerSource::Remembered,
+				RememberedInstaller->Location.CanonicalPath, Error,
+				UnavailableThisSweep);
+		}
+	}
+
+	/** Records the Browse pick that just built the cache. Best effort: a
+	 * failure is a heartbeat, never a failed build. */
+	void RememberPickedInstaller(const FWork& Work,
+		const FString& CanonicalPath)
+	{
+		FWoTBootstrapStatus Saved = WoTWriteRememberedInstaller(
+			Deps.UserStateRoot,
+			Deps.bHasUserStateRootIdentity ? &Deps.UserStateRootIdentity
+				: nullptr,
+			CanonicalPath);
+		WoTRecordBootstrapHeartbeat(TEXT("installer-remembered"),
+			Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+			Saved.IsError()
+				? FString::Printf(TEXT("result=failed detail=%s"),
+					LexToString(Saved.GetError().Code))
+				: FString(TEXT("result=saved")));
+	}
+
 	TWoTBootstrapResult<FWoTInstallerSweep> SweepInstallerLocations(
 		FWork& Work)
 	{
 		using FResult = TWoTBootstrapResult<FWoTInstallerSweep>;
 		AdoptLatestPickedInstallerRequest();
+		FWoTInstallerSweep Sweep;
+		TSet<FString> UnavailableThisSweep;
+		TSet<FString> ProbedUnavailableSlots;
+		TrackRememberedInstaller(Work, UnavailableThisSweep,
+			ProbedUnavailableSlots);
 		TArray<FTrackedInstallerLocation*> Locations;
 		if (PickedInstaller.IsSet())
 		{
@@ -1553,14 +1672,23 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		{
 			Locations.Add(&AdjacentInstaller);
 		}
+		// The remembered Browse pick goes right after the installer beside the
+		// game and before Downloads, unless an earlier location is that file.
+		if (RememberedInstaller.IsSet() && !bRememberedInstallerRejected
+			&& !Locations.ContainsByPredicate(
+				[this](const FTrackedInstallerLocation* Earlier)
+				{
+					return FPaths::IsSamePath(Earlier->Location.CanonicalPath,
+						RememberedInstaller->Location.CanonicalPath);
+				}))
+		{
+			Locations.Add(&RememberedInstaller.GetValue());
+		}
 		for (FTrackedInstallerLocation& Downloads : DownloadsInstallers)
 		{
 			Locations.Add(&Downloads);
 		}
 
-		FWoTInstallerSweep Sweep;
-		TSet<FString> UnavailableThisSweep;
-		TSet<FString> ProbedUnavailableSlots;
 		TUniquePtr<FWoTHeldInstallerParent> DownloadsParent;
 		bool bDownloadsUnavailable = false;
 		for (FTrackedInstallerLocation* Tracked : Locations)
@@ -1624,6 +1752,18 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			}
 			ProbedUnavailableSlots.Add(InstallerUnavailableSlotKey(
 				Tracked->Location.Source, Tracked->Location.CanonicalPath));
+			const bool bRemembered =
+				Tracked->Location.Source == EWoTInstallerSource::Remembered;
+			// The remembered location is a silent shortcut: whatever it finds,
+			// the reason shown to the player comes only from the normal search.
+			auto MergeReason = [&Sweep, bRemembered](
+				EWoTOriginalGameNeededReason Reason, FString Detail = FString())
+			{
+				if (!bRemembered)
+				{
+					MergeInstallerReason(Sweep, Reason, MoveTemp(Detail));
+				}
+			};
 			TWoTBootstrapResult<FWoTAdjacentInstallerInspection> Inspected =
 				InspectInstallerLocation(Tracked->Location, Parent);
 			if (Inspected.IsError())
@@ -1631,6 +1771,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				FWoTBootstrapError Error = MoveTemp(Inspected).GetError();
 				if (WoTInstallerAcquisitionIsParentIdentityMismatch(Error))
 				{
+					if (bRemembered)
+					{
+						RejectRememberedInstaller(
+							Work, Error, UnavailableThisSweep);
+						continue;
+					}
 					RecordedInstallerUnavailable.Reset();
 					return FResult::Error(MoveTemp(Error));
 				}
@@ -1650,7 +1796,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Tracked->PreviousCandidateIdentity.Reset();
 				if (Tracked->Location.Source == EWoTInstallerSource::Picked)
 				{
-					MergeInstallerReason(Sweep, WrongReason);
+					MergeReason(WrongReason);
 				}
 				continue;
 			}
@@ -1658,7 +1804,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::Downloading)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
-				MergeInstallerReason(Sweep,
+				MergeReason(
 					Tracked->Location.Source == EWoTInstallerSource::Picked
 						? WrongReason
 						: EWoTOriginalGameNeededReason::Downloading);
@@ -1668,8 +1814,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::OnlineOnly)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
-				MergeInstallerReason(Sweep,
-					EWoTOriginalGameNeededReason::OnlineOnly,
+				MergeReason(EWoTOriginalGameNeededReason::OnlineOnly,
 					Observation.Message);
 				continue;
 			}
@@ -1677,7 +1822,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::UnsupportedReparsePoint)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
-				MergeInstallerReason(Sweep,
+				MergeReason(
 					EWoTOriginalGameNeededReason::UnsupportedReparsePoint);
 				continue;
 			}
@@ -1685,7 +1830,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
-				MergeInstallerReason(Sweep, WrongReason);
+				MergeReason(WrongReason);
 				continue;
 			}
 			if (Observation.State != EWoTPinnedAdjacentInstallerProbe::Candidate
@@ -1698,7 +1843,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			if (Tracked->KnownWrongIdentity.IsSet()
 				&& Tracked->KnownWrongIdentity.GetValue() == Identity)
 			{
-				MergeInstallerReason(Sweep, WrongReason);
+				MergeReason(WrongReason);
 				continue;
 			}
 			if (!Tracked->PreviousCandidateIdentity.IsSet()
@@ -1720,6 +1865,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				}
 				if (WoTInstallerAcquisitionIsParentIdentityMismatch(Error))
 				{
+					if (bRemembered)
+					{
+						RejectRememberedInstaller(
+							Work, Error, UnavailableThisSweep);
+						continue;
+					}
 					RecordedInstallerUnavailable.Reset();
 					return FResult::Error(MoveTemp(Error));
 				}
@@ -1734,6 +1885,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				&& Result.Verified.IsValid())
 			{
 				Sweep.FoundSource = Tracked->Location.Source;
+				Sweep.FoundCanonicalPath = Tracked->Location.CanonicalPath;
 				Sweep.Verified = MoveTemp(Result.Verified);
 				RecordedInstallerUnavailable.Reset();
 				return FResult::Success(MoveTemp(Sweep));
@@ -1742,12 +1894,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
 				Tracked->KnownWrongIdentity = Identity;
-				MergeInstallerReason(Sweep, WrongReason);
+				MergeReason(WrongReason);
 			}
 			else if (Result.State
 				== EWoTPinnedAdjacentInstallerProbe::Downloading)
 			{
-				MergeInstallerReason(Sweep,
+				MergeReason(
 					Tracked->Location.Source == EWoTInstallerSource::Picked
 						? WrongReason
 						: EWoTOriginalGameNeededReason::Downloading);
@@ -1755,14 +1907,13 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			else if (Result.State
 				== EWoTPinnedAdjacentInstallerProbe::OnlineOnly)
 			{
-				MergeInstallerReason(Sweep,
-					EWoTOriginalGameNeededReason::OnlineOnly,
+				MergeReason(EWoTOriginalGameNeededReason::OnlineOnly,
 					Result.Message);
 			}
 			else if (Result.State
 				== EWoTPinnedAdjacentInstallerProbe::UnsupportedReparsePoint)
 			{
-				MergeInstallerReason(Sweep,
+				MergeReason(
 					EWoTOriginalGameNeededReason::UnsupportedReparsePoint);
 			}
 			Tracked->PreviousCandidateIdentity.Reset();
@@ -1793,17 +1944,16 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Deps.InstallerPinsForTesting.GetValue().Sha256);
 		}
 #endif
-		TWoTBootstrapResult<FWoTSha256> DescriptorSha =
-			GetCacheExpectedProductionDescriptorSha256();
+		TWoTBootstrapResult<FWoTSha256> ContentLabel = GetCacheContentLabel();
 		TWoTBootstrapResult<FWoTRetailContract> Contract =
 			WoTLoadProductionRetailContract();
 		if (InstallerSha.IsError())
 		{
 			return FResult::Error(MoveTemp(InstallerSha).GetError());
 		}
-		if (DescriptorSha.IsError())
+		if (ContentLabel.IsError())
 		{
-			return FResult::Error(MoveTemp(DescriptorSha).GetError());
+			return FResult::Error(MoveTemp(ContentLabel).GetError());
 		}
 		if (Contract.IsError())
 		{
@@ -1813,7 +1963,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		Identity.bHasBuildIdentity = true;
 		Identity.InstallerSha256 = InstallerSha.GetValue();
 		Identity.ContractSha256 = ComputeRetailContractIdentity(Contract.GetValue());
-		Identity.ProductionDescriptorSha256 = DescriptorSha.GetValue();
+		Identity.ProductionDescriptorSha256 = ContentLabel.GetValue();
 		return FResult::Success(MoveTemp(Identity));
 	}
 
@@ -2826,6 +2976,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Work, EWoTBootstrapPhase::VerifyingContent);
 		}
 		bOriginalGameTranslocated = RunningTreeTranslocated();
+		LoadRememberedInstallerRecord(Work);
 		TWoTBootstrapResult<FWoTInstallerSweep> Swept =
 			SweepInstallerLocations(Work);
 		if (Swept.IsError())
@@ -2857,7 +3008,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		}
 		if (InstallerSweep.Verified.IsValid())
 		{
-			ContentInstaller = MoveTemp(InstallerSweep.Verified);
+			AdoptContentInstaller(InstallerSweep);
 			WoTRecordBootstrapHeartbeat(TEXT("original-game-detected"),
 				EWoTBootstrapPhase::CheckingOriginalGameData,
 				Work.Request.OperationEpoch, {}, {},
@@ -2879,6 +3030,16 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		Result.OriginalGameNeededReason = InstallerSweep.Reason;
 		Result.OriginalGameNeededDetail = InstallerSweep.Detail;
 		return Result;
+	}
+
+	/** Takes the sweep's held installer for extraction and notes a Browse pick,
+	 * which is remembered only once the cache it builds has been published. */
+	void AdoptContentInstaller(FWoTInstallerSweep& InstallerSweep)
+	{
+		ContentInstaller = MoveTemp(InstallerSweep.Verified);
+		PickedInstallerPathToRemember =
+			InstallerSweep.FoundSource == EWoTInstallerSource::Picked
+				? InstallerSweep.FoundCanonicalPath : FString();
 	}
 
 	void PublishOriginalGameNeededState(FWork& Work,
@@ -2935,7 +3096,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			if (InstallerSweep.Verified.IsValid())
 			{
 				bAcceptPickedInstaller.Store(false);
-				ContentInstaller = MoveTemp(InstallerSweep.Verified);
+				AdoptContentInstaller(InstallerSweep);
 				WoTRecordBootstrapHeartbeat(TEXT("original-game-detected"),
 					EWoTBootstrapPhase::OriginalGameNeeded,
 					Work.Request.OperationEpoch, {}, {},
@@ -2967,6 +3128,10 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			Downloads.KnownWrongIdentity.Reset();
 		}
 		PickedInstaller.Reset();
+		RememberedInstaller.Reset();
+		RememberedInstallerRecordPath.Reset();
+		bRememberedInstallerRejected = false;
+		PickedInstallerPathToRemember.Reset();
 		RecordedInstallerUnavailable.Reset();
 		FString DiscardedPickedPath;
 		while (PickedInstallerRequests.Dequeue(DiscardedPickedPath)) {}
@@ -2994,6 +3159,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				return InvalidInstallerFailure(Work);
 			}
 			ContentInstaller = MoveTemp(Adjacent.Verified);
+			PickedInstallerPathToRemember.Reset();
 		}
 		TWoTBootstrapResult<FWoTRetailPackage> Package = FWoTRetailPackage::Open(
 			MoveTemp(ContentInstaller->Snapshot), FWoTArchiveLimits());
@@ -3071,6 +3237,10 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		FWoTGameBootstrapCacheProgress Progress(
 			Work.Progress, Work.Request.OperationEpoch, bCancelled,
 			Work.PhaseStartedSeconds, Deps.NowSeconds);
+		// Reset below clears the flow's installer state; keep the Browse pick
+		// (if this build came from one) until publication has succeeded.
+		const FString PickedPathToRemember =
+			MoveTemp(PickedInstallerPathToRemember);
 		TWoTBootstrapResult<FWoTPublishedCacheReceipt> Published =
 			ContentOperation->BuildAndPublish(
 				MoveTemp(*ContentPackage), *ContentCache, Progress);
@@ -3096,6 +3266,10 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			return CacheFailure(Work, MoveTemp(Published).GetError());
 		}
 		PublishedCacheReceipt = MoveTemp(Published).GetValue();
+		if (!PickedPathToRemember.IsEmpty())
+		{
+			RememberPickedInstaller(Work, PickedPathToRemember);
+		}
 		return Completion(Work, EWoTBootstrapPhase::VerifyingContent);
 	}
 
@@ -3214,6 +3388,14 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 	TOptional<FWoTNativeFileIdentity> DownloadsParentIdentity;
 	TOptional<FTrackedInstallerLocation> PickedInstaller;
 	TQueue<FString, EQueueMode::Mpsc> PickedInstallerRequests;
+	/** Well-formed path read from the remembered-installer record this flow. */
+	FString RememberedInstallerRecordPath;
+	/** The remembered location once it has canonicalized to its record. */
+	TOptional<FTrackedInstallerLocation> RememberedInstaller;
+	/** Skips the remembered location for the rest of this flow. */
+	bool bRememberedInstallerRejected = false;
+	/** Canonical path of the Browse pick feeding this flow's build, if any. */
+	FString PickedInstallerPathToRemember;
 	TSet<FString> RecordedInstallerUnavailable;
 	TUniquePtr<FWoTRetailPackage> ContentPackage;
 	TUniquePtr<FWoTCacheStore> ContentCache;

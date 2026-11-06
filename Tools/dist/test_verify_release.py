@@ -246,6 +246,111 @@ class VerifyReleaseTests(unittest.TestCase):
             archive.writestr("WoT Reborn/Game/extra.dll", b"not signed")
         self.assertFails(directory, "'extra.dll' is not in the signed tree")
 
+    def test_a_published_set_requires_and_validates_its_release_notes(self):
+        notes = formats.RELEASE_NOTES_ASSET
+        directory = self.copy()
+        # Sequence 0 publishes an empty cumulative asset (merge_release_notes).
+        (directory / notes).write_bytes(formats.merge_release_notes(None, 0, ""))
+        verified = self.verify(directory, published=True)
+        self.assertEqual(verified.release_notes["entry_sequences"], [])
+        self.assertNotIn(notes, verified.assets)
+        self.assertEqual(len(verified.assets), len(self.verify(self.pristine).assets))
+        self.assertEqual(verified.summary()["release_notes"]["entry_sequences"], [])
+        self.assertNotIn("release_notes", self.verify(self.pristine).summary())
+        # A signing set stays closed: the notes asset is refused there.
+        self.assertFails(directory, f"unexpected file {notes}")
+        # Published mode still refuses anything else.
+        (directory / "stray.txt").write_bytes(b"x")
+        self.assertFails(directory, "unexpected file stray.txt", published=True)
+
+        directory = self.copy()
+        self.assertFails(directory, "but the downloaded set has none", published=True)
+        (directory / notes).write_bytes(b'{"format":"wrong","notes":[]}')
+        self.assertFails(directory, ".format is not", published=True)
+        (directory / notes).write_bytes(formats.merge_release_notes(None, 2, "Later."))
+        self.assertFails(directory, "entries for later releases [2]", published=True)
+
+    def test_published_player_downloads_are_optional_identical_copies(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        sources = {
+            formats.PLAYER_DOWNLOAD_ASSETS["Win64"]:
+                formats.guarded_install_zip_asset(
+                    "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION),
+            formats.PLAYER_DOWNLOAD_ASSETS["Mac"]:
+                formats.guarded_install_dmg_asset(
+                    fixtures.COMMIT, formats.SHIPPING_CONFIGURATION),
+        }
+        for fixed_name, source_name in sources.items():
+            shutil.copyfile(directory / source_name, directory / fixed_name)
+
+        verified = self.verify(directory, published=True)
+        expected = {
+            fixed_name: {
+                "source": source_name,
+                "sha256": formats.sha256_file(directory / source_name)[0],
+                "size": (directory / source_name).stat().st_size,
+            }
+            for fixed_name, source_name in sources.items()
+        }
+        self.assertEqual(verified.player_downloads, expected)
+        self.assertEqual(verified.summary()["player_downloads"], expected)
+        self.assertTrue(set(sources).isdisjoint(verified.assets))
+        self.assertFails(
+            directory, f"unexpected file {formats.PLAYER_DOWNLOAD_ASSETS['Mac']}")
+
+    def test_published_player_download_must_match_its_source(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        fixed_name = formats.PLAYER_DOWNLOAD_ASSETS["Win64"]
+        source_name = formats.guarded_install_zip_asset(
+            "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
+        (directory / fixed_name).write_bytes(
+            (directory / source_name).read_bytes() + b"different")
+        self.assertFails(
+            directory, f"{fixed_name}: differs from {source_name}", published=True)
+
+    def test_published_player_download_requires_its_source_in_the_set(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        fixed_name = formats.PLAYER_DOWNLOAD_ASSETS["Win64"]
+        source_name = formats.guarded_install_zip_asset(
+            "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
+        shutil.copyfile(directory / source_name, directory / fixed_name)
+        (directory / source_name).unlink()
+        self.assertFails(
+            directory, f"{fixed_name}: has no commit-named source in the set",
+            published=True)
+
+    def test_published_notes_must_carry_this_releases_entry(self):
+        path = self.fixture.root / "published-notes.json"
+        path.write_bytes(formats.merge_release_notes(
+            formats.merge_release_notes(None, 1, "First update."), 2, "Second update."))
+        failures = []
+        result = verify_release._check_published_release_notes(path, 2, failures)
+        self.assertEqual((failures, result["entry_sequences"]), ([], [1, 2]))
+        failures = []
+        verify_release._check_published_release_notes(path, 3, failures)
+        self.assertEqual(failures, [
+            f"{formats.RELEASE_NOTES_ASSET} has no entry for this release's sequence 3"])
+
+    def test_cli_published_flag_accepts_the_notes_asset(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        arguments = ["--set", str(directory), "--release",
+                     f"Mac={self.fixture.releases['Mac']}", *self.fixture.trust_arguments()]
+        with contextlib.redirect_stderr(io.StringIO()) as errors:
+            self.assertEqual(verify_release.main(arguments), 1)
+        self.assertIn(f"unexpected file {formats.RELEASE_NOTES_ASSET}", errors.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(verify_release.main(arguments + ["--published"]), 0)
+        self.assertIn(f"{formats.RELEASE_NOTES_ASSET} is valid", out.getvalue())
+        self.assertIn("verify_release: PASS", out.getvalue())
+
     def test_mac_dmg_and_sidecar_are_required_and_hash_bound(self):
         dmg_name = formats.guarded_install_dmg_asset(
             fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
@@ -538,6 +643,115 @@ class VerifyReleaseTests(unittest.TestCase):
             sequence_two_set, "test_twin release_sequence",
             releases=replayed_releases, funnel_receipts=replayed_receipts,
             previous=previous)
+
+    def resign_lineage(self, directory, platform, mutate, *, key=None, public=None,
+                       context=crypto.CONTEXT_CACHE_LINEAGE_V1):
+        name = formats.cache_lineage_asset(platform)
+        document = json.loads((directory / name).read_bytes())
+        mutate(document)
+        raw = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+        (directory / name).write_bytes(raw)
+        (directory / (name + ".sig")).write_bytes(crypto.sign_framed(
+            self.fixture.openssl, key or self.fixture.release_key, context, raw,
+            public or self.fixture.release_public))
+
+    def test_cache_lineage_is_signed_and_bound_to_the_manifest(self):
+        verified = self.verify(self.pristine, openssl=self.fixture.openssl)
+        for platform in formats.PLATFORMS:
+            lineage = verified.platforms[platform].cache_lineage
+            self.assertEqual((lineage["platform"], lineage["release_sequence"],
+                              lineage["revision"]), (platform, 0, 1))
+            for suffix in ("", ".sig"):
+                self.assertIn(formats.cache_lineage_asset(platform) + suffix,
+                              verified.assets)
+        name = formats.cache_lineage_asset("Win64")
+        directory = self.copy()
+        raw = bytearray((directory / name).read_bytes())
+        raw[-3] = ord("1") if raw[-3] != ord("1") else ord("2")
+        (directory / name).write_bytes(bytes(raw))
+        self.assertFails(directory, "does not verify under release key")
+        directory = self.copy()
+        self.resign_lineage(directory, "Win64", lambda document: None,
+                            key=self.fixture.announcement_key,
+                            public=self.fixture.announcement_public)
+        self.assertFails(directory, f"{name}: the signature does not verify")
+        directory = self.copy()
+        self.resign_lineage(directory, "Win64", lambda document: None,
+                            context=crypto.CONTEXT_RELEASE_MANIFEST_V2)
+        self.assertFails(directory, f"{name}: the signature does not verify")
+        directory = self.copy()
+        self.resign_lineage(directory, "Mac",
+                            lambda document: document.update(release_sequence=5))
+        self.assertFails(directory, "release_sequence 5 differs from the signed "
+                         "manifest's 0")
+        directory = self.copy()
+        self.resign_lineage(directory, "Mac",
+                            lambda document: document.update(human_version="0.1.0"))
+        self.assertFails(directory, "unknown=['human_version']")
+        directory = self.copy()
+        self.resign_lineage(directory, "Win64",
+                            lambda document: document.update(platform="Mac"))
+        self.assertFails(directory, f"{name}.platform is not Win64")
+        directory = self.copy()
+        self.resign_lineage(directory, "Win64",
+                            lambda document: document.update(revision=2))
+        self.assertFails(directory, "not the content label of revision 2")
+
+    def test_cache_lineage_is_optional_at_sequence_zero_and_required_after(self):
+        directory = self.copy()
+        for suffix in ("", ".sig"):
+            (directory / (formats.cache_lineage_asset("Win64") + suffix)).unlink()
+        verified = self.verify(directory)
+        self.assertIsNone(verified.platforms["Win64"].cache_lineage)
+        self.assertIsNotNone(verified.platforms["Mac"].cache_lineage)
+        directory = self.copy()
+        (directory / formats.cache_lineage_asset("Mac")).unlink()
+        self.assertFails(directory, "missing asset WoT-Mac-cache-lineage-v1.json")
+
+        sequence_one = self.fixture.root / "lineage-sequence-one"
+        self.fixture.sign(sequence_one, release_sequence=1, tag="v0.1.1-lineage")
+        releases = {"Mac": self.fixture.root / "sequence-1-Mac" / "release.json"}
+        previous = {platform: result.announcement
+                    for platform, result in self.verify(self.pristine).platforms.items()}
+        with contextlib.redirect_stderr(io.StringIO()):
+            verified = self.verify(sequence_one, releases=releases, previous=previous)
+            self.assertEqual(verified.platforms["Win64"].cache_lineage["release_sequence"],
+                             1)
+            for suffix in ("", ".sig"):
+                (sequence_one / (formats.cache_lineage_asset("Win64") + suffix)).unlink()
+            self.assertFails(sequence_one, "missing asset WoT-Win64-cache-lineage-v1.json: "
+                             "a release at sequence 1 or later",
+                             releases=releases, previous=previous)
+
+    def test_verified_cache_lineage_loader_needs_only_one_platform_chain(self):
+        directory = self.fixture.root / "lineage-win64-only"
+        directory.mkdir()
+        manifest = json.loads((self.pristine / formats.manifest_asset("Win64")).read_bytes())
+        names = [formats.KEY_RING_ASSET, manifest["archive"]["name"]]
+        for name in (formats.KEY_RING_ASSET, formats.announcement_asset("Win64"),
+                     formats.manifest_asset("Win64"),
+                     formats.cache_lineage_asset("Win64")):
+            names += [name, name + ".sig"]
+        for name in set(names):
+            shutil.copyfile(self.pristine / name, directory / name)
+        lineage = verify_release.load_verified_cache_lineage(
+            directory, "Win64", trust=self.fixture.trust, compiled=self.fixture.compiled,
+            openssl=self.fixture.openssl)
+        self.assertEqual(lineage, formats.parse_cache_lineage(
+            (directory / formats.cache_lineage_asset("Win64")).read_bytes(), "Win64"))
+        with self.assertRaises(verify_release.VerifyError) as caught:
+            verify_release.load_verified_cache_lineage(
+                directory, "Mac", trust=self.fixture.trust,
+                compiled=self.fixture.compiled)
+        self.assertIn("missing asset WoT-Mac-announcement-v1.json",
+                      "\n".join(caught.exception.failures))
+        (directory / (formats.cache_lineage_asset("Win64") + ".sig")).write_bytes(
+            bytes(64))
+        with self.assertRaises(verify_release.VerifyError) as caught:
+            verify_release.load_verified_cache_lineage(
+                directory, "Win64", trust=self.fixture.trust,
+                compiled=self.fixture.compiled)
+        self.assertIn("does not verify", "\n".join(caught.exception.failures))
 
     def test_previous_announcements_must_authenticate(self):
         directory = self.copy()

@@ -462,7 +462,9 @@ class RunSmokeWiringTests(unittest.TestCase):
             + [record("host-refused", detail="launcher-only",
                       pid=LAUNCHER_PID)])
         self.assertEqual(receipt["verdict"], "pass")
-        self.assertIn("Host Match", output)
+        self.assertIn("Multiplayer, pick any map, then click Host Match", output)
+        self.assertNotIn("click Play", output)
+        self.assertIn("closes the game itself", output)
         checks = receipt["checks"]
         self.assertEqual(checks["image"]["game"].replace("\\", "/"),
                          "WoT/Binaries/Win64/WoT-Win64-Shipping.exe")

@@ -322,7 +322,7 @@ ACameraActor* UWoTShotSubsystem::EnsureCamera()
 		// projection from the 16:9-implied vertical FOV — 73.74° horizontal,
 		// a uniform 4/3 magnification vs the UE1 goldens (FOV 90 horizontal
 		// at any aspect). That zoom masqueraded as a per-map brightness
-		// anomaly in the mean-luma baselines (PORT_NOTES v2.6).
+		// anomaly in the mean-luma baselines.
 		Cam->SetConstraintAspectRatio(true);
 		Cam->SetAspectRatio(1600.0f / 1200.0f);
 		Cam->SetFieldOfView(90.0f);

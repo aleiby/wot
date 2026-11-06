@@ -856,8 +856,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Setup screen and locally captured backdrop
 - **Original:** There was no setup or first-run content step.
-- **Port:** A setup screen shows content preparation and updates. Its blurred backdrop is captured from the main-menu scene on the player's own machine; the first run shows a gradient instead.
-- **Why:** The port builds content from the player's own game copy, and no image derived from the original is packaged.
+- **Port:** A setup screen shows content preparation and updates. Its blurred backdrop is captured from the main-menu scene on the player's own machine the first time the main menu shows. Until then, including a fresh install's first setup screen, a default blurred capture of the same scene that ships with the game is shown; a generated gradient remains only as a fallback.
+- **Why:** The port builds content from the player's own game copy, so there is no scene to capture before the first setup finishes. The shipped default is a small, heavily blurred screenshot, not original game data, and it gives the first run the same kind of backdrop later runs show.
 
 ### One movable folder with verified updates
 - **Original:** A standard installer with its own settings files, and patches installed by hand.

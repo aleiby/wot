@@ -819,6 +819,35 @@ FWoTFrontEndSceneStaging::StagedCensusForTesting() const
 }
 #endif
 
+FWoTBootstrapStatus WoTFrontEndSceneLoadWorld(
+	const FWoTFrontEndDescriptor& Descriptor,
+	FWoTRuntimeWorldResource& WorldResource)
+{
+	const FWoTNeutralResourceId WorldId{
+		Descriptor.WorldLogicalId, EWoTNeutralResourceKind::World};
+	FWoTBootstrapStatus WorldLoaded = WorldResource.LoadFirstUse(WorldId);
+	if (WorldLoaded.IsError()) return WorldLoaded;
+	if (WorldResource.MapIdentity() != Descriptor.MapName)
+		return SceneStatus(
+			TEXT("front-end world object has the wrong authenticated identity"));
+	return FWoTBootstrapStatus::Success();
+}
+
+FWoTBootstrapStatus WoTFrontEndSceneDecodeBSP(
+	const FWoTNeutralResourceId& Id, FWoTBSPPayloadData& OutBSP)
+{
+	auto BSPObject = FWoTRuntimeRegistry::Get().ReadObject(
+		Id, 1024ull * 1024ull * 1024ull,
+		TEXT("wot-bsp-static-mesh-v1"), TEXT("bsp"));
+	if (BSPObject.IsError())
+		return FWoTBootstrapStatus::Error(MoveTemp(BSPObject).GetError());
+	FString BSPError;
+	if (!UWoTBSPPayloadLibrary::DecodePayload(
+			BSPObject.GetValue().Payload(), OutBSP, BSPError))
+		return SceneStatus(TEXT("front-end BSP is malformed"));
+	return FWoTBootstrapStatus::Success();
+}
+
 FWoTFrontEndSceneMaterializer::FWoTFrontEndSceneMaterializer()
 	: OwnerState(MakeShared<FWoTFrontEndSceneOwnerState, ESPMode::ThreadSafe>())
 {
@@ -934,14 +963,10 @@ FWoTFrontEndSceneMaterializer::Stage(
 		return SceneError<FWoTFrontEndSceneStaging>(
 			TEXT("front-end scene could not subscribe to retained authority"));
 
-	const FWoTNeutralResourceId WorldId{
-		Descriptor.WorldLogicalId, EWoTNeutralResourceKind::World};
 	FWoTRuntimeWorldResource WorldResource;
-	FWoTBootstrapStatus WorldLoaded = WorldResource.LoadFirstUse(WorldId);
+	FWoTBootstrapStatus WorldLoaded =
+		WoTFrontEndSceneLoadWorld(Descriptor, WorldResource);
 	if (WorldLoaded.IsError()) return FResult::Error(MoveTemp(WorldLoaded).GetError());
-	if (WorldResource.MapIdentity() != Descriptor.MapName)
-		return SceneError<FWoTFrontEndSceneStaging>(
-			TEXT("front-end world object has the wrong authenticated identity"));
 
 	uint32 Lights = 0, Ambience = 0, Splash = 0, Rain = 0, Lightning = 0;
 	uint32 RandomLightning = 0, Water = 0;
@@ -1381,18 +1406,12 @@ FWoTFrontEndSceneMaterializer::Stage(
 		case EWoTFactDomain::BSP:
 			if (Requirement.LogicalId == Descriptor.BspLogicalId)
 			{
-				auto BSPObject = FWoTRuntimeRegistry::Get().ReadObject(
-					Id, 1024ull * 1024ull * 1024ull,
-					TEXT("wot-bsp-static-mesh-v1"), TEXT("bsp"));
-				if (BSPObject.IsError())
-					return FResult::Error(MoveTemp(BSPObject).GetError());
 				TSharedRef<FWoTBSPPayloadData> BSP =
 					MakeShared<FWoTBSPPayloadData>();
-				FString BSPError;
-				if (!UWoTBSPPayloadLibrary::DecodePayload(
-						BSPObject.GetValue().Payload(), *BSP, BSPError))
-					return SceneError<FWoTFrontEndSceneStaging>(
-						TEXT("front-end BSP is malformed"));
+				FWoTBootstrapStatus BSPDecoded =
+					WoTFrontEndSceneDecodeBSP(Id, *BSP);
+				if (BSPDecoded.IsError())
+					return FResult::Error(MoveTemp(BSPDecoded).GetError());
 				Candidate->BSP = BSP;
 			}
 			if (!Candidate->BSP.IsValid())

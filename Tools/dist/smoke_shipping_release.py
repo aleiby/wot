@@ -37,8 +37,9 @@ the announcement URL (WoTGameBootstrapWorker.cpp:1229-1256).
 Hosting has no automation seam in Shipping by design: -ExecCmds is ignored
 (UnrealEngine.cpp:2555-2564, !UE_BUILD_SHIPPING) and there is no console
 (ALLOW_CONSOLE_IN_SHIPPING 0). With --host-trigger manual (the default) the
-operator clicks Play > Host Match in the visible window when prompted and the
-smoke judges the heartbeat; --host-trigger none stops after the front end.
+operator picks Multiplayer, any map, then Host Match in the visible window when
+prompted and the smoke judges the heartbeat; --host-trigger none stops after the
+front end. The smoke closes the game itself once the host's player spawns.
 """
 from __future__ import annotations
 
@@ -52,7 +53,7 @@ import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable, Iterable, Optional
 
 DIST = Path(__file__).resolve().parent
@@ -294,8 +295,10 @@ def _discover_windows_game_child(
     launcher_creation = _windows_launcher_creation_time(launcher)
     while time.monotonic() < deadline:
         for pid, parent_pid, image in _toolhelp_process_entries():
+            # A Toolhelp image is always a Windows path; PureWindowsPath keeps
+            # that true whatever os.name a caller (or a test) presents.
             if (parent_pid != launcher.pid
-                    or Path(image).name.casefold() != expected_name):
+                    or PureWindowsPath(image).name.casefold() != expected_name):
                 continue
             try:
                 candidate = _WindowsChildProcess(pid)
@@ -725,9 +728,11 @@ def run_smoke(args: argparse.Namespace) -> dict:
         boot["seconds"] = round(time.monotonic() - started, 3)
         receipt["checks"]["boot"] = boot
         if args.host_trigger == "manual":
-            print("SHIPPING SMOKE: the front end is up. In the WoT window click "
-                  "Play, then Host Match, within "
-                  f"{args.host_timeout:g}s.", flush=True)
+            print("SHIPPING SMOKE: the front end is up. In the WoT window choose "
+                  "Multiplayer, pick any map, then click Host Match, within "
+                  f"{args.host_timeout:g}s. The smoke closes the game itself as "
+                  "soon as your player spawns; that is the pass, not a crash.",
+                  flush=True)
             host, records = _wait(
                 "a hosted neutral-shell map", args.host_timeout, process,
                 game_process, game_pid, state_root, heartbeat_root, prelaunch_files,

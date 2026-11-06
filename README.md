@@ -57,7 +57,8 @@ Archive](https://archive.org/download/twot_gog_classic/The%20Wheel%20Of%20Time%2
 The required file is `setup_the_wheel_of_time_333b_(54846).exe`. Leave it in
 your Downloads folder and WoT Reborn finds it on first launch, or point to it
 with Browse. The game reads its data but never runs it and never downloads it
-for you.
+for you. Keep the installer after setup. Some updates rebuild the game's
+converted data from it, and the game asks for it again if it can't find it.
 
 - Windows: download `WoT-Win64-guarded-shipping-<commit>.zip` from the
   [latest release](https://github.com/aleiby/wot/releases/latest), extract its single

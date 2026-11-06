@@ -586,7 +586,7 @@ bool FWoTRetailBuilderOverrideLayerSpec::RunTest(const FString&)
 	TestTrue(TEXT("sound family builds"),
 		FWoTSoundTableBuilder::Build(
 			WoTRetailBuilderContext(Defaults), Built, Error));
-	TestEqual(TEXT("PORT_NOTES sound identity transform runs after decode"),
+	TestEqual(TEXT("sound identity transform runs after decode"),
 		Built.Tables.FindChecked(TEXT("Trolloc"))[0].SoundSubPath,
 		FName(TEXT("FixtureBank/FixtureSound")));
 	return !HasAnyErrors();

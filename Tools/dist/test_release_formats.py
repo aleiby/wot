@@ -69,7 +69,24 @@ class NativeVectorCrossCheckTests(unittest.TestCase):
         self.assertEqual(len(framed), 24 + 2)
         frames = {crypto.frame_signature_input(context, b"{}")
                   for context in crypto.CONTEXT_NAMES}
-        self.assertEqual(len(frames), 8)
+        self.assertEqual(len(frames), 9)
+
+    def test_context_ordinals_and_names_mirror_the_native_enum(self):
+        # ArtifactTypes.h EWoTSignatureContext declaration order is the ordinal;
+        # Ed25519.cpp LexToString is the spelling. Neither is ever renumbered.
+        header = formats.ARTIFACT_TYPES_HEADER.read_text(encoding="utf-8")
+        body = re.search(r"enum class EWoTSignatureContext : uint8\s*\{([^}]*)\}",
+                         header).group(1)
+        enumerators = re.findall(r"^\s*(\w+),", body, re.MULTILINE)
+        self.assertEqual(enumerators, [crypto.CONTEXT_NAMES[ordinal]
+                                       for ordinal in range(len(crypto.CONTEXT_NAMES))])
+        self.assertEqual(crypto.CONTEXT_CACHE_LINEAGE_V1, 8)
+        self.assertEqual(crypto.CONTEXT_NAMES[8], "CacheLineageV1")
+        source = (formats.REPOSITORY_ROOT / "Source" / "WoTBootstrapCore" / "Private"
+                  / "Ed25519.cpp").read_text(encoding="utf-8")
+        spellings = dict(re.findall(
+            r'case EWoTSignatureContext::(\w+):\s*return TEXT\("(\w+)"\);', source))
+        self.assertEqual(spellings, {name: name for name in crypto.CONTEXT_NAMES.values()})
 
     def test_synthetic_ring_manifest_and_domain_separation(self):
         ring = vectors.literal(vectors.CRYPTO_TESTS, "SynthRingJson").encode()
@@ -221,6 +238,102 @@ class CanonicalJsonTests(unittest.TestCase):
         for value in ({"a": 0.5}, {"a": 2 ** 63}, {"a": "\ud800"}, {1: 2}):
             with self.assertRaises(FormatError):
                 formats.canonical_bytes(value)
+
+
+class CacheLineageFormatTests(unittest.TestCase):
+    REVISION_2 = "e6e3ef1fa015fcfdef584ffa59b5badff4993d1f3fab2fb35e7743ed522e968e"
+
+    def values(self, **overrides):
+        values = {
+            "platform": "Win64", "release_sequence": 1, "revision": 2,
+            "label": self.REVISION_2, "installer_sha256": "a" * 64,
+            "contract_sha256": "b" * 64, "manifest_sha256": "c" * 64,
+        }
+        values.update(overrides)
+        return values
+
+    def test_asset_name_and_round_trip(self):
+        self.assertEqual(formats.cache_lineage_asset("Mac"),
+                         "WoT-Mac-cache-lineage-v1.json")
+        self.assertEqual(formats.validate_asset_name(
+            formats.cache_lineage_asset("Win64")), "WoT-Win64-cache-lineage-v1.json")
+        document = formats.build_cache_lineage(**self.values())
+        self.assertEqual(set(document), {
+            "format", "platform", "release_sequence", "revision", "label",
+            "installer_sha256", "contract_sha256", "manifest_sha256"})
+        self.assertEqual(document["format"], "wot-cache-lineage-v1")
+        raw = formats.canonical_bytes(document)
+        self.assertEqual(formats.parse_cache_lineage(raw, "Win64"), document)
+        revision_one = formats.build_cache_lineage(**self.values(
+            revision=1, release_sequence=0,
+            label="1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e"))
+        self.assertEqual(revision_one["revision"], 1)
+
+    def test_builder_refuses_what_the_reader_refuses(self):
+        cases = {
+            "label of another revision": {"revision": 3},
+            "revision zero": {"revision": 0},
+            "boolean revision": {"revision": True},
+            "negative sequence": {"release_sequence": -1},
+            "sequence beyond int64": {"release_sequence": 2 ** 63},
+            "upper-case digest": {"manifest_sha256": "C" * 64},
+            "short digest": {"installer_sha256": "a" * 63},
+            "unknown platform": {"platform": "Linux"},
+        }
+        for label, overrides in cases.items():
+            with self.subTest(label=label), self.assertRaises(FormatError):
+                formats.build_cache_lineage(**self.values(**overrides))
+
+    def test_reader_is_strict(self):
+        document = formats.build_cache_lineage(**self.values())
+        raw = formats.canonical_bytes(document)
+        refused = {
+            "not canonical": json.dumps(document, indent=1).encode(),
+            "other platform": raw,
+            "extra member": formats.canonical_bytes({**document, "human_version": "1"}),
+            "missing member": formats.canonical_bytes(
+                {key: value for key, value in document.items() if key != "label"}),
+            "wrong format": formats.canonical_bytes(
+                {**document, "format": "wot-cache-lineage-v2"}),
+            "mismatched label": formats.canonical_bytes(
+                {**document, "label": "d" * 64}),
+        }
+        for label, candidate in refused.items():
+            platform = "Mac" if label == "other platform" else "Win64"
+            with self.subTest(label=label), self.assertRaises(FormatError):
+                formats.parse_cache_lineage(candidate, platform)
+
+
+class PlayerDownloadAssetTests(unittest.TestCase):
+    def test_shipping_sources_use_fixed_valid_asset_names(self):
+        class Result:
+            configuration = formats.SHIPPING_CONFIGURATION
+
+        win64 = Result()
+        win64.install_zip = "WoT-Win64-guarded-shipping-abc1234.zip"
+        win64.dmg = None
+        mac = Result()
+        mac.install_zip = "WoT-Mac-guarded-shipping-abc1234.zip"
+        mac.dmg = "WoT-Mac-guarded-shipping-abc1234.dmg"
+
+        self.assertEqual(formats.player_download_asset_sources({
+            "Win64": win64,
+            "Mac": mac,
+        }), {
+            "WoT-Reborn-Windows.zip": win64.install_zip,
+            "WoT-Reborn-Mac.dmg": mac.dmg,
+        })
+        for name in formats.PLAYER_DOWNLOAD_ASSETS.values():
+            self.assertEqual(formats.validate_asset_name(name), name)
+
+    def test_test_configuration_has_no_fixed_downloads(self):
+        result = type("Result", (), {
+            "configuration": formats.TEST_CONFIGURATION,
+            "install_zip": "WoT-Win64-guarded-abc1234.zip",
+            "dmg": None,
+        })()
+        self.assertEqual(
+            formats.player_download_asset_sources({"Win64": result}), {})
 
 
 class ReleaseNotesFormatTests(unittest.TestCase):

@@ -11,8 +11,11 @@ class AActor;
 class APlayerController;
 class FWoTCacheGenerationLease;
 class FWoTFrontEndFontOwner;
+class FWoTRuntimeWorldResource;
 class UWoTPayloadSubsystem;
 class UWorld;
+struct FWoTBSPPayloadData;
+struct FWoTNeutralResourceId;
 
 struct FWoTFrontEndScenePreferences
 {
@@ -207,3 +210,13 @@ private:
 #endif
 	friend class FWoTFrontEndSceneStaging;
 };
+
+/** The entry world decode that staging runs first: the descriptor's world
+ * object, which must carry the descriptor's map identity. */
+WOT_API FWoTBootstrapStatus WoTFrontEndSceneLoadWorld(
+	const FWoTFrontEndDescriptor& Descriptor,
+	FWoTRuntimeWorldResource& WorldResource);
+
+/** The entry BSP decode that staging runs for the descriptor's BSP object. */
+WOT_API FWoTBootstrapStatus WoTFrontEndSceneDecodeBSP(
+	const FWoTNeutralResourceId& Id, FWoTBSPPayloadData& OutBSP);

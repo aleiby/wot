@@ -25,9 +25,11 @@ from pathlib import Path
 from typing import Any, Sequence
 
 try:
+    from . import cache_content_label
     from .validate_automation_report import (
         ReportRejected, load_report, validate_report)
 except ImportError:
+    import cache_content_label  # type: ignore
     from validate_automation_report import (  # type: ignore
         ReportRejected, load_report, validate_report)
 
@@ -85,6 +87,7 @@ SYNTHETIC_ARTIFACT_FORMAT = "wot-cache-v3-synthetic-parity-v1"
 DEPENDENCY_PATHS = (
     Path(__file__).resolve(),
     Path(__file__).with_name("build_payload_cache.py").resolve(),
+    Path(__file__).with_name("cache_content_label.py").resolve(),
     Path(__file__).with_name("validate_automation_report.py").resolve(),
     SYNTHETIC_FIXTURE.resolve(),
     (ROOT / "Tools/dist/fixtures/bsp-native-parity-v1.json").resolve(),
@@ -265,7 +268,11 @@ def _synthetic_contract_sha256(maps: list[dict[str, Any]]) -> str:
 def synthetic_parity_inputs() -> dict[str, Any]:
     fixture, fixture_raw = load_canonical(
         SYNTHETIC_FIXTURE, "synthetic nineteen-map fixture")
-    descriptor, descriptor_sha = validate_descriptor(CHECKED_DESCRIPTOR)
+    # The descriptor is still validated and supplies the rejection matrix; the
+    # build identity records the cache content label, as the native builder does.
+    descriptor, _descriptor_sha = validate_descriptor(CHECKED_DESCRIPTOR)
+    content_label = cache_content_label.label(
+        cache_content_label.compiled_revision())
     maps = fixture.get("maps")
     if not isinstance(maps, list) or len(maps) != 19:
         raise OracleError("synthetic parity fixture does not contain nineteen maps")
@@ -304,7 +311,7 @@ def synthetic_parity_inputs() -> dict[str, Any]:
         "build_identity": {
             "contract_sha256": _synthetic_contract_sha256(maps),
             "installer_sha256": sha256_bytes(fixture_raw),
-            "production_descriptor_sha256": descriptor_sha,
+            "production_descriptor_sha256": content_label,
         },
         "event_roots": event_roots,
         "objects": objects,

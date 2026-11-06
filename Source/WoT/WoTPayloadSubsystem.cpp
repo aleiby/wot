@@ -2944,61 +2944,152 @@ bool UWoTPayloadSubsystem::LoadManifest()
 }
 #endif
 
-TSharedPtr<const FWoTTexturePayloadData> UWoTPayloadSubsystem::LoadTexturePayload(
-	const FString& CacheKey)
+namespace
 {
-	return LoadTexturePayloadInternal(CacheKey, false);
-}
-
-TSharedPtr<const FWoTTexturePayloadData>
-UWoTPayloadSubsystem::LoadTexturePayloadForRetailBuildContext(
-	const FString& CacheKey)
+// The structural texture decode shared by the activated and developer paths
+// of UWoTPayloadSubsystem::LoadTexturePayloadInternal. Null, with the
+// rejection reason, when the blob disagrees with its entry.
+TSharedPtr<FWoTTexturePayloadData> WoTPayload_DecodeTextureBlob(
+	const FWoTTexturePayloadEntry* Entry, TConstArrayView<uint8> BlobBytes,
+	const FString& AuthenticatedSourcePackage,
+	const FString& AuthenticatedSourceExport,
+	const FWoTSha256& AuthenticatedSourceSha, FString& OutRejectReason)
 {
-	return LoadTexturePayloadInternal(CacheKey, true);
-}
-
-TSharedPtr<const FWoTTexturePayloadData>
-UWoTPayloadSubsystem::LoadTexturePayloadInternal(
-	const FString& CacheKey, bool bAllowActivatingGeneration)
-{
-	const bool bActivationRead = bAllowActivatingGeneration
-		&& ActiveCacheLease.IsValid() && ActiveCacheLease->IsValid()
-		&& IsWoTPayloadBootstrapActive()
-		&& FWoTRuntimeRegistry::Get().SharesSnapshotWith(*ActiveCacheLease);
-	if (((!bInjectionEnabled || !bManifestReady) && !bActivationRead)
-		|| !IsInGameThread())
+	auto Reject = [&OutRejectReason](const FString& Reason)
 	{
+		OutRejectReason = Reason;
+	};
+
+	constexpr uint8 ExpectedMagic[8] = {
+		'W', 'O', 'T', 'P', 'T', 'E', 'X', 0
+	};
+	if (BlobBytes.Num() < 8
+		|| FMemory::Memcmp(BlobBytes.GetData(), ExpectedMagic, 8) != 0)
+	{
+		Reject(TEXT("truncated or invalid texture magic"));
 		return nullptr;
 	}
-	if (const TSharedPtr<const FWoTTexturePayloadData>* Existing =
-		LoadedTexturePayloads.Find(CacheKey))
+	uint64 Offset = 8;
+	uint16 EncodingVersion = 0;
+	uint16 Flags = 0;
+	uint32 PaletteColors = 0;
+	uint32 MipCount = 0;
+	if (!WoTPayload_ReadU16(BlobBytes, Offset, EncodingVersion)
+		|| !WoTPayload_ReadU16(BlobBytes, Offset, Flags)
+		|| !WoTPayload_ReadU32(BlobBytes, Offset, PaletteColors)
+		|| !WoTPayload_ReadU32(BlobBytes, Offset, MipCount)
+		|| EncodingVersion != 1 || (Flags & ~1u) != 0
+		|| PaletteColors != 256 || MipCount == 0
+		|| MipCount > WoTPayload_MaxTextureMips
+		|| MipCount != static_cast<uint32>(Entry->Mips.Num())
+		|| static_cast<bool>(Flags & 1u) != Entry->bMasked)
 	{
-		return *Existing;
-	}
-	if (RejectedBlobKeys.Contains(CacheKey))
-	{
+		Reject(TEXT("texture header disagrees with version-1 manifest metadata"));
 		return nullptr;
 	}
+
+	uint64 PaletteBytes = 0;
+	uint64 PaletteEnd = 0;
+	if (!WoTPayload_CheckedMultiply(PaletteColors, 4, PaletteBytes)
+		|| !WoTPayload_CheckedAdd(Offset, PaletteBytes, PaletteEnd)
+		|| PaletteEnd > static_cast<uint64>(BlobBytes.Num()))
+	{
+		Reject(TEXT("texture palette is truncated"));
+		return nullptr;
+	}
+
+	// Validate the complete base-derived mip chain, exact byte sizes, manifest
+	// agreement, and blob ranges before sizing palette/mip/output buffers.
+	Offset = PaletteEnd;
+	for (uint32 MipIndex = 0; MipIndex < MipCount; ++MipIndex)
+	{
+		uint32 Width = 0;
+		uint32 Height = 0;
+		uint32 Stored = 0;
+		if (!WoTPayload_ReadU32(BlobBytes, Offset, Width)
+			|| !WoTPayload_ReadU32(BlobBytes, Offset, Height)
+			|| !WoTPayload_ReadU32(BlobBytes, Offset, Stored))
+		{
+			Reject(FString::Printf(TEXT("texture mip %u header is truncated"), MipIndex));
+			return nullptr;
+		}
+		const FWoTTexturePayloadMip& ManifestMip = Entry->Mips[MipIndex];
+		uint64 DataEnd = 0;
+		if (!WoTPayload_ValidateTextureMipLayout(
+				Entry->Mips[0].Width, Entry->Mips[0].Height, MipIndex,
+				Width, Height, Stored, ManifestMip.ExpandedByteLength)
+			|| Width != ManifestMip.Width || Height != ManifestMip.Height
+			|| Stored != ManifestMip.StoredByteLength
+			|| !WoTPayload_CheckedAdd(Offset, Stored, DataEnd)
+			|| DataEnd > static_cast<uint64>(BlobBytes.Num()))
+		{
+			Reject(FString::Printf(
+				TEXT("texture mip %u is invalid, truncated, or disagrees with the manifest"),
+				MipIndex));
+			return nullptr;
+		}
+		Offset = DataEnd;
+	}
+	if (Offset != static_cast<uint64>(BlobBytes.Num()))
+	{
+		Reject(TEXT("texture blob has trailing structural bytes"));
+		return nullptr;
+	}
+
+	TSharedRef<FWoTTexturePayloadData> Payload = MakeShared<FWoTTexturePayloadData>();
+	Payload->bMasked = Entry->bMasked;
+	Payload->Format = 0;
+	Payload->AnimNext = Entry->AnimNext;
+	Payload->MinFrameRate = Entry->MinFrameRate;
+	Payload->MaxFrameRate = Entry->MaxFrameRate;
+	Payload->PrimeCount = Entry->PrimeCount;
+	Payload->SourcePackage = AuthenticatedSourcePackage;
+	Payload->SourceExport = AuthenticatedSourceExport;
+	Payload->SourceSha256 = AuthenticatedSourceSha;
+	Payload->Palette.Reserve(256);
+	Offset = 8 + 2 + 2 + 4 + 4;
+	for (uint32 PaletteIndex = 0; PaletteIndex < PaletteColors; ++PaletteIndex)
+	{
+		const int32 ColorOffset = static_cast<int32>(Offset + PaletteIndex * 4ull);
+		Payload->Palette.Emplace(
+			BlobBytes[ColorOffset + 0], BlobBytes[ColorOffset + 1],
+			BlobBytes[ColorOffset + 2], BlobBytes[ColorOffset + 3]);
+	}
+	Offset = PaletteEnd;
+	Payload->Mips.Reserve(static_cast<int32>(MipCount));
+	for (uint32 MipIndex = 0; MipIndex < MipCount; ++MipIndex)
+	{
+		uint32 Width = 0;
+		uint32 Height = 0;
+		uint32 Stored = 0;
+		verify(WoTPayload_ReadU32(BlobBytes, Offset, Width)
+			&& WoTPayload_ReadU32(BlobBytes, Offset, Height)
+			&& WoTPayload_ReadU32(BlobBytes, Offset, Stored));
+		FWoTTexturePayloadMip ParsedMip = Entry->Mips[MipIndex];
+		ParsedMip.DataOffset = Offset;
+		Payload->Mips.Add(ParsedMip);
+		Offset += Stored;
+	}
+	return Payload;
+}
+}
+
+TSharedPtr<FWoTTexturePayloadData> WoTDecodeActivatedTexturePayload(
+	const FString& CacheKey, FString& OutRejectReason)
+{
 	const FWoTTexturePayloadEntry* Entry = nullptr;
 	FWoTTexturePayloadEntry ActivatedEntry;
 	FWoTRuntimeVerifiedObject VerifiedObject;
-#if !WOT_GUARDED_BOOTSTRAP
-	TArray<uint8> DeveloperBlobBytes;
-#endif
 	TConstArrayView<uint8> BlobBytes;
 	FString AuthenticatedSourcePackage;
 	FString AuthenticatedSourceExport;
 	FWoTSha256 AuthenticatedSourceSha;
 
-	auto Reject = [this, &CacheKey](const FString& Reason)
+	auto Reject = [&OutRejectReason](const FString& Reason)
 	{
-		RejectedBlobKeys.Add(CacheKey);
-		UE_LOG(LogWoTPayload, Warning,
-			TEXT("Rejecting texture payload %s: %s"), *CacheKey, *Reason);
+		OutRejectReason = Reason;
 	};
 
-	if (bPayloadActivated || bActivationRead)
-	{
 	if (!CacheKey.StartsWith(
 			TEXT("cache/texture/"), ESearchCase::CaseSensitive))
 	{
@@ -3266,15 +3357,77 @@ UWoTPayloadSubsystem::LoadTexturePayloadInternal(
 	}
 	Entry = &ActivatedEntry;
 	BlobBytes = VerifiedObject.Payload();
+	TSharedPtr<FWoTTexturePayloadData> Payload = WoTPayload_DecodeTextureBlob(
+		Entry, BlobBytes, AuthenticatedSourcePackage, AuthenticatedSourceExport,
+		AuthenticatedSourceSha, OutRejectReason);
+	// A retail-family build reads textures before bPayloadActivated is set, and
+	// the cached entry is what every later consumer (the front-end scene) gets:
+	// it must own its verified bytes, not just the mip layout.
+	if (Payload.IsValid())
+	{
+		Payload->VerifiedObject.Emplace(MoveTemp(VerifiedObject));
+	}
+	return Payload;
+}
+
+TSharedPtr<const FWoTTexturePayloadData> UWoTPayloadSubsystem::LoadTexturePayload(
+	const FString& CacheKey)
+{
+	return LoadTexturePayloadInternal(CacheKey, false);
+}
+
+TSharedPtr<const FWoTTexturePayloadData>
+UWoTPayloadSubsystem::LoadTexturePayloadForRetailBuildContext(
+	const FString& CacheKey)
+{
+	return LoadTexturePayloadInternal(CacheKey, true);
+}
+
+TSharedPtr<const FWoTTexturePayloadData>
+UWoTPayloadSubsystem::LoadTexturePayloadInternal(
+	const FString& CacheKey, bool bAllowActivatingGeneration)
+{
+	const bool bActivationRead = bAllowActivatingGeneration
+		&& ActiveCacheLease.IsValid() && ActiveCacheLease->IsValid()
+		&& IsWoTPayloadBootstrapActive()
+		&& FWoTRuntimeRegistry::Get().SharesSnapshotWith(*ActiveCacheLease);
+	if (((!bInjectionEnabled || !bManifestReady) && !bActivationRead)
+		|| !IsInGameThread())
+	{
+		return nullptr;
+	}
+	if (const TSharedPtr<const FWoTTexturePayloadData>* Existing =
+		LoadedTexturePayloads.Find(CacheKey))
+	{
+		return *Existing;
+	}
+	if (RejectedBlobKeys.Contains(CacheKey))
+	{
+		return nullptr;
+	}
+
+	auto Reject = [this, &CacheKey](const FString& Reason)
+	{
+		RejectedBlobKeys.Add(CacheKey);
+		UE_LOG(LogWoTPayload, Warning,
+			TEXT("Rejecting texture payload %s: %s"), *CacheKey, *Reason);
+	};
+
+	TSharedPtr<FWoTTexturePayloadData> Payload;
+	FString RejectReason;
+	if (bPayloadActivated || bActivationRead)
+	{
+		Payload = WoTDecodeActivatedTexturePayload(CacheKey, RejectReason);
 	}
 #if !WOT_GUARDED_BOOTSTRAP
 	else
 	{
-		Entry = TextureEntries.Find(CacheKey);
+		const FWoTTexturePayloadEntry* Entry = TextureEntries.Find(CacheKey);
 		if (!Entry)
 		{
 			return nullptr;
 		}
+		TArray<uint8> DeveloperBlobBytes;
 		FString BlobReadError;
 		const FString BlobFilename =
 			FPaths::Combine(CacheDirectory, Entry->BlobPath);
@@ -3294,176 +3447,182 @@ UWoTPayloadSubsystem::LoadTexturePayloadInternal(
 			Reject(TEXT("blob SHA-256 does not match the developer manifest"));
 			return nullptr;
 		}
-		BlobBytes = DeveloperBlobBytes;
-	}
-#endif
-	if (Entry == nullptr)
-	{
-		return nullptr;
-	}
-
-	constexpr uint8 ExpectedMagic[8] = {
-		'W', 'O', 'T', 'P', 'T', 'E', 'X', 0
-	};
-	if (BlobBytes.Num() < 8
-		|| FMemory::Memcmp(BlobBytes.GetData(), ExpectedMagic, 8) != 0)
-	{
-		Reject(TEXT("truncated or invalid texture magic"));
-		return nullptr;
-	}
-	uint64 Offset = 8;
-	uint16 EncodingVersion = 0;
-	uint16 Flags = 0;
-	uint32 PaletteColors = 0;
-	uint32 MipCount = 0;
-	if (!WoTPayload_ReadU16(BlobBytes, Offset, EncodingVersion)
-		|| !WoTPayload_ReadU16(BlobBytes, Offset, Flags)
-		|| !WoTPayload_ReadU32(BlobBytes, Offset, PaletteColors)
-		|| !WoTPayload_ReadU32(BlobBytes, Offset, MipCount)
-		|| EncodingVersion != 1 || (Flags & ~1u) != 0
-		|| PaletteColors != 256 || MipCount == 0
-		|| MipCount > WoTPayload_MaxTextureMips
-		|| MipCount != static_cast<uint32>(Entry->Mips.Num())
-		|| static_cast<bool>(Flags & 1u) != Entry->bMasked)
-	{
-		Reject(TEXT("texture header disagrees with version-1 manifest metadata"));
-		return nullptr;
-	}
-
-	uint64 PaletteBytes = 0;
-	uint64 PaletteEnd = 0;
-	if (!WoTPayload_CheckedMultiply(PaletteColors, 4, PaletteBytes)
-		|| !WoTPayload_CheckedAdd(Offset, PaletteBytes, PaletteEnd)
-		|| PaletteEnd > static_cast<uint64>(BlobBytes.Num()))
-	{
-		Reject(TEXT("texture palette is truncated"));
-		return nullptr;
-	}
-
-	// Validate the complete base-derived mip chain, exact byte sizes, manifest
-	// agreement, and blob ranges before sizing palette/mip/output buffers.
-	Offset = PaletteEnd;
-	for (uint32 MipIndex = 0; MipIndex < MipCount; ++MipIndex)
-	{
-		uint32 Width = 0;
-		uint32 Height = 0;
-		uint32 Stored = 0;
-		if (!WoTPayload_ReadU32(BlobBytes, Offset, Width)
-			|| !WoTPayload_ReadU32(BlobBytes, Offset, Height)
-			|| !WoTPayload_ReadU32(BlobBytes, Offset, Stored))
+		Payload = WoTPayload_DecodeTextureBlob(Entry, DeveloperBlobBytes,
+			FString(), FString(), FWoTSha256(), RejectReason);
+		if (Payload.IsValid())
 		{
-			Reject(FString::Printf(TEXT("texture mip %u header is truncated"), MipIndex));
-			return nullptr;
+			Payload->BlobBytes = MoveTemp(DeveloperBlobBytes);
 		}
-		const FWoTTexturePayloadMip& ManifestMip = Entry->Mips[MipIndex];
-		uint64 DataEnd = 0;
-		if (!WoTPayload_ValidateTextureMipLayout(
-				Entry->Mips[0].Width, Entry->Mips[0].Height, MipIndex,
-				Width, Height, Stored, ManifestMip.ExpandedByteLength)
-			|| Width != ManifestMip.Width || Height != ManifestMip.Height
-			|| Stored != ManifestMip.StoredByteLength
-			|| !WoTPayload_CheckedAdd(Offset, Stored, DataEnd)
-			|| DataEnd > static_cast<uint64>(BlobBytes.Num()))
-		{
-			Reject(FString::Printf(
-				TEXT("texture mip %u is invalid, truncated, or disagrees with the manifest"),
-				MipIndex));
-			return nullptr;
-		}
-		Offset = DataEnd;
 	}
-	if (Offset != static_cast<uint64>(BlobBytes.Num()))
-	{
-		Reject(TEXT("texture blob has trailing structural bytes"));
-		return nullptr;
-	}
-
-	TSharedRef<FWoTTexturePayloadData> Payload = MakeShared<FWoTTexturePayloadData>();
-	Payload->bMasked = Entry->bMasked;
-	Payload->Format = 0;
-	Payload->AnimNext = Entry->AnimNext;
-	Payload->MinFrameRate = Entry->MinFrameRate;
-	Payload->MaxFrameRate = Entry->MaxFrameRate;
-	Payload->PrimeCount = Entry->PrimeCount;
-	Payload->SourcePackage = AuthenticatedSourcePackage;
-	Payload->SourceExport = AuthenticatedSourceExport;
-	Payload->SourceSha256 = AuthenticatedSourceSha;
-	Payload->Palette.Reserve(256);
-	Offset = 8 + 2 + 2 + 4 + 4;
-	for (uint32 PaletteIndex = 0; PaletteIndex < PaletteColors; ++PaletteIndex)
-	{
-		const int32 ColorOffset = static_cast<int32>(Offset + PaletteIndex * 4ull);
-		Payload->Palette.Emplace(
-			BlobBytes[ColorOffset + 0], BlobBytes[ColorOffset + 1],
-			BlobBytes[ColorOffset + 2], BlobBytes[ColorOffset + 3]);
-	}
-	Offset = PaletteEnd;
-	Payload->Mips.Reserve(static_cast<int32>(MipCount));
-	for (uint32 MipIndex = 0; MipIndex < MipCount; ++MipIndex)
-	{
-		uint32 Width = 0;
-		uint32 Height = 0;
-		uint32 Stored = 0;
-		verify(WoTPayload_ReadU32(BlobBytes, Offset, Width)
-			&& WoTPayload_ReadU32(BlobBytes, Offset, Height)
-			&& WoTPayload_ReadU32(BlobBytes, Offset, Stored));
-		FWoTTexturePayloadMip ParsedMip = Entry->Mips[MipIndex];
-		ParsedMip.DataOffset = Offset;
-		Payload->Mips.Add(ParsedMip);
-		Offset += Stored;
-	}
-	// A retail-family build reads textures before bPayloadActivated is set, and
-	// the cached entry is what every later consumer (the front-end scene) gets:
-	// it must own its verified bytes, not just the mip layout.
-	if (bPayloadActivated || bActivationRead)
-	{
-		Payload->VerifiedObject.Emplace(MoveTemp(VerifiedObject));
-	}
-#if !WOT_GUARDED_BOOTSTRAP
+#else
 	else
 	{
-		Payload->BlobBytes = MoveTemp(DeveloperBlobBytes);
+		return nullptr;
 	}
 #endif
+	if (!Payload.IsValid())
+	{
+		Reject(RejectReason);
+		return nullptr;
+	}
 	TSharedPtr<const FWoTTexturePayloadData> Result = Payload;
 	LoadedTexturePayloads.Add(CacheKey, Result);
 	return Result;
 }
 
-TSharedPtr<const FWoTSoundPayloadData> UWoTPayloadSubsystem::LoadSoundPayload(
-	const FString& CacheKey)
+namespace
 {
-	if (!bInjectionEnabled || !bManifestReady || !IsInGameThread())
+// The structural WAV decode shared by the activated and developer paths of
+// UWoTPayloadSubsystem::LoadSoundPayload. Null, with the rejection reason,
+// when the blob disagrees with its entry.
+TSharedPtr<FWoTSoundPayloadData> WoTPayload_DecodeSoundBlob(
+	const FWoTSoundPayloadEntry* Entry, TConstArrayView<uint8> BlobBytes,
+	TArray<FWoTSoundPayloadData::FLoop>& HeaderLoops, FString& OutRejectReason)
+{
+	auto Reject = [&OutRejectReason](const FString& Reason)
 	{
+		OutRejectReason = Reason;
+	};
+
+	if (BlobBytes.Num() < 12
+		|| FMemory::Memcmp(BlobBytes.GetData(), "RIFF", 4) != 0
+		|| FMemory::Memcmp(BlobBytes.GetData() + 8, "WAVE", 4) != 0)
+	{
+		Reject(TEXT("invalid WAV RIFF header"));
 		return nullptr;
 	}
-	if (const TSharedPtr<const FWoTSoundPayloadData>* Existing =
-		LoadedSoundPayloads.Find(CacheKey))
+	uint64 RiffSizeOffset = 4;
+	uint32 RiffSize = 0;
+	if (!WoTPayload_ReadU32(BlobBytes, RiffSizeOffset, RiffSize)
+		|| static_cast<uint64>(RiffSize) + 8 != static_cast<uint64>(BlobBytes.Num()))
 	{
-		return *Existing;
-	}
-	if (RejectedBlobKeys.Contains(CacheKey))
-	{
+		Reject(TEXT("WAV RIFF length disagrees with the authenticated blob size"));
 		return nullptr;
 	}
+
+	bool bHasFormat = false;
+	bool bHasData = false;
+	uint16 FormatTag = 0;
+	uint16 Channels = 0;
+	uint32 SampleRate = 0;
+	uint32 ByteRate = 0;
+	uint16 BlockAlign = 0;
+	uint16 BitsPerSample = 0;
+	uint64 DataOffset = 0;
+	uint64 DataLength = 0;
+	uint64 Offset = 12;
+	while (Offset < static_cast<uint64>(BlobBytes.Num()))
+	{
+		uint64 ChunkHeaderEnd = 0;
+		if (!WoTPayload_CheckedAdd(Offset, 8, ChunkHeaderEnd)
+			|| ChunkHeaderEnd > static_cast<uint64>(BlobBytes.Num()))
+		{
+			Reject(TEXT("truncated WAV chunk header"));
+			return nullptr;
+		}
+		const uint8* ChunkID = BlobBytes.GetData() + static_cast<int32>(Offset);
+		uint64 ChunkSizeOffset = Offset + 4;
+		uint32 ChunkSize = 0;
+		uint64 ChunkEnd = 0;
+		uint64 PaddedEnd = 0;
+		if (!WoTPayload_ReadU32(BlobBytes, ChunkSizeOffset, ChunkSize)
+			|| !WoTPayload_CheckedAdd(ChunkHeaderEnd, ChunkSize, ChunkEnd)
+			|| !WoTPayload_CheckedAdd(ChunkEnd, ChunkSize & 1u, PaddedEnd)
+			|| PaddedEnd > static_cast<uint64>(BlobBytes.Num()))
+		{
+			Reject(TEXT("truncated WAV chunk payload"));
+			return nullptr;
+		}
+
+		if (FMemory::Memcmp(ChunkID, "fmt ", 4) == 0)
+		{
+			if (bHasFormat || ChunkSize < 16)
+			{
+				Reject(TEXT("WAV has a duplicate or short fmt chunk"));
+				return nullptr;
+			}
+			uint64 FormatOffset = ChunkHeaderEnd;
+			if (!WoTPayload_ReadU16(BlobBytes, FormatOffset, FormatTag)
+				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, Channels)
+				|| !WoTPayload_ReadU32(BlobBytes, FormatOffset, SampleRate)
+				|| !WoTPayload_ReadU32(BlobBytes, FormatOffset, ByteRate)
+				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, BlockAlign)
+				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, BitsPerSample))
+			{
+				Reject(TEXT("WAV fmt chunk is truncated"));
+				return nullptr;
+			}
+			bHasFormat = true;
+		}
+		else if (FMemory::Memcmp(ChunkID, "data", 4) == 0)
+		{
+			if (bHasData)
+			{
+				Reject(TEXT("WAV has duplicate data chunks"));
+				return nullptr;
+			}
+			bHasData = true;
+			DataOffset = ChunkHeaderEnd;
+			DataLength = ChunkSize;
+		}
+		Offset = PaddedEnd;
+	}
+
+	uint64 ExpectedBlockAlign = 0;
+	uint64 ExpectedByteRate = 0;
+	uint64 FrameCount = 0;
+	if (!bHasFormat || !bHasData || FormatTag != 1
+		|| Channels < 1 || Channels > 8
+		|| SampleRate < 1 || SampleRate > 384000
+		|| (BitsPerSample != 8 && BitsPerSample != 16)
+		|| !WoTPayload_CheckedMultiply(Channels, BitsPerSample / 8,
+			ExpectedBlockAlign)
+		|| BlockAlign != ExpectedBlockAlign
+		|| !WoTPayload_CheckedMultiply(SampleRate, BlockAlign, ExpectedByteRate)
+		|| ByteRate != ExpectedByteRate
+		|| DataLength % BlockAlign != 0)
+	{
+		Reject(TEXT("WAV PCM structure is invalid or unsupported"));
+		return nullptr;
+	}
+	FrameCount = DataLength / BlockAlign;
+	if (FormatTag != Entry->PCMFormatTag || Channels != Entry->Channels
+		|| SampleRate != Entry->SampleRate
+		|| BitsPerSample != Entry->BitsPerSample
+		|| FrameCount != Entry->FrameCount
+		|| DataLength != Entry->DataByteLength)
+	{
+		Reject(TEXT("parsed WAV PCM metadata disagrees with the manifest"));
+		return nullptr;
+	}
+
+	TSharedRef<FWoTSoundPayloadData> Payload = MakeShared<FWoTSoundPayloadData>();
+	Payload->Channels = Channels;
+	Payload->SampleRate = SampleRate;
+	Payload->BitsPerSample = BitsPerSample;
+	Payload->FrameCount = FrameCount;
+	Payload->Loops = MoveTemp(HeaderLoops);
+	Payload->PCMBytes.Append(
+		BlobBytes.GetData() + static_cast<int32>(DataOffset),
+		static_cast<int32>(DataLength));
+	return Payload;
+}
+}
+
+TSharedPtr<FWoTSoundPayloadData> WoTDecodeActivatedSoundPayload(
+	const FString& CacheKey, FString& OutRejectReason)
+{
 	const FWoTSoundPayloadEntry* Entry = nullptr;
 	FWoTSoundPayloadEntry ActivatedEntry;
 	FWoTRuntimeVerifiedObject VerifiedObject;
-#if !WOT_GUARDED_BOOTSTRAP
-	TArray<uint8> DeveloperBlobBytes;
-#endif
 	TConstArrayView<uint8> BlobBytes;
 	TArray<FWoTSoundPayloadData::FLoop> HeaderLoops;
 
-	auto Reject = [this, &CacheKey](const FString& Reason)
+	auto Reject = [&OutRejectReason](const FString& Reason)
 	{
-		RejectedBlobKeys.Add(CacheKey);
-		UE_LOG(LogWoTPayload, Warning,
-			TEXT("Rejecting sound payload %s: %s"), *CacheKey, *Reason);
+		OutRejectReason = Reason;
 	};
 
-	if (bPayloadActivated)
-	{
 	if (!CacheKey.StartsWith(
 			TEXT("cache/sound/"), ESearchCase::CaseSensitive))
 	{
@@ -3707,15 +3866,49 @@ TSharedPtr<const FWoTSoundPayloadData> UWoTPayloadSubsystem::LoadSoundPayload(
 	ActivatedEntry.DataByteLength = DataBytesFromHeader;
 	Entry = &ActivatedEntry;
 	BlobBytes = VerifiedObject.Payload();
+	return WoTPayload_DecodeSoundBlob(
+		Entry, BlobBytes, HeaderLoops, OutRejectReason);
+}
+
+TSharedPtr<const FWoTSoundPayloadData> UWoTPayloadSubsystem::LoadSoundPayload(
+	const FString& CacheKey)
+{
+	if (!bInjectionEnabled || !bManifestReady || !IsInGameThread())
+	{
+		return nullptr;
+	}
+	if (const TSharedPtr<const FWoTSoundPayloadData>* Existing =
+		LoadedSoundPayloads.Find(CacheKey))
+	{
+		return *Existing;
+	}
+	if (RejectedBlobKeys.Contains(CacheKey))
+	{
+		return nullptr;
+	}
+
+	auto Reject = [this, &CacheKey](const FString& Reason)
+	{
+		RejectedBlobKeys.Add(CacheKey);
+		UE_LOG(LogWoTPayload, Warning,
+			TEXT("Rejecting sound payload %s: %s"), *CacheKey, *Reason);
+	};
+
+	TSharedPtr<FWoTSoundPayloadData> Payload;
+	FString RejectReason;
+	if (bPayloadActivated)
+	{
+		Payload = WoTDecodeActivatedSoundPayload(CacheKey, RejectReason);
 	}
 #if !WOT_GUARDED_BOOTSTRAP
 	else
 	{
-		Entry = SoundEntries.Find(CacheKey);
+		const FWoTSoundPayloadEntry* Entry = SoundEntries.Find(CacheKey);
 		if (!Entry)
 		{
 			return nullptr;
 		}
+		TArray<uint8> DeveloperBlobBytes;
 		FString BlobReadError;
 		const FString BlobFilename =
 			FPaths::Combine(CacheDirectory, Entry->BlobPath);
@@ -3735,135 +3928,21 @@ TSharedPtr<const FWoTSoundPayloadData> UWoTPayloadSubsystem::LoadSoundPayload(
 			Reject(TEXT("blob SHA-256 does not match the developer manifest"));
 			return nullptr;
 		}
-		BlobBytes = DeveloperBlobBytes;
+		TArray<FWoTSoundPayloadData::FLoop> HeaderLoops;
+		Payload = WoTPayload_DecodeSoundBlob(
+			Entry, DeveloperBlobBytes, HeaderLoops, RejectReason);
+	}
+#else
+	else
+	{
+		return nullptr;
 	}
 #endif
-	if (Entry == nullptr)
+	if (!Payload.IsValid())
 	{
+		Reject(RejectReason);
 		return nullptr;
 	}
-
-	if (BlobBytes.Num() < 12
-		|| FMemory::Memcmp(BlobBytes.GetData(), "RIFF", 4) != 0
-		|| FMemory::Memcmp(BlobBytes.GetData() + 8, "WAVE", 4) != 0)
-	{
-		Reject(TEXT("invalid WAV RIFF header"));
-		return nullptr;
-	}
-	uint64 RiffSizeOffset = 4;
-	uint32 RiffSize = 0;
-	if (!WoTPayload_ReadU32(BlobBytes, RiffSizeOffset, RiffSize)
-		|| static_cast<uint64>(RiffSize) + 8 != static_cast<uint64>(BlobBytes.Num()))
-	{
-		Reject(TEXT("WAV RIFF length disagrees with the authenticated blob size"));
-		return nullptr;
-	}
-
-	bool bHasFormat = false;
-	bool bHasData = false;
-	uint16 FormatTag = 0;
-	uint16 Channels = 0;
-	uint32 SampleRate = 0;
-	uint32 ByteRate = 0;
-	uint16 BlockAlign = 0;
-	uint16 BitsPerSample = 0;
-	uint64 DataOffset = 0;
-	uint64 DataLength = 0;
-	uint64 Offset = 12;
-	while (Offset < static_cast<uint64>(BlobBytes.Num()))
-	{
-		uint64 ChunkHeaderEnd = 0;
-		if (!WoTPayload_CheckedAdd(Offset, 8, ChunkHeaderEnd)
-			|| ChunkHeaderEnd > static_cast<uint64>(BlobBytes.Num()))
-		{
-			Reject(TEXT("truncated WAV chunk header"));
-			return nullptr;
-		}
-		const uint8* ChunkID = BlobBytes.GetData() + static_cast<int32>(Offset);
-		uint64 ChunkSizeOffset = Offset + 4;
-		uint32 ChunkSize = 0;
-		uint64 ChunkEnd = 0;
-		uint64 PaddedEnd = 0;
-		if (!WoTPayload_ReadU32(BlobBytes, ChunkSizeOffset, ChunkSize)
-			|| !WoTPayload_CheckedAdd(ChunkHeaderEnd, ChunkSize, ChunkEnd)
-			|| !WoTPayload_CheckedAdd(ChunkEnd, ChunkSize & 1u, PaddedEnd)
-			|| PaddedEnd > static_cast<uint64>(BlobBytes.Num()))
-		{
-			Reject(TEXT("truncated WAV chunk payload"));
-			return nullptr;
-		}
-
-		if (FMemory::Memcmp(ChunkID, "fmt ", 4) == 0)
-		{
-			if (bHasFormat || ChunkSize < 16)
-			{
-				Reject(TEXT("WAV has a duplicate or short fmt chunk"));
-				return nullptr;
-			}
-			uint64 FormatOffset = ChunkHeaderEnd;
-			if (!WoTPayload_ReadU16(BlobBytes, FormatOffset, FormatTag)
-				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, Channels)
-				|| !WoTPayload_ReadU32(BlobBytes, FormatOffset, SampleRate)
-				|| !WoTPayload_ReadU32(BlobBytes, FormatOffset, ByteRate)
-				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, BlockAlign)
-				|| !WoTPayload_ReadU16(BlobBytes, FormatOffset, BitsPerSample))
-			{
-				Reject(TEXT("WAV fmt chunk is truncated"));
-				return nullptr;
-			}
-			bHasFormat = true;
-		}
-		else if (FMemory::Memcmp(ChunkID, "data", 4) == 0)
-		{
-			if (bHasData)
-			{
-				Reject(TEXT("WAV has duplicate data chunks"));
-				return nullptr;
-			}
-			bHasData = true;
-			DataOffset = ChunkHeaderEnd;
-			DataLength = ChunkSize;
-		}
-		Offset = PaddedEnd;
-	}
-
-	uint64 ExpectedBlockAlign = 0;
-	uint64 ExpectedByteRate = 0;
-	uint64 FrameCount = 0;
-	if (!bHasFormat || !bHasData || FormatTag != 1
-		|| Channels < 1 || Channels > 8
-		|| SampleRate < 1 || SampleRate > 384000
-		|| (BitsPerSample != 8 && BitsPerSample != 16)
-		|| !WoTPayload_CheckedMultiply(Channels, BitsPerSample / 8,
-			ExpectedBlockAlign)
-		|| BlockAlign != ExpectedBlockAlign
-		|| !WoTPayload_CheckedMultiply(SampleRate, BlockAlign, ExpectedByteRate)
-		|| ByteRate != ExpectedByteRate
-		|| DataLength % BlockAlign != 0)
-	{
-		Reject(TEXT("WAV PCM structure is invalid or unsupported"));
-		return nullptr;
-	}
-	FrameCount = DataLength / BlockAlign;
-	if (FormatTag != Entry->PCMFormatTag || Channels != Entry->Channels
-		|| SampleRate != Entry->SampleRate
-		|| BitsPerSample != Entry->BitsPerSample
-		|| FrameCount != Entry->FrameCount
-		|| DataLength != Entry->DataByteLength)
-	{
-		Reject(TEXT("parsed WAV PCM metadata disagrees with the manifest"));
-		return nullptr;
-	}
-
-	TSharedRef<FWoTSoundPayloadData> Payload = MakeShared<FWoTSoundPayloadData>();
-	Payload->Channels = Channels;
-	Payload->SampleRate = SampleRate;
-	Payload->BitsPerSample = BitsPerSample;
-	Payload->FrameCount = FrameCount;
-	Payload->Loops = MoveTemp(HeaderLoops);
-	Payload->PCMBytes.Append(
-		BlobBytes.GetData() + static_cast<int32>(DataOffset),
-		static_cast<int32>(DataLength));
 	TSharedPtr<const FWoTSoundPayloadData> Result = Payload;
 	LoadedSoundPayloads.Add(CacheKey, Result);
 	return Result;

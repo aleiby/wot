@@ -22,11 +22,19 @@ import windows_launcher
 import build_stripped_pak as stripped_pak
 
 
+def _repo_tmp() -> Path:
+    """The ignored .tmp folder in the checkout (kept off the system temp
+    volume); a fresh clone does not have it yet."""
+    path = Path.cwd() / ".tmp"
+    path.mkdir(exist_ok=True)
+    return path
+
+
 @unittest.skipUnless(os.name == "nt", "the launcher is a Win64 executable")
 class WindowsLauncherTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(
-            prefix="wot launcher tests ", dir=Path.cwd() / ".tmp")
+            prefix="wot launcher tests ", dir=_repo_tmp())
         self.root = Path(self.temporary.name) / "Install Root With Spaces" / "WoT Reborn"
         staged = self.root / "Game"
         self.child = windows_launcher.build_test_stub(

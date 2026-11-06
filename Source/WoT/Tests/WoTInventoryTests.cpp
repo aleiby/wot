@@ -5939,7 +5939,7 @@ bool FWoTTracerTargetingTest::RunTest(const FString&)
 
 // Audio attenuation (WoTSound): the UE1 sound model — WorldSoundRadius byte
 // conversion, the cached linear-falloff attenuation, and per-class projectile
-// sound-radius overrides. See PORT_NOTES "Audio attenuation pass".
+// sound-radius overrides. See PORT_NOTES "Default sound radius".
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSoundAttenuationTest,
 	"WoT.Feel.SoundAttenuation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)

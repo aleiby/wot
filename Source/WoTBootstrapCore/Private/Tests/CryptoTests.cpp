@@ -235,6 +235,7 @@ bool FWoTCryptoFramingSpec::RunTest(const FString&)
 			EWoTSignatureContext::ReleaseKeyRingV1, EWoTSignatureContext::FullPackageV1,
 			EWoTSignatureContext::RecoveryDomainV1, EWoTSignatureContext::ReleaseManifestV2,
 			EWoTSignatureContext::InstalledTreeV1, EWoTSignatureContext::CacheContractV3,
+			EWoTSignatureContext::CacheLineageV1,
 		};
 		TSet<FString> Distinct;
 		TSet<FString> Names;
@@ -244,8 +245,8 @@ bool FWoTCryptoFramingSpec::RunTest(const FString&)
 			Distinct.Add(BytesToHex(Bytes.GetData(), Bytes.Num()));
 			Names.Add(LexToString(Context));
 		}
-		TestEqual(TEXT("all eight contexts frame differently"), Distinct.Num(), 8);
-		TestEqual(TEXT("all eight contexts are named uniquely"), Names.Num(), 8);
+		TestEqual(TEXT("all nine contexts frame differently"), Distinct.Num(), 9);
+		TestEqual(TEXT("all nine contexts are named uniquely"), Names.Num(), 9);
 	}
 
 	// Length is framed explicitly, so two payloads cannot be spliced into one input.

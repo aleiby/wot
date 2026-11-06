@@ -1,7 +1,7 @@
 """Rig-drift correction for retail captures (2026-07-14 discovery).
 
-The Windows capture rig drifted bright-in-darks vs the archived goldens
-(PORT_NOTES "Retail capture rig drift"): darks/mids +10..+18 luma, ~0 above
+The Windows capture rig drifted bright-in-darks vs the archived goldens:
+darks/mids +10..+18 luma, ~0 above
 p95. This tool builds a per-channel quantile-mapping LUT from a (fresh
 recapture of an archived golden pose, archived golden PNG) pair and applies
 it to any capture taken on the drifted rig, mapping it into golden space so

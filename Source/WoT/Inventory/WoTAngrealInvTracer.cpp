@@ -88,7 +88,7 @@ AActor* AWoTAngrealInvTracer::GetBestTarget()
 		// The executable .uc iterates the complete PawnList including Owner
 		// (a zero-cost self-target when the caster carries a seal), but its
 		// "ignore your own seal" prose is honored as a RULED divergence
-		// (PORT_NOTES Tracer wave) — both backend arms keep the owner skip
+		// (PORT_NOTES "Tracer ignores the caster's own seals") — both backend arms keep the owner skip
 		// until the divergence audit re-adjudicates it.
 		for (TActorIterator<AWoTCharacter> It(GetWorld()); It; ++It)
 		{

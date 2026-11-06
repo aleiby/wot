@@ -74,14 +74,25 @@ struct FWoTCacheBuildResult
 WOTRETAILREADER_API FWoTSha256 ComputeRetailContractIdentity(
 	const FWoTRetailContract& Contract);
 
-/** Parse the production-descriptor pin compiled into CacheBuilder.cpp. */
-WOTRETAILREADER_API TWoTBootstrapResult<FWoTSha256>
-GetCacheExpectedProductionDescriptorSha256();
+/** The cache content revision compiled into this binary. It changes only when
+ * the bytes or formats a cache build produces change. */
+WOTRETAILREADER_API uint32 GetCacheContentRevision();
 
-/** Exact reviewed contract/descriptor pair that requires entry-sidecar authority. */
+/** The cache content label of one revision. Revision 1 is the digest the first
+ * public release recorded; later revisions hash a fixed domain and the
+ * revision. Revision 0 is an error. */
+WOTRETAILREADER_API TWoTBootstrapResult<FWoTSha256> ComputeCacheContentLabel(
+	uint32 Revision);
+
+/** The label this binary records in a fresh cache and requires of a current
+ * one, stored in the manifest's production_descriptor_sha256 field. */
+WOTRETAILREADER_API TWoTBootstrapResult<FWoTSha256> GetCacheContentLabel();
+
+/** Exact reviewed contract identity and cache content label that require
+ * entry-sidecar authority. */
 WOTRETAILREADER_API bool IsCurrentProductionCacheBuildIdentity(
 	const FWoTSha256& ContractSha256,
-	const FWoTSha256& ProductionDescriptorSha256);
+	const FWoTSha256& RecordedContentLabel);
 
 namespace WoT::Retail::Detail
 {
@@ -114,6 +125,10 @@ WOTRETAILREADER_API FWoTBootstrapStatus ValidateCacheProductionDescriptorForTest
 
 /** The standalone test runner publishes its exact command-line descriptor here. */
 WOTRETAILREADER_API void SetCacheProductionDescriptorPathForTesting(FString Path);
+
+/** Replace the compiled descriptor pin used by the final exact-document check;
+ * an empty value restores the compiled pin. */
+WOTRETAILREADER_API void SetCacheProductionDescriptorPinForTesting(FString HexOrEmpty);
 
 /** Load the runner-published descriptor, or the checked-in default when unset. */
 WOTRETAILREADER_API TWoTBootstrapResult<TArray<uint8>>

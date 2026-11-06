@@ -40,6 +40,7 @@ class FakeRunner:
         self.previous_notes = previous_notes
         self.created_release_notes = None
         self.created_release_notes_asset = None
+        self.created_player_downloads = {}
 
     def __call__(self, command):
         command = list(command)
@@ -83,6 +84,10 @@ class FakeRunner:
                               if Path(value).name == formats.RELEASE_NOTES_ASSET), None)
                 if asset is not None:
                     self.created_release_notes_asset = asset.read_bytes()
+                for value in command:
+                    path = Path(value)
+                    if path.name in formats.PLAYER_DOWNLOAD_ASSETS.values():
+                        self.created_player_downloads[path.name] = path.read_bytes()
                 return done()
             if verb == ["release", "view"]:
                 return done(stdout=json.dumps({"assets": self.uploaded, "isDraft": True,
@@ -119,7 +124,19 @@ class PublishReleaseTests(unittest.TestCase):
             "digest": "sha256:" + __import__("hashlib").sha256(
                 cls.empty_notes).hexdigest(),
         }
-        cls.union_assets = [*cls.assets, cls.notes_row]
+        cls.player_sources = {
+            formats.PLAYER_DOWNLOAD_ASSETS["Win64"]:
+                cls.set / formats.guarded_install_zip_asset(
+                    "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION),
+            formats.PLAYER_DOWNLOAD_ASSETS["Mac"]:
+                cls.set / formats.guarded_install_dmg_asset(
+                    fixtures.COMMIT, formats.SHIPPING_CONFIGURATION),
+        }
+        cls.player_rows = [
+            {"name": fixed_name, "size": source.stat().st_size,
+             "digest": "sha256:" + formats.sha256_file(source)[0]}
+            for fixed_name, source in sorted(cls.player_sources.items())]
+        cls.union_assets = [*cls.assets, *cls.player_rows, cls.notes_row]
         cls.previous_directory = cls.fixture.root / "previous-zero"
         cls.previous_directory.mkdir()
         for platform in formats.PLATFORMS:
@@ -151,17 +168,19 @@ class PublishReleaseTests(unittest.TestCase):
 
     def test_release_notes_carry_install_steps(self):
         commit = "0" * 40
-        downloads = {"Mac": f"WoT-Mac-guarded-shipping-{commit}.dmg",
-                     "Win64": f"WoT-Win64-guarded-shipping-{commit}.zip"}
+        sources = {"Mac": f"WoT-Mac-guarded-shipping-{commit}.dmg",
+                   "Win64": f"WoT-Win64-guarded-shipping-{commit}.zip"}
 
         def verified(platforms, *, notarized=False):
             return types.SimpleNamespace(
                 platforms={name: types.SimpleNamespace(
                     configuration=formats.SHIPPING_CONFIGURATION,
-                    dmg_notarized=(notarized if name == "Mac" else None))
+                    dmg_notarized=(notarized if name == "Mac" else None),
+                    install_zip=(sources[name] if name == "Win64" else None),
+                    dmg=(sources[name] if name == "Mac" else None))
                            for name in platforms},
                 release_sequence=0, build_commit=commit,
-                assets={downloads[name]: {"size": 1, "sha256": "0" * 64}
+                assets={sources[name]: {"size": 1, "sha256": "0" * 64}
                         for name in platforms})
         mac_notes = publish_release.release_notes(
             verified(("Mac", "Win64")), "0.1.0",
@@ -171,18 +190,15 @@ class PublishReleaseTests(unittest.TestCase):
             "- Added one thing.\n- Fixed another.\n"
             "<!-- wot-whats-new:end -->\n\nWoT Reborn 0.1.0"))
         # One download per platform, named; GitHub already lists every asset.
-        self.assertIn(f"- **Mac:** {downloads['Mac']}", mac_notes)
-        self.assertIn(f"- **Windows:** {downloads['Win64']}", mac_notes)
+        self.assertIn("- **Mac:** WoT-Reborn-Mac.dmg", mac_notes)
+        self.assertIn("- **Windows:** WoT-Reborn-Windows.zip", mac_notes)
         self.assertNotIn("| asset |", mac_notes)
         self.assertNotIn("0" * 64, mac_notes)
-        self.assertIn("guarded-shipping", mac_notes)
+        self.assertNotIn("guarded-shipping", mac_notes)
         self.assertIn("https://github.com/aleiby/wot#playing", mac_notes)
         # The README is the one place that names a store.
         self.assertNotIn("gog", mac_notes.casefold())
-        self.assertIn(
-            "WoT-Mac-guarded-shipping-0000000000000000000000000000000000000000.dmg",
-            mac_notes,
-        )
+        self.assertIn("Open WoT-Reborn-Mac.dmg", mac_notes)
         normalized_mac_notes = " ".join(mac_notes.split())
         self.assertIn(
             "drag WoT.app to Applications",
@@ -215,6 +231,23 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertNotIn("Open Anyway", notarized_notes)
         self.assertNotIn("not notarized", notarized_notes)
         self.assertIn("Always Allow", notarized_notes)
+        # A deliberate Test publication has no fixed-name copies, so its notes
+        # name the commit-named DMG it does carry.
+        test_sources = {"Mac": f"WoT-Mac-guarded-{commit}.dmg",
+                        "Win64": f"WoT-Win64-guarded-{commit}.zip"}
+        test_set = types.SimpleNamespace(
+            platforms={name: types.SimpleNamespace(
+                configuration="Test",
+                dmg_notarized=(True if name == "Mac" else None),
+                install_zip=(test_sources[name] if name == "Win64" else None),
+                dmg=(test_sources[name] if name == "Mac" else None))
+                       for name in ("Mac", "Win64")},
+            release_sequence=0, build_commit=commit,
+            assets={name: {"size": 1, "sha256": "0" * 64}
+                    for name in test_sources.values()})
+        test_notes = publish_release.release_notes(test_set, "0.1.0", "notes")
+        self.assertIn(f"Open WoT-Mac-guarded-{commit}.dmg", test_notes)
+        self.assertNotIn("WoT-Reborn-", test_notes)
 
     def test_dry_run_only_reads_git_and_prints_the_plan(self):
         runner = FakeRunner()
@@ -224,6 +257,8 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertIn("DRY RUN", text)
         self.assertIn("release create v0.1.0", text)
         self.assertIn("--draft", text)
+        self.assertIn("WoT-Reborn-Mac.dmg", text)
+        self.assertIn("WoT-Reborn-Windows.zip", text)
         self.assertIn("qualify_announcement_transport.py", text)
         self.assertEqual((receipt["mode"], receipt["outcome"]), ("dry-run", "planned"))
 
@@ -312,14 +347,35 @@ class PublishReleaseTests(unittest.TestCase):
             "- Added one thing.\n- Fixed another.\n"
             "<!-- wot-whats-new:end -->\n"))
         self.assertEqual(runner.created_release_notes_asset, self.empty_notes)
+        self.assertEqual(runner.created_player_downloads, {
+            name: source.read_bytes()
+            for name, source in self.player_sources.items()
+        })
         self.assertIn(formats.RELEASE_NOTES_ASSET,
                       [Path(value).name for value in create])
         self.assertEqual(sorted(Path(arg).name for arg in create
                                 if arg.startswith(str(self.set))),
                          sorted(asset["name"] for asset in self.assets))
+        # The signed cache lineage pairs ride along with the verified assets.
+        for platform in formats.PLATFORMS:
+            for suffix in ("", formats.SIGNATURE_SUFFIX):
+                self.assertIn(str(self.set / (formats.cache_lineage_asset(platform)
+                                              + suffix)), create)
+        self.assertEqual(
+            sorted(set(Path(arg).name for arg in create)
+                   & set(formats.PLAYER_DOWNLOAD_ASSETS.values())),
+            sorted(formats.PLAYER_DOWNLOAD_ASSETS.values()))
         edit = runner.calls[-1]
         self.assertEqual(edit[-2:], ["--draft=false", "--latest"])
         self.assertEqual(receipt["outcome"], "published")
+        self.assertEqual(receipt["player_downloads"], {
+            fixed_name: {
+                "source": source.name,
+                "sha256": formats.sha256_file(source)[0],
+                "size": source.stat().st_size,
+            }
+            for fixed_name, source in self.player_sources.items()
+        })
 
     def test_public_target_tags_the_export_commit_after_proving_the_release(self):
         public = "ab" * 20
@@ -329,6 +385,18 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         create = next(call for call in runner.calls if call[1:3] == ["release", "create"])
         self.assertEqual(create[create.index("--target") + 1], public)
+        self.assertEqual(receipt["outcome"], "published")
+
+    def test_publish_copies_player_downloads_when_hard_links_are_unavailable(self):
+        runner = FakeRunner(uploaded=self.union_assets)
+        with mock.patch.object(publish_release.os, "link", side_effect=OSError):
+            code, text, receipt = self.run_main(
+                runner, "--publish", "--confirm-tag", "v0.1.0")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(runner.created_player_downloads, {
+            name: source.read_bytes()
+            for name, source in self.player_sources.items()
+        })
         self.assertEqual(receipt["outcome"], "published")
 
     def test_public_target_still_requires_the_release_commit_at_head(self):
@@ -354,6 +422,51 @@ class PublishReleaseTests(unittest.TestCase):
             self.assertNotIn("release edit", runner.gh_verbs())
             self.assertIn("left unpublished", text)
             self.assertEqual(receipt["outcome"], "failed")
+
+    def test_a_mismatched_player_copy_is_never_made_latest(self):
+        fixed_name = formats.PLAYER_DOWNLOAD_ASSETS["Mac"]
+        fixed_index = next(index for index, row in enumerate(self.union_assets)
+                           if row["name"] == fixed_name)
+        for field, value in (("size", self.union_assets[fixed_index]["size"] + 1),
+                             ("digest", "sha256:" + "f" * 64)):
+            with self.subTest(field=field):
+                uploaded = [dict(asset) for asset in self.union_assets]
+                uploaded[fixed_index][field] = value
+                runner = FakeRunner(uploaded=uploaded)
+                code, text, receipt = self.run_main(
+                    runner, "--publish", "--confirm-tag", "v0.1.0")
+                self.assertEqual(code, 1)
+                self.assertNotIn("release edit", runner.gh_verbs())
+                self.assertIn(f"uploaded {fixed_name} differs", text)
+                self.assertEqual(receipt["outcome"], "failed")
+
+    def test_test_configuration_adds_no_fixed_player_downloads(self):
+        releases = {
+            platform: fixtures.write_guarded_release(
+                self.fixture.root / f"publish-test-{platform}", platform,
+                configuration=formats.TEST_CONFIGURATION)
+            for platform in formats.PLATFORMS
+        }
+        funnels = {
+            platform: fixtures.write_funnel_receipt(
+                self.fixture.root / "publish-test-funnel" / platform
+                / "funnel-receipt.json", release)
+            for platform, release in releases.items()
+        }
+        release_set = self.fixture.root / "publish-test-set"
+        self.fixture.sign(release_set, release_jsons=releases,
+                          funnel_receipts=funnels, allow_test=True)
+        test_assets = [
+            {"name": path.name, "size": path.stat().st_size,
+             "digest": "sha256:" + formats.sha256_file(path)[0]}
+            for path in sorted(release_set.iterdir())]
+        runner = FakeRunner(uploaded=[*test_assets, self.notes_row])
+        code, text, receipt = self.run_main(
+            runner, "--allow-test", "--release", f"Mac={releases['Mac']}",
+            "--publish", "--confirm-tag", "v0.1.0", directory=release_set)
+        self.assertEqual(code, 0, text)
+        self.assertEqual(runner.created_player_downloads, {})
+        self.assertEqual(receipt["player_downloads"], {})
 
     def test_existing_tag_or_rollback_stops_before_create(self):
         runner = FakeRunner(tag_exists=True, uploaded=self.union_assets)
@@ -451,6 +564,28 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertEqual(receipt["set"]["sequence_gate"], {
             "mode": "unproven", "platforms": {},
         })
+
+    def test_positive_sequence_plan_uploads_the_cache_lineage(self):
+        release_set = self.fixture.root / "publish-lineage-sequence-one"
+        self.fixture.sign(release_set, release_sequence=1, tag="v0.1.1-lineage")
+        verify = publish_release.verify_release.verify_publish_set
+        previous = {
+            platform: result.announcement for platform, result in verify(
+                self.set, trust=self.fixture.trust, compiled=self.fixture.compiled,
+                releases={"Mac": self.fixture.releases["Mac"]}).platforms.items()}
+        with contextlib.redirect_stderr(io.StringIO()):
+            verified = verify(
+                release_set, trust=self.fixture.trust, compiled=self.fixture.compiled,
+                previous=previous,
+                releases={"Mac": self.fixture.root / "sequence-1-Mac" / "release.json"})
+        plan = publish_release.build_plan(
+            verified, target=HEAD, repo=formats.REPOSITORY, title=None,
+            human_version="0.1.1", notes_text="- Added one thing.")
+        names = {path.name for path in plan.assets}
+        for platform in formats.PLATFORMS:
+            for suffix in ("", formats.SIGNATURE_SUFFIX):
+                self.assertIn(formats.cache_lineage_asset(platform) + suffix, names)
+        self.assertEqual(names, {path.name for path in release_set.iterdir()})
 
     def test_publish_refuses_replayed_sequence_receipt_and_test_twin(self):
         release_set = self.fixture.root / "publish-replay-sequence-two"

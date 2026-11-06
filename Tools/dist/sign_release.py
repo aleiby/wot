@@ -38,6 +38,11 @@ citation is repeated where release_formats implements it):
   * Mac DMG       the guarded first-install DMG plus canonical verification
     sidecar. These are copied unchanged and are asserted never to become the
     update manifest's archive.
+  * cache lineage WoT-<P>-cache-lineage-v1.json(.sig), the release key, context
+    CacheLineageV1: the content revision, label, installer, contract and cache
+    manifest digest that this platform's passing cache gate A receipt
+    (--cache-gate, cache_lineage.py gate) recorded for the Shipping zip being
+    signed. The next release's gate takes its reference from it.
 
 All JSON is canonical, every signature is produced by the OpenSSL CLI from a key
 PATH (Python never reads private-key bytes) and re-verified by the independent
@@ -60,6 +65,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cache_lineage  # noqa: E402
 import release_crypto as crypto  # noqa: E402
 import release_formats as formats  # noqa: E402
 import verify_release  # noqa: E402
@@ -225,6 +231,39 @@ def _check_funnel_receipts(releases: Dict[str, formats.GuardedRelease],
     return bound
 
 
+def _check_cache_gates(releases: Dict[str, formats.GuardedRelease],
+                       cache_gates: Dict[str, Path],
+                       release_sequence: int) -> Dict[str, dict]:
+    """One passing gate A receipt per platform, for the Shipping zip being signed,
+    whose reference is the immediately previous release (sequence N-1; a sequence-0
+    set compares against sequence 0). An older reference could let a revision bump
+    hide changed cache bytes."""
+    expected_reference = max(release_sequence - 1, 0)
+    if sorted(cache_gates) != sorted(releases):
+        raise SignError(
+            "sign needs one --cache-gate PLATFORM=PATH per platform in the set "
+            f"({', '.join(sorted(releases))}); got "
+            f"{', '.join(sorted(cache_gates)) or 'none'}")
+    gates: Dict[str, dict] = {}
+    for platform, release in sorted(releases.items()):
+        try:
+            gate = cache_lineage.load_gate_receipt(cache_gates[platform], platform)
+        except cache_lineage.GateError as exc:
+            raise SignError(f"{platform}: {exc}") from exc
+        if gate["candidate"]["release_asset_sha256"] != release.document["sha256"]:
+            raise SignError(
+                f"{platform}: the cache gate receipt proved the Shipping asset "
+                f"{gate['candidate']['release_asset_sha256']}, not the "
+                f"{release.zip_path.name} being signed ({release.document['sha256']})")
+        if gate["reference"]["release_sequence"] != expected_reference:
+            raise SignError(
+                f"{platform}: the cache gate compared against release sequence "
+                f"{gate['reference']['release_sequence']}, not the previous release "
+                f"({expected_reference})")
+        gates[platform] = gate
+    return gates
+
+
 def _check_releases(releases: Dict[str, formats.GuardedRelease],
                     allow_dirty_build: bool) -> str:
     if sorted(releases) != sorted(formats.PLATFORMS):
@@ -289,7 +328,8 @@ def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
                  allow_unnotarized: bool = False,
                  funnel_receipts: Optional[Dict[str, Path]] = None,
                  allow_unproven_funnel: bool = False,
-                 inspect_mac_dmg: Optional[bool] = None
+                 inspect_mac_dmg: Optional[bool] = None,
+                 cache_gates: Optional[Dict[str, Path]] = None
                  ) -> dict:
     try:
         formats.validate_tag(tag)
@@ -340,6 +380,7 @@ def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
     funnels = _check_funnel_receipts(
         releases, dict(funnel_receipts or {}), allow_unproven_funnel,
         require_update_cells=(release_sequence > 0))
+    gates = _check_cache_gates(releases, dict(cache_gates or {}), release_sequence)
     output = Path(output)
     _prepare_output(output)
     try:
@@ -359,7 +400,8 @@ def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
                           allow_test=allow_test, configuration=configuration,
                           allow_unnotarized=allow_unnotarized,
                           funnels=funnels, funnel_receipts=dict(funnel_receipts or {}),
-                          inspect_mac_dmg=inspect_mac_dmg)
+                          inspect_mac_dmg=inspect_mac_dmg, gates=gates,
+                          cache_gates=dict(cache_gates or {}))
     except BaseException:
         # A refused publish set must not survive as something publishable.
         shutil.rmtree(output, ignore_errors=True)
@@ -394,7 +436,8 @@ def _sign_into(output: Path, *, trust, compiled, openssl, releases, ring, ring_r
                allow_staging_sequence, cache_contract, allow_test=False,
                allow_unnotarized=False,
                configuration=formats.RELEASE_CONFIGURATION, funnels=None,
-               funnel_receipts=None, inspect_mac_dmg=None) -> dict:
+               funnel_receipts=None, inspect_mac_dmg=None, gates=None,
+               cache_gates=None) -> dict:
     _write_bytes(output / formats.KEY_RING_ASSET, ring_raw)
     _write_bytes(output / (formats.KEY_RING_ASSET + formats.SIGNATURE_SUFFIX),
                  ring_signature)
@@ -471,11 +514,23 @@ def _sign_into(output: Path, *, trust, compiled, openssl, releases, ring, ring_r
             openssl, announcement_key_path, crypto.CONTEXT_ANNOUNCEMENT_V1,
             announcement_raw, trust.announcement_key)
         announcement_name = formats.announcement_asset(platform)
+        gate = (gates or {}).get(platform)
+        if gate is None:
+            raise SignError(f"{platform}: no passing cache gate receipt")
+        lineage_raw = formats.canonical_bytes(
+            cache_lineage.lineage_document(gate, sequence), "cache lineage")
+        formats.parse_cache_lineage(lineage_raw, platform)
+        lineage_signature = crypto.sign_framed(
+            openssl, release_key_path, crypto.CONTEXT_CACHE_LINEAGE_V1, lineage_raw,
+            release_key.public_key)
+        lineage_name = formats.cache_lineage_asset(platform)
         for name, data in ((manifest_name, manifest_raw),
                            (manifest_name + formats.SIGNATURE_SUFFIX, manifest_signature),
                            (announcement_name, announcement_raw),
                            (announcement_name + formats.SIGNATURE_SUFFIX,
-                            announcement_signature)):
+                            announcement_signature),
+                           (lineage_name, lineage_raw),
+                           (lineage_name + formats.SIGNATURE_SUFFIX, lineage_signature)):
             _write_bytes(output / name, data)
         install_zip = None
         if include_install_zips:
@@ -493,6 +548,17 @@ def _sign_into(output: Path, *, trust, compiled, openssl, releases, ring, ring_r
         platforms[platform] = {
             "archive": {"name": archive_name, "sha256": archive_digest,
                         "size": archive_size},
+            "cache_lineage": {
+                "gate_receipt_sha256": formats.sha256_file(
+                    Path(cache_gates[platform]))[0]
+                if cache_gates and platform in cache_gates else None,
+                "identity_unchanged": gate["identity_unchanged"],
+                "name": lineage_name,
+                "sha256": formats.sha256_hex(lineage_raw),
+                "signature": {"name": lineage_name + formats.SIGNATURE_SUFFIX,
+                              "sha256": formats.sha256_hex(lineage_signature)},
+                "size": len(lineage_raw),
+            },
             "dropped_source_metadata": repack.dropped_metadata,
             "guarded_zip": {"name": release.zip_path.name,
                             "sha256": release.document["sha256"],
@@ -594,6 +660,10 @@ def parser() -> argparse.ArgumentParser:
                       "funnel run on the Shipping release's Test twin (both platforms)")
     sign.add_argument("--allow-unproven-funnel", action="store_true",
                       help="compatibility no-op; missing funnel receipts warn")
+    sign.add_argument("--cache-gate", action="append", default=[], required=True,
+                      help="PLATFORM=<passing cache gate A receipt> "
+                      "(cache_lineage.py gate) for that platform's Shipping zip; "
+                      "once per platform. Its lineage is signed into the set")
     sign.add_argument("--receipt")
     sign.add_argument("--openssl")
     verify_release.add_trust_arguments(sign)
@@ -632,7 +702,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 allow_unnotarized=args.allow_unnotarized,
                 funnel_receipts=verify_release.parse_platform_paths(
                     args.funnel_receipt, "funnel-receipt"),
-                allow_unproven_funnel=args.allow_unproven_funnel)
+                allow_unproven_funnel=args.allow_unproven_funnel,
+                cache_gates=verify_release.parse_platform_paths(
+                    args.cache_gate, "cache-gate"))
             receipt_path = Path(args.receipt) if args.receipt else _default_receipt(
                 args.tag, "sign-receipt.json")
     except verify_release.VerifyError as exc:

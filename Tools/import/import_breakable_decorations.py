@@ -9,7 +9,8 @@ per-instance collision. NOTE: the T3D authors are NOT pure-CDO — six barrels
 carry DrawScale=2 with CollisionRadius=55/CollisionHeight=40 and two carry
 DrawScale=1.1 with 28/21.5-ish cylinders; honoring the authored world-space
 collision is what makes the two stacked piles actually rest on each other
-(support-loss collapse, PORT_NOTES G36). DrawScale rides the MESH component
+(support-loss collapse). See PORT_NOTES "Stacked decorations fall when their support breaks".
+DrawScale rides the MESH component
 relative scale (the collision root stays unscaled so UE1's world-unit
 CollisionRadius/Height stamp 1:1).
 

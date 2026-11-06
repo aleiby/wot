@@ -10,7 +10,16 @@ enum class EWoTInstallerSource : uint8
 	Adjacent,
 	Downloads,
 	Picked,
+	/** A Browse pick recorded after it built the cache; searched right after
+	 * the installer beside the game and before Downloads. */
+	Remembered,
 };
+
+/** The canonical spelling of a Browse pick: its parent directory resolved once
+ * through any links above it, then the picked leaf unchanged. A remembered pick
+ * passes the same rule before it is searched again. */
+TWoTBootstrapResult<FString> WoTCanonicalizeInstallerPickPath(
+	const FString& AbsolutePath);
 
 /** One identity-bound parent and child name that may hold the installer. */
 struct FWoTInstallerLocation

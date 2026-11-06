@@ -95,11 +95,10 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 	}
 	const FWoTSha256 ContractSha256 =
 		ComputeRetailContractIdentity(Contract.GetValue());
-	TWoTBootstrapResult<FWoTSha256> DescriptorSha256 =
-		GetCacheExpectedProductionDescriptorSha256();
-	if (DescriptorSha256.IsError())
+	TWoTBootstrapResult<FWoTSha256> ContentLabel = GetCacheContentLabel();
+	if (ContentLabel.IsError())
 	{
-		return FResult::Error(MoveTemp(DescriptorSha256).GetError());
+		return FResult::Error(MoveTemp(ContentLabel).GetError());
 	}
 	TUniquePtr<FWoTProfileSession> Session =
 		WoTTakeProcessProfileSession();
@@ -169,7 +168,7 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 	Expected.bHasBuildIdentity = true;
 	Expected.InstallerSha256 = InstallerSha256;
 	Expected.ContractSha256 = ContractSha256;
-	Expected.ProductionDescriptorSha256 = DescriptorSha256.GetValue();
+	Expected.ProductionDescriptorSha256 = ContentLabel.GetValue();
 	FWoTCacheReopenCancellation ReopenCancellation(Progress);
 	TWoTBootstrapResult<TOptional<FWoTCacheGenerationLease>> Reopened =
 		Store.TryOpenCurrent(Expected, &ReopenCancellation);
@@ -188,7 +187,7 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 	FWoTPublishedCacheReceipt Receipt;
 	Receipt.InstallerSha256 = InstallerSha256;
 	Receipt.ContractSha256 = ContractSha256;
-	Receipt.ProductionDescriptorSha256 = DescriptorSha256.GetValue();
+	Receipt.ProductionDescriptorSha256 = ContentLabel.GetValue();
 	Receipt.ManifestSha256 = Build.GetValue().ManifestSha256;
 	Receipt.CompletedProgressUnits = Build.GetValue().Progress.GetCompletedUnits();
 	Receipt.TotalProgressUnits = Build.GetValue().Progress.GetTotalUnits();

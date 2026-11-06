@@ -15,7 +15,7 @@
 // footprint is PRESENCE — a 32x32 invisible flat cylinder with
 // bProjTarget=True that weave projectile overlaps dispatch Touch against. The break path itself is
 // ACTIVATION-DEAD in shipped MP (all six authors gate on DamageType 'break01',
-// which nothing emits — PORT_NOTES G35), but SP/mission maps and mods reach it,
+// which nothing emits), but SP/mission maps and mods reach it,
 // so it ports faithfully.
 UCLASS()
 class AWoTExplodingWall : public AActor, public IWoTTriggerable,
@@ -49,7 +49,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "WoT|Sound") FName BreakingSound;
 	// Presentation stubs (uc:107-108 s.bUnlit / STY_Translucent on the glass
 	// debris): carried for author fidelity, not yet threaded into AWoTFragment
-	// display — same standing gap as the mover port (PORT_NOTES G35).
+	// display — same standing gap as the mover port (PORT_NOTES).
 	UPROPERTY(EditAnywhere, Category = "WoT|Explosion") bool bTranslucentGlass = false;
 	UPROPERTY(EditAnywhere, Category = "WoT|Explosion") bool bUnlitGlass = false;
 	UPROPERTY(EditAnywhere, Category = "WoT|Explosion") bool bOnlyTriggerable = false;

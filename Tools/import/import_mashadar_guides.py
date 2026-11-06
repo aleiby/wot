@@ -4,7 +4,7 @@ Mirrors import_map.py's MashadarGuide branch for maps that are already
 imported, the import_sound_dispatchers.py precedent: plan_map() is
 stdlib-only for dry inspection; re-runs update actors by stable T3D label,
 remove duplicates, and save each loaded map once. MashadarManager /
-RestPoint / MashadarPathNode are runtime-folded (PORT_NOTES 2026-07-19).
+RestPoint / MashadarPathNode are runtime-folded (PORT_NOTES "Mashadar growth and retraction").
 
 UnrealEditor-Cmd WoT.uproject -run=pythonscript
   -script="...import_mashadar_guides.py [<Map> ...]"

@@ -10,10 +10,9 @@ halo brightness (~+-18 and up, measured): delta >= +MISS_T means golden
 shows and ours hides (false_hide), <= -MISS_T ours shows and golden hides
 (false_show). This is the standing gate metric for AWoTCorona visibility
 (the leaf-permeation bake); history: the Reach distance gate scored 26
-mismatches across the 19 maps (PORT_NOTES "Corona visibility").
+mismatches across the 19 maps.
 
-DECOMPOSITION (PORT_NOTES "Corona candidacy anomaly
-RESOLVED" + "Corona sprite heat"): the binary disc delta conflates gating
+DECOMPOSITION: the binary disc delta conflates gating
 errors with co-located emitter brightness deltas and sprite-width deltas
 (a hand-checked truth table: 48/50 flagged rows were NOT gate errors). Each
 emitted row now also carries the nocorona-referenced amplitude-fit

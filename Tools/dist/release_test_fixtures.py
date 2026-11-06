@@ -6,7 +6,9 @@ keys are minted by `openssl genpkey` inside it (release_crypto.generate_test_key
 refuses any other location), the trust files are synthetic public exports of
 those keys, and the "guarded releases" imitate build_stripped_pak.py's package
 stage byte-shape (Win64: zipfile, files only, host modes 0666/0777; Mac: Unix
-modes and explicit directories). No production key, path,
+modes and explicit directories). Each signing also gets a passing cache gate A
+receipt per platform, produced by the real gate (cache_lineage.evaluate_gate)
+over a synthetic cache manifest. No production key, path,
 or artifact is touched, and the directory is deleted with the fixture.
 """
 from __future__ import annotations
@@ -23,6 +25,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cache_content_label as content_label  # noqa: E402
+import cache_lineage  # noqa: E402
 import generate_bootstrap_trust as generator  # noqa: E402
 import release_crypto as crypto  # noqa: E402
 import release_formats as formats  # noqa: E402
@@ -657,6 +661,92 @@ def write_funnel_receipt(path: Path, release_json: Path, *, verdict: str = "pass
     return Path(path)
 
 
+def synthetic_cache_manifest(revision: int = 1, *,
+                             blob_sha256: str = "3" * 64,
+                             installer_sha256: str = formats.PINNED_INSTALLER_SHA256,
+                             contract_sha256: str = "1" * 64) -> dict:
+    """A one-blob cache manifest stamped with ``revision``'s content label."""
+    return {
+        "blobs": [{
+            "logical_id": "cache/localization/WoT.int",
+            "satisfies": ["synthetic.localization"],
+            "schema": "wot-localization-v3",
+            "sha256": blob_sha256,
+            "size": 1,
+        }],
+        "cache_version": formats.CACHE_MANIFEST_VERSION,
+        "contract_sha256": contract_sha256,
+        "format": formats.CACHE_MANIFEST_FORMAT,
+        "front_end_descriptor_root": "0" * 64,
+        "hash_algorithm": "sha256",
+        "installer_sha256": installer_sha256,
+        "production_descriptor_sha256": content_label.label(revision),
+        "world_descriptors": [],
+    }
+
+
+def manifest_digest(manifest: dict) -> str:
+    return formats.sha256_hex(formats.canonical_bytes(manifest, "cache manifest"))
+
+
+def synthetic_smoke_receipt(platform: str, asset_sha256: str,
+                            manifest: Optional[dict], *, verdict: str = "pass",
+                            release_json_sha256: str = "e" * 64) -> dict:
+    """The parts of a Shipping smoke receipt the cache gate reads."""
+    manifests = [] if manifest is None else [{
+        "exists": True,
+        "json": manifest,
+        "path": "work/smoke/extracted/WoT Reborn/Data/ContentCache/current/manifest.json",
+        "sha256": manifest_digest(manifest),
+        "size": len(formats.canonical_bytes(manifest, "cache manifest")),
+    }]
+    return {
+        "checks": {"boot": {"cache": {"manifests": manifests}}},
+        "format": cache_lineage.SMOKE_FORMAT,
+        "platform": platform,
+        "release": {"asset_sha256": asset_sha256,
+                    "manifest_sha256": release_json_sha256},
+        "verdict": verdict,
+    }
+
+
+def synthetic_reference(platform: str, manifest: dict, *, release_sequence: int = 0,
+                        revision: Optional[int] = None) -> dict:
+    """A lineage-sourced cache reference describing ``manifest``."""
+    identity = cache_lineage.manifest_identity(manifest, "reference manifest")
+    return {
+        "contract_sha256": identity["contract_sha256"],
+        "format": cache_lineage.REFERENCE_FORMAT,
+        "installer_sha256": identity["installer_sha256"],
+        "label": identity["label"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "platform": platform,
+        "release_sequence": release_sequence,
+        "revision": (revision if revision is not None else
+                     content_label.revision_for_label(identity["label"], 64)),
+        "source": "lineage",
+    }
+
+
+def write_cache_gate_receipt(path: Path, release_json: Path, *, revision: int = 1,
+                             reference_manifest: Optional[dict] = None) -> Path:
+    """A passing gate A receipt for a release.json's asset, made by the real gate."""
+    document = json.loads(Path(release_json).read_text(encoding="utf-8"))
+    platform = document["platform"]
+    candidate = synthetic_cache_manifest(revision)
+    reference = synthetic_reference(
+        platform, reference_manifest or synthetic_cache_manifest(1),
+        release_sequence=max(0, int(document.get("release_sequence", 0)) - 1))
+    receipt = cache_lineage.evaluate_gate(
+        platform=platform, reference=reference,
+        smoke_receipt=synthetic_smoke_receipt(platform, document["sha256"], candidate),
+        compiled_revision=revision)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+                          encoding="utf-8")
+    return Path(path)
+
+
 def write_guarded_release(directory: Path, platform: str, *,
                           files: Optional[Dict[str, tuple]] = None,
                           extra: Optional[Dict[str, tuple]] = None,
@@ -856,7 +946,30 @@ class ReleaseFixture:
             release_sequence=0, human_version="0.1.0", tag="v0.1.0", output=output,
             funnel_receipts=dict(self.funnel_receipts), inspect_mac_dmg=False)
         arguments.update(overrides)
+        if "cache_gates" not in overrides:
+            arguments["cache_gates"] = self.write_cache_gates(
+                arguments["release_jsons"], Path(output).name)
         return sign_release.sign_release(**arguments)
+
+    def write_cache_gates(self, release_jsons: Dict[str, Path], label: str,
+                          **options) -> Dict[str, Path]:
+        """A passing gate A receipt per release, beside the fixture's evidence.
+
+        A release.json that cannot be read gets none; signing refuses that
+        release for its own reason first.
+        """
+        gates = {}
+        for platform, release_json in release_jsons.items():
+            path = Path(release_json)
+            path = path / "release.json" if path.is_dir() else path
+            try:
+                gates[platform] = write_cache_gate_receipt(
+                    self.root / "cache-gates" / label / platform / "cache-gate-a.json",
+                    path, **options)
+            except (OSError, ValueError, KeyError, TypeError,
+                    cache_lineage.GateError):
+                continue
+        return gates
 
     def cleanup(self) -> None:
         self._temporary.cleanup()

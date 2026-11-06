@@ -1956,7 +1956,7 @@ def stage_import(args, iso: Path) -> str:
     # This orchestrator only ever builds STRIPPED paks, so the
     # flag is unconditional here; the runtime WoTFractalSubsystem rehydrates the
     # emptied wet/ice seeds from the payload cache by source_texture. Fire/wave
-    # keep their baker-generated seed (not a leak). See PORT_NOTES 2026-07-18.
+    # keep their baker-generated seed (not a leak). See PORT_NOTES "Built from the player's own copy of the game".
     env["WOT_STRIP_FRACTAL_SEED"] = "1"
     # Both signals are load-bearing: import_all publishes the marker only after
     # all items succeed, while guarded publication also requires the commandlet

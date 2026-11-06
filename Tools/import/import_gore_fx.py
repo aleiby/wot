@@ -71,7 +71,7 @@ for name in NAMES:
 
 
 # ---- 4e decals: the decal textures (+ the retired deferred-decal master). ----
-# RETIRED 2026-09-30 (PORT_NOTES "Decals as UE1 meshes"): AWoTDecal now draws
+# RETIRED: AWoTDecal now draws
 # the retail Legend.DecalTRI mesh with M_WoT_MeshModulate / M_WoT_MeshTranslucent
 # and binds these textures directly; nothing resolves M_WoT_Decal or MI_Decal_*.
 # The master is still generated only because it is a pinned neutral-closure

@@ -24,7 +24,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
-// The imported-mesh layout (PORT_NOTES "Mesh binding pass"): the same deterministic
+// The imported-mesh layout uses the same deterministic
 // path ResolveBodyMesh walks for creature rows, keyed by the bare asset name.
 USkeletalMesh* AWoTCarcass::ResolveMeshByName(FName MeshName)
 {

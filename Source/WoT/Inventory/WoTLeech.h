@@ -7,7 +7,7 @@
 // Port of WOT.Leech (LegendActorComponent : Actor), providing the shared
 // component machinery for effects that remain attached over time (Leech.uc:7).
 //
-// UE5 mapping (first-of-kind framework; PORT_NOTES "Leech framework"):
+// UE5 mapping (first-of-kind framework; PORT_NOTES):
 //  - Leech "attached to a host pawn" -> a UActorComponent on that pawn, matching
 //    the ratified Inventory->UWoTInventoryComponent collapse. The per-host
 //    singly-linked list (WOTPlayer/WOTPawn.FirstLeech) and LeechIterator become

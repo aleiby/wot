@@ -75,11 +75,11 @@ PICKUPS = {
 # the imported mesh's slot MIC (MI_tex0_2S / MI_tex1) is deliberately neutral
 # and the skin must ride the leaf BP as a slot-0 override material parented to
 # the masked mesh master (STY_Masked ExtraFlags; retail masked mesh tris are
-# two-sided, PORT_NOTES C02). KeyColor is each texture's palette[0], probed
+# two-sided). KeyColor is each texture's palette[0], probed
 # offline from original/System/Angreal.u with Tools/convert/ue1pkg (the
 # import_seal_skins.py precedent). AngrealInvTracer also authors Skin= but has
 # no Style override and the ordinary mesh path never inherits texture flags
-# (PORT_NOTES C02): retail drew its embedded slot texture — the same asset the
+# Retail drew its embedded slot texture — the same asset the
 # Skin= names — through the opaque reconstruct path, so it takes no override.
 # ue5 class -> (skin texture under /Game/WoT/Textures/Angreal, palette[0] RGB)
 MASKED_SKINS = {

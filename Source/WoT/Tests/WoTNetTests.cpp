@@ -1209,7 +1209,7 @@ bool FWoTNetHarnessActionsSpec::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTNetChannelSpec,
-	"WoT.Net.Channel", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+	"WoT.Net.Channel.Loopback", EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWoTNetChannelSpec::RunTest(const FString&)
 {
 	FString ArenaTravel;

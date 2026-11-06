@@ -40,7 +40,7 @@ IMPORT_DIR = REPO / "Tools" / "import"
 CONVERT_DIR = REPO / "Tools" / "convert"
 sys.path.insert(0, str(TOOLS_DIR))
 sys.path.insert(0, str(IMPORT_DIR))
-from wot_config import (ConfigurationError, devtree_dir, exports_dir,
+from wot_config import (ConfigurationError, exports_dir,
                         installed_engine_root)  # noqa: E402
 from import_all import (  # noqa: E402 - intentionally shared pipeline metadata
     IMPORT_STEP_SPECS,
@@ -103,7 +103,7 @@ INNOEXTRACT_PINS = {
 CONVERT_PHASES = (
     ("dev-inputs", "Copy checkout exports, or decode script and T3D from retail."),
     ("metadata", "Copy optional checkout inventory metadata into the work tree."),
-    ("meshes", "Convert 243 meshes (retail packages by default; devtree = oracle) BEFORE textures so masked slots can request keyed variants."),
+    ("meshes", "Convert 243 meshes from the retail packages BEFORE textures so masked slots can request keyed variants."),
     ("textures", "Decode all retail Texture/System packages and make the neutral texture."),
     ("fonts", "Decode the WOT.u offline HUD font atlases/metrics."),
     ("flipbooks", "Bake all Fire/Wet/Wave/Ice procedural textures to sheets."),
@@ -1724,21 +1724,8 @@ def mesh_names(ctx: Context) -> list[str]:
     return sorted((item["name"] for item in metadata.values()), key=str.lower)
 
 
-def _devtree_model_dirs(ctx: Context) -> list[Path]:
-    root = devtree_dir(required=False) / "U2Radiosity"
-    return sorted((path for path in root.glob("*/Models") if path.is_dir()),
-                  key=lambda path: str(path).lower())
-
-
 def _prepare_mesh_source(ctx: Context, names: Sequence[str]) -> tuple[str, Optional[Path]]:
-    """Decode canonical retail meshes; retain the reference source as an oracle."""
-    if getattr(ctx.args, "mesh_source", "retail-package") == "devtree":
-        if not _devtree_model_dirs(ctx):
-            raise StageFailure(
-                "convert", f"no devtree Models directories under "
-                f"{devtree_dir(required=False) / 'U2Radiosity'}")
-        return "devtree", None
-
+    """Decode the canonical meshes from the retail packages."""
     output = ctx.work / "retail-meshes"
     manifest = output / "_manifest.json"
     outputs = ([manifest]
@@ -2365,10 +2352,10 @@ def parser() -> argparse.ArgumentParser:
         help="retail dev-input T3D exporter: pure Python by default; 'ucc' is "
              "the explicit development oracle/fallback")
     result.add_argument(
-        "--mesh-source", choices=("retail-package", "devtree"),
+        "--mesh-source", choices=("retail-package",),
         default="retail-package",
-        help="mesh conversion source: shipped retail packages by default; "
-             "'devtree' is the later-source reference oracle")
+        help="mesh conversion source: the shipped retail packages (the only "
+             "source)")
     result.add_argument("--dev-input-map", action="append", default=[], metavar="MAP",
                         help="limit a forced dev-inputs verification/repair run "
                              "to one MP map (repeat or comma-separate)")

@@ -34,7 +34,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,6 +75,7 @@ class Plan:
     title: str
     repo: str
     assets: List[Path]
+    player_downloads: Dict[str, str]
     notes: str
     release_notes_asset: bytes = b""
     local_failures: List[str] = field(default_factory=list)
@@ -117,7 +120,7 @@ GAME_DATA_NOTES = (
 MAC_INSTALL_NOTES = (
     "### Mac",
     "",
-    "1. Open WoT-Mac-guarded-shipping-<commit>.dmg and drag WoT.app to",
+    "1. Open <dmg> and drag WoT.app to",
     "   Applications, then open WoT.app from Applications.",
     "2. Multiplayer > LAN: the game tells you macOS is about to ask; choose",
     "   **Allow** so it can find and host games on your network (change it later",
@@ -129,7 +132,7 @@ MAC_INSTALL_NOTES = (
 MAC_UNNOTARIZED_INSTALL_NOTES = (
     "### Mac",
     "",
-    "1. Open WoT-Mac-guarded-shipping-<commit>.dmg and drag WoT.app to",
+    "1. Open <dmg> and drag WoT.app to",
     "   Applications, then open WoT.app from Applications.",
     "2. macOS reports that it cannot verify the app: this build is",
     "   not notarized. Click Done, open System Settings > Privacy & Security,",
@@ -178,10 +181,17 @@ def release_notes(verified: verify_release.VerifiedSet, human_version: str,
     ]
     # GitHub lists every asset with its size and digest right below the notes,
     # so the notes only point players at the one file per platform they need.
-    downloads = (("Mac", f"WoT-Mac-{flavor}-{verified.build_commit}.dmg"),
-                 ("Windows", f"WoT-Win64-{flavor}-{verified.build_commit}.zip"))
-    lines += [f"- **{label}:** {name}" for label, name in downloads
-              if name in verified.assets]
+    player_downloads = formats.player_download_asset_sources(verified)
+    if player_downloads:
+        downloads = (("Mac", formats.PLAYER_DOWNLOAD_ASSETS["Mac"]),
+                     ("Windows", formats.PLAYER_DOWNLOAD_ASSETS["Win64"]))
+        lines += [f"- **{label}:** {name}" for label, name in downloads
+                  if name in player_downloads]
+    else:
+        downloads = (("Mac", f"WoT-Mac-{flavor}-{verified.build_commit}.dmg"),
+                     ("Windows", f"WoT-Win64-{flavor}-{verified.build_commit}.zip"))
+        lines += [f"- **{label}:** {name}" for label, name in downloads
+                  if name in verified.assets]
     lines += [
         "",
         "Everything else is used by the game's built-in updater and its signature",
@@ -197,8 +207,14 @@ def release_notes(verified: verify_release.VerifiedSet, human_version: str,
                      if getattr(verified.platforms["Mac"],
                                 "dmg_notarized", False)
                      else MAC_UNNOTARIZED_INSTALL_NOTES)
-        lines += [*(line.replace("<commit>", verified.build_commit)
-                    for line in mac_notes), ""]
+        # A Shipping publication carries the fixed-name copy; a deliberate Test
+        # publication only has the commit-named DMG.
+        dmg_name = (formats.PLAYER_DOWNLOAD_ASSETS["Mac"]
+                    if formats.PLAYER_DOWNLOAD_ASSETS["Mac"]
+                    in formats.player_download_asset_sources(verified)
+                    else verified.platforms["Mac"].dmg
+                    or f"WoT-Mac-{flavor}-{verified.build_commit}.dmg")
+        lines += [*(line.replace("<dmg>", dmg_name) for line in mac_notes), ""]
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
@@ -208,6 +224,7 @@ def build_plan(verified: verify_release.VerifiedSet, *, target: str, repo: str,
     assets = [verified.directory / name for name in sorted(verified.assets)]
     return Plan(tag=verified.tag, target=target, repo=repo,
                 title=title or f"WoT Reborn {human_version}", assets=assets,
+                player_downloads=formats.player_download_asset_sources(verified),
                 notes=release_notes(verified, human_version, notes_text))
 
 
@@ -302,15 +319,27 @@ def _asset_rows(view_stdout: str) -> Dict[str, dict]:
 
 def publish(plan: Plan, runner: Runner, gh: str,
             verified: verify_release.VerifiedSet) -> None:
-    with tempfile.TemporaryDirectory(prefix="wot-notes-") as scratch:
-        notes = Path(scratch) / "notes.md"
+    with tempfile.TemporaryDirectory(
+            prefix="wot-publish-", dir=verified.directory.parent) as scratch_name:
+        scratch = Path(scratch_name)
+        notes = scratch / "notes.md"
         notes.write_text(plan.notes, encoding="utf-8")
-        notes_asset = Path(scratch) / formats.RELEASE_NOTES_ASSET
+        notes_asset = scratch / formats.RELEASE_NOTES_ASSET
         notes_asset.write_bytes(plan.release_notes_asset)
+        staged_downloads = []
+        for fixed_name, source_name in sorted(plan.player_downloads.items()):
+            source = verified.directory / source_name
+            staged = scratch / fixed_name
+            try:
+                os.link(source, staged)
+            except OSError:
+                shutil.copyfile(source, staged)
+            staged_downloads.append(staged)
         _run_step(plan, runner, "create-draft",
                   [gh, "release", "create", plan.tag, "--repo", plan.repo, "--draft",
                    "--target", plan.target, "--title", plan.title, "--notes-file",
                    str(notes), *[str(path) for path in plan.assets],
+                   *[str(path) for path in staged_downloads],
                    str(notes_asset)])
     view = _run_step(plan, runner, "read-back-draft",
                      [gh, "release", "view", plan.tag, "--repo", plan.repo, "--json",
@@ -321,6 +350,8 @@ def publish(plan: Plan, runner: Runner, gh: str,
         "size": len(plan.release_notes_asset),
         "sha256": hashlib.sha256(plan.release_notes_asset).hexdigest(),
     }
+    for fixed_name, source_name in plan.player_downloads.items():
+        expected[fixed_name] = dict(verified.assets[source_name])
     if set(rows) != set(expected):
         raise PublishError(f"draft assets {sorted(rows)} differ from the verified set "
                            f"plus release notes {sorted(expected)}; the draft was left "
@@ -349,6 +380,7 @@ def dry_run_commands(plan: Plan, gh: str) -> List[List[str]]:
         [gh, "release", "create", plan.tag, "--repo", plan.repo, "--draft", "--target",
          plan.target, "--title", plan.title, "--notes-file", "<generated notes>",
          *[str(path) for path in plan.assets],
+         *[f"<staged {name}>" for name in sorted(plan.player_downloads)],
          f"<generated {formats.RELEASE_NOTES_ASSET}>"],
         [gh, "release", "view", plan.tag, "--repo", plan.repo, "--json",
          "assets,isDraft,tagName"],
@@ -497,6 +529,13 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
         "tag": plan.tag,
         "target": plan.target,
         "set": verified.summary(),
+        "player_downloads": {
+            fixed_name: {
+                "source": source_name,
+                **verified.assets[source_name],
+            }
+            for fixed_name, source_name in plan.player_downloads.items()
+        },
         "release_notes_asset": release_notes_summary,
         "steps": plan.steps,
     }

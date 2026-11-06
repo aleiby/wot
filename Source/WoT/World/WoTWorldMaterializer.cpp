@@ -387,6 +387,7 @@ bool WoTWorldRegistryMatchesDescriptors(
 	}
 	return true;
 }
+}
 
 FWoTBootstrapStatus WoTWorldDecodeBSPPart(
 	const FWoTBSPPartDescriptor& Descriptor,
@@ -457,6 +458,61 @@ FWoTBootstrapStatus WoTWorldDecodeBSPPart(
 	return FWoTBootstrapStatus::Success();
 }
 
+FWoTBootstrapStatus WoTWorldLoadDescribedResource(
+	const FWoTWorldDescriptor& Descriptor,
+	FWoTRuntimeWorldResource& WorldResource)
+{
+	const FWoTNeutralResourceId WorldId{
+		Descriptor.WorldLogicalId, EWoTNeutralResourceKind::World};
+	const TOptional<FWoTCacheBlobDescriptor> WorldBlob =
+		FWoTRuntimeRegistry::Get().FindDescriptor(WorldId);
+	if (!WorldBlob.IsSet() || WorldBlob->Schema != Descriptor.WorldSchema
+		|| WorldBlob->Sha256 != Descriptor.WorldSha256)
+	{
+		return WoTWorldMaterializationStatus(
+			TEXT("the exact descriptor-authorized world object is absent"));
+	}
+	FWoTBootstrapStatus WorldLoaded = WorldResource.LoadFirstUse(WorldId);
+	if (WorldLoaded.IsError())
+	{
+		return WorldLoaded;
+	}
+	TWoTBootstrapResult<FWoTSha256> SourceSha =
+		FWoTSha256::FromHex(WorldResource.SourceSha256());
+	if (SourceSha.IsError()
+		|| SourceSha.GetValue() != Descriptor.PackageSha256
+		|| Descriptor.MapIdentity != WorldResource.MapIdentity()
+		|| Descriptor.WorldFactId != WorldResource.FactId()
+		|| Descriptor.WorldImporter != WorldResource.Importer()
+		|| (WorldResource.ImporterVersion() != 2
+			&& WorldResource.ImporterVersion() != 3
+			&& WorldResource.ImporterVersion() != 4
+			&& WorldResource.ImporterVersion() != 5
+			&& WorldResource.ImporterVersion() != 6)
+		|| Descriptor.ActorCount != WorldResource.ActorCount()
+		|| Descriptor.AttachmentCount != WorldResource.AttachmentCount()
+		|| Descriptor.BSPNodeCount != WorldResource.BSPNodeCount()
+		|| Descriptor.BSPSurfaceCount != WorldResource.BSPSurfaceCount()
+		|| Descriptor.ZoneCount != WorldResource.ZoneCount()
+		|| Descriptor.PortalSurfaceCount
+			!= WorldResource.PortalSurfaceCount()
+		|| Descriptor.MoverCount != WorldResource.MoverCount()
+		|| Descriptor.LightCount != WorldResource.LightCount()
+		|| Descriptor.SoundCount != WorldResource.SoundCount()
+		|| Descriptor.NavigationSeedCount
+			!= WorldResource.NavigationSeedCount()
+		|| Descriptor.SemanticObjectCount
+			!= WorldResource.SemanticObjectCount()
+		|| Descriptor.ReachSpecCount != WorldResource.ReachSpecCount())
+	{
+		return WoTWorldMaterializationStatus(
+			TEXT("the complete world descriptor binding or census mismatched"));
+	}
+	return FWoTBootstrapStatus::Success();
+}
+
+namespace
+{
 FString WoTWorldClassLeaf(const FString& ClassIdentity)
 {
 	int32 Dot = INDEX_NONE;
@@ -2780,52 +2836,12 @@ FWoTWorldMaterializer::MaterializeBeforePlay(
 			TEXT("world materialization requires a hidden uninitialized candidate and live lease"));
 	}
 
-	const FWoTNeutralResourceId WorldId{
-		Descriptor.WorldLogicalId, EWoTNeutralResourceKind::World};
-	const TOptional<FWoTCacheBlobDescriptor> WorldBlob =
-		FWoTRuntimeRegistry::Get().FindDescriptor(WorldId);
-	if (!WorldBlob.IsSet() || WorldBlob->Schema != Descriptor.WorldSchema
-		|| WorldBlob->Sha256 != Descriptor.WorldSha256)
-	{
-		return WoTWorldMaterializationError<FWoTMaterializedWorldReceipt>(
-			TEXT("the exact descriptor-authorized world object is absent"));
-	}
 	FWoTRuntimeWorldResource WorldResource;
-	FWoTBootstrapStatus WorldLoaded = WorldResource.LoadFirstUse(WorldId);
+	FWoTBootstrapStatus WorldLoaded =
+		WoTWorldLoadDescribedResource(Descriptor, WorldResource);
 	if (WorldLoaded.IsError())
 	{
 		return FResult::Error(MoveTemp(WorldLoaded).GetError());
-	}
-	TWoTBootstrapResult<FWoTSha256> SourceSha =
-		FWoTSha256::FromHex(WorldResource.SourceSha256());
-	if (SourceSha.IsError()
-		|| SourceSha.GetValue() != Descriptor.PackageSha256
-		|| Descriptor.MapIdentity != WorldResource.MapIdentity()
-		|| Descriptor.WorldFactId != WorldResource.FactId()
-		|| Descriptor.WorldImporter != WorldResource.Importer()
-		|| (WorldResource.ImporterVersion() != 2
-			&& WorldResource.ImporterVersion() != 3
-			&& WorldResource.ImporterVersion() != 4
-			&& WorldResource.ImporterVersion() != 5
-			&& WorldResource.ImporterVersion() != 6)
-		|| Descriptor.ActorCount != WorldResource.ActorCount()
-		|| Descriptor.AttachmentCount != WorldResource.AttachmentCount()
-		|| Descriptor.BSPNodeCount != WorldResource.BSPNodeCount()
-		|| Descriptor.BSPSurfaceCount != WorldResource.BSPSurfaceCount()
-		|| Descriptor.ZoneCount != WorldResource.ZoneCount()
-		|| Descriptor.PortalSurfaceCount
-			!= WorldResource.PortalSurfaceCount()
-		|| Descriptor.MoverCount != WorldResource.MoverCount()
-		|| Descriptor.LightCount != WorldResource.LightCount()
-		|| Descriptor.SoundCount != WorldResource.SoundCount()
-		|| Descriptor.NavigationSeedCount
-			!= WorldResource.NavigationSeedCount()
-		|| Descriptor.SemanticObjectCount
-			!= WorldResource.SemanticObjectCount()
-		|| Descriptor.ReachSpecCount != WorldResource.ReachSpecCount())
-	{
-		return WoTWorldMaterializationError<FWoTMaterializedWorldReceipt>(
-			TEXT("the complete world descriptor binding or census mismatched"));
 	}
 
 	// Pass one creates every identity before a property/reference is applied.

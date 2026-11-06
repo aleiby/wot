@@ -39,6 +39,8 @@ struct FWoTCacheGenerationBuildIdentity
 	bool bHasBuildIdentity = false;
 	FWoTSha256 InstallerSha256;
 	FWoTSha256 ContractSha256;
+	/** The recorded cache content label. The member and the manifest key
+	 * production_descriptor_sha256 keep their names for format compatibility. */
 	FWoTSha256 ProductionDescriptorSha256;
 };
 
@@ -146,6 +148,10 @@ private:
 	friend class FWoTFrontEndPresentationAuthority;
 	friend class FWoTFrontEndSceneMaterializer;
 	friend class UWoTPayloadSubsystem;
+#if WITH_AUTOMATION_TESTS
+	/** The guarded cache-decode gate enumerates every manifest entry. */
+	friend class FWoTGuardedCacheDecodeAccess;
+#endif
 	friend WOT_API bool WoTCommitAuthenticatedWorldExposure(
 		UWorld*, FString*);
 	friend WOT_API TWoTBootstrapResult<FWoTImmutableVerifiedBlob> ReadVerifiedCacheBlob(

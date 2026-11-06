@@ -601,8 +601,8 @@ bool FWoTFrontEndPresentationAuthority::PrepareBrowserResources()
 	if (Font.IsError()) return Fail(Font.GetError().ToString());
 	FString Failure;
 	// The multiplayer menus use
-	// the port's dark game skin, never the retail Win95 UWindow look (PORT_NOTES
-	// "Multiplayer menus keep the dark game skin"). The authenticated face and
+	// the port's dark game skin, never the retail Win95 UWindow look
+	// (PORT_NOTES "Menu skin, fonts and sliders"). The authenticated face and
 	// captured lease still supply the text.
 	TSharedPtr<FWoTRetailBrowserStyle> Prepared = FWoTRetailBrowserStyle::CreateAuthenticated(
 		*Payload, *PinnedLease, Font.GetValue(), Failure, true);
@@ -2381,7 +2381,7 @@ float SWoTRetailSlider::KnobLeft(float AllottedWidth) const
 	// whole Slide1 sprite, so 3px of track showed between the end border and
 	// the knob at either extreme, which reads as unreachable values. The port
 	// stretches the track to the row and lets the knob travel to the end
-	// borders themselves (PORT_NOTES "Menu sliders").
+	// borders themselves (PORT_NOTES "Menu slider travel and host-setting stops").
 	const FWoTRetailSliderMetrics Metrics = WoTRetailSliderMetrics();
 	const float Travel = FMath::Max(AllottedWidth - Metrics.TrackStart
 		- Metrics.TrackEndInset - Metrics.Knob.X, 0.0f);

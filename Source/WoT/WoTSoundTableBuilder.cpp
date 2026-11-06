@@ -209,8 +209,8 @@ bool WoTSoundDecodeTimer(const FWoTRuntimeWorldProperty& Property,
 
 bool WoTSoundApplyPortOverrides(FWoTSoundSet& Table, FString& OutError)
 {
-	// PORT_NOTES "Sound Slice 5a-5c": imported UE1 Package.Sound identities
-	// become deterministic subpaths below /Game/WoT/Sounds. The engine channel
+	// Imported Package.Sound identities become deterministic subpaths below
+	// /Game/WoT/Sounds. The engine channel
 	// and bNoOverride cells have no UE5 row field, but were validated above.
 	for (TPair<FName, TArray<FWoTSoundTableEntry>>& Pair : Table.Tables)
 	{

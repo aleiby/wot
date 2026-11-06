@@ -86,8 +86,8 @@ private:
 	TSharedPtr<SButton> BrowseInstallerButton;
 	TSharedPtr<SButton> GetOriginalGameButton;
 	TSharedPtr<SProgressBar> ProgressBar;
-	// The backdrop behind everything: the saved blurred main-menu scene, or
-	// the generated first-run gradient (WoTSetupBackdrop).
+	// The backdrop behind everything: the saved blurred main-menu scene, else
+	// the shipped default, else the generated gradient (WoTSetupBackdrop).
 	TSharedPtr<FSlateDynamicImageBrush> BackdropBrush;
 	float ArrangedWidth = 0.0f;
 	bool bReadyAnnounced = false;

@@ -331,7 +331,7 @@ def _make_world_blend_master(name, modulated, animated=False):
     translucent slots on rest-maps therefore rebind to M_WoT_WorldT_SceneBlend
     (setup_childsky.py: per-channel algebra via an explicit SceneColor read);
     a GLOBAL migration of this master is queued, needing its own 19-map A/B
-    (PORT_NOTES "Sky child scene: through-portal...").
+    (PORT_NOTES "Translucent blending").
     TESTED AND REFUTED (do not retry): the
     MULTI-TMU one-pass model (Glide driver, dst factor 1 - Tex*M,
     Opacity = min3(Tex*M)). Identical at M=1, it changes only LIT
@@ -696,8 +696,9 @@ def make_world_masters():
     macro_graph_version = "retail-pan-v2"
     _make_mpc()
     masters = {}
-    # The *Flip sheet-scrub variants are RETIRED (PORT_NOTES "sheet-scrub
-    # retirement"): fractal surfaces ride the plain blend masters and the
+    # The *Flip sheet-scrub variants are RETIRED
+    # (PORT_NOTES "Procedural textures animate when recently seen"): fractal
+    # surfaces ride the plain blend masters and the
     # runtime binds the live procedural texture.
     for kind, name, mod, animated in (
             ("translucent", "M_WoT_WorldTranslucent", False, False),
@@ -1084,9 +1085,9 @@ def make_world_instances(mats, textures, world_masters, atlas_path,
         # NULL surface texture ('__None') or dangling import (B3_02's
         # WOT.Watr_400 class): retail substitutes Level->DefaultTexture at
         # render time (the zone pass) — Engine.DefaultTexture x the
-        # composed lightmap, pan flags live. Divergence (accepted, PORT_NOTES
-        # 2026-07-10): bsp2obj normalized these UVs by its (1,1) unresolved
-        # fallback, not the substituted texture's 32px, so tiling runs denser;
+        # composed lightmap, pan flags live. bsp2obj normalized these UVs by its
+        # (1,1) unresolved fallback, not the substituted texture's 32px, so
+        # tiling runs denser (PORT_NOTES);
         # mipped/grazing views collapse to the same mip-tail mean. Without
         # this, the slot fell to MI_Missing (developer checker on the lit
         # mesh master — renders black in-game, matching nothing retail).
@@ -1332,8 +1333,8 @@ def import_mesh(suffix="", source_suffix=None):
     dest = f"/Game/WoT/Maps/Geo/{MAP}{suffix}"
     if EAL.does_directory_exist(dest):
         EAL.delete_directory(dest)
-    # GLB, one mesh node — UE's OBJ translator silently drops faces (see
-    # PORT_NOTES); glTF is the well-supported Interchange path.
+    # GLB, one mesh node — UE's OBJ translator silently drops faces; glTF is the
+    # well-supported Interchange path.
     params = unreal.ImportAssetParameters()
     params.is_automated = True
     params.override_pipelines = [unreal.SoftObjectPath(lightmap_pipeline())]
@@ -1590,8 +1591,8 @@ def place_semantics(eas):
             # SpawnActor->FindSpot shoved it flush. Our AlwaysSpawn spawn path
             # has no such shove, so lift clear of the worst embed instead: the
             # pawn falls and lands at floor+46 — exactly retail's rest height —
-            # for ANY lift >= ~32uu. Keep the number in sync with PORT_NOTES
-            # "PlayerStart +55uu import lift audited" before changing it.
+            # for ANY lift >= ~32uu. The 55uu import lift is an intentional
+            # divergence (PORT_NOTES); keep it in sync before changing it.
             loc.z += 55
             # AWoTPlayerStart carries the UE1 TeamNumber tag (engine APlayerStart
             # dropped it). T3D omits default-valued props, so an absent line IS
@@ -4140,7 +4141,7 @@ def place_navmesh(eas, meshes, real_bounds=None):
 # The arenas place no fixed artifacts — every pickup comes from a weighted
 # AngrealSpawnPool (Common/Uncommon/Rare). Map the UE1 pool classes to the
 # ported AWoTAngrealInv*; unported angreal are skipped, and a pool left with
-# nothing ported is not placed. See PORT_NOTES "AngrealSpawnPool".
+# nothing ported is not placed. See PORT_NOTES.
 # Each ported UE1 'AngrealInvX' leaf has a UE5 'WoTAngrealInvX' class AND a
 # generated pickup leaf BP (Tools/import/import_pickups.py) that carries its view
 # mesh — place_spawnpools prefers the BP so the pickup renders (_pickup_class).
@@ -4712,8 +4713,8 @@ def _spawn_world_meshes(eas, mesh_parts, portal=False):
             template = actor
         if portal:
             # PROFILE, not just the enabled flag: a PLACED actor's saved
-            # BodyInstance re-applies its collision profile template on load
-            # (the AWoTSkyBox PostLoad-clobber gotcha, PORT_NOTES), so a bare
+            # BodyInstance re-applies its collision profile template on load,
+            # so a bare
             # set_collision_enabled(NO_COLLISION) silently reverts to
             # BlockAll in the running game — the packaged BSP proof caught
             # portal-directed darts colliding with the pit lava portal.

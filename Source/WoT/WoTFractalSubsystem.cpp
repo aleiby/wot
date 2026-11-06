@@ -330,7 +330,7 @@ bool UWoTFractalSubsystem::UsesIdentityUVRoot(const FName RootName)
 		TEXT("M_WoT_MeshLit"), TEXT("M_WoT_MeshLit2S"),
 		TEXT("M_WoT_MeshLitMasked"), TEXT("M_WoT_MeshLitT"),
 		TEXT("M_WoT_MeshTranslucent"), TEXT("M_WoT_MeshModulate"),
-		// The retired-sheet families (PORT_NOTES "sheet-scrub retirement"):
+		// The retired-sheet families (PORT_NOTES "Procedural textures animate when recently seen"):
 		// the shared MI_<Tex> instances parent on the FractalLive pair, and
 		// the FB particle/mesh masters were regenerated as identity graphs —
 		// every fractal consumer now keeps its parent and swaps Tex only.
@@ -408,8 +408,8 @@ const FWoTFractalTextureRecord* UWoTFractalSubsystem::ResolveSeededRecord(
 	const FWoTFractalTextureRecord& Record)
 {
 	// Canonical catalogs embed the retail seed; stripped catalogs omit it (the
-	// last Audit-1 leak — PORT_NOTES "sole remaining leak is the FRACTAL
-	// CATALOG") and the seed rehydrates from the payload cache at bind time.
+	// final packaged-data leak — PORT_NOTES "Built from the player's own copy of the game")
+	// and the seed rehydrates from the payload cache at bind time.
 	const bool bNeedsPalette = Record.PaletteRGBA.Num() != 256 * 4;
 	const bool bNeedsInitial = Record.InitialBitmap.IsEmpty();
 	const bool bNeedsSource = Record.SourceIndices.IsEmpty()

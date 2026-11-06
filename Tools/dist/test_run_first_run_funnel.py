@@ -45,6 +45,14 @@ COOKED_ENGINE_DESCRIPTOR_COUNT = 2
 COOKED_CENSUS_COUNT = COOKED_PATH_COUNT + len(COOKED_DESCRIPTOR_PATHS)
 
 
+def _repo_tmp() -> Path:
+    """The ignored .tmp folder in the checkout (kept off the system temp
+    volume); a fresh clone does not have it yet."""
+    path = Path.cwd() / ".tmp"
+    path.mkdir(exist_ok=True)
+    return path
+
+
 class ReducedFunnelContractTests(unittest.TestCase):
     def test_front_end_evidence_requires_prior_ready_in_same_process_and_epoch(self):
         ready = {"event": "phase-ready", "phase": "Ready", "pid": 42, "epoch": 7}
@@ -71,7 +79,7 @@ class ReducedFunnelContractTests(unittest.TestCase):
         ))
 
     def test_process_heartbeat_reader_uses_only_new_complete_valid_records(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd() / ".tmp") as temp:
+        with tempfile.TemporaryDirectory(dir=_repo_tmp()) as temp:
             state = Path(temp)
             timestamp = datetime.now(timezone.utc).isoformat()
             heartbeat_root, before = funnel._heartbeat_launch_boundary(state)
@@ -128,7 +136,7 @@ class ReducedFunnelContractTests(unittest.TestCase):
                 heartbeat_root, before, expected_pid=1), [])
 
     def test_process_heartbeat_reader_accepts_epoch_zero_world_events(self):
-        with tempfile.TemporaryDirectory(dir=Path.cwd() / ".tmp") as temp:
+        with tempfile.TemporaryDirectory(dir=_repo_tmp()) as temp:
             state = Path(temp)
             root, before = funnel._heartbeat_launch_boundary(state)
             root.mkdir(parents=True)

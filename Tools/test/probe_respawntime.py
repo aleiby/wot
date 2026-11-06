@@ -8,7 +8,7 @@ zero/inherited default, so an ABSENT tag means the default is 0.0.
 
 Result (2026-07-05): Inventory has no tag -> default 0.0 (matches UE1).
 Weapon carries RespawnTime=30.0 (matches UE1's Weapon default) -> validates the
-method. Pickup inherits (no tag). See PORT_NOTES "Artifact layer port".
+method. Pickup inherits (no tag).
 
 Run from repo root:  python3 Tools/test/probe_respawntime.py
 """

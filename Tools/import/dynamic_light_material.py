@@ -194,7 +194,7 @@ def build_dynamic_surface_sum(unreal, material, expr, x, y, *,
 # hardware did, instead of evaluated per pixel (which left the 0.02
 # NonIncidence step at s = 1 as a crisp ring).
 #
-# Fallbacks (PORT_NOTES "Dynamic-light meshel reconstruction"): a pixel
+# Fallbacks (PORT_NOTES "Dynamic lights on world surfaces and meshes"): a pixel
 # within sixteen float ulps of a lattice point in both axes evaluates at its
 # own position (equal to the reconstruction there to within that distance,
 # and the case of every constant-UV1 fullbright slot - all its vertices sit on

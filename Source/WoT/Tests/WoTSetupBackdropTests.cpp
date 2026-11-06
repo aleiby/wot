@@ -1,16 +1,20 @@
 // The setup (bootstrap) screen's backdrop: the blurred main-menu capture, the
-// generated first-run gradient, the saved file, and the 2x screen column.
+// compiled-in default, the generated gradient, the saved file, the order
+// Current() picks them in, and the 2x screen column.
 #if WITH_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
 
 #include "../UI/SWoTBootstrapScreen.h"
 #include "../UI/WoTSetupBackdrop.h"
+#include "../WoTPreferencesSubsystem.h"
 
 #include "HAL/FileManager.h"
 #include "ImageUtils.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 
 namespace
 {
@@ -170,6 +174,118 @@ bool FWoTSetupBackdropFileSpec::RunTest(const FString&)
 	{
 		Files.Delete(*Path, false, true, true);
 	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSetupBackdropDefaultSpec,
+	"WoT.UI.SetupBackdrop.Default", WoTSetupBackdropSpecFlags)
+
+bool FWoTSetupBackdropDefaultSpec::RunTest(const FString&)
+{
+	TArray<FColor> Backdrop;
+	if (!TestTrue(TEXT("the compiled-in default decodes"),
+			WoTSetupBackdrop::Default(Backdrop))
+		|| !TestEqual(TEXT("the compiled-in default is 640 x 360"), Backdrop.Num(),
+			WoTSetupBackdrop::Width * WoTSetupBackdrop::Height))
+	{
+		return false;
+	}
+	bool bOpaque = true;
+	double LuminanceSum = 0.0;
+	for (const FColor& Color : Backdrop)
+	{
+		bOpaque &= Color.A == 255;
+		LuminanceSum += 0.2126 * Color.R + 0.7152 * Color.G + 0.0722 * Color.B;
+	}
+	const double Mean = LuminanceSum / Backdrop.Num();
+	TestTrue(TEXT("every default pixel is opaque"), bOpaque);
+	// Made like a capture, so it sits at the menu screen's own brightness (~14).
+	TestTrue(FString::Printf(TEXT("the default stays dark behind white text (mean %.1f)"),
+		Mean), Mean >= 8.0 && Mean <= 24.0);
+	TestFalse(TEXT("the default is an image, not the generated gradient"),
+		Backdrop == WoTSetupBackdrop::Fallback());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSetupBackdropCurrentSpec,
+	"WoT.UI.SetupBackdrop.Current", WoTSetupBackdropSpecFlags)
+
+bool FWoTSetupBackdropCurrentSpec::RunTest(const FString&)
+{
+	// An isolated preference path: the saved capture lives beside it, never
+	// beside the user's real preferences.
+	const FString Directory = WoTSetupBackdropSpecPath(
+		*(FString(TEXT("Current-")) + FGuid::NewGuid().ToString()));
+	IFileManager& Files = IFileManager::Get();
+	Files.MakeDirectory(*Directory, true);
+	UWoTPreferencesSubsystem::SetPreferencePathForTesting(
+		FPaths::Combine(Directory, TEXT("WoTUserPreferences")));
+	ON_SCOPE_EXIT
+	{
+		WoTSetupBackdrop::SetDefaultPngForTesting(nullptr);
+		UWoTPreferencesSubsystem::SetPreferencePathForTesting(FString());
+		IFileManager::Get().DeleteDirectory(*Directory, false, true);
+	};
+	FString Saved;
+	if (!TestTrue(TEXT("the saved backdrop path resolves"), WoTSetupBackdrop::Path(Saved))
+		|| !TestTrue(TEXT("the saved backdrop path is the spec's own"),
+			Saved.StartsWith(Directory)))
+	{
+		return false;
+	}
+	TArray<FColor> ShippedDefault;
+	if (!TestTrue(TEXT("the compiled-in default decodes"), WoTSetupBackdrop::Default(ShippedDefault)))
+	{
+		return false;
+	}
+	const TArray<FColor> Gradient = WoTSetupBackdrop::Fallback();
+
+	// A fresh install: no capture yet, so the setup screen shows the default.
+	TestFalse(TEXT("no capture exists yet"), Files.FileExists(*Saved));
+	TestTrue(TEXT("without a capture, Current() is the default"),
+		WoTSetupBackdrop::Current() == ShippedDefault);
+
+	// The first main-menu visit saves the player's own capture, which wins.
+	TArray<FColor> Capture;
+	Capture.Init(FColor(40, 20, 10, 255), WoTSetupBackdrop::Width * WoTSetupBackdrop::Height);
+	if (!TestTrue(TEXT("a capture saves"), WoTSetupBackdrop::Save(Capture, Saved)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("with a capture, Current() is the capture"),
+		WoTSetupBackdrop::Current() == Capture);
+
+	// A capture that does not load falls back to the default, not the gradient.
+	FFileHelper::SaveStringToFile(TEXT("\x89PNG corrupt"), *Saved);
+	TestTrue(TEXT("a corrupt capture falls back to the default"),
+		WoTSetupBackdrop::Current() == ShippedDefault);
+
+	// The gradient only when the default itself is unusable: not a PNG, or a
+	// PNG of the wrong size. Neither crashes.
+	Files.Delete(*Saved, false, true, true);
+	TArray<uint8> Garbage = {'n', 'o', 't', ' ', 'a', ' ', 'p', 'n', 'g'};
+	WoTSetupBackdrop::SetDefaultPngForTesting(&Garbage);
+	TArray<FColor> Unusable;
+	TestFalse(TEXT("a non-PNG default does not decode"), WoTSetupBackdrop::Default(Unusable));
+	TestTrue(TEXT("an unusable default and no capture: the gradient"),
+		WoTSetupBackdrop::Current() == Gradient);
+	TArray<FColor> Tiny;
+	Tiny.Init(FColor::Red, 16);
+	TArray64<uint8> TinyPng;
+	FImageUtils::PNGCompressImageArray(4, 4,
+		TArrayView64<const FColor>(Tiny.GetData(), Tiny.Num()), TinyPng);
+	TArray<uint8> WrongSize(TinyPng.GetData(), static_cast<int32>(TinyPng.Num()));
+	WoTSetupBackdrop::SetDefaultPngForTesting(&WrongSize);
+	TestFalse(TEXT("a wrong-size default does not decode"), WoTSetupBackdrop::Default(Unusable));
+	TestTrue(TEXT("a wrong-size default and no capture: the gradient"),
+		WoTSetupBackdrop::Current() == Gradient);
+	TestTrue(TEXT("the capture still wins over an unusable default"),
+		WoTSetupBackdrop::Save(Capture, Saved) && WoTSetupBackdrop::Current() == Capture);
+
+	WoTSetupBackdrop::SetDefaultPngForTesting(nullptr);
+	TArray<FColor> Restored;
+	TestTrue(TEXT("clearing the override restores the compiled-in default"),
+		WoTSetupBackdrop::Default(Restored) && Restored == ShippedDefault);
 	return !HasAnyErrors();
 }
 

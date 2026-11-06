@@ -27,7 +27,7 @@ REPO = Path(__file__).resolve().parents[2]
 IMPORT_DIR = REPO / "Tools" / "import"
 CONVERT_DIR = REPO / "Tools" / "convert"
 sys.path.insert(0, str(REPO / "Tools"))
-from wot_config import devtree_dir, exports_dir, original_dir  # noqa: E402
+from wot_config import exports_dir, original_dir  # noqa: E402
 
 MP_MAPS = (
     *(f"Arena_{i:02d}" for i in (1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12)),
@@ -118,7 +118,7 @@ IMPORT_STEP_SPECS = (
         ("{retail}/System/*.u", "{exports}/script/**/*.uc", "{conv}/tex/<Pkg>/*.png"),
         ("/Game/WoT/Meshes/<Mesh>", "/Game/WoT/Materials/Instances/MI_<Skin>"),
         aliases=("mesh", "import-mesh"),
-        note="The DEV default reconstructs all James pairs and GLBs from retail first; --mesh-source devtree is the reference escape hatch.",
+        note="Reconstructs all James pairs and GLBs from the retail packages first.",
     ),
     StepSpec(
         "animdata", "import_animdata.py", "Build the animation-sequence/notifies data table from mesh metadata.",
@@ -390,8 +390,8 @@ def _validate_mesh_outputs(conv_mesh: Path, names: Sequence[str],
 def _prepare_mesh_inputs(args: argparse.Namespace) -> list[str]:
     """Build mode-correct James/GLB inputs before the Unreal leaf importer."""
     from class2mesh import write_class_to_mesh
-    from mesh2glb import (DEVTREE_MODEL_DIRS, DEVTREE_SOURCE, RETAIL_SOURCE,
-                          convert, mesh_names, reconstruct_retail_james)
+    from mesh2glb import (RETAIL_SOURCE, convert, mesh_names,
+                          reconstruct_retail_james)
 
     script_root = args.exports_dir.resolve() / "script"
     metadata = _mesh_metadata(script_root)
@@ -425,13 +425,6 @@ def _prepare_mesh_inputs(args: argparse.Namespace) -> list[str]:
             metadata, models_dir, args.retail_root.resolve(), names)
         model_dirs = [models_dir]
         source = RETAIL_SOURCE
-    elif args.mesh_source == DEVTREE_SOURCE:
-        if not DEVTREE_MODEL_DIRS:
-            raise FileNotFoundError(
-                f"no devtree Models directories under "
-                f"{devtree_dir(required=False) / 'U2Radiosity'}")
-        model_dirs = DEVTREE_MODEL_DIRS
-        source = DEVTREE_SOURCE
     else:
         raise ValueError(f"unknown mesh source: {args.mesh_source}")
 
@@ -629,7 +622,7 @@ def _parser() -> argparse.ArgumentParser:
                         help="build canonical payloads (default) or guarded "
                              "canonical-path placeholders in a disposable project")
     parser.add_argument(
-        "--mesh-source", choices=("retail-package", "devtree", "prepared"),
+        "--mesh-source", choices=("retail-package", "prepared"),
         default="retail-package",
         help="mesh conversion source; 'prepared' is reserved for the bootstrap's "
              "already-converted work tree")

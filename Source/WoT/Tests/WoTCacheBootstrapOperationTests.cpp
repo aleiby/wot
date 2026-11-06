@@ -2,6 +2,7 @@
 #if WITH_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -24,6 +25,7 @@
 #include "../FrontEnd/WoTFrontEndSceneMaterializer.h"
 #include "../Mesh/WoTRuntimeVertexMesh.h"
 #include "../Updater/WoTCacheBootstrapOperation.h"
+#include "WoTBootstrapCore/CanonicalJson.h"
 #include "WoTBootstrapCore/Hash.h"
 #include "WoTBootstrapCore/ProfileSession.h"
 #include "WoTBootstrapCore/Generated/BootstrapTrust.generated.h"
@@ -64,6 +66,161 @@ bool DamageProductionBlob(FAutomationTestBase& Test, const FString& Root, const 
         FFileHelper::LoadFileToArray(Bytes, *Path) && !Bytes.IsEmpty())) return false;
     Bytes.Last() ^= 0x55;
     return Test.TestTrue(TEXT("real emitted blob is damaged"), FFileHelper::SaveArrayToFile(Bytes, *Path));
+}
+
+// The identity a production binary requires of its current cache.
+TWoTBootstrapResult<FWoTCacheGenerationBuildIdentity> CacheProductionExpectedIdentity()
+{
+    using FResult = TWoTBootstrapResult<FWoTCacheGenerationBuildIdentity>;
+    auto InstallerSha = FWoTSha256::FromHex(WoT::Bootstrap::InstallerSha256);
+    auto ContentLabel = GetCacheContentLabel();
+    auto Contract = WoTLoadProductionRetailContract();
+    if (InstallerSha.IsError()) return FResult::Error(MoveTemp(InstallerSha).GetError());
+    if (ContentLabel.IsError()) return FResult::Error(MoveTemp(ContentLabel).GetError());
+    if (Contract.IsError()) return FResult::Error(MoveTemp(Contract).GetError());
+    FWoTCacheGenerationBuildIdentity Expected;
+    Expected.bHasBuildIdentity = true;
+    Expected.InstallerSha256 = InstallerSha.GetValue();
+    Expected.ContractSha256 = ComputeRetailContractIdentity(Contract.GetValue());
+    Expected.ProductionDescriptorSha256 = ContentLabel.GetValue();
+    return FResult::Success(MoveTemp(Expected));
+}
+
+// Names what differs between two canonical cache manifests: each top-level
+// field other than the blob table, then each blob record that differs or is
+// present in only one of them, by logical id.
+TArray<FString> CacheProductionManifestDifferences(
+    TConstArrayView<uint8> Fresh, TConstArrayView<uint8> Previous)
+{
+    TArray<FString> Differences;
+    auto FreshParsed = ParseCanonicalJson(Fresh);
+    auto PreviousParsed = ParseCanonicalJson(Previous);
+    if (FreshParsed.IsError() || PreviousParsed.IsError()
+        || !FreshParsed.GetValue().IsObject() || !PreviousParsed.GetValue().IsObject())
+    {
+        Differences.Add(TEXT("a manifest is not a canonical JSON object"));
+        return Differences;
+    }
+    const FWoTCanonicalJsonValue& FreshRoot = FreshParsed.GetValue();
+    const FWoTCanonicalJsonValue& PreviousRoot = PreviousParsed.GetValue();
+    auto MemberBytes = [](const FWoTCanonicalJsonValue* Value) -> TArray<uint8>
+    {
+        if (Value == nullptr) return {};
+        auto Written = WriteCanonicalJson(*Value);
+        return Written.IsError() ? TArray<uint8>() : MoveTemp(Written).GetValue();
+    };
+    TSet<FString> Keys;
+    for (int32 Index = 0; Index < FreshRoot.Num(); ++Index) Keys.Add(FreshRoot.GetMemberKey(Index));
+    for (int32 Index = 0; Index < PreviousRoot.Num(); ++Index) Keys.Add(PreviousRoot.GetMemberKey(Index));
+    for (const FString& Key : Keys)
+    {
+        if (Key != TEXT("blobs")
+            && MemberBytes(FreshRoot.FindMember(Key)) != MemberBytes(PreviousRoot.FindMember(Key)))
+        {
+            Differences.Add(TEXT("field ") + Key);
+        }
+    }
+    auto BlobRecords = [&MemberBytes](const FWoTCanonicalJsonValue& Root)
+    {
+        TMap<FString, TArray<uint8>> Records;
+        const FWoTCanonicalJsonValue* Blobs = Root.FindMember(TEXT("blobs"));
+        if (Blobs == nullptr || !Blobs->IsArray()) return Records;
+        for (int32 Index = 0; Index < Blobs->Num(); ++Index)
+        {
+            const FWoTCanonicalJsonValue& Record = Blobs->GetElement(Index);
+            const FWoTCanonicalJsonValue* LogicalId = Record.FindMember(TEXT("logical_id"));
+            if (LogicalId != nullptr && LogicalId->GetKind() == EWoTCanonicalJsonKind::String)
+                Records.Add(LogicalId->GetString(), MemberBytes(&Record));
+        }
+        return Records;
+    };
+    const TMap<FString, TArray<uint8>> FreshBlobs = BlobRecords(FreshRoot);
+    const TMap<FString, TArray<uint8>> PreviousBlobs = BlobRecords(PreviousRoot);
+    TArray<FString> BlobDifferences;
+    for (const TPair<FString, TArray<uint8>>& Pair : FreshBlobs)
+    {
+        const TArray<uint8>* Other = PreviousBlobs.Find(Pair.Key);
+        if (Other == nullptr) BlobDifferences.Add(TEXT("blob only in the fresh build: ") + Pair.Key);
+        else if (*Other != Pair.Value) BlobDifferences.Add(TEXT("blob differs: ") + Pair.Key);
+    }
+    for (const TPair<FString, TArray<uint8>>& Pair : PreviousBlobs)
+    {
+        if (!FreshBlobs.Contains(Pair.Key))
+            BlobDifferences.Add(TEXT("blob only in the previous release: ") + Pair.Key);
+    }
+    Differences.Sort();
+    BlobDifferences.Sort();
+    Differences.Append(MoveTemp(BlobDifferences));
+    return Differences;
+}
+
+// Opt-in proof against a retained previous-release cache: the directory named
+// by WOT_PREVIOUS_RELEASE_CACHE holds current/manifest.json and current/blobs/.
+// (a) The fresh build's manifest is byte-identical to it. (b) A copy of it,
+// placed under this spec's fixture root, is accepted as current without a
+// rebuild. The retained cache itself is only read.
+void CheckPreviousReleaseCache(FAutomationTestBase& Test, const FString& FixtureParent,
+    const FString& FreshRoot, const FWoTSha256& FreshManifestSha)
+{
+    const FString PreviousRelease =
+        FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_PREVIOUS_RELEASE_CACHE"));
+    if (PreviousRelease.IsEmpty())
+    {
+        Test.AddWarning(TEXT("WOT_PREVIOUS_RELEASE_CACHE is unset: previous-release cache identity and acceptance not verified"));
+        return;
+    }
+    const FString PreviousCurrent =
+        FPaths::ConvertRelativePathToFull(PreviousRelease) / TEXT("current");
+    TArray<uint8> PreviousManifest;
+    if (!Test.TestTrue(TEXT("previous release manifest loads"),
+        FFileHelper::LoadFileToArray(PreviousManifest, *(PreviousCurrent / TEXT("manifest.json")))))
+        return;
+    const FWoTSha256 PreviousManifestSha = Sha256(PreviousManifest);
+    Test.AddInfo(FString::Printf(TEXT("previous release manifest sha256=%s fresh manifest sha256=%s"),
+        *PreviousManifestSha.ToHex(), *FreshManifestSha.ToHex()));
+    if (!Test.TestEqual(TEXT("(a) fresh manifest is byte-identical to the previous release's"),
+        FreshManifestSha.ToHex(), PreviousManifestSha.ToHex()))
+    {
+        TArray<uint8> FreshManifest;
+        if (FFileHelper::LoadFileToArray(FreshManifest, *(FreshRoot / TEXT("current/manifest.json"))))
+        {
+            for (const FString& Difference :
+                CacheProductionManifestDifferences(FreshManifest, PreviousManifest))
+            {
+                Test.AddError(TEXT("fresh manifest differs from the previous release: ") + Difference);
+            }
+        }
+    }
+
+    const FString CopyParent = FixtureParent / TEXT("PreviousRelease");
+    const FString CopyRoot = CopyParent / TEXT("ContentCache");
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+    const bool bCopied = PlatformFile.CreateDirectoryTree(*(CopyRoot / TEXT("current")))
+        && PlatformFile.CopyDirectoryTree(*(CopyRoot / TEXT("current")), *PreviousCurrent, false);
+    if (Test.TestTrue(TEXT("previous release cache copies into the fixture"), bCopied))
+    {
+        auto CopyStore = FWoTCacheStore::Open(CopyRoot);
+        auto Expected = CacheProductionExpectedIdentity();
+        if (CopyStore.IsError() || Expected.IsError())
+        {
+            Test.AddError(CopyStore.IsError() ? CopyStore.GetError().ToString()
+                : Expected.GetError().ToString());
+        }
+        else
+        {
+            auto Accepted = CopyStore.GetValue().TryOpenCurrent(Expected.GetValue(), nullptr);
+            if (Accepted.IsError()) Test.AddError(Accepted.GetError().ToString());
+            else if (Test.TestTrue(TEXT("(b) this binary accepts the previous release cache without a rebuild"),
+                Accepted.GetValue().IsSet()))
+            {
+                Test.TestEqual(TEXT("(b) the accepted lease holds the previous release manifest"),
+                    Accepted.GetValue()->GetManifestSha256().ToHex(), PreviousManifestSha.ToHex());
+                Test.AddInfo(FString::Printf(TEXT("previous release cache accepted as current: lease manifest sha256=%s"),
+                    *Accepted.GetValue()->GetManifestSha256().ToHex()));
+            }
+        }
+    }
+    IFileManager::Get().DeleteDirectory(*CopyParent, false, true);
 }
 }
 
@@ -111,16 +268,9 @@ bool FWoTCacheProductionRecoverySpec::RunTest(const FString&)
             FPaths::FileExists(Root / TEXT("current/damaged")))) return false;
         auto RestartStore = FWoTCacheStore::Open(Root);
         if (RestartStore.IsError()) { AddError(RestartStore.GetError().ToString()); return false; }
-        auto InstallerSha = FWoTSha256::FromHex(WoT::Bootstrap::InstallerSha256);
-        auto DescriptorSha = GetCacheExpectedProductionDescriptorSha256();
-        auto RestartContract = WoTLoadProductionRetailContract();
-        if (InstallerSha.IsError() || DescriptorSha.IsError() || RestartContract.IsError()) return false;
-        FWoTCacheGenerationBuildIdentity Expected;
-        Expected.bHasBuildIdentity = true;
-        Expected.InstallerSha256 = InstallerSha.GetValue();
-        Expected.ContractSha256 = ComputeRetailContractIdentity(RestartContract.GetValue());
-        Expected.ProductionDescriptorSha256 = DescriptorSha.GetValue();
-        auto RestartCurrent = RestartStore.GetValue().TryOpenCurrent(Expected, nullptr);
+        auto Expected = CacheProductionExpectedIdentity();
+        if (Expected.IsError()) return false;
+        auto RestartCurrent = RestartStore.GetValue().TryOpenCurrent(Expected.GetValue(), nullptr);
         if (!TestTrue(TEXT("fresh process rejects the previous process's damaged current"),
             !RestartCurrent.IsError() && !RestartCurrent.GetValue().IsSet())) return false;
     }
@@ -154,6 +304,13 @@ bool FWoTCacheProductionRecoverySpec::RunTest(const FString&)
         AddError(Built.GetError().ToString()); return false;
     }
     TestFalse(TEXT("published cache has no building remnants"), FPaths::DirectoryExists(Root / TEXT("building")));
+    {
+        const TWoTBootstrapResult<FWoTSha256> ContentLabel = GetCacheContentLabel();
+        TestTrue(TEXT("the fresh build records the cache content label"),
+            !ContentLabel.IsError()
+            && Built.GetValue().ProductionDescriptorSha256 == ContentLabel.GetValue());
+    }
+    CheckPreviousReleaseCache(*this, Parent, Root, Built.GetValue().ManifestSha256);
     FWoTCacheGenerationBuildIdentity Identity;
     Identity.bHasBuildIdentity = true;
     Identity.InstallerSha256 = Built.GetValue().InstallerSha256;

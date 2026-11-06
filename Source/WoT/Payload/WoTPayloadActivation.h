@@ -36,6 +36,10 @@ private:
 		const FWoTCacheGenerationLease& Lease);
 
 	friend class UWoTPayloadSubsystem;
+#if WITH_AUTOMATION_TESTS
+	/** The guarded cache-decode gate publishes a lease without a game instance. */
+	friend class FWoTGuardedCacheDecodeAccess;
+#endif
 };
 
 /** Publishes readiness after the complete front-end/world initialization. */

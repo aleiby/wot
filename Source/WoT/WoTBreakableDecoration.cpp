@@ -71,8 +71,8 @@ void AWoTBreakableDecoration::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 	// Placed actors reload with the serialized collision-profile template over
-	// the constructor's responses (the AWoTSkyBox clobber, PORT_NOTES finding
-	// #3) — re-assert the blocking contract at init.
+	// the constructor's responses (the saved collision-profile overwrite), so
+	// re-assert the blocking contract at init.
 	ApplyBlockingCollision();
 }
 
@@ -197,7 +197,7 @@ void AWoTBreakableDecoration::ReleaseSupportedDecorations()
 	// for others resting on top of it (XY inside combined radii, bottom within
 	// ~4uu of this top) and starts them falling. The carried/pawn-base and
 	// decoration-base damage-math legs (uc:32-60) are SP furniture mechanics —
-	// NOTE-SKIPPED (PORT_NOTES G36).
+	// NOTE-SKIPPED (PORT_NOTES "Decoration features multiplayer never uses").
 	const FVector MyLocation = GetActorLocation();
 	const float MyTop = MyLocation.Z
 		+ Collision->GetUnscaledCapsuleHalfHeight() * Collision->GetComponentScale().Z;

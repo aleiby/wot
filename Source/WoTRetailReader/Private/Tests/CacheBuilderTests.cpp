@@ -5,6 +5,7 @@
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "WoTBootstrapCore/CanonicalJson.h"
 #include "WoTBootstrapCore/Hash.h"
 #include "WoTRetailReader/BSPWorld.h"
@@ -436,6 +437,59 @@ TArray<uint8> WoTCacheBuilderSpecRemovedDescriptorEntry(
 	return Result;
 }
 
+// Change one byte inside the descriptor graph without repairing graph_sha256,
+// as a regenerated graph checked in beside a stale digest would.
+TArray<uint8> WoTCacheBuilderSpecStaleGraphDescriptor(TConstArrayView<uint8> Descriptor)
+{
+	TArray<uint8> Stale(Descriptor.GetData(), Descriptor.Num());
+	static const ANSICHAR StatusNeedle[] = "not_yet_cooked";
+	for (int32 ByteIndex = 0;
+		ByteIndex + UE_ARRAY_COUNT(StatusNeedle) - 1 <= Stale.Num();
+		++ByteIndex)
+	{
+		if (FMemory::Memcmp(Stale.GetData() + ByteIndex,
+			StatusNeedle, UE_ARRAY_COUNT(StatusNeedle) - 1) == 0)
+		{
+			Stale[ByteIndex + UE_ARRAY_COUNT(StatusNeedle) - 2] =
+				static_cast<uint8>('e');
+			break;
+		}
+	}
+	return Stale;
+}
+
+// Recompute graph_sha256 over the descriptor's own graph, yielding a canonical
+// substitute that passes every semantic check and differs from the checked-in
+// document only in its graph. Empty when the graph framing is not found.
+TArray<uint8> WoTCacheBuilderSpecRepairGraphDigest(TConstArrayView<uint8> Descriptor)
+{
+	const FUTF8ToTCHAR Converted(
+		reinterpret_cast<const ANSICHAR*>(Descriptor.GetData()), Descriptor.Num());
+	FString SubstituteText(Converted.Length(), Converted.Get());
+	const FString GraphPrefix = TEXT("\"graph\":");
+	const FString GraphSuffix = TEXT(",\"graph_sha256\":\"");
+	const int32 GraphAt = SubstituteText.Find(GraphPrefix, ESearchCase::CaseSensitive);
+	const int32 GraphStart = GraphAt == INDEX_NONE
+		? INDEX_NONE : GraphAt + GraphPrefix.Len();
+	const int32 GraphEnd = GraphStart == INDEX_NONE ? INDEX_NONE
+		: SubstituteText.Find(GraphSuffix, ESearchCase::CaseSensitive,
+			ESearchDir::FromStart, GraphStart);
+	if (GraphStart == INDEX_NONE || GraphEnd == INDEX_NONE) return {};
+	const FString GraphText = SubstituteText.Mid(GraphStart, GraphEnd - GraphStart);
+	const FTCHARToUTF8 GraphUtf8(*GraphText);
+	const FWoTSha256 RepairedGraphSha = Sha256(TConstArrayView<uint8>(
+		reinterpret_cast<const uint8*>(GraphUtf8.Get()), GraphUtf8.Length()));
+	const int32 DigestStart = GraphEnd + GraphSuffix.Len();
+	SubstituteText.RemoveAt(DigestStart, 64);
+	SubstituteText = SubstituteText.Left(DigestStart)
+		+ RepairedGraphSha.ToHex() + SubstituteText.Mid(DigestStart);
+	const FTCHARToUTF8 SubstituteUtf8(*SubstituteText);
+	TArray<uint8> CanonicalSubstitute;
+	CanonicalSubstitute.Append(
+		reinterpret_cast<const uint8*>(SubstituteUtf8.Get()), SubstituteUtf8.Length());
+	return CanonicalSubstitute;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCacheBuilderContractIdentityClosureSpec,
 	"WoT.RetailReader.CacheBuilder.ContractIdentityStartupClosure",
 	WoTCacheBuilderSpecFlags)
@@ -586,20 +640,8 @@ bool FWoTCacheBuilderDescriptorSpec::RunTest(const FString&)
 				Writer.TotalWrites(), 0);
 		}
 	}
-	TArray<uint8> RegeneratedSubstitute = Descriptor;
-	static const ANSICHAR StatusNeedle[] = "not_yet_cooked";
-	for (int32 ByteIndex = 0;
-		ByteIndex + UE_ARRAY_COUNT(StatusNeedle) - 1 <= RegeneratedSubstitute.Num();
-		++ByteIndex)
-	{
-		if (FMemory::Memcmp(RegeneratedSubstitute.GetData() + ByteIndex,
-			StatusNeedle, UE_ARRAY_COUNT(StatusNeedle) - 1) == 0)
-		{
-			RegeneratedSubstitute[ByteIndex + UE_ARRAY_COUNT(StatusNeedle) - 2] =
-				static_cast<uint8>('e');
-			break;
-		}
-	}
+	const TArray<uint8> RegeneratedSubstitute =
+		WoTCacheBuilderSpecStaleGraphDescriptor(Descriptor);
 	FWoTBootstrapStatus Stale =
 		ValidateCacheProductionDescriptorForTesting(RegeneratedSubstitute);
 	TestTrue(TEXT("stale descriptor graph is refused"), Stale.IsError());
@@ -612,34 +654,11 @@ bool FWoTCacheBuilderDescriptorSpec::RunTest(const FString&)
 
 	// Repair the graph digest so this canonical substitute reaches the final
 	// exact-document pin rather than the earlier semantic/staleness checks.
-	const FUTF8ToTCHAR Converted(
-		reinterpret_cast<const ANSICHAR*>(RegeneratedSubstitute.GetData()),
-		RegeneratedSubstitute.Num());
-	FString SubstituteText(Converted.Length(), Converted.Get());
-	const FString GraphPrefix = TEXT("\"graph\":");
-	const FString GraphSuffix = TEXT(",\"graph_sha256\":\"");
-	const int32 GraphAt = SubstituteText.Find(GraphPrefix, ESearchCase::CaseSensitive);
-	const int32 GraphStart = GraphAt == INDEX_NONE
-		? INDEX_NONE : GraphAt + GraphPrefix.Len();
-	const int32 GraphEnd = GraphStart == INDEX_NONE ? INDEX_NONE
-		: SubstituteText.Find(GraphSuffix, ESearchCase::CaseSensitive,
-			ESearchDir::FromStart, GraphStart);
+	const TArray<uint8> CanonicalSubstitute =
+		WoTCacheBuilderSpecRepairGraphDigest(RegeneratedSubstitute);
 	if (TestTrue(TEXT("substitute graph framing is found"),
-		GraphStart != INDEX_NONE && GraphEnd != INDEX_NONE))
+		!CanonicalSubstitute.IsEmpty()))
 	{
-		const FString GraphText = SubstituteText.Mid(GraphStart, GraphEnd - GraphStart);
-		const FTCHARToUTF8 GraphUtf8(*GraphText);
-		const FWoTSha256 RepairedGraphSha = Sha256(TConstArrayView<uint8>(
-			reinterpret_cast<const uint8*>(GraphUtf8.Get()), GraphUtf8.Length()));
-		const int32 DigestStart = GraphEnd + GraphSuffix.Len();
-		SubstituteText.RemoveAt(DigestStart, 64);
-		SubstituteText = SubstituteText.Left(DigestStart)
-			+ RepairedGraphSha.ToHex() + SubstituteText.Mid(DigestStart);
-		const FTCHARToUTF8 SubstituteUtf8(*SubstituteText);
-		TArray<uint8> CanonicalSubstitute;
-		CanonicalSubstitute.Append(
-			reinterpret_cast<const uint8*>(SubstituteUtf8.Get()),
-			SubstituteUtf8.Length());
 		FWoTBootstrapStatus Substitute =
 			ValidateCacheProductionDescriptorForTesting(CanonicalSubstitute);
 		TestTrue(TEXT("caller-supplied canonical substitute is refused"),
@@ -650,6 +669,103 @@ bool FWoTCacheBuilderDescriptorSpec::RunTest(const FString&)
 				Substitute.GetError().Path,
 				FString(TEXT("Build/WoTRelease/cache-v3-production-descriptor.json")));
 		}
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCacheBuilderContentLabelSpec,
+	"WoT.RetailReader.CacheBuilder.ContentLabel",
+	WoTCacheBuilderSpecFlags)
+
+bool FWoTCacheBuilderContentLabelSpec::RunTest(const FString&)
+{
+	TestTrue(TEXT("content revision 0 has no label"),
+		ComputeCacheContentLabel(0).IsError());
+	struct FWoTCacheBuilderSpecGoldenLabel
+	{
+		uint32 Revision;
+		const TCHAR* Label;
+	};
+	static const FWoTCacheBuilderSpecGoldenLabel GoldenLabels[] = {
+		{1, TEXT("1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e")},
+		{2, TEXT("e6e3ef1fa015fcfdef584ffa59b5badff4993d1f3fab2fb35e7743ed522e968e")},
+		{3, TEXT("089c6c7258ecb8c9499919ae0f211f0a6477189784a94c39df1ca677ec6cd6d6")},
+	};
+	for (const FWoTCacheBuilderSpecGoldenLabel& Golden : GoldenLabels)
+	{
+		const TWoTBootstrapResult<FWoTSha256> Label =
+			ComputeCacheContentLabel(Golden.Revision);
+		TestEqual(FString::Printf(TEXT("content revision %u label"), Golden.Revision),
+			Label.IsError() ? FString() : Label.GetValue().ToHex(),
+			FString(Golden.Label));
+	}
+	const TWoTBootstrapResult<FWoTSha256> CompiledLabel = GetCacheContentLabel();
+	const TWoTBootstrapResult<FWoTSha256> RevisionLabel =
+		ComputeCacheContentLabel(GetCacheContentRevision());
+	if (!TestFalse(TEXT("the compiled content label parses"),
+		CompiledLabel.IsError() || RevisionLabel.IsError()))
+		return false;
+	TestEqual(TEXT("the compiled label is the compiled revision's label"),
+		CompiledLabel.GetValue().ToHex(), RevisionLabel.GetValue().ToHex());
+
+	// A descriptor that differs from the checked-in one only in its graph,
+	// admitted through the pin seam, still stamps the content label: the
+	// descriptor no longer reaches the cache.
+	TArray<uint8> Descriptor;
+	if (!TestTrue(TEXT("production descriptor loads"),
+		WoTCacheBuilderSpecLoadProductionDescriptor(Descriptor)))
+		return false;
+	const TArray<uint8> Substitute = WoTCacheBuilderSpecRepairGraphDigest(
+		WoTCacheBuilderSpecStaleGraphDescriptor(Descriptor));
+	if (!TestTrue(TEXT("a graph-only canonical substitute is built"),
+		!Substitute.IsEmpty() && Substitute != Descriptor))
+		return false;
+	const FWoTSha256 SubstituteSha = Sha256(Substitute);
+	{
+		SetCacheProductionDescriptorPinForTesting(SubstituteSha.ToHex());
+		ON_SCOPE_EXIT
+		{
+			SetCacheProductionDescriptorPinForTesting(FString());
+		};
+		const FWoTBootstrapStatus Accepted =
+			ValidateCacheProductionDescriptorForTesting(Substitute);
+		if (!TestFalse(TEXT("the substitute is accepted under its own pin"),
+			Accepted.IsError()))
+		{
+			AddError(Accepted.GetError().ToString());
+			return false;
+		}
+		const FWoTRetailContract Contract = WoTCacheBuilderSpecSyntheticContract();
+		const TMap<FString, uint64> Sizes = WoTCacheBuilderSpecSyntheticSizes(Contract);
+		FWoTCacheBuilderSpecWriter Writer;
+		FWoTCacheBuilderSpecProgress Progress;
+		TArray<FWoTCacheImporterForTesting> Importers =
+			WoTCacheBuilderSpecImporters(Contract);
+		const TWoTBootstrapResult<FWoTCacheBuildResult> Built =
+			BuildRetailCacheForTesting(WoTCacheBuilderSpecInstallerSha(), Contract,
+				Writer, Progress, Substitute, Sizes, Importers);
+		if (!TestFalse(TEXT("a cache builds from the substitute descriptor"),
+			Built.IsError()))
+		{
+			AddError(Built.GetError().ToString());
+			return false;
+		}
+		TestEqual(TEXT("the manifest records the cache content label"),
+			Built.GetValue().Manifest.ProductionDescriptorSha256.ToHex(),
+			CompiledLabel.GetValue().ToHex());
+		TestNotEqual(TEXT("the manifest does not record the descriptor digest"),
+			Built.GetValue().Manifest.ProductionDescriptorSha256.ToHex(),
+			SubstituteSha.ToHex());
+	}
+	const FWoTBootstrapStatus Refused =
+		ValidateCacheProductionDescriptorForTesting(Substitute);
+	TestTrue(TEXT("with the compiled pin restored the substitute is refused"),
+		Refused.IsError());
+	if (Refused.IsError())
+	{
+		TestEqual(TEXT("the restored pin refuses at the exact-document check"),
+			Refused.GetError().Path,
+			FString(TEXT("Build/WoTRelease/cache-v3-production-descriptor.json")));
 	}
 	return !HasAnyErrors();
 }

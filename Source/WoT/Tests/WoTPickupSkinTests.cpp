@@ -24,7 +24,7 @@ namespace
 
 	// The six STY_Masked Skin= pickup classes. AngrealInvTracer also authors
 	// Skin= but has no Style override, and retail's ordinary mesh path never
-	// inherits texture flags (PORT_NOTES C02) — its embedded slot texture IS
+	// inherits texture flags — its embedded slot texture IS
 	// the skin, so it stays on the mesh's own reconstruct-path MIC.
 	const FWoTPickupSkinCase GWoTPickupSkinCases[] =
 	{

@@ -141,8 +141,8 @@ bool WoTAnimDecodeEntry(const FWoTRuntimeWorldProperty& Property,
 
 void WoTAnimApplyPortOverrides(FWoTAnimSet& Table)
 {
-	// PORT_NOTES "Presentation Slice 3": GameType is intentionally absent from
-	// FWoTAnimTableEntry because the shipped validity hook always returns true.
+	// GameType is intentionally absent from FWoTAnimTableEntry because the shipped
+	// validity hook always returns true.
 	// The retained row cells require no asset-specific substitutions.
 	(void)Table;
 }

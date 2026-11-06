@@ -47,7 +47,7 @@ void AWoTExplodingWall::PostInitializeComponents()
 
 	// PLACED actors reload with the serialized collision-profile template over
 	// the constructor's responses (FBodyInstance::LoadProfileData — the
-	// AWoTSkyBox clobber, PORT_NOTES finding #3), so re-assert the occluder
+	// saved collision-profile overwrite), so re-assert the occluder
 	// contract at init regardless of what the umap carries.
 	ApplyOccluderCollision();
 }
@@ -81,8 +81,8 @@ float AWoTExplodingWall::TakeDamage(float DamageAmount,
 	// The wall's gate is EXACT-match only (uc:50-57): incoming 'All' bypasses,
 	// anything else must equal an ActivatedBy entry. Deliberately NO
 	// ActivatedBy=='All' wildcard and NO DamageTypeContains element clause —
-	// both are ExplodingMover.uc:45 additions the wall never had (PORT_NOTES
-	// G35; this exact-only gate is why the six MP authors are inert: nothing
+	// both are ExplodingMover.uc:45 additions the wall never had (this exact-only
+	// gate is why the six MP authors are inert: nothing
 	// shipped emits their 'break01').
 	if (DamageType != FName(TEXT("All")))
 	{
@@ -128,7 +128,8 @@ void AWoTExplodingWall::Explode(APawn* EventInstigator, const FVector& Momentum)
 	// Retail fires Event BEFORE `Instigator = EventInstigator` (uc:69-73), so
 	// the chain carries the stale pre-explosion Instigator (in practice None).
 	// Normalized to the real instigator, exactly like the mover port — same
-	// INTENTIONAL DIVERGENCE ruling (no MP author has an Event; PORT_NOTES).
+	// Intentional divergence: no MP author has an Event
+	// (PORT_NOTES "Exploding walls and movers credit the real instigator").
 	GetWorld()->GetSubsystem<UWoTEventSubsystem>()->FireEvent(
 		EventName, this, EventInstigator);
 	// Retail MakeNoise(1.0) when instigated (uc:74-75). The noise ORIGIN is the

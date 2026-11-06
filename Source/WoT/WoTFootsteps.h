@@ -7,8 +7,8 @@
 class FWoTRuntimeClassDefaults;
 
 // Port of WOT.GenericTextureHelper + its WoTPawns subclasses (spec:
-// exports/script/WOT/GenericTextureHelper.uc; deep record: PORT_NOTES "Footsteps
-// slice"): the floor texture under the pawn keys a surface type, the surface keys
+// exports/script/WOT/GenericTextureHelper.uc; see PORT_NOTES "Footsteps"): the
+// floor texture under the pawn keys a surface type, the surface keys
 // the WOT.* footstep wave set. Selection is uniform among <=4 matching rows (the
 // Odds field is dead code, :460-487); unknown/None surfaces fall back to Stone
 // (:445-449, :549-551). The shipped Texture.FootstepSound stub override (FootStubA

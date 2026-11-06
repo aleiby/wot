@@ -20,18 +20,30 @@ constexpr TCHAR WoTCacheProductionDescriptorRelativePath[] =
 	TEXT("Build/WoTRelease/cache-v3-production-descriptor.json");
 // Updated together with the checked-in descriptor after the Shipping source
 // inventory is regenerated. A different canonical document is a substitute,
-// not the production input this binary was reviewed against.
+// not the production input this binary was reviewed against. The descriptor
+// is validated while a cache is built; it never reaches the cache itself,
+// which records the cache content label below.
 constexpr TCHAR WoTCacheExpectedProductionDescriptorSha256[] =
-	TEXT("1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e");
+	TEXT("bb601c131a0f3a7a32932b4d28415bab552f5ce62e38dfe58208cc4e84fd05e4");
 constexpr TCHAR WoTCacheExpectedImporterSpecSha256[] =
 	TEXT("63a333a7d7cffe985958e5790272ebfe0c844fe64c6920361a79c883817e8044");
 // Domain-separated ComputeRetailContractIdentity of the reviewed compiled
 // production contract. Updated with its generated payload and descriptor pin.
 constexpr TCHAR WoTCacheExpectedProductionContractIdentity[] =
 	TEXT("83d74231a05ac8211b401969be83a6860a43729497eda27c231bf001c5b791e0");
+// The cache content revision. Bump it when, for the same installer and
+// contract, any cache object's bytes, the manifest metadata or the front-end
+// sidecar would differ. The release gate refuses a changed cache under an
+// unchanged revision.
+constexpr uint32 WoTCacheContentRevision = 1;
+// Revision 1 keeps the digest the first public release recorded, so caches
+// built before and after this labelling scheme are byte-identical.
+constexpr TCHAR WoTCacheRevision1Label[] =
+	TEXT("1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e");
 
 #if WITH_AUTOMATION_TESTS
 FString GWoTCacheProductionDescriptorPathForTesting;
+FString GWoTCacheProductionDescriptorPinForTesting;
 #endif
 
 struct FWoTCacheDescriptorOutput
@@ -361,8 +373,15 @@ FWoTBootstrapStatus WoTCacheValidateProductionDescriptor(
 	// Semantic causes are reported before this exact-document identity gate so
 	// descriptor mutation tests retain their specific rejection contexts.
 	const FWoTSha256 ActualDescriptorSha = Sha256(CanonicalBytes);
+	FStringView ExpectedDescriptorHex = WoTCacheExpectedProductionDescriptorSha256;
+#if WITH_AUTOMATION_TESTS
+	if (!GWoTCacheProductionDescriptorPinForTesting.IsEmpty())
+	{
+		ExpectedDescriptorHex = GWoTCacheProductionDescriptorPinForTesting;
+	}
+#endif
 	TWoTBootstrapResult<FWoTSha256> ExpectedDescriptorSha =
-		FWoTSha256::FromHex(WoTCacheExpectedProductionDescriptorSha256);
+		FWoTSha256::FromHex(ExpectedDescriptorHex);
 	if (ExpectedDescriptorSha.IsError()
 		|| ActualDescriptorSha != ExpectedDescriptorSha.GetValue())
 	{
@@ -678,7 +697,10 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoTCacheBuildWithInputs(
 		}
 	}
 	const FWoTSha256 ContractSha = ComputeRetailContractIdentity(Contract);
-	const FWoTSha256 DescriptorSha = Sha256(DescriptorBytes);
+	TWoTBootstrapResult<FWoTSha256> ContentLabelResult = GetCacheContentLabel();
+	if (ContentLabelResult.IsError())
+		return FResult::Error(MoveTemp(ContentLabelResult).GetError());
+	const FWoTSha256 ContentLabel = ContentLabelResult.GetValue();
     FWoTCacheProgressAggregator Progress(Downstream, TotalUnits);
     FWoTCacheCoordinatingWriter Writer(Destination, Declared, Progress);
 	TArray<FWoTCacheBlob> ManifestBlobs;
@@ -716,7 +738,7 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoTCacheBuildWithInputs(
 	Result.Manifest.bHasBuildIdentity = true;
 	Result.Manifest.InstallerSha256 = InstallerSha;
 	Result.Manifest.ContractSha256 = ContractSha;
-	Result.Manifest.ProductionDescriptorSha256 = DescriptorSha;
+	Result.Manifest.ProductionDescriptorSha256 = ContentLabel;
 	Result.Manifest.Blobs = MoveTemp(ManifestBlobs);
     FWoTBootstrapStatus Finalized = BeforeCompletion(Result.Manifest);
     if (Finalized.IsError()) return FResult::Error(MoveTemp(Finalized).GetError());
@@ -733,23 +755,48 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoTCacheBuildWithInputs(
 }
 }
 
-TWoTBootstrapResult<FWoTSha256>
-GetCacheExpectedProductionDescriptorSha256()
+uint32 GetCacheContentRevision()
 {
-	return FWoTSha256::FromHex(
-		WoTCacheExpectedProductionDescriptorSha256);
+	return WoTCacheContentRevision;
+}
+
+TWoTBootstrapResult<FWoTSha256> ComputeCacheContentLabel(uint32 Revision)
+{
+	using FResult = TWoTBootstrapResult<FWoTSha256>;
+	if (Revision == 0)
+	{
+		return FResult::Error(WoTCacheError(EWoTBootstrapError::InvalidNumber,
+			TEXT("cache content revisions start at 1"),
+			TEXT("cache-content-revision")));
+	}
+	if (Revision == 1)
+	{
+		return FWoTSha256::FromHex(WoTCacheRevision1Label);
+	}
+	FWoTSha256Hasher Hasher;
+	// The domain includes its terminating NUL, framed like the contract identity.
+	static const ANSICHAR Domain[] = "WOT-CACHE-CONTENT-IDENTITY-V1";
+	Hasher.Update(TConstArrayView<uint8>(reinterpret_cast<const uint8*>(Domain),
+		UE_ARRAY_COUNT(Domain)));
+	WoTCacheHashUnsigned(Hasher, static_cast<uint64>(Revision));
+	return FResult::Success(Hasher.Finish());
+}
+
+TWoTBootstrapResult<FWoTSha256> GetCacheContentLabel()
+{
+	return ComputeCacheContentLabel(WoTCacheContentRevision);
 }
 
 bool IsCurrentProductionCacheBuildIdentity(
 	const FWoTSha256& ContractSha256,
-	const FWoTSha256& ProductionDescriptorSha256)
+	const FWoTSha256& RecordedContentLabel)
 {
 	const auto ExpectedContract = FWoTSha256::FromHex(
 		WoTCacheExpectedProductionContractIdentity);
-	const auto ExpectedDescriptor = GetCacheExpectedProductionDescriptorSha256();
-	return !ExpectedContract.IsError() && !ExpectedDescriptor.IsError()
+	const auto ExpectedLabel = GetCacheContentLabel();
+	return !ExpectedContract.IsError() && !ExpectedLabel.IsError()
 		&& ContractSha256 == ExpectedContract.GetValue()
-		&& ProductionDescriptorSha256 == ExpectedDescriptor.GetValue();
+		&& RecordedContentLabel == ExpectedLabel.GetValue();
 }
 
 FWoTSha256 ComputeRetailContractIdentity(const FWoTRetailContract& Contract)
@@ -827,7 +874,10 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoT::Retail::Detail::BuildRetailCache(
 	TArray<uint8> FrontEndDescriptorSidecar;
 	FWoTSha256 ExpectedFrontEndDescriptorRoot;
 	const FWoTSha256 ContractSha = ComputeRetailContractIdentity(Contract);
-	const FWoTSha256 DescriptorSha = Sha256(Descriptor.GetValue());
+	TWoTBootstrapResult<FWoTSha256> ContentLabelResult = GetCacheContentLabel();
+	if (ContentLabelResult.IsError())
+		return FResult::Error(MoveTemp(ContentLabelResult).GetError());
+	const FWoTSha256 ContentLabel = ContentLabelResult.GetValue();
 	Boundaries.Add({TEXT("texture-sound"), {TEXT("texture-v2"), TEXT("sound-v1")},
 		[&Package, &Contract](IWoTObjectWriter& ObjectWriter,
 			IWoTProgressSink& ObjectProgress)
@@ -862,7 +912,7 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoT::Retail::Detail::BuildRetailCache(
 		}});
 	Boundaries.Add({TEXT("front-end-world"), {TEXT("front-end-world-v1")},
 		[&Package, &Contract, &FrontEndDescriptorSidecar,
-			&ExpectedFrontEndDescriptorRoot, ContractSha, DescriptorSha](
+			&ExpectedFrontEndDescriptorRoot, ContractSha, ContentLabel](
 			IWoTObjectWriter& ObjectWriter, IWoTProgressSink& ObjectProgress)
 		{
 			using FObjectsResult = TWoTBootstrapResult<TArray<FWoTCacheBlob>>;
@@ -874,7 +924,7 @@ TWoTBootstrapResult<FWoTCacheBuildResult> WoT::Retail::Detail::BuildRetailCache(
 				MoveTemp(BuiltDescriptor).GetValue();
 			TWoTBootstrapResult<TArray<uint8>> Sealed =
 				WriteSealedFrontEndDescriptorSidecar(EntryDescriptor,
-					Package.CachedInputSha256(), ContractSha, DescriptorSha);
+					Package.CachedInputSha256(), ContractSha, ContentLabel);
 			if (Sealed.IsError())
 				return FObjectsResult::Error(MoveTemp(Sealed).GetError());
 			FrontEndDescriptorSidecar = MoveTemp(Sealed).GetValue();
@@ -966,6 +1016,11 @@ FWoTBootstrapStatus ValidateCacheProductionDescriptorForTesting(
 void SetCacheProductionDescriptorPathForTesting(FString Path)
 {
 	GWoTCacheProductionDescriptorPathForTesting = MoveTemp(Path);
+}
+
+void SetCacheProductionDescriptorPinForTesting(FString HexOrEmpty)
+{
+	GWoTCacheProductionDescriptorPinForTesting = MoveTemp(HexOrEmpty);
 }
 
 TWoTBootstrapResult<TArray<uint8>> LoadCacheProductionDescriptorForTesting()

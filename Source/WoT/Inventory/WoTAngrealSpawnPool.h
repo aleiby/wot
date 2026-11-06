@@ -13,7 +13,7 @@
 // own collision, and on Touch hands the item to the toucher; if bRespawn it
 // respawns after RespawnTime. Pool[]/Weight[] come from the map t3d — the
 // importer maps the class names to the ported AWoTAngrealInv* and drops the
-// unported ones (PORT_NOTES "AngrealSpawnPool").
+// unported ones (PORT_NOTES).
 //
 UCLASS()
 class AWoTAngrealSpawnPool : public AWoTInventory

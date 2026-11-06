@@ -1052,23 +1052,13 @@ void UWoTBootstrapSubsystem::RequestPickedInstaller(
 	{
 		return;
 	}
-	FString ParentPath;
-	FString Leaf;
-	if (FWoTBootstrapStatus Split = SplitNativePathParentAndLeaf(
-			AbsolutePath, ParentPath, Leaf); Split.IsError())
+	TWoTBootstrapResult<FString> CanonicalPath =
+		WoTCanonicalizeInstallerPickPath(AbsolutePath);
+	if (CanonicalPath.IsError())
 	{
 		return;
 	}
-	TWoTBootstrapResult<FWoTCanonicalNativeDirectory> Parent =
-		OpenCanonicalNativeDirectoryFollowing(ParentPath);
-	if (Parent.IsError())
-	{
-		return;
-	}
-	FString CanonicalPath = FPaths::Combine(
-		Parent.GetValue().CanonicalPath, Leaf);
-	FPaths::NormalizeFilename(CanonicalPath);
-	Worker->RequestPickedInstaller(MoveTemp(CanonicalPath));
+	Worker->RequestPickedInstaller(MoveTemp(CanonicalPath).GetValue());
 }
 
 bool UWoTBootstrapSubsystem::IsReady() const

@@ -810,18 +810,16 @@ WoTWorldMaterializerTest_BuildWorldSet(
 	IWoTProgressSink& Progress)
 {
 	using FResult = TWoTBootstrapResult<FWoTCacheBuildResult>;
-	TWoTBootstrapResult<FWoTSha256> DescriptorIdentity =
-		GetCacheExpectedProductionDescriptorSha256();
-	if (DescriptorIdentity.IsError())
+	TWoTBootstrapResult<FWoTSha256> ContentLabel = GetCacheContentLabel();
+	if (ContentLabel.IsError())
 	{
-		return FResult::Error(MoveTemp(DescriptorIdentity).GetError());
+		return FResult::Error(MoveTemp(ContentLabel).GetError());
 	}
 	FWoTCacheBuildResult Build;
 	Build.Manifest.bHasBuildIdentity = true;
 	Build.Manifest.InstallerSha256 = Package.CachedInputSha256();
 	Build.Manifest.ContractSha256 = ComputeRetailContractIdentity(Contract);
-	Build.Manifest.ProductionDescriptorSha256 =
-		DescriptorIdentity.GetValue();
+	Build.Manifest.ProductionDescriptorSha256 = ContentLabel.GetValue();
 	constexpr uint64 TotalObjects = 38;
 	FWoTBootstrapStatus Reported =
 		Progress.ReportProgress(TEXT("required-world-set"), 0, TotalObjects);

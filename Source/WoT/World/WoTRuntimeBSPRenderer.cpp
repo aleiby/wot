@@ -1611,7 +1611,7 @@ UTexture2D* WoTRuntimeBSPMaterializeTexture(
 	Options.bSRGB = !bRawSurfaceTexture;
 	// Smooth surfaces sample through TEXTUREGROUP_World (TF_Default: anisotropic,
 	// blended mips) instead of retail's isotropic bilinear, so oblique floors and
-	// ceilings keep their detail (PORT_NOTES "World surfaces filter anisotropically").
+	// ceilings keep their detail (PORT_NOTES "Texture filtering").
 	Options.Filter = bNoSmooth ? TF_Nearest : TF_Default;
 	// Retail Glide authors DetailBias=-1.5. UTexture exposes only an integer
 	// asset bias; -1 is the closest conservative value (the equally near -2

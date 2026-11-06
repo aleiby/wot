@@ -9,8 +9,7 @@ sets SetCollision(true..)+bCollideWorld=true in UE1's PlayerPawn), so FindSpot
 shoves the cylinder off the floor/walls. Our render used the un-nudged target,
 leaving the camera low per-pose. This writes the FindSpot spot into `pawn`.
 
-Model (validated 2026-07-07 on B2_02/B2_04/Arena_04, PORT_NOTES
-"Golden-capture height residual"):
+Model (validated on B2_02/B2_04/Arena_04):
     pawn_adjusted.z = pawn_jumpto.z + (FindSpot_dz - GLOBAL_MEAN_DZ)
     (x,y likewise get the FindSpot dx,dy; those are ~0 off open floor.)
 GLOBAL_MEAN_DZ de-degenerates the nudge from eye_height: the original parallax

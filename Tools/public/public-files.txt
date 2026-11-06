@@ -581,6 +581,8 @@ Source/WoT/Traps/WoTTrapBurst.cpp
 Source/WoT/Traps/WoTTrapBurst.h
 Source/WoT/Traps/WoTWall.cpp
 Source/WoT/Traps/WoTWall.h
+Source/WoT/UI/Generated/WoTSetupBackdropDefault.inl
+Source/WoT/UI/Resources/WoTSetupBackdropDefault.png
 Source/WoT/UI/SWoTBootstrapScreen.cpp
 Source/WoT/UI/SWoTBootstrapScreen.h
 Source/WoT/UI/WoTReleaseNotes.cpp
@@ -606,6 +608,8 @@ Source/WoT/Updater/WoTInstallerLocations.cpp
 Source/WoT/Updater/WoTInstallerLocations.h
 Source/WoT/Updater/WoTReleaseIdentity.cpp
 Source/WoT/Updater/WoTReleaseIdentity.h
+Source/WoT/Updater/WoTRememberedInstaller.cpp
+Source/WoT/Updater/WoTRememberedInstaller.h
 Source/WoT/WoT.Build.cs
 Source/WoT/WoT.cpp
 Source/WoT/WoTActorRotator.cpp
@@ -949,6 +953,8 @@ Source/WoTBootstrapCoreTests/Private/WoTBootstrapCoreTestsPCH.h
 Source/WoTBootstrapCoreTests/WoTBootstrapCoreTests.Build.cs
 Source/WoTEditor.Target.cs
 Source/WoTGuardedEngineTests.Target.cs
+Source/WoTGuardedEngineTests/Private/WoTGuardedCacheDecodeSpec.cpp
+Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTests.h
 Source/WoTGuardedEngineTests/Private/WoTGuardedEngineTestsMain.cpp
 Source/WoTGuardedEngineTests/WoTGuardedEngineTests.Build.cs
 Source/WoTLaunch/Private/Tests/WoTEarlyUITests.cpp
@@ -1075,6 +1081,7 @@ Tools/build/build_guarded_ue58.sh
 Tools/build/build_innoextract_native.py
 Tools/build/check_innoextract_link.py
 Tools/build/fetch_innoextract_libs.py
+Tools/build/generate_setup_backdrop.py
 Tools/build/provision_ue58_source.py
 Tools/build/prune_stale_module_intermediates.py
 Tools/build/record_build_receipt.py
@@ -1082,6 +1089,7 @@ Tools/build/stage_innoextract_native.py
 Tools/build/test_build_innoextract_native.py
 Tools/build/test_check_innoextract_link.py
 Tools/build/test_fetch_innoextract_libs.py
+Tools/build/test_generate_setup_backdrop.py
 Tools/build/test_prune_stale_module_intermediates.py
 Tools/build/test_public_blob_exemptions.py
 Tools/build/test_record_build_receipt.py
@@ -1147,8 +1155,11 @@ Tools/dist/bootstrap.py
 Tools/dist/build_payload_cache.py
 Tools/dist/build_stripped_pak.py
 Tools/dist/cache-v3-importer-outputs-v1.json
+Tools/dist/cache_content_label.py
 Tools/dist/cache_contract_v3.py
 Tools/dist/cache_contract_v3.schema.json
+Tools/dist/cache_decode_gate.py
+Tools/dist/cache_lineage.py
 Tools/dist/check_cache_v3_production_closure.py
 Tools/dist/check_lazy_payload_consumers.py
 Tools/dist/check_shipping_consumer_allowlist.py
@@ -1303,7 +1314,10 @@ Tools/dist/test_automation_test_names.py
 Tools/dist/test_bootstrap.py
 Tools/dist/test_bsp_payload.py
 Tools/dist/test_build_stripped_pak.py
+Tools/dist/test_cache_content_label.py
 Tools/dist/test_cache_contract_v3.py
+Tools/dist/test_cache_decode_gate.py
+Tools/dist/test_cache_lineage.py
 Tools/dist/test_cache_v3_production_closure.py
 Tools/dist/test_check_lazy_payload_consumers.py
 Tools/dist/test_check_shipping_consumer_allowlist.py
@@ -1441,6 +1455,7 @@ Tools/public/scaffold/gitignore
 Tools/public/test_check_export_receipt.py
 Tools/public/test_export_public_tree.py
 Tools/public/test_leak_guard.py
+Tools/public/test_port_notes_references.py
 Tools/public/test_provenance_scan.py
 Tools/reference/README.md
 Tools/reference/capture_original_shots.ps1

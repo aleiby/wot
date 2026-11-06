@@ -917,7 +917,7 @@ def compose_map(map_path, t3d_path, verbose=False, ctx=None, wave="mean",
     # RE-CONFIRMED against goldens 2026-07-14 after a false alarm: fresh
     # retail captures that day showed gated-light areas brighter, but that
     # was the CAPTURE RIG drifted bright-in-darks vs the archived goldens
-    # (PORT_NOTES "Retail capture rig drift"), not the gate failing —
+    # (the capture rig had drifted), not the gate failing —
     # composing gated lights IN regressed Arena_01 pose bad% 2.06 -> 12.29
     # (PS20_rev 0.26 -> 93) against the goldens, which are the spec of
     # record. Do not re-litigate this from fresh retail captures without

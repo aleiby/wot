@@ -490,7 +490,7 @@ if __name__ == "__main__":
     parser.add_argument("out_dir", nargs="?", default=ROOT / "Intermediate/Conv/mesh")
     parser.add_argument("models_dir", nargs="?", type=Path,
                         help="explicit, already-reconstructed James source tree")
-    parser.add_argument("--source", choices=(RETAIL_SOURCE, DEVTREE_SOURCE),
+    parser.add_argument("--source", choices=(RETAIL_SOURCE,),
                         default=RETAIL_SOURCE,
                         help="mesh provenance/input selector (default: retail-package)")
     parser.add_argument("--retail-root", type=Path,

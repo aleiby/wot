@@ -13,6 +13,8 @@ struct FWoTPublishedCacheReceipt
 {
 	FWoTSha256 InstallerSha256;
 	FWoTSha256 ContractSha256;
+	/** The cache content label the build recorded; the name matches the
+	 * manifest key kept for format compatibility. */
 	FWoTSha256 ProductionDescriptorSha256;
 	FWoTSha256 ManifestSha256;
 	uint64 CompletedProgressUnits = 0;

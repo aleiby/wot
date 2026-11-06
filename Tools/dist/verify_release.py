@@ -8,6 +8,8 @@ writes and publish_release.py uploads:
   WoT-<P>-release-manifest-v2.json(.sig)          per platform, release-key signed
   WoT-<P>-update-r<seq>-<commit>.zip              per platform, the updater archive
   WoT-<P>-announcement-v1.json(.sig)              per platform, announcement-key signed
+  WoT-<P>-cache-lineage-v1.json(.sig)             per platform, release-key signed;
+                                                  required from release sequence 1
   WoT-<P>-guarded-shipping-<commit>.zip           optional manual-install download
                                                   (WoT-<P>-guarded-<commit>.zip for
                                                   an --allow-test Test publication)
@@ -81,6 +83,10 @@ class PlatformResult:
     dmg_inspection: Optional[str] = None
     dmg_notarized: Optional[bool] = None
     configuration: str = ""
+    # The ring key that verified the manifest; the cache lineage must verify
+    # under the same key.
+    release_key: Optional[formats.ReleaseKey] = None
+    cache_lineage: Optional[dict] = None
 
 
 @dataclass
@@ -96,9 +102,15 @@ class VerifiedSet:
     platforms: Dict[str, PlatformResult]
     sequence_gate: dict
     assets: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    # Only for a downloaded published release (--published): the unsigned
+    # cumulative notes asset publish_release adds beside the signed set.
+    release_notes: Optional[Dict[str, object]] = None
+    # Unsigned, fixed-name copies of the player downloads. They are admitted
+    # only in --published mode and never become part of signed assets.
+    player_downloads: Dict[str, Dict[str, object]] = field(default_factory=dict)
 
     def summary(self) -> dict:
-        return {
+        summary = {
             "assets": self.assets,
             "build_commit": self.build_commit,
             "key_id": self.key_id,
@@ -123,6 +135,62 @@ class VerifiedSet:
             "sequence_gate": self.sequence_gate,
             "tag": self.tag,
         }
+        if self.release_notes is not None:
+            summary["release_notes"] = self.release_notes
+        if self.player_downloads:
+            summary["player_downloads"] = self.player_downloads
+        return summary
+
+
+def _check_published_release_notes(path: Path, sequence: int,
+                                   failures: List[str]) -> Optional[Dict[str, object]]:
+    """Validate the notes asset of a published release against its sequence.
+
+    publish_release merges an entry for every positive sequence into the
+    cumulative asset (merge_release_notes), so a published release N > 0 must
+    carry entry N and no entry from a later release.
+    """
+    raw = path.read_bytes()
+    try:
+        document = formats.parse_release_notes(raw, formats.RELEASE_NOTES_ASSET)
+    except FormatError as exc:
+        failures.append(str(exc))
+        return None
+    sequences = [entry["release_sequence"] for entry in document["notes"]]
+    later = [value for value in sequences if value > sequence]
+    if later:
+        failures.append(f"{formats.RELEASE_NOTES_ASSET} has entries for later releases "
+                        f"{later} than this release's sequence {sequence}")
+    if sequence > 0 and sequence not in sequences:
+        failures.append(f"{formats.RELEASE_NOTES_ASSET} has no entry for this release's "
+                        f"sequence {sequence}")
+    digest, size = formats.sha256_file(path)
+    return {"entry_sequences": sequences, "sha256": digest, "size": size}
+
+
+def _check_published_player_downloads(
+        directory: Path, paths: Dict[str, Path],
+        platforms: Dict[str, PlatformResult], failures: List[str]
+        ) -> Dict[str, Dict[str, object]]:
+    sources = formats.player_download_asset_sources(platforms)
+    result = {}
+    for fixed_name, path in sorted(paths.items()):
+        source_name = sources.get(fixed_name)
+        source = directory / source_name if source_name is not None else None
+        if source is None or not source.is_file():
+            failures.append(
+                f"{fixed_name}: has no commit-named source in the set")
+            continue
+        digest, size = formats.sha256_file(path)
+        if (digest, size) != formats.sha256_file(source):
+            failures.append(f"{fixed_name}: differs from {source_name}")
+            continue
+        result[fixed_name] = {
+            "source": source_name,
+            "sha256": digest,
+            "size": size,
+        }
+    return result
 
 
 def _read(directory: Path, name: str, failures: List[str]) -> Optional[bytes]:
@@ -416,7 +484,59 @@ def _verify_platform(directory: Path, platform: str, trust: formats.Trust,
     failures.extend(local)
     return PlatformResult(announcement=announcement, manifest=manifest,
                           archive_name=archive_name, tree_root=staged.tree_root,
-                          entries=staged.entries, configuration=configuration)
+                          entries=staged.entries, configuration=configuration,
+                          release_key=key)
+
+
+def _check_cache_lineage(directory: Path, platform: str, result: PlatformResult,
+                         openssl: Optional[str], failures: List[str], *,
+                         required: bool) -> Optional[dict]:
+    """Verify one platform's signed cache lineage against its signed manifest.
+
+    The lineage is signed by the release key that signed the manifest, under
+    its own CacheLineageV1 context, and must name the manifest's platform and
+    release sequence. It is required from release sequence 1 on; the first
+    release (sequence 0) published none, so there it is verified only if present.
+    """
+    name = formats.cache_lineage_asset(platform)
+    signature_name = name + formats.SIGNATURE_SUFFIX
+    if not (directory / name).exists() and not (directory / signature_name).exists():
+        if required:
+            failures.append(
+                f"missing asset {name}: a release at sequence 1 or later "
+                "carries its signed cache lineage")
+        return None
+    raw = _read(directory, name, failures)
+    signature = _read_signature(directory, name, failures)
+    if raw is None or signature is None:
+        return None
+    key = result.release_key
+    if key is None:
+        failures.append(f"{name}: no authenticated release key to verify it with")
+        return None
+    if not crypto.verify_framed(key.public_key, crypto.CONTEXT_CACHE_LINEAGE_V1,
+                                raw, signature):
+        failures.append(f"{name}: the signature does not verify under release key "
+                        f"{key.key_id!r} (CacheLineageV1)")
+        return None
+    _openssl_second_opinion(openssl, key.public_key, crypto.CONTEXT_CACHE_LINEAGE_V1,
+                            raw, signature, name, failures)
+    try:
+        lineage = formats.parse_cache_lineage(raw, platform)
+    except FormatError as exc:
+        failures.append(f"{name}: {exc}")
+        return None
+    manifest = result.manifest.document
+    if lineage["platform"] != manifest["platform"]:
+        failures.append(f"{name}: platform {lineage['platform']!r} differs from the "
+                        f"signed manifest's {manifest['platform']!r}")
+        return None
+    if lineage["release_sequence"] != manifest["release_sequence"]:
+        failures.append(f"{name}: release_sequence {lineage['release_sequence']} "
+                        "differs from the signed manifest's "
+                        f"{manifest['release_sequence']}")
+        return None
+    return lineage
 
 
 def _check_install_zip(directory: Path, name: str, platform: str,
@@ -627,7 +747,8 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
                         openssl: Optional[str], allow_test: bool,
                         allow_unnotarized: bool,
                         require_previous: bool,
-                        inspect_mac_dmg: bool) -> VerifiedSet:
+                        inspect_mac_dmg: bool,
+                        published: bool = False) -> VerifiedSet:
     directory = Path(directory)
     failures: List[str] = []
     if not trust.recovery_url.endswith("/" + formats.KEY_RING_ASSET):
@@ -672,6 +793,9 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
     sequence_gate = _verify_update_sequence_gate(
         sequence, dict(releases or {}), dict(funnel_receipts or {}),
         allow_staging_sequence, failures)
+    for platform, result in sorted(results.items()):
+        result.cache_lineage = _check_cache_lineage(
+            directory, platform, result, openssl, failures, required=sequence >= 1)
     previous_platforms = set(previous or {})
     if (require_previous and sequence > 0
             and previous_platforms != set(formats.PLATFORMS)):
@@ -702,6 +826,8 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
                   formats.announcement_asset(platform) + formats.SIGNATURE_SUFFIX,
                   formats.manifest_asset(platform),
                   formats.manifest_asset(platform) + formats.SIGNATURE_SUFFIX,
+                  formats.cache_lineage_asset(platform),
+                  formats.cache_lineage_asset(platform) + formats.SIGNATURE_SUFFIX,
                   result.archive_name}
         if platform == "Mac":
             try:
@@ -714,9 +840,21 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
             else:
                 known |= {dmg_name, mac_dmg.sidecar_name(dmg_name)}
     assets: Dict[str, Dict[str, object]] = {}
+    release_notes: Optional[Dict[str, object]] = None
+    player_download_paths: Dict[str, Path] = {}
+    notes_seen = False
     for path in sorted(directory.iterdir()) if directory.is_dir() else []:
         if path.is_dir():
             failures.append(f"unexpected directory {path.name} in the publish set")
+            continue
+        if published and path.name == formats.RELEASE_NOTES_ASSET:
+            # Not part of the signed set: publish_release adds it. A signing
+            # set stays closed and still refuses it.
+            notes_seen = True
+            release_notes = _check_published_release_notes(path, sequence, failures)
+            continue
+        if published and path.name in formats.PLAYER_DOWNLOAD_ASSETS.values():
+            player_download_paths[path.name] = path
             continue
         match = _INSTALL_ZIP.match(path.name)
         if path.name not in known and not match:
@@ -741,6 +879,9 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
             _check_install_zip(directory, path.name, platform, result, failures)
         digest, size = formats.sha256_file(path)
         assets[path.name] = {"sha256": digest, "size": size}
+    if published and not notes_seen:
+        failures.append(f"a published release carries {formats.RELEASE_NOTES_ASSET}, "
+                        "but the downloaded set has none")
     checked_releases: Dict[str, formats.GuardedRelease] = {}
     for platform, release_json in (releases or {}).items():
         if platform in results:
@@ -752,6 +893,8 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
             and results["Mac"].configuration in formats.GUARDED_CONFIGURATIONS):
         _check_dmg_assets(directory, results["Mac"], checked_releases.get("Mac"),
                           inspect_mac_dmg, allow_unnotarized, failures)
+    player_downloads = _check_published_player_downloads(
+        directory, player_download_paths, results, failures)
     if failures:
         raise VerifyError(failures)
     first = next(iter(results.values()))
@@ -761,7 +904,8 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
         key_id=first.announcement.key_id,
         build_commit=first.manifest.document["build_commit"], ring=ring,
         ring_signer=ring_signer, platforms=results, sequence_gate=sequence_gate,
-        assets=assets)
+        assets=assets, release_notes=release_notes,
+        player_downloads=player_downloads)
 
 
 def verify_publish_set(directory: Path, *, trust: formats.Trust,
@@ -773,8 +917,14 @@ def verify_publish_set(directory: Path, *, trust: formats.Trust,
                        openssl: Optional[str] = None,
                        allow_test: bool = False,
                        allow_unnotarized: bool = False,
-                       inspect_mac_dmg: Optional[bool] = None) -> VerifiedSet:
-    """Verify a candidate set, including the mandatory positive-sequence history."""
+                       inspect_mac_dmg: Optional[bool] = None,
+                       published: bool = False) -> VerifiedSet:
+    """Verify a candidate set, including the mandatory positive-sequence history.
+
+    ``published`` verifies a set downloaded from a published release, which
+    may also hold the release-notes asset and fixed player-download copies;
+    they are validated, not signed.
+    """
     return _verify_publish_set(
         directory, trust=trust, compiled=compiled, previous=previous,
         releases=releases, funnel_receipts=funnel_receipts,
@@ -782,7 +932,8 @@ def verify_publish_set(directory: Path, *, trust: formats.Trust,
         allow_test=allow_test, allow_unnotarized=allow_unnotarized,
         require_previous=True,
         inspect_mac_dmg=(sys.platform == "darwin"
-                         if inspect_mac_dmg is None else inspect_mac_dmg))
+                         if inspect_mac_dmg is None else inspect_mac_dmg),
+        published=published)
 
 
 def _verify_signing_output(directory: Path, *, trust: formats.Trust,
@@ -824,6 +975,44 @@ def load_previous_announcements(directory: Path, trust: formats.Trust,
         previous[platform] = formats.parse_announcement(raw, platform,
                                                         compiled.announcement_domain)
     return previous
+
+
+def authenticate_platform(directory: Path, platform: str, *, trust: formats.Trust,
+                          compiled: formats.CompiledConstants,
+                          openssl: Optional[str] = None) -> PlatformResult:
+    """Authenticate one platform's signed chain in a (previous) publish set.
+
+    The same checks verify_publish_set applies to that platform: the root-signed
+    ring, the announcement, the release-key-signed manifest and its update
+    archive and tree. The other platform's assets are not needed.
+    """
+    if platform not in formats.PLATFORMS:
+        raise VerifyError([f"unknown platform {platform!r}"])
+    directory = Path(directory)
+    failures: List[str] = []
+    ring, ring_raw, _ = _verify_ring(directory, trust, openssl, failures)
+    result = None
+    if ring is not None:
+        result = _verify_platform(directory, platform, trust, compiled, ring,
+                                  ring_raw, openssl, failures)
+    if failures or result is None:
+        raise VerifyError(failures or [f"{platform}: the signed chain does not verify"])
+    return result
+
+
+def load_verified_cache_lineage(directory: Path, platform: str, *,
+                                trust: formats.Trust,
+                                compiled: formats.CompiledConstants,
+                                openssl: Optional[str] = None) -> dict:
+    """The authenticated cache lineage of one platform of a published set."""
+    result = authenticate_platform(directory, platform, trust=trust,
+                                   compiled=compiled, openssl=openssl)
+    failures: List[str] = []
+    lineage = _check_cache_lineage(Path(directory), platform, result, openssl,
+                                   failures, required=True)
+    if failures or lineage is None:
+        raise VerifyError(failures or [f"{platform}: no verified cache lineage"])
+    return lineage
 
 
 def write_receipt(path: Path, document: dict) -> None:
@@ -901,6 +1090,11 @@ def parser() -> argparse.ArgumentParser:
                         help="also verify every signature with the OpenSSL CLI")
     result.add_argument("--openssl", help="OpenSSL 3 CLI for --openssl-cross-check")
     result.add_argument("--receipt", help="write a verify receipt here")
+    result.add_argument("--published", action="store_true",
+                        help="the set was downloaded from a published release: also "
+                        f"accept and validate {formats.RELEASE_NOTES_ASSET} and "
+                        "fixed player-download copies, which publish_release adds "
+                        "outside the signed set")
     add_trust_arguments(result)
     return result
 
@@ -918,7 +1112,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             funnel_receipts=parse_platform_paths(args.funnel_receipt, "funnel-receipt"),
             allow_staging_sequence=args.allow_staging_sequence, openssl=openssl,
             allow_test=args.allow_test,
-            allow_unnotarized=args.allow_unnotarized)
+            allow_unnotarized=args.allow_unnotarized,
+            published=args.published)
     except VerifyError as exc:
         for failure in exc.failures:
             print(f"FAIL: {failure}", file=sys.stderr)
@@ -938,6 +1133,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "verdict": "pass",
         })
     print(json.dumps(summary, indent=2, sort_keys=True))
+    notes = summary.get("release_notes")
+    if notes is not None:
+        print(f"verify_release: {formats.RELEASE_NOTES_ASSET} is valid (unsigned; "
+              f"entries for sequences {notes['entry_sequences']})")
     mac = summary["platforms"].get("Mac")
     if mac and mac.get("dmg_inspection"):
         if "contents-not-inspected" in mac["dmg_inspection"]:

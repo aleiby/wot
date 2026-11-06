@@ -36,6 +36,7 @@
 #include "WoTBootstrapCore/InstalledTree.h"
 #include "WoTBootstrapCore/NativeHandles.h"
 #include "WoTBootstrapCore/ReleaseManifest.h"
+#include "WoTUpdaterCore/UpdateFailureNotice.h"
 #include "WoTUpdaterCore/UpdateState.h"
 #include "WoTUpdaterCore/UpdaterPaths.h"
 #include "WoTRetailReader/CacheManifest.h"
@@ -47,6 +48,7 @@
 #include "../Payload/WoTPayloadActivation.h"
 #include "../Payload/WoTVerifiedBlobReader.h"
 #include "../Updater/WoTGameBootstrapWorker.h"
+#include "../Updater/WoTRememberedInstaller.h"
 #include "../WoTGameInstance.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../WoTBootstrapHeartbeat.h"
@@ -99,6 +101,10 @@ constexpr TCHAR WoTGameBootstrapWorkerSpecArchiveUrl[] =
 	TEXT("https://github.com/aleiby/wot/releases/download/worker/release.zip");
 constexpr TCHAR WoTGameBootstrapWorkerSpecReleaseKeyId[] =
 	TEXT("worker-test-release-a");
+// Every wait below is for an observable condition (an event, a counter, a
+// phase). This deadline only bounds a genuine hang: a loaded machine can be
+// slow, but a passing condition never waits it out.
+constexpr double WoTGameBootstrapWorkerSpecHangSeconds = 60.0;
 
 FString WoTGameBootstrapWorkerSpecCanonicalOwnedRoot(const FString& Root)
 {
@@ -268,14 +274,13 @@ WoTGameBootstrapWorkerSpecContentBuild(FWoTRetailPackage& Package,
 	if (Written.IsError()) return FResult::Error(MoveTemp(Written).GetError());
 	Reported = Progress.ReportProgress(TEXT("texture-sound"), 1, 1);
 	if (Reported.IsError()) return FResult::Error(MoveTemp(Reported).GetError());
-	TWoTBootstrapResult<FWoTSha256> Descriptor =
-		GetCacheExpectedProductionDescriptorSha256();
-	if (Descriptor.IsError()) return FResult::Error(MoveTemp(Descriptor).GetError());
+	TWoTBootstrapResult<FWoTSha256> ContentLabel = GetCacheContentLabel();
+	if (ContentLabel.IsError()) return FResult::Error(MoveTemp(ContentLabel).GetError());
 	FWoTCacheBuildResult Build;
 	Build.Manifest.bHasBuildIdentity = true;
 	Build.Manifest.InstallerSha256 = Package.CachedInputSha256();
 	Build.Manifest.ContractSha256 = ComputeRetailContractIdentity(Contract);
-	Build.Manifest.ProductionDescriptorSha256 = Descriptor.GetValue();
+	Build.Manifest.ProductionDescriptorSha256 = ContentLabel.GetValue();
 	FWoTCacheBlob& Blob = Build.Manifest.Blobs.AddDefaulted_GetRef();
 	Blob.LogicalId = Output.LogicalId;
 	Blob.Schema = Output.Schema;
@@ -1040,10 +1045,20 @@ public:
 		FPlatformMisc::SetEnvironmentVar(
 			TEXT("WOT_BOOTSTRAP_TEST_ANNOUNCEMENT_URL"),
 			TEXT("http://127.0.0.1:38431/announcement.json"));
+		// An unrouted update-failed notice resolves to one per-process
+		// directory keyed by PID that nothing clears, so a stale "failed=2"
+		// left there (or by an earlier process with a reused PID) turned
+		// every sequence-2 background check into KnownBad. Each fixture
+		// reads and writes its own, initially absent, notice directory.
+		NoticeDirectory = InstallRoot + TEXT("-notices");
+		WoTSetUpdateFailureNoticeDirectoryForTesting(NoticeDirectory);
 	}
 
 	~FWoTGameBootstrapWorkerSpecFixture()
 	{
+		WoTSetUpdateFailureNoticeDirectoryForTesting(FString());
+		IFileManager::Get().DeleteDirectory(
+			*NoticeDirectory, false, true);
 		WoTResetProcessProfileSessionForTesting();
 		FPlatformMisc::SetEnvironmentVar(
 			TEXT("WOT_UPDATER_SPEC_RELAUNCH_MARKER"), TEXT(""));
@@ -1197,12 +1212,12 @@ public:
 		TWoTBootstrapResult<FWoTSha256> CompiledInstallerSha =
 			TWoTBootstrapResult<FWoTSha256>::Success(
 				WoTGameBootstrapWorkerSpecInstallerPins().Sha256);
-		TWoTBootstrapResult<FWoTSha256> CompiledDescriptorSha =
-			GetCacheExpectedProductionDescriptorSha256();
+		TWoTBootstrapResult<FWoTSha256> CompiledContentLabel =
+			GetCacheContentLabel();
 		TWoTBootstrapResult<FWoTRetailContract> CompiledContract =
 			WoTLoadProductionRetailContract();
 		if (CompiledInstallerSha.IsError()
-			|| CompiledDescriptorSha.IsError() || CompiledContract.IsError()
+			|| CompiledContentLabel.IsError() || CompiledContract.IsError()
 			|| CompiledContract.GetValue().StartupCriticalLogicalIds.Num() != 48)
 		{
 			Test.AddError(TEXT("worker fixture could not parse compiled cache pins"));
@@ -1267,7 +1282,7 @@ public:
 		Build.Manifest.ProductionDescriptorSha256 =
 			DescriptorShaOverride.IsSet()
 			? DescriptorShaOverride.GetValue()
-			: CompiledDescriptorSha.GetValue();
+			: CompiledContentLabel.GetValue();
 		auto FrontEndDescriptor = WoTFrontEndTest_MakeDescriptor(
 			CompiledContract.GetValue());
 		if (FrontEndDescriptor.IsError())
@@ -1414,6 +1429,7 @@ private:
 	FWoTGameBootstrapWorkerSpecKey ReleaseKey;
 	FWoTGameBootstrapWorkerSpecKey RootKey;
 	FString PreviousAnnouncementOverride;
+	FString NoticeDirectory;
 };
 
 TUniquePtr<FWoTGameBootstrapWorker>
@@ -1511,7 +1527,8 @@ WoTGameBootstrapWorkerSpecMakeWorker(
 bool WoTGameBootstrapWorkerSpecWaitForAtLeast(
 	const TAtomic<int32>& Counter, int32 Expected)
 {
-	const double Deadline = FPlatformTime::Seconds() + 5.0;
+	const double Deadline =
+		FPlatformTime::Seconds() + WoTGameBootstrapWorkerSpecHangSeconds;
 	while (FPlatformTime::Seconds() < Deadline)
 	{
 		if (Counter.Load() >= Expected)
@@ -1554,7 +1571,8 @@ int32 WoTGameBootstrapWorkerSpecCountUnavailableHeartbeats(
 bool WoTGameBootstrapWorkerSpecWaitForUnavailableHeartbeats(
 	const FString& UserStateRoot, const FString& Leaf, int32 Expected)
 {
-	const double Deadline = FPlatformTime::Seconds() + 5.0;
+	const double Deadline =
+		FPlatformTime::Seconds() + WoTGameBootstrapWorkerSpecHangSeconds;
 	while (FPlatformTime::Seconds() < Deadline)
 	{
 		if (WoTGameBootstrapWorkerSpecCountUnavailableHeartbeats(
@@ -1589,7 +1607,7 @@ bool WoTGameBootstrapWorkerSpecRunPhase(
 	EWoTBootstrapPhase Phase, uint64 Epoch,
 	FWoTBootstrapWorkerCompletion& OutCompletion,
 	TArray<TPair<uint64, uint64>>* OutByteProgress = nullptr,
-	double TimeoutSeconds = 10.0,
+	double TimeoutSeconds = WoTGameBootstrapWorkerSpecHangSeconds,
 	TArray<uint64>* OutProgressEpochs = nullptr,
 	TArray<TPair<uint64, uint64>>* OutItemProgress = nullptr,
 	TArray<FWoTBootstrapProgressEvent>* OutProgressEvents = nullptr)
@@ -1826,7 +1844,7 @@ bool FWoTGameBootstrapWorkerSpecBootstrapNeverFetches::RunTest(
 bool WoTGameBootstrapWorkerSpecRunBackground(
 	IWoTBootstrapWorker& Worker, FWoTUpdateState& OutTerminal,
 	TArray<FWoTUpdateState>* OutStates = nullptr,
-	double TimeoutSeconds = 30.0)
+	double TimeoutSeconds = WoTGameBootstrapWorkerSpecHangSeconds)
 {
 	FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
 	TAtomic<bool> bTerminal{false};
@@ -1856,7 +1874,8 @@ bool WoTGameBootstrapWorkerSpecRunBackground(
 
 bool WoTGameBootstrapWorkerSpecRunReleaseNotes(
 	IWoTBootstrapWorker& Worker, bool bSeen,
-	FWoTReleaseNotesResult& OutResult, double TimeoutSeconds = 5.0)
+	FWoTReleaseNotesResult& OutResult,
+	double TimeoutSeconds = WoTGameBootstrapWorkerSpecHangSeconds)
 {
 	FEvent* Done = FPlatformProcess::GetSynchEventFromPool(false);
 	TAtomic<bool> bCompleted{false};
@@ -2106,12 +2125,21 @@ bool FWoTGameBootstrapWorkerSpecReleaseNotes::RunTest(const FString&)
 		Worker->StartReleaseNotes(false,
 			[&CompletionCount](FWoTReleaseNotesResult&&) { ++CompletionCount; });
 		TestTrue(TEXT("notes fetch reaches the blocked request"),
-			Hops->BlockEntered->Wait(FTimespan::FromSeconds(5.0)));
-		const double Started = FPlatformTime::Seconds();
-		Worker->CancelAndJoin();
+			Hops->BlockEntered->Wait(FTimespan::FromSeconds(
+				WoTGameBootstrapWorkerSpecHangSeconds)));
+		// Only CancelCurrentRequest (or this spec) releases the blocked hop, so
+		// a join that finishes before the spec releases it proves the abort.
+		TFuture<void> Cancelling = Async(EAsyncExecution::Thread,
+			[&Worker]() { Worker->CancelAndJoin(); });
+		const bool bCancelledWithoutRelease = Cancelling.WaitFor(
+			FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds));
+		if (!bCancelledWithoutRelease)
+		{
+			Hops->BlockRelease->Trigger();
+		}
+		Cancelling.Wait();
 		TestTrue(TEXT("notes cancellation aborts the request promptly"),
-			FPlatformTime::Seconds() - Started < 1.0
-				&& Hops->CancelCalls.Load() > 0);
+			bCancelledWithoutRelease && Hops->CancelCalls.Load() > 0);
 		TestEqual(TEXT("notes cancellation suppresses delivery"),
 			CompletionCount.Load(), 0);
 	}
@@ -2295,11 +2323,15 @@ bool FWoTGameBootstrapWorkerSpecTranslocatedNotifyOnly::RunTest(const FString&)
 					TEXT("translocated startup must not recover activation")));
 			}, Fixture.UserStateRoot, {},
 			[](const FString&) { return true; });
+	// The held update store this once timed against is gone and nothing on
+	// this path waits with a timeout any more, so a short wall-clock budget
+	// measured machine load, not skipping; only a hang exceeds this bound.
 	const double EstablishStarted = FPlatformTime::Seconds();
 	TestTrue(TEXT("translocated identity establishment remains playable"),
 		WoTGameBootstrapWorkerSpecEstablish(*this, *Worker));
 	TestTrue(TEXT("translocated notify-only skips the held store promptly"),
-		FPlatformTime::Seconds() - EstablishStarted < 2.0);
+		FPlatformTime::Seconds() - EstablishStarted
+			< WoTGameBootstrapWorkerSpecHangSeconds);
 	TestEqual(TEXT("translocated identity establishment skips activation recovery"),
 		RecoveryCalls, 0);
 	FWoTBootstrapWorkerCompletion Checked;
@@ -2623,7 +2655,8 @@ bool FWoTGameBootstrapWorkerSpecNotifyOnlyTerminalEarly::RunTest(
 			Pending->Done->Trigger();
 		});
 	TestTrue(TEXT("notify-only precedes malformed update-request validation"),
-		Pending->Done->Wait(FTimespan::FromSeconds(2.0))
+		Pending->Done->Wait(FTimespan::FromSeconds(
+			WoTGameBootstrapWorkerSpecHangSeconds))
 			&& Pending->bCompleted.Load()
 			&& Pending->Completion.bSucceeded
 			&& Pending->Completion.bUpdateNotifyOnly);
@@ -2718,6 +2751,56 @@ bool FWoTGameBootstrapWorkerSpecContentRouting::RunTest(const FString&)
 		{
 			TestTrue(TEXT("activation owns a live verified snapshot"),
 				Started.CacheSnapshot->IsValid());
+		}
+	}
+	// A cache recorded under the first public release's label stays current
+	// while this binary is at content revision 1, even with the installer
+	// beside the game; any later revision rebuilds it from the installer.
+	{
+		const TWoTBootstrapResult<FWoTSha256> FirstReleaseLabel = FWoTSha256::FromHex(
+			TEXT("1a7e19b367523c11d9ad6c7fda42a39472a68d4b8c52233b6b2d568ca3daa58e"));
+		if (!TestFalse(TEXT("first public release label parses"),
+				FirstReleaseLabel.IsError()))
+			return false;
+		FWoTGameBootstrapWorkerSpecFixture Released;
+		if (!Released.Initialize(*this)
+			|| !Released.PublishActiveCache(*this, TOptional<FWoTSha256>(),
+				TOptional<FWoTSha256>(FirstReleaseLabel.GetValue()))
+			|| !Released.WriteInstaller(WoTGameBootstrapWorkerSpecInstallerBytes()))
+			return false;
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> ReleasedHops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TUniquePtr<FWoTGameBootstrapWorker> ReleasedWorker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Released.InstallRoot, ReleasedHops);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *ReleasedWorker))
+			return false;
+		FWoTBootstrapWorkerCompletion Update, Content;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*ReleasedWorker,
+				EWoTBootstrapPhase::CheckingGameUpdates, 1, Update)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*ReleasedWorker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Content))
+			return false;
+		if (GetCacheContentRevision() == 1)
+		{
+			FWoTBootstrapWorkerCompletion Verified, Started;
+			if (!WoTGameBootstrapWorkerSpecRunPhase(*ReleasedWorker,
+					EWoTBootstrapPhase::VerifyingContent, 3, Verified)
+				|| !WoTGameBootstrapWorkerSpecRunPhase(*ReleasedWorker,
+					EWoTBootstrapPhase::StartingGame, 4, Started))
+				return false;
+			TestTrue(TEXT("first-release cache bypasses installer at revision 1"),
+				Content.bSucceeded
+				&& Content.NextPhase == EWoTBootstrapPhase::VerifyingContent);
+			TestTrue(TEXT("first-release cache activates at revision 1"),
+				Started.bSucceeded && Started.CacheSnapshot.IsSet());
+			TestEqual(TEXT("first-release cache is zero-network at revision 1"),
+				ReleasedHops->Requests.Num(), 0);
+		}
+		else
+		{
+			TestTrue(TEXT("first-release cache selects installer after a revision bump"),
+				Content.bSucceeded
+				&& Content.NextPhase == EWoTBootstrapPhase::ExtractingOriginalGame);
 		}
 	}
 	for (int32 Mismatch = 0; Mismatch < 3; ++Mismatch)
@@ -2828,11 +2911,14 @@ bool FWoTGameBootstrapWorkerSpecCacheFailures::RunTest(const FString&)
 		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
 			EWoTBootstrapPhase::CheckingGameUpdates, 2, Update)) return false;
 		TestTrue(TEXT("update check performs no cache open or critical hashing"), Update.bSucceeded);
-		const double Started = FPlatformTime::Seconds();
-		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
-			EWoTBootstrapPhase::CheckingOriginalGameData, 3, Content)) return false;
-		TestTrue(TEXT("shared snapshot discovery is nonblocking"),
-			FPlatformTime::Seconds() - Started < 1.0);
+		// Profile locks are taken without waiting (contention fails at once,
+		// which the assertions below catch) and nothing else here waits with
+		// a timeout, so completing while the other session is still held
+		// proves discovery nonblocking; a one-second budget measured load.
+		const bool bDiscovered = WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 3, Content);
+		TestTrue(TEXT("shared snapshot discovery is nonblocking"), bDiscovered);
+		if (!bDiscovered) return false;
 		TestTrue(TEXT("shared session permits normal content discovery"),
 			Content.bSucceeded);
 		TestEqual(TEXT("missing cache still requests original game data"),
@@ -2949,18 +3035,25 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 
 bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 {
+	// Every sweep of the waiting phase publishes one progress event, so
+	// Sweeps counts completed polls (entry included).
 	auto StartWaitingPhase = [](IWoTBootstrapWorker& Worker, uint64 Epoch,
 		FEvent* Entered, TAtomic<int32>* LastReason = nullptr,
-		TAtomic<bool>* SawNotTheInstaller = nullptr)
+		TAtomic<bool>* SawNotTheInstaller = nullptr,
+		TAtomic<int32>* Sweeps = nullptr)
 	{
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
 			MakeShared<FWoTGameBootstrapWorkerSpecPendingPhase>();
 		Worker.StartPhase(
 			WoTGameBootstrapWorkerSpecRequest(
 				EWoTBootstrapPhase::OriginalGameNeeded, Epoch),
-			[Entered, LastReason, SawNotTheInstaller](
+			[Entered, LastReason, SawNotTheInstaller, Sweeps](
 				FWoTBootstrapProgressEvent&& Event)
 			{
+				if (Sweeps != nullptr)
+				{
+					++(*Sweeps);
+				}
 				if (Event.OriginalGameNeededReason.IsSet())
 				{
 					const EWoTOriginalGameNeededReason Reason =
@@ -2989,7 +3082,8 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 	auto WaitForReason = [](const TAtomic<int32>& LastReason,
 		EWoTOriginalGameNeededReason Expected)
 	{
-		const double Deadline = FPlatformTime::Seconds() + 5.0;
+		const double Deadline =
+			FPlatformTime::Seconds() + WoTGameBootstrapWorkerSpecHangSeconds;
 		while (FPlatformTime::Seconds() < Deadline)
 		{
 			if (LastReason.Load() == static_cast<int32>(Expected))
@@ -3000,6 +3094,10 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		}
 		return false;
 	};
+	// The waiting phase polls every OriginalGameProbeIntervalSeconds (0.01 s
+	// in these specs); "not rehashed" used to sleep 0.1 s, about ten polls,
+	// which a loaded machine may not run. Wait for the polls themselves.
+	constexpr int32 NegativeCheckSweeps = 10;
 
 	// The long-lived phase observes a copy made after entry, requires two
 	// identical full native identities, hashes once, and hands that exact held
@@ -3034,7 +3132,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		FEvent* Entered = FPlatformProcess::GetSynchEventFromPool(false);
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
 			StartWaitingPhase(*Worker, 81, Entered);
-		const bool bEntered = Entered->Wait(FTimespan::FromSeconds(5.0));
+		const bool bEntered = Entered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds));
 		if (!TestTrue(TEXT("long-lived waiting phase publishes entry"), bEntered)
 			|| !TestTrue(TEXT("installer is copied after entry"),
 				Fixture.WriteInstaller(
@@ -3046,7 +3144,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		}
 		Worker->RequestOriginalGameRecheck();
 		if (!TestTrue(TEXT("post-entry copy is auto-detected"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0))))
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
@@ -3078,6 +3176,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
 			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
 		TAtomic<int32> Hashes{0};
+		TAtomic<int32> Sweeps{0};
 		FWoTInstallerAcquisitionTestHooks Hooks;
 		Hooks.FullHash = [&Hashes](uint64) { ++Hashes; };
 		TUniquePtr<FWoTGameBootstrapWorker> Worker =
@@ -3099,15 +3198,17 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 			EWoTOriginalGameNeededReason::NotTheInstaller);
 		FEvent* Entered = FPlatformProcess::GetSynchEventFromPool(false);
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
-			StartWaitingPhase(*Worker, 83, Entered);
-		const bool bEntered = Entered->Wait(FTimespan::FromSeconds(5.0));
-		if (!TestTrue(TEXT("wrong-installer wait publishes entry"), bEntered))
+			StartWaitingPhase(*Worker, 83, Entered, nullptr, nullptr, &Sweeps);
+		const bool bEntered = Entered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds));
+		if (!TestTrue(TEXT("wrong-installer wait publishes entry"), bEntered)
+			|| !TestTrue(TEXT("the wrong installer is re-polled while waiting"),
+				WoTGameBootstrapWorkerSpecWaitForAtLeast(
+					Sweeps, Sweeps.Load() + NegativeCheckSweeps)))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
 			return false;
 		}
-		FPlatformProcess::Sleep(0.1f);
 		TestEqual(TEXT("known-wrong identity is not rehashed"),
 			Hashes.Load(), 1);
 		const FString InstallerPath =
@@ -3124,7 +3225,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		}
 		Worker->RequestOriginalGameRecheck();
 		if (!TestTrue(TEXT("replacement is accepted without restart"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0))))
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
@@ -3177,7 +3278,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 				WoTGameBootstrapWorkerSpecInstallerBytes(), *DownloadsPath));
 		Worker->RequestOriginalGameRecheck();
 		TestTrue(TEXT("translocated Downloads copy completes the phase"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0)));
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)));
 		TestEqual(TEXT("translocated Downloads copy is hashed once"),
 			Hashes.Load(), 1);
 		TestEqual(TEXT("translocated Downloads routes to extraction"),
@@ -3211,7 +3312,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		TAtomic<bool> SawWrong{false};
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
 			StartWaitingPhase(*Worker, 89, Entered, &LastReason, &SawWrong);
-		if (!Entered->Wait(FTimespan::FromSeconds(5.0)))
+		if (!Entered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
@@ -3235,7 +3336,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 				WoTGameBootstrapWorkerSpecInstallerBytes(), *DownloadsPath));
 		Worker->RequestOriginalGameRecheck();
 		TestTrue(TEXT("completed Downloads copy is acquired"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0)));
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)));
 		FPlatformProcess::ReturnSynchEventToPool(Entered);
 		TestEqual(TEXT("completed partial is hashed once"), Hashes.Load(), 1);
 		TestFalse(TEXT("completion never passed through wrong"), SawWrong.Load());
@@ -3249,6 +3350,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
 			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
 		TAtomic<int32> Hashes{0};
+		TAtomic<int32> Sweeps{0};
 		FWoTInstallerAcquisitionTestHooks Hooks;
 		Hooks.FullHash = [&Hashes](uint64) { ++Hashes; };
 		TUniquePtr<FWoTGameBootstrapWorker> Worker =
@@ -3263,8 +3365,9 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		TAtomic<int32> LastReason{
 			static_cast<int32>(EWoTOriginalGameNeededReason::Missing)};
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
-			StartWaitingPhase(*Worker, 91, Entered, &LastReason);
-		if (!Entered->Wait(FTimespan::FromSeconds(5.0)))
+			StartWaitingPhase(*Worker, 91, Entered, &LastReason, nullptr,
+				&Sweeps);
+		if (!Entered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
@@ -3282,7 +3385,14 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 			WaitForReason(LastReason,
 				EWoTOriginalGameNeededReason::PickedWrongFile));
 		const int32 HashesAfterWrong = Hashes.Load();
-		FPlatformProcess::Sleep(0.1f);
+		if (!TestTrue(TEXT("the wrong pick is re-polled while waiting"),
+			WoTGameBootstrapWorkerSpecWaitForAtLeast(
+				Sweeps, Sweeps.Load() + NegativeCheckSweeps)))
+		{
+			Worker->CancelAndJoin();
+			FPlatformProcess::ReturnSynchEventToPool(Entered);
+			return false;
+		}
 		TestEqual(TEXT("known wrong picked identity is not rehashed"),
 			Hashes.Load(), HashesAfterWrong);
 		TestTrue(TEXT("valid picked fixture is written"),
@@ -3290,7 +3400,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 				WoTGameBootstrapWorkerSpecInstallerBytes(), *ValidPath));
 		Worker->RequestPickedInstaller(ValidPath);
 		TestTrue(TEXT("a later valid pick is acquired"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0)));
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)));
 		FPlatformProcess::ReturnSynchEventToPool(Entered);
 		TestEqual(TEXT("wrong and valid picked identities hash once each"),
 			Hashes.Load(), 2);
@@ -3328,7 +3438,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 		FEvent* Entered = FPlatformProcess::GetSynchEventFromPool(false);
 		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
 			StartWaitingPhase(*Worker, 93, Entered);
-		if (!Entered->Wait(FTimespan::FromSeconds(5.0)))
+		if (!Entered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)))
 		{
 			Worker->CancelAndJoin();
 			FPlatformProcess::ReturnSynchEventToPool(Entered);
@@ -3341,7 +3451,7 @@ bool FWoTGameBootstrapWorkerSpecOriginalGameNeeded::RunTest(const FString&)
 				WoTGameBootstrapWorkerSpecInstallerBytes(), *PickedPath));
 		Worker->RequestPickedInstaller(PickedPath);
 		TestTrue(TEXT("picked file succeeds despite unavailable Downloads"),
-			Pending->Done->Wait(FTimespan::FromSeconds(5.0)));
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)));
 		FPlatformProcess::ReturnSynchEventToPool(Entered);
 		TestEqual(TEXT("picked-after-denial routes to extraction"),
 			Pending->Completion.NextPhase,
@@ -3579,7 +3689,7 @@ bool FWoTGameBootstrapWorkerSpecDownloadsCandidatesShareParentIdentity::RunTest(
 		WoTGameBootstrapWorkerSpecStartPhase(*Worker,
 			EWoTBootstrapPhase::OriginalGameNeeded, 97);
 	if (!TestTrue(TEXT("the next sweep rejects the substituted parent"),
-		Pending->Done->Wait(FTimespan::FromSeconds(5.0))))
+		Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
 	{
 		Worker->CancelAndJoin();
 		return false;
@@ -3759,7 +3869,7 @@ bool FWoTGameBootstrapWorkerSpecDownloadsParentHeartbeatDedup::RunTest(
 	}
 	Worker->RequestPickedInstaller(PickedPath);
 	if (!TestTrue(TEXT("a picked installer ends the parent-fault flow"),
-		Pending->Done->Wait(FTimespan::FromSeconds(5.0))))
+		Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
 	{
 		Worker->CancelAndJoin();
 		return false;
@@ -3924,7 +4034,7 @@ bool FWoTGameBootstrapWorkerSpecDownloadsLeafHeartbeatDedup::RunTest(
 	}
 	Worker->RequestPickedInstaller(PickedPath);
 	if (!TestTrue(TEXT("a picked installer ends the leaf-fault flow"),
-		Pending->Done->Wait(FTimespan::FromSeconds(5.0))))
+		Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
 	{
 		Worker->CancelAndJoin();
 		return false;
@@ -4205,11 +4315,13 @@ bool FWoTGameBootstrapWorkerSpecCancellation::RunTest(
 			}
 		});
 	TestTrue(TEXT("download reaches the blocked archive hop"),
-		Hops->BlockEntered->Wait(FTimespan::FromSeconds(5.0)));
+		Hops->BlockEntered->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds)));
 
+	// Only CancelCurrentRequest (or this spec) releases the blocked body, so
+	// a join that finishes before the spec releases it proves the abort; a
+	// one-second budget on top of that measured machine load.
 	FEvent* CancelStarted =
 		FPlatformProcess::GetSynchEventFromPool(false);
-	const double StartedAt = FPlatformTime::Seconds();
 	TFuture<void> Cancelling = Async(
 		EAsyncExecution::Thread,
 		[&Worker, CancelStarted]()
@@ -4219,17 +4331,15 @@ bool FWoTGameBootstrapWorkerSpecCancellation::RunTest(
 		});
 	CancelStarted->Wait();
 	FPlatformProcess::ReturnSynchEventToPool(CancelStarted);
-	const bool bCancelledPromptly =
-		Cancelling.WaitFor(FTimespan::FromSeconds(1.0));
+	const bool bCancelledPromptly = Cancelling.WaitFor(
+		FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds));
 	if (!bCancelledPromptly)
 	{
 		Hops->BlockRelease->Trigger();
 	}
 	Cancelling.Wait();
-	const double Elapsed =
-		FPlatformTime::Seconds() - StartedAt;
 	TestTrue(TEXT("CancelAndJoin aborts the blocked body without test release"),
-		bCancelledPromptly && Elapsed < 1.0 && Hops->CancelCalls.Load() > 0);
+		bCancelledPromptly && Hops->CancelCalls.Load() > 0);
 	FPlatformProcess::Sleep(0.05f);
 	TestEqual(TEXT("cancel suppresses the in-flight completion"),
 		CompletionCount.Load(), 0);
@@ -5462,7 +5572,8 @@ bool FWoTGameBootstrapWorkerSpecSubsystem::RunTest(const FString&)
 		WoTTest::DestroySpecWorld(World);
 		return false;
 	}
-	const double Deadline = FPlatformTime::Seconds() + 10.0;
+	const double Deadline =
+		FPlatformTime::Seconds() + WoTGameBootstrapWorkerSpecHangSeconds;
 	while (!Bootstrap->Snapshot().IsTerminal()
 		&& FPlatformTime::Seconds() < Deadline)
 	{
@@ -5494,7 +5605,8 @@ bool FWoTGameBootstrapWorkerSpecSubsystem::RunTest(const FString&)
 		TestFalse(TEXT("new cache open has no current view"),
 			Reopened.GetValue().IsSet());
 	}
-	const double BackgroundDeadline = FPlatformTime::Seconds() + 1.0;
+	const double BackgroundDeadline =
+		FPlatformTime::Seconds() + WoTGameBootstrapWorkerSpecHangSeconds;
 	while (Hops->RequestCount.Load() < 2
 		&& FPlatformTime::Seconds() < BackgroundDeadline)
 	{
@@ -5511,6 +5623,814 @@ bool FWoTGameBootstrapWorkerSpecSubsystem::RunTest(const FString&)
 			FString(WoT::Bootstrap::Trust::AnnouncementUrl));
 	}
 	WoTTest::DestroySpecWorld(World);
+	return !HasAnyErrors();
+}
+
+// The remembered installer: a Browse pick that built the cache is tried again
+// on a later rebuild, right after the installer beside the game.
+namespace
+{
+constexpr TCHAR WoTGameBootstrapWorkerSpecRememberedLeaf[] =
+	TEXT("archived wot installer.exe");
+
+FString WoTGameBootstrapWorkerSpecRememberedRecordFile(
+	const FString& UserStateRoot)
+{
+	return FPaths::Combine(UserStateRoot, TEXT("UpdaterState"),
+		WoTRememberedInstallerLeaf);
+}
+
+/** Reads the record exactly as the worker does. */
+TOptional<FString> WoTGameBootstrapWorkerSpecRememberedPath(
+	const FString& UserStateRoot)
+{
+	FWoTRememberedInstallerRead Read =
+		WoTReadRememberedInstaller(UserStateRoot, nullptr);
+	return Read.CanonicalInstallerPath;
+}
+
+/** True when this simulated process run's heartbeat has the event on a line
+ * that also contains Fragment (an empty Fragment matches any such line). */
+bool WoTGameBootstrapWorkerSpecHeartbeatHas(const FString& UserStateRoot,
+	const TCHAR* Event, const FString& Fragment = FString())
+{
+	FString Heartbeat;
+	if (!FFileHelper::LoadFileToString(Heartbeat, *FPaths::Combine(
+		UserStateRoot, TEXT("UpdaterState"),
+		WoTBootstrapHeartbeatFileName())))
+	{
+		return false;
+	}
+	TArray<FString> Lines;
+	Heartbeat.ParseIntoArrayLines(Lines, false);
+	const FString EventField =
+		FString::Printf(TEXT("\"event\":\"%s\""), Event);
+	for (const FString& Line : Lines)
+	{
+		if (Line.Contains(EventField, ESearchCase::CaseSensitive)
+			&& (Fragment.IsEmpty()
+				|| Line.Contains(Fragment, ESearchCase::CaseSensitive)))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+FString WoTGameBootstrapWorkerSpecDetectedFrom(const TCHAR* Source)
+{
+	return FString::Printf(TEXT("\"detail\":\"source=%s\","), Source);
+}
+
+/** Records InstallerPath exactly as a successful Browse pick would. */
+bool WoTGameBootstrapWorkerSpecSeedRemembered(FAutomationTestBase& Test,
+	const FString& UserStateRoot, const FString& InstallerPath,
+	FString& OutRecordedPath)
+{
+	TWoTBootstrapResult<FString> Canonical =
+		WoTCanonicalizeInstallerPickPath(InstallerPath);
+	if (Canonical.IsError())
+	{
+		Test.AddError(TEXT("remembered fixture path: ")
+			+ Canonical.GetError().ToString());
+		return false;
+	}
+	FWoTBootstrapStatus Written = WoTWriteRememberedInstaller(
+		UserStateRoot, nullptr, Canonical.GetValue());
+	if (Written.IsError())
+	{
+		Test.AddError(TEXT("remembered fixture record: ")
+			+ Written.GetError().ToString());
+		return false;
+	}
+	OutRecordedPath = MoveTemp(Canonical).GetValue();
+	return true;
+}
+
+bool WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(
+	const FString& InstallRoot, TConstArrayView<uint8> Bytes)
+{
+	const FString Directory = InstallRoot + TEXT("-downloads");
+	return IFileManager::Get().MakeDirectory(*Directory, true)
+		&& WoTGameBootstrapWorkerSpecSave(
+			FPaths::Combine(Directory, WoT::Bootstrap::InstallerName), Bytes);
+}
+
+struct FWoTGameBootstrapWorkerSpecRememberedCheck
+{
+	FWoTBootstrapWorkerCompletion Completion;
+	int32 Hashes = 0;
+	int32 Requests = 0;
+};
+
+/** One fresh worker (one simulated launch) through the content check, with
+ * the small default installer pins. */
+bool WoTGameBootstrapWorkerSpecRunRememberedCheck(FAutomationTestBase& Test,
+	const FString& InstallRoot, FWoTGameBootstrapWorkerSpecRememberedCheck& Out)
+{
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TAtomic<int32> HashCount{0};
+	FWoTInstallerAcquisitionTestHooks Hooks;
+	Hooks.FullHash = [&HashCount](uint64) { ++HashCount; };
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(InstallRoot, Hops, {},
+			WoTGameBootstrapWorkerSpecAnnouncementUrl, {}, {}, {}, {}, Hooks);
+	if (!WoTGameBootstrapWorkerSpecEstablish(Test, *Worker))
+	{
+		return false;
+	}
+	if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Out.Completion))
+	{
+		Test.AddError(TEXT("the remembered-installer content check timed out"));
+		return false;
+	}
+	Worker.Reset();
+	Out.Hashes = HashCount.Load();
+	Out.Requests = Hops->Requests.Num();
+	return true;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecRememberedRecordFormat,
+	"WoT.Update.Worker.RememberedInstaller.RecordFormat",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecRememberedRecordFormat::RunTest(const FString&)
+{
+#if PLATFORM_WINDOWS
+	const FString Valid =
+		TEXT("D:/Old Games/setup_the_wheel_of_time_333b_(54846).exe");
+	const FString NonAscii = TEXT("D:/Caf\u00e9 Games/setup.exe");
+	const FString TooLong = TEXT("C:/") + FString::ChrN(5000, TEXT('a'));
+	const TCHAR* const Accepted[] = {
+		TEXT("C:/setup.exe"),
+		TEXT("z:/a/b/c.exe"),
+		TEXT("//nas/games/setup.exe"),
+	};
+	const TCHAR* const Refused[] = {
+		TEXT(""),
+		TEXT("setup.exe"),
+		TEXT("Old Games/setup.exe"),
+		TEXT("/Old Games/setup.exe"),
+		TEXT("C:setup.exe"),
+		TEXT("C:/"),
+		TEXT("1:/setup.exe"),
+		TEXT("C:\\Old Games\\setup.exe"),
+		TEXT("C:/Old Games//setup.exe"),
+		TEXT("C:/Old Games/./setup.exe"),
+		TEXT("C:/Old Games/../setup.exe"),
+		TEXT("C:/Old Games/setup.exe/"),
+		TEXT("C:/Old Games/setup.exe:hidden"),
+		TEXT("C:/Old Games/setup.exe."),
+		TEXT("C:/Old Games/setup.exe "),
+		TEXT("C:/Old*Games/setup.exe"),
+		TEXT("C:/Old Games/set\tup.exe"),
+		TEXT("//?/C:/Old Games/setup.exe"),
+		TEXT("//./PhysicalDrive0/setup.exe"),
+		TEXT("//nas/games"),
+		TEXT("//nas//setup.exe"),
+	};
+#else
+	const FString Valid =
+		TEXT("/Volumes/Old Games/setup_the_wheel_of_time_333b_(54846).exe");
+	const FString NonAscii = TEXT("/Users/player/Caf\u00e9 Games/setup.exe");
+	const FString TooLong = TEXT("/") + FString::ChrN(5000, TEXT('a'));
+	const TCHAR* const Accepted[] = {
+		TEXT("/setup.exe"),
+		TEXT("/Users/player/Downloads/setup.exe"),
+	};
+	const TCHAR* const Refused[] = {
+		TEXT(""),
+		TEXT("setup.exe"),
+		TEXT("Users/player/setup.exe"),
+		TEXT("C:/Old Games/setup.exe"),
+		TEXT("/"),
+		TEXT("//Users/setup.exe"),
+		TEXT("/Users/player/./setup.exe"),
+		TEXT("/Users/player/../setup.exe"),
+		TEXT("/Users/player/setup.exe/"),
+		TEXT("/Users/player\\setup.exe"),
+		TEXT("/Users/pl\tayer/setup.exe"),
+	};
+#endif
+	for (const TCHAR* Candidate : Accepted)
+	{
+		TestTrue(FString::Printf(TEXT("a canonical path is rememberable: %s"),
+			Candidate), WoTIsRememberableInstallerPath(Candidate));
+	}
+	for (const TCHAR* Candidate : Refused)
+	{
+		TestFalse(FString::Printf(TEXT("a non-canonical path is refused: '%s'"),
+			Candidate), WoTIsRememberableInstallerPath(Candidate));
+		TestTrue(FString::Printf(TEXT("a refused path is never written: '%s'"),
+			Candidate), WoTEncodeRememberedInstallerRecord(Candidate).IsError());
+	}
+	TestFalse(TEXT("an over-long path is refused"),
+		WoTIsRememberableInstallerPath(TooLong));
+
+	const FString Format = TEXT("wot-remembered-installer-v1");
+	const FString Expected = FString::Printf(
+		TEXT("{\"format\":\"%s\",\"path\":\"%s\"}"), *Format, *Valid);
+	TWoTBootstrapResult<TArray<uint8>> Encoded =
+		WoTEncodeRememberedInstallerRecord(Valid);
+	if (!TestFalse(TEXT("a canonical path encodes"), Encoded.IsError()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the record is exactly its canonical JSON bytes"),
+		Encoded.GetValue() == WoTGameBootstrapWorkerSpecAscii(Expected));
+	TWoTBootstrapResult<FString> Decoded =
+		WoTParseRememberedInstallerRecord(Encoded.GetValue());
+	TestTrue(TEXT("the record round-trips"), !Decoded.IsError()
+		&& Decoded.GetValue().Equals(Valid, ESearchCase::CaseSensitive));
+
+	TWoTBootstrapResult<TArray<uint8>> Escaped =
+		WoTEncodeRememberedInstallerRecord(NonAscii);
+	if (!TestFalse(TEXT("a non-ASCII path encodes"), Escaped.IsError()))
+	{
+		return false;
+	}
+	bool bAscii = true;
+	for (const uint8 Byte : Escaped.GetValue())
+	{
+		bAscii &= Byte < 0x80;
+	}
+	TestTrue(TEXT("the record is ASCII, other characters escaped"), bAscii);
+	TWoTBootstrapResult<FString> NonAsciiDecoded =
+		WoTParseRememberedInstallerRecord(Escaped.GetValue());
+	TestTrue(TEXT("a non-ASCII path round-trips"), !NonAsciiDecoded.IsError()
+		&& NonAsciiDecoded.GetValue().Equals(NonAscii, ESearchCase::CaseSensitive));
+
+	// The record is untrusted input: only the exact canonical bytes of one v1
+	// record with a canonical path are accepted.
+	const FString Malformed[] = {
+		FString(),
+		TEXT("not a record"),
+		Expected + TEXT("\n"),
+		FString::Printf(TEXT("{ \"format\": \"%s\", \"path\": \"%s\" }"),
+			*Format, *Valid),
+		FString::Printf(TEXT("{\"path\":\"%s\",\"format\":\"%s\"}"),
+			*Valid, *Format),
+		FString::Printf(TEXT("{\"format\":\"%s\"}"), *Format),
+		FString::Printf(TEXT("{\"path\":\"%s\"}"), *Valid),
+		FString::Printf(TEXT("{\"extra\":0,\"format\":\"%s\",\"path\":\"%s\"}"),
+			*Format, *Valid),
+		FString::Printf(
+			TEXT("{\"format\":\"wot-remembered-installer-v2\",\"path\":\"%s\"}"),
+			*Valid),
+		FString::Printf(TEXT("{\"format\":\"%s\",\"path\":7}"), *Format),
+		FString::Printf(TEXT("{\"format\":\"%s\",\"path\":{\"inner\":\"%s\"}}"),
+			*Format, *Valid),
+		FString::Printf(TEXT("[\"%s\",\"%s\"]"), *Format, *Valid),
+		FString::Printf(TEXT("{\"format\":\"%s\",\"path\":\"%s\\u0001.exe\"}"),
+			*Format, *Valid),
+		FString::Printf(
+			TEXT("{\"format\":\"%s\",\"path\":\"relative/setup.exe\"}"), *Format),
+		FString::Printf(TEXT("{\"format\":\"%s\",\"path\":\"%s\"}"), *Format,
+			*FString::ChrN(40000, TEXT('a'))),
+	};
+	int32 Index = 0;
+	for (const FString& Record : Malformed)
+	{
+		TestTrue(FString::Printf(TEXT("malformed record %d is refused"), Index),
+			WoTParseRememberedInstallerRecord(
+				WoTGameBootstrapWorkerSpecAscii(Record)).IsError());
+		++Index;
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecRememberedPickReused,
+	"WoT.Update.Worker.RememberedInstaller.PickBuildIsRememberedAndReused",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecRememberedPickReused::RunTest(const FString&)
+{
+	TArray<uint8> InstallerBytes;
+	if (!TestTrue(TEXT("remembered-pick Inno fixture loads"),
+		WoTGameBootstrapWorkerSpecLoadInnoInstaller(InstallerBytes)))
+	{
+		return false;
+	}
+	const FWoTRetailContract Contract =
+		WoTGameBootstrapWorkerSpecContentContract();
+	FWoTGameBootstrapWorkerSpecContractScope ContractScope(Contract);
+	const FWoTInstallerAcquisitionPins Pins =
+		WoTGameBootstrapWorkerSpecInnoPins(InstallerBytes);
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	const FString Elsewhere = Fixture.InstallRoot + TEXT("-elsewhere");
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+		IFileManager::Get().DeleteDirectory(*Elsewhere, false, true);
+	};
+	const FString PickedPath = FPaths::Combine(
+		Elsewhere, WoTGameBootstrapWorkerSpecRememberedLeaf);
+	if (!TestTrue(TEXT("the installer is kept outside the game and Downloads"),
+		IFileManager::Get().MakeDirectory(*Elsewhere, true)
+			&& WoTGameBootstrapWorkerSpecSave(PickedPath, InstallerBytes)))
+	{
+		return false;
+	}
+	const FString RecordFile =
+		WoTGameBootstrapWorkerSpecRememberedRecordFile(Fixture.UserStateRoot);
+
+	// First install: nothing beside the game or in Downloads, so the player
+	// browses to the installer and it builds the cache.
+	{
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops, {},
+				WoTGameBootstrapWorkerSpecAnnouncementUrl, Pins,
+				WoTGameBootstrapWorkerSpecContentBuild);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Checked;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked)
+			|| !TestEqual(TEXT("with no installer found the player is asked to Browse"),
+				Checked.NextPhase, EWoTBootstrapPhase::OriginalGameNeeded))
+		{
+			return false;
+		}
+		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+			WoTGameBootstrapWorkerSpecStartPhase(*Worker,
+				EWoTBootstrapPhase::OriginalGameNeeded, 3);
+		Worker->RequestPickedInstaller(PickedPath);
+		if (!TestTrue(TEXT("the Browse pick is acquired"),
+			Pending->Done->Wait(FTimespan::FromSeconds(WoTGameBootstrapWorkerSpecHangSeconds))))
+		{
+			Worker->CancelAndJoin();
+			return false;
+		}
+		TestEqual(TEXT("the Browse pick routes to extraction"),
+			Pending->Completion.NextPhase,
+			EWoTBootstrapPhase::ExtractingOriginalGame);
+		TestFalse(TEXT("acquiring a pick records nothing before the cache builds"),
+			IFileManager::Get().FileExists(*RecordFile));
+		FWoTBootstrapWorkerCompletion Extracted, Built, Verified;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::ExtractingOriginalGame, 4, Extracted)
+			|| !TestEqual(TEXT("the picked installer extracts"),
+				Extracted.NextPhase, EWoTBootstrapPhase::BuildingContent)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::BuildingContent, 5, Built))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the picked installer builds the cache"),
+			Built.bSucceeded
+				&& Built.NextPhase == EWoTBootstrapPhase::VerifyingContent);
+		const TOptional<FString> Remembered =
+			WoTGameBootstrapWorkerSpecRememberedPath(Fixture.UserStateRoot);
+		TestTrue(TEXT("a build from a Browse pick records the pick's path"),
+			Remembered.IsSet()
+				&& FPaths::IsSamePath(Remembered.GetValue(), PickedPath));
+		TestTrue(TEXT("the saved record is reported"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("installer-remembered"),
+				TEXT("\"detail\":\"result=saved\",")));
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::VerifyingContent, 6, Verified))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the cache built from the pick verifies"),
+			Verified.bSucceeded);
+		TestEqual(TEXT("the pick flow is zero-network"), Hops->Requests.Num(), 0);
+	}
+
+	// A later rebuild of this install (here the cache is marked damaged; an
+	// update that changes the content revision takes the same path) uses the
+	// remembered installer before Downloads and without asking again.
+	const TOptional<FString> RecordedBefore =
+		WoTGameBootstrapWorkerSpecRememberedPath(Fixture.UserStateRoot);
+	const TArray<uint8> EmptyMarker;
+	if (!TestTrue(TEXT("the published cache is marked damaged"),
+			FFileHelper::SaveArrayToFile(EmptyMarker, *FPaths::Combine(
+				WoTGameBootstrapWorkerSpecCacheRoot(Fixture.InstallRoot),
+				TEXT("current"), TEXT("damaged"))))
+		|| !TestTrue(TEXT("a valid installer also waits in Downloads"),
+			WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(
+				Fixture.InstallRoot, InstallerBytes)))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	{
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TAtomic<int32> Hashes{0};
+		FWoTInstallerAcquisitionTestHooks Hooks;
+		Hooks.FullHash = [&Hashes](uint64) { ++Hashes; };
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops, {},
+				WoTGameBootstrapWorkerSpecAnnouncementUrl, Pins,
+				WoTGameBootstrapWorkerSpecContentBuild, {}, {}, Hooks);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Checked, Extracted, Built;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked))
+		{
+			return false;
+		}
+		TestEqual(TEXT("the remembered installer goes straight to extraction, no Browse"),
+			Checked.NextPhase, EWoTBootstrapPhase::ExtractingOriginalGame);
+		TestTrue(TEXT("the remembered installer is the detected source"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("original-game-detected"),
+				WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("remembered"))));
+		TestEqual(TEXT("Downloads is never hashed once the remembered installer wins"),
+			Hashes.Load(), 1);
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::ExtractingOriginalGame, 3, Extracted)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::BuildingContent, 4, Built))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the remembered installer rebuilds the cache"),
+			Built.bSucceeded
+				&& Built.NextPhase == EWoTBootstrapPhase::VerifyingContent);
+		TestFalse(TEXT("a remembered build is not recorded again"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("installer-remembered")));
+		const TOptional<FString> RecordedAfter =
+			WoTGameBootstrapWorkerSpecRememberedPath(Fixture.UserStateRoot);
+		TestTrue(TEXT("the record is unchanged"),
+			RecordedBefore.IsSet() && RecordedAfter.IsSet()
+				&& RecordedBefore.GetValue().Equals(
+					RecordedAfter.GetValue(), ESearchCase::CaseSensitive));
+		TestEqual(TEXT("the remembered rebuild is zero-network"),
+			Hops->Requests.Num(), 0);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecRememberedAutomaticSources,
+	"WoT.Update.Worker.RememberedInstaller.AutomaticSourcesAreNotRecorded",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecRememberedAutomaticSources::RunTest(
+	const FString&)
+{
+	TArray<uint8> InstallerBytes;
+	if (!TestTrue(TEXT("automatic-source Inno fixture loads"),
+		WoTGameBootstrapWorkerSpecLoadInnoInstaller(InstallerBytes)))
+	{
+		return false;
+	}
+	const FWoTRetailContract Contract =
+		WoTGameBootstrapWorkerSpecContentContract();
+	FWoTGameBootstrapWorkerSpecContractScope ContractScope(Contract);
+	const FWoTInstallerAcquisitionPins Pins =
+		WoTGameBootstrapWorkerSpecInnoPins(InstallerBytes);
+	for (const bool bAdjacent : {true, false})
+	{
+		const FString Case = bAdjacent ? TEXT("adjacent") : TEXT("downloads");
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this))
+		{
+			return false;
+		}
+		const bool bWritten = bAdjacent
+			? Fixture.WriteInstaller(InstallerBytes)
+			: WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(
+				Fixture.InstallRoot, InstallerBytes);
+		if (!TestTrue(Case + TEXT(": the installer fixture is written"), bWritten))
+		{
+			return false;
+		}
+		SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+		ON_SCOPE_EXIT
+		{
+			SetWoTBootstrapHeartbeatRootForTesting(FString());
+		};
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops, {},
+				WoTGameBootstrapWorkerSpecAnnouncementUrl, Pins,
+				WoTGameBootstrapWorkerSpecContentBuild);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Checked, Extracted, Built;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked)
+			|| !TestEqual(Case + TEXT(": the installer is found without Browse"),
+				Checked.NextPhase, EWoTBootstrapPhase::ExtractingOriginalGame)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::ExtractingOriginalGame, 3, Extracted)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::BuildingContent, 4, Built))
+		{
+			return false;
+		}
+		TestTrue(Case + TEXT(": the cache builds"), Built.bSucceeded
+			&& Built.NextPhase == EWoTBootstrapPhase::VerifyingContent);
+		TestTrue(Case + TEXT(": the detected source is reported"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("original-game-detected"),
+				WoTGameBootstrapWorkerSpecDetectedFrom(*Case)));
+		TestFalse(Case + TEXT(": no record is written"),
+			IFileManager::Get().FileExists(*WoTGameBootstrapWorkerSpecRememberedRecordFile(
+				Fixture.UserStateRoot)));
+		TestFalse(Case + TEXT(": nothing is reported as remembered"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("installer-remembered")));
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecRememberedFallsThrough,
+	"WoT.Update.Worker.RememberedInstaller.MissingOrTamperedFallsThrough",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecRememberedFallsThrough::RunTest(const FString&)
+{
+	enum class ERememberedFault : uint8
+	{
+		Missing,
+		Tampered,
+		FolderGone,
+	};
+	for (const ERememberedFault Fault : {ERememberedFault::Missing,
+		ERememberedFault::Tampered, ERememberedFault::FolderGone})
+	{
+		for (const bool bDownloads : {true, false})
+		{
+			const FString Case = FString::Printf(TEXT("%s, %s"),
+				Fault == ERememberedFault::Missing ? TEXT("missing file")
+					: Fault == ERememberedFault::Tampered ? TEXT("tampered file")
+					: TEXT("folder gone"),
+				bDownloads ? TEXT("Downloads has the installer")
+					: TEXT("nothing else"));
+			FWoTGameBootstrapWorkerSpecFixture Fixture;
+			if (!Fixture.Initialize(*this))
+			{
+				return false;
+			}
+			const FString Elsewhere = Fixture.InstallRoot + TEXT("-elsewhere");
+			SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+			ON_SCOPE_EXIT
+			{
+				SetWoTBootstrapHeartbeatRootForTesting(FString());
+				IFileManager::Get().DeleteDirectory(*Elsewhere, false, true);
+			};
+			const FString RememberedFile = FPaths::Combine(
+				Elsewhere, WoTGameBootstrapWorkerSpecRememberedLeaf);
+			FString RecordedPath;
+			if (!TestTrue(Case + TEXT(": the remembered folder exists"),
+					IFileManager::Get().MakeDirectory(*Elsewhere, true))
+				|| !WoTGameBootstrapWorkerSpecSeedRemembered(*this,
+					Fixture.UserStateRoot, RememberedFile, RecordedPath))
+			{
+				return false;
+			}
+			if (Fault == ERememberedFault::Tampered
+				&& !TestTrue(Case + TEXT(": the tampered file is written"),
+					WoTGameBootstrapWorkerSpecSave(RememberedFile,
+						WoTGameBootstrapWorkerSpecBadInstallerBytes())))
+			{
+				return false;
+			}
+			if (Fault == ERememberedFault::FolderGone
+				&& !TestTrue(Case + TEXT(": the remembered folder is removed"),
+					IFileManager::Get().DeleteDirectory(*Elsewhere, false, true)))
+			{
+				return false;
+			}
+			if (bDownloads && !TestTrue(Case + TEXT(": Downloads is seeded"),
+				WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(
+					Fixture.InstallRoot,
+					WoTGameBootstrapWorkerSpecInstallerBytes())))
+			{
+				return false;
+			}
+			FWoTGameBootstrapWorkerSpecRememberedCheck Checked;
+			if (!WoTGameBootstrapWorkerSpecRunRememberedCheck(
+					*this, Fixture.InstallRoot, Checked))
+			{
+				return false;
+			}
+			if (bDownloads)
+			{
+				TestEqual(Case + TEXT(": Downloads supplies the installer"),
+					Checked.Completion.NextPhase,
+					EWoTBootstrapPhase::ExtractingOriginalGame);
+				TestTrue(Case + TEXT(": Downloads is the detected source"),
+					WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+						TEXT("original-game-detected"),
+						WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("downloads"))));
+			}
+			else
+			{
+				TestEqual(Case + TEXT(": the player is asked to Browse"),
+					Checked.Completion.NextPhase,
+					EWoTBootstrapPhase::OriginalGameNeeded);
+				TestEqual(Case + TEXT(": the remembered file shows no error of its own"),
+					Checked.Completion.OriginalGameNeededReason,
+					EWoTOriginalGameNeededReason::Missing);
+				TestTrue(Case + TEXT(": the content check itself succeeds"),
+					Checked.Completion.bSucceeded);
+			}
+			TestFalse(Case + TEXT(": the remembered file is never used"),
+				WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+					TEXT("original-game-detected"),
+					WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("remembered"))));
+			TestEqual(Case + TEXT(": only a tampered file and a Downloads copy are hashed"),
+				Checked.Hashes,
+				(Fault == ERememberedFault::Tampered ? 1 : 0) + (bDownloads ? 1 : 0));
+			TestEqual(Case + TEXT(": zero network"), Checked.Requests, 0);
+			if (Fault == ERememberedFault::FolderGone)
+			{
+				TestTrue(Case + TEXT(": the unreachable folder is a diagnostic only"),
+					WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+						TEXT("installer-location-unavailable"),
+						FString::Printf(TEXT("source=remembered leaf=%s "),
+							WoTGameBootstrapWorkerSpecRememberedLeaf)));
+			}
+			// A stale record is kept: the drive may come back, and the next
+			// successful Browse pick replaces it.
+			const TOptional<FString> Kept =
+				WoTGameBootstrapWorkerSpecRememberedPath(Fixture.UserStateRoot);
+			TestTrue(Case + TEXT(": the record is kept"), Kept.IsSet()
+				&& Kept.GetValue().Equals(RecordedPath, ESearchCase::CaseSensitive));
+		}
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecRememberedMalformed,
+	"WoT.Update.Worker.RememberedInstaller.MalformedRecordIsIgnored",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecRememberedMalformed::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	const FString Elsewhere = Fixture.InstallRoot + TEXT("-elsewhere");
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+		IFileManager::Get().DeleteDirectory(*Elsewhere, false, true);
+	};
+	// A valid installer sits where each damaged record points, so only the
+	// record's own defects can keep it from being used.
+	const FString RememberedFile = FPaths::Combine(
+		Elsewhere, WoTGameBootstrapWorkerSpecRememberedLeaf);
+	FString CanonicalPath;
+	if (!TestTrue(TEXT("the remembered installer is written"),
+			IFileManager::Get().MakeDirectory(*Elsewhere, true)
+				&& WoTGameBootstrapWorkerSpecSave(RememberedFile,
+					WoTGameBootstrapWorkerSpecInstallerBytes()))
+		|| !WoTGameBootstrapWorkerSpecSeedRemembered(*this,
+			Fixture.UserStateRoot, RememberedFile, CanonicalPath)
+		|| !TestTrue(TEXT("Downloads is seeded"),
+			WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(Fixture.InstallRoot,
+				WoTGameBootstrapWorkerSpecInstallerBytes())))
+	{
+		return false;
+	}
+	const FString RecordFile =
+		WoTGameBootstrapWorkerSpecRememberedRecordFile(Fixture.UserStateRoot);
+	const FString Format = TEXT("wot-remembered-installer-v1");
+	const FString Parent = FPaths::GetPath(CanonicalPath);
+	const FString Leaf = FPaths::GetCleanFilename(CanonicalPath);
+	// The same file through a differently spelled parent: syntactically fine,
+	// but not what canonicalization produces, so it is refused before use.
+	const FString Respelled = FPaths::Combine(FPaths::GetPath(Parent),
+		FPaths::GetCleanFilename(Parent).ToUpper(), Leaf);
+	struct FMalformedCase
+	{
+		FString Name;
+		FString Text;
+		FString Diagnostic;
+	};
+	const FString Malformed = TEXT("\"detail\":\"reason=malformed\",");
+	const TArray<FMalformedCase> Cases = {
+		{TEXT("garbage"), TEXT("not a record"), Malformed},
+		{TEXT("trailing newline"), FString::Printf(
+			TEXT("{\"format\":\"%s\",\"path\":\"%s\"}\n"), *Format, *CanonicalPath),
+			Malformed},
+		{TEXT("whitespace"), FString::Printf(
+			TEXT("{ \"format\": \"%s\", \"path\": \"%s\" }"), *Format, *CanonicalPath),
+			Malformed},
+		{TEXT("unknown field"), FString::Printf(
+			TEXT("{\"extra\":1,\"format\":\"%s\",\"path\":\"%s\"}"), *Format,
+			*CanonicalPath), Malformed},
+		{TEXT("future format"), FString::Printf(
+			TEXT("{\"format\":\"wot-remembered-installer-v2\",\"path\":\"%s\"}"),
+			*CanonicalPath), Malformed},
+		{TEXT("dot segment"), FString::Printf(
+			TEXT("{\"format\":\"%s\",\"path\":\"%s/./%s\"}"), *Format, *Parent,
+			*Leaf), Malformed},
+		{TEXT("relative path"), FString::Printf(
+			TEXT("{\"format\":\"%s\",\"path\":\"%s\"}"), *Format, *Leaf),
+			Malformed},
+		{TEXT("oversized"), FString::ChrN(40000, TEXT(' ')),
+			TEXT("\"detail\":\"reason=too-large\",")},
+		{TEXT("respelled parent"), FString::Printf(
+			TEXT("{\"format\":\"%s\",\"path\":\"%s\"}"), *Format, *Respelled),
+			FString()},
+	};
+	for (const FMalformedCase& Case : Cases)
+	{
+		if (!TestTrue(Case.Name + TEXT(": the damaged record is written"),
+			FFileHelper::SaveStringToFile(Case.Text, *RecordFile,
+				FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM)))
+		{
+			return false;
+		}
+		SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+		FWoTGameBootstrapWorkerSpecRememberedCheck Checked;
+		if (!WoTGameBootstrapWorkerSpecRunRememberedCheck(
+				*this, Fixture.InstallRoot, Checked))
+		{
+			return false;
+		}
+		TestEqual(Case.Name + TEXT(": Downloads still supplies the installer"),
+			Checked.Completion.NextPhase, EWoTBootstrapPhase::ExtractingOriginalGame);
+		TestTrue(Case.Name + TEXT(": Downloads is the detected source"),
+			WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("original-game-detected"),
+				WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("downloads"))));
+		TestEqual(Case.Name + TEXT(": only the Downloads copy is hashed"),
+			Checked.Hashes, 1);
+		if (!Case.Diagnostic.IsEmpty())
+		{
+			TestTrue(Case.Name + TEXT(": the ignored record is a diagnostic only"),
+				WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+					TEXT("remembered-installer-ignored"), Case.Diagnostic));
+		}
+	}
+
+	// A record that is not a regular file is ignored the same way.
+	IFileManager::Get().Delete(*RecordFile, false, true, true);
+	if (!TestTrue(TEXT("the record name holds a directory"),
+		IFileManager::Get().MakeDirectory(*RecordFile, true)))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	FWoTGameBootstrapWorkerSpecRememberedCheck DirectoryChecked;
+	if (!WoTGameBootstrapWorkerSpecRunRememberedCheck(
+			*this, Fixture.InstallRoot, DirectoryChecked))
+	{
+		return false;
+	}
+	TestEqual(TEXT("a directory record falls through to Downloads"),
+		DirectoryChecked.Completion.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestTrue(TEXT("a directory record is a diagnostic only"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("remembered-installer-ignored"),
+			TEXT("\"detail\":\"reason=not-a-file\",")));
+
+	// Control: the same installer behind a well-formed record is used.
+	IFileManager::Get().DeleteDirectory(*RecordFile, false, true);
+	FString ControlPath;
+	if (!WoTGameBootstrapWorkerSpecSeedRemembered(*this,
+			Fixture.UserStateRoot, RememberedFile, ControlPath))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	FWoTGameBootstrapWorkerSpecRememberedCheck ControlChecked;
+	if (!WoTGameBootstrapWorkerSpecRunRememberedCheck(
+			*this, Fixture.InstallRoot, ControlChecked))
+	{
+		return false;
+	}
+	TestTrue(TEXT("a well-formed record to the same file is used"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("original-game-detected"),
+			WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("remembered"))));
+	TestEqual(TEXT("the remembered file is the only one hashed"),
+		ControlChecked.Hashes, 1);
 	return !HasAnyErrors();
 }
 

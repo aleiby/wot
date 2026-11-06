@@ -184,7 +184,7 @@ bool FWoTSealAltarBankAndWinTest::RunTest(const FString&)
 	}
 
 	// First bank: a lone seal sits centred (retail put slot 0 left of centre at
-	// i*2 - (Goal-1) = -1; PORT_NOTES "Banked seals sit centred on the altar").
+	// i*2 - (Goal-1) = -1; PORT_NOTES "Banked seals fit and center on the altar").
 	Altar->TouchedByPawn(Pawn);
 	TestTrue(TEXT("seal banked into slot 0"), Altar->FindSeal() == Seal);
 	TestTrue(TEXT("pulled from the carrier's inventory"),

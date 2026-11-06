@@ -55,6 +55,7 @@ enum class EWoTSignatureContext : uint8
 	ReleaseManifestV2,
 	InstalledTreeV1,
 	CacheContractV3,
+	CacheLineageV1,
 };
 
 /** Stable ASCII spelling of a signature domain, for evidence and diagnostics. */

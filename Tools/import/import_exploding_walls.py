@@ -2,7 +2,7 @@
 
 The six MP authors (Battle2_05 x3 + Battle4_01 x3, identical configs) are
 invisible 32x32 projectile occluders whose break path is activation-dead in
-shipped MP (ActivatedBy=break01, which nothing emits — PORT_NOTES G35); the
+shipped MP (ActivatedBy=break01, which nothing emits); the
 stamp restores the parity-locked presence plus the full authored break config
 for the faithful AWoTExplodingWall port. Mirrors the import_path_nodes.py
 patcher precedent: plan_map() is stdlib-only for dry inspection; re-runs update

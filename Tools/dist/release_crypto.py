@@ -12,7 +12,7 @@ Byte contract (the part the game checks):
     byte for byte by WoT.BootstrapCore.Crypto.Framing
     (Source/WoTBootstrapCore/Private/Tests/CryptoTests.cpp:196-226);
   * the context ordinals are the declaration order of EWoTSignatureContext --
-    Source/WoTBootstrapCore/Public/WoTBootstrapCore/ArtifactTypes.h:49-59
+    Source/WoTBootstrapCore/Public/WoTBootstrapCore/ArtifactTypes.h:48-59
     ("Values are part of the signed bytes and therefore never renumbered");
   * verification is one-shot RFC 8032 Ed25519 over the framed bytes --
     Ed25519.cpp:124-188 (EVP_DigestVerify, no digest);
@@ -49,7 +49,7 @@ SIGNATURE_TAG = b"WOT-SIGNATURE\x00"
 SIGNATURE_BYTES = 64
 PUBLIC_KEY_BYTES = 32
 
-# EWoTSignatureContext ordinals (ArtifactTypes.h:49-59). Never renumbered.
+# EWoTSignatureContext ordinals (ArtifactTypes.h:48-59). Never renumbered.
 CONTEXT_ANNOUNCEMENT_V1 = 0
 CONTEXT_COMPONENT_IDENTITY_V1 = 1
 CONTEXT_RELEASE_KEY_RING_V1 = 2
@@ -58,6 +58,7 @@ CONTEXT_RECOVERY_DOMAIN_V1 = 4
 CONTEXT_RELEASE_MANIFEST_V2 = 5
 CONTEXT_INSTALLED_TREE_V1 = 6
 CONTEXT_CACHE_CONTRACT_V3 = 7
+CONTEXT_CACHE_LINEAGE_V1 = 8
 
 CONTEXT_NAMES = {
     CONTEXT_ANNOUNCEMENT_V1: "AnnouncementV1",
@@ -68,6 +69,7 @@ CONTEXT_NAMES = {
     CONTEXT_RELEASE_MANIFEST_V2: "ReleaseManifestV2",
     CONTEXT_INSTALLED_TREE_V1: "InstalledTreeV1",
     CONTEXT_CACHE_CONTRACT_V3: "CacheContractV3",
+    CONTEXT_CACHE_LINEAGE_V1: "CacheLineageV1",
 }
 
 # The fixed 12-byte DER prefix of an Ed25519 SubjectPublicKeyInfo (RFC 8410).

@@ -336,7 +336,7 @@ def bake(map_path, t3d_path, conv_dir):
             # washed +31G/+41B cyan; over-black matches golden's G/B, sky-mask
             # MAE 26.4->17.6; Arena_04 modulated fallback unchanged). Gate the
             # fallback on a modulated layer being present in the sky-zone stack.
-            # (fallback_probe.py; PORT_NOTES "Skybox fallback: modulated-gated".)
+            # (fallback_probe.py; PORT_NOTES "Sky drawn as a camera-locked backdrop".)
             has_base = np.zeros(len(ids), dtype=bool)
             has_mod = np.zeros(len(ids), dtype=bool)
             for isurf, gids, tvals, _ in all_hits:

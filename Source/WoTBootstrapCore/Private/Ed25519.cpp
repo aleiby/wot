@@ -46,6 +46,7 @@ const TCHAR* LexToString(EWoTSignatureContext Context)
 	case EWoTSignatureContext::ReleaseManifestV2:   return TEXT("ReleaseManifestV2");
 	case EWoTSignatureContext::InstalledTreeV1:     return TEXT("InstalledTreeV1");
 	case EWoTSignatureContext::CacheContractV3:     return TEXT("CacheContractV3");
+	case EWoTSignatureContext::CacheLineageV1:      return TEXT("CacheLineageV1");
 	}
 	return TEXT("UnknownSignatureContext");
 }

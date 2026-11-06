@@ -119,6 +119,18 @@ public:
  * (BSPWorld.cpp MoverCount), not a class-name heuristic. */
 WOT_API uint32 WoTWorldCensusMoverCount(const FWoTRuntimeWorldResource& World);
 
+/** Decode one descriptor-authorized world object and bind it to its complete
+ * descriptor census and importer version, as materialization does first. */
+WOT_API FWoTBootstrapStatus WoTWorldLoadDescribedResource(
+	const FWoTWorldDescriptor& Descriptor,
+	FWoTRuntimeWorldResource& WorldResource);
+
+/** Decode one BSP part against its exact descriptor (header, payload digest,
+ * geometry and sections), as materialization does for every part. */
+WOT_API FWoTBootstrapStatus WoTWorldDecodeBSPPart(
+	const FWoTBSPPartDescriptor& Descriptor,
+	FWoTBSPPayloadData& OutData);
+
 /** The exact static-world material-family router, shared by BSP and baked movers. */
 WOT_API UMaterialInterface* WoTWorldRuntimeBSPMaster(
 	const FWoTRuntimeBSPSectionStyle& Style, bool bProcedural,

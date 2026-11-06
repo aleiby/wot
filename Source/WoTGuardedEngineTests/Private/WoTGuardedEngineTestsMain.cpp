@@ -1,5 +1,7 @@
 #include "CoreMinimal.h"
 
+#include "WoTGuardedEngineTests.h"
+
 #include "Async/ParallelFor.h"
 #include "GenericPlatform/GenericPlatformFile.h"
 #include "HAL/FileManager.h"
@@ -58,9 +60,7 @@ PER_MODULE_BOILERPLATE
 
 namespace
 {
-constexpr EAutomationTestFlags WoTGuardedEngineSpecFlags =
-	EAutomationTestFlags::ProgramContext | EAutomationTestFlags::EditorContext
-	| EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter;
+FWoTGuardedCacheDecodeInputs GCacheDecodeInputs;
 
 UWorld* GAuthenticatedWorld = nullptr;
 std::atomic<int32> GDispatchCounts[5];
@@ -478,6 +478,11 @@ int32 RunSuite(const FString& Filter)
 	return Failed == 0 ? 0 : 1;
 }
 }  // namespace
+
+const FWoTGuardedCacheDecodeInputs& WoTGuardedCacheDecodeInputs()
+{
+	return GCacheDecodeInputs;
+}
 
 #if WITH_AUTOMATION_TESTS
 
@@ -1138,6 +1143,10 @@ INT32_MAIN_INT32_ARGC_TCHAR_ARGV()
 		return 5;
 	}
 
+	FindOption(ArgC, ArgV, TEXT("cache-root"), GCacheDecodeInputs.CacheRoot);
+	FindOption(ArgC, ArgV, TEXT("decode-receipt"),
+		GCacheDecodeInputs.DecodeReceipt);
+
 	FString Suite;
 	int32 ExitCode = 2;
 	if (FindOption(ArgC, ArgV, TEXT("suite"), Suite) && !Suite.IsEmpty())
@@ -1147,7 +1156,8 @@ INT32_MAIN_INT32_ARGC_TCHAR_ARGV()
 	else
 	{
 		UE_LOG(LogTemp, Error,
-			TEXT("usage: WoTGuardedEngineTests --suite WoT.GuardedEngine.AllWorldStartPaths"));
+			TEXT("usage: WoTGuardedEngineTests --suite WoT.GuardedEngine.AllWorldStartPaths"
+				" [--cache-root <dir> --decode-receipt <json>]"));
 	}
 
 	// Teardown is explicit rather than scope-guarded so that it is ordered

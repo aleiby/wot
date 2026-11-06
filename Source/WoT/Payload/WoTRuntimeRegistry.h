@@ -103,4 +103,8 @@ private:
 	TMap<FString, FWoTCacheBlobDescriptor> Descriptors;
 
 	friend class UWoTPayloadSubsystem;
+#if WITH_AUTOMATION_TESTS
+	/** The guarded cache-decode gate binds a lease without a game instance. */
+	friend class FWoTGuardedCacheDecodeAccess;
+#endif
 };

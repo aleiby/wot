@@ -78,7 +78,8 @@ public:
 	// Weave hold range: the standoff the caster's tracking bands hold at (the
 	// Visible/Reachable band StandoffDistance). Once the goal's cylinder gap is
 	// within this, the caster stops closing and casts from range rather than
-	// chasing to point-blank (PORT_NOTES slice 3a). Per-creature data in slice 5.
+	// chasing to point-blank (PORT_NOTES "Range-band handling"). Per-creature data
+	// remains on the creature rows.
 	UPROPERTY(EditDefaultsOnly, Category = "WoT")
 	float HoldRange = 400.0f;
 

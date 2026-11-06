@@ -45,7 +45,7 @@ import lightmaps as L
 # History: scale 4 ceilinged at a composed 63.75 — HALF the retail range;
 # 2% of Battle2_02's texels (26.8% on the stained glass) clamped there,
 # producing the measured bright-core deficit (A/B'd + rolled out
-# 2026-07-06, PORT_NOTES "Atlas overbright ceiling": WIN mean delta
+# before correction: WIN mean delta
 # -8 -> -0.4, bright ratio 0.839 -> 0.914). Do not change one side
 # without the other.
 ATLAS_SCALE = 2

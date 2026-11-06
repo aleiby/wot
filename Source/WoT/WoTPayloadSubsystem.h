@@ -153,6 +153,19 @@ struct FWoTSoundPayloadData
 	TArray<uint8> PCMBytes;
 };
 
+/**
+ * The texture decode of an activated cache generation, which
+ * UWoTPayloadSubsystem::LoadTexturePayload runs: the exact logical object read
+ * through FWoTRuntimeRegistry, its canonical header, then the blob structure.
+ * Null, with the rejection reason, on any failure.
+ */
+WOT_API TSharedPtr<FWoTTexturePayloadData> WoTDecodeActivatedTexturePayload(
+	const FString& CacheKey, FString& OutRejectReason);
+
+/** The sound decode of an activated generation (LoadSoundPayload). */
+WOT_API TSharedPtr<FWoTSoundPayloadData> WoTDecodeActivatedSoundPayload(
+	const FString& CacheKey, FString& OutRejectReason);
+
 struct FWoTMeshPayloadEntry
 {
 	FString CacheKey;

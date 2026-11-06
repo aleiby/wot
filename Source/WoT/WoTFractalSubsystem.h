@@ -155,7 +155,7 @@ private:
 	TArray<FName> ActiveOrder;
 	TMap<UMaterialInterface*, UMaterialInstanceDynamic*> MaterialReplacements;
 	/** "Pkg__Tex" identity → record (the stable join; sheet assets are dying —
-	    PORT_NOTES "Pregenerated flipbook excision", phase 2). */
+	    PORT_NOTES "Procedural textures animate when recently seen"). */
 	TMap<FName, const FWoTFractalTextureRecord*> RecordsByIdentity;
 	/** Bare texture name → record, UNIQUE names only (colliding bare names —
 	    Flames02-09, Fire_Torch_001-003, WetPart01 — are removed; qualified

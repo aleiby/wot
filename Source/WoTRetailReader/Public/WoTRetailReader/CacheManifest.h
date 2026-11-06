@@ -98,6 +98,9 @@ struct FWoTCacheManifestV3
 	bool bHasBuildIdentity = false;
 	FWoTSha256 InstallerSha256;
 	FWoTSha256 ContractSha256;
+	/** The cache content label (GetCacheContentLabel). The member and its JSON
+	 * key production_descriptor_sha256 keep their names for format
+	 * compatibility. */
 	FWoTSha256 ProductionDescriptorSha256;
 	/** Publication metadata belongs to the same completed manifest as its blobs. */
 	TArray<FWoTWorldDescriptor> WorldDescriptors;

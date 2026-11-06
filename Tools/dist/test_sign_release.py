@@ -83,6 +83,8 @@ class SignReleaseTests(unittest.TestCase):
                          formats.announcement_asset(platform) + ".sig",
                          formats.manifest_asset(platform),
                          formats.manifest_asset(platform) + ".sig",
+                         formats.cache_lineage_asset(platform),
+                         formats.cache_lineage_asset(platform) + ".sig",
                          formats.update_archive_asset(platform, 0, fixtures.COMMIT),
                          f"WoT-{platform}-guarded-shipping-{fixtures.COMMIT}.zip"}
         dmg = formats.guarded_install_dmg_asset(
@@ -117,10 +119,84 @@ class SignReleaseTests(unittest.TestCase):
                              "wot-production-cache-contract-v3")
             self.assertTrue(manifest["archive"]["url"].startswith(tag_prefix))
             for name in (formats.announcement_asset(platform),
-                         formats.manifest_asset(platform)):
+                         formats.manifest_asset(platform),
+                         formats.cache_lineage_asset(platform)):
                 raw = self.read(name)
                 self.assertEqual(formats.canonical_bytes(json.loads(raw)), raw)
                 self.assertEqual(len(self.read(name + ".sig")), 64)
+
+    def test_lineage_repeats_the_gate_receipt_at_this_sequence(self):
+        for platform in formats.PLATFORMS:
+            with self.subTest(platform=platform):
+                gate = json.loads((self.fixture.root / "cache-gates" / "set" / platform
+                                   / "cache-gate-a.json").read_text(encoding="utf-8"))
+                lineage = formats.parse_cache_lineage(
+                    self.read(formats.cache_lineage_asset(platform)), platform)
+                self.assertEqual(lineage, {
+                    "format": "wot-cache-lineage-v1", "release_sequence": 0,
+                    **gate["lineage"]})
+                row = self.receipt["platforms"][platform]["cache_lineage"]
+                self.assertEqual(row["name"], formats.cache_lineage_asset(platform))
+                self.assertEqual(row["sha256"], formats.sha256_hex(
+                    self.read(formats.cache_lineage_asset(platform))))
+                self.assertEqual(row["signature"]["sha256"], formats.sha256_hex(
+                    self.read(formats.cache_lineage_asset(platform) + ".sig")))
+                self.assertIn(formats.cache_lineage_asset(platform),
+                              self.receipt["set"]["assets"])
+
+    def test_cache_gate_receipts_are_required_and_bound_to_the_signed_zip(self):
+        releases = self.fixture.releases
+        gates = self.fixture.write_cache_gates(releases, "gate-cases")
+        error = self.assertRefused(cache_gates={"Win64": gates["Win64"]})
+        self.assertIn("--cache-gate", str(error))
+        swapped = self.assertRefused(cache_gates={"Win64": gates["Mac"],
+                                                  "Mac": gates["Win64"]})
+        self.assertIn("is for 'Win64', not Mac", str(swapped))
+        other = fixtures.write_guarded_release(self.fixture.root / "gate-other-zip",
+                                               "Win64", commit="fedcba987")
+        foreign = self.fixture.write_cache_gates({"Win64": other}, "gate-foreign")
+        error = self.assertRefused(cache_gates={"Win64": foreign["Win64"],
+                                                "Mac": gates["Mac"]})
+        self.assertIn("not the WoT-Win64-guarded-shipping-0a1b2c3d4.zip being signed",
+                      str(error))
+        failing = gates["Win64"].parent / "failing.json"
+        failing.write_text(json.dumps({"format": "wot-cache-gate-a-v1",
+                                       "platform": "Win64", "reason": "x",
+                                       "verdict": "fail"}), encoding="utf-8")
+        error = self.assertRefused(cache_gates={"Win64": failing, "Mac": gates["Mac"]})
+        self.assertIn("verdict is 'fail', not 'pass'", str(error))
+        tampered = gates["Win64"].parent / "tampered.json"
+        document = json.loads(gates["Win64"].read_text(encoding="utf-8"))
+        document["lineage"]["manifest_sha256"] = "0" * 64
+        tampered.write_text(json.dumps(document), encoding="utf-8")
+        error = self.assertRefused(cache_gates={"Win64": tampered, "Mac": gates["Mac"]})
+        self.assertIn("lineage does not repeat the candidate", str(error))
+        # The reference must be the immediately previous release: an older one
+        # could let a past revision bump hide changed cache bytes.
+        stale = gates["Win64"].parent / "stale-reference.json"
+        document = json.loads(gates["Win64"].read_text(encoding="utf-8"))
+        document["reference"]["release_sequence"] = 3
+        stale.write_text(json.dumps(document), encoding="utf-8")
+        error = self.assertRefused(cache_gates={"Win64": stale, "Mac": gates["Mac"]})
+        self.assertIn("compared against release sequence 3, not the previous release (0)",
+                      str(error))
+        missing = gates["Win64"].parent / "no-reference-sequence.json"
+        document = json.loads(gates["Win64"].read_text(encoding="utf-8"))
+        del document["reference"]["release_sequence"]
+        missing.write_text(json.dumps(document), encoding="utf-8")
+        error = self.assertRefused(cache_gates={"Win64": missing, "Mac": gates["Mac"]})
+        self.assertIn("release_sequence", str(error))
+
+    def test_a_higher_revision_gate_signs_its_new_label(self):
+        gates = self.fixture.write_cache_gates(
+            self.fixture.releases, "gate-revision-two", revision=2)
+        output = self.fixture.root / "revision-two-set"
+        self.fixture.sign(output, cache_gates=gates)
+        for platform in formats.PLATFORMS:
+            lineage = formats.parse_cache_lineage(
+                (output / formats.cache_lineage_asset(platform)).read_bytes(), platform)
+            self.assertEqual(lineage["revision"], 2)
+            self.assertEqual(lineage["label"], fixtures.content_label.label(2))
 
     def test_every_signature_is_accepted_by_openssl_and_domain_bound(self):
         openssl = self.fixture.openssl
@@ -133,6 +209,9 @@ class SignReleaseTests(unittest.TestCase):
                            self.read(name), self.read(name + ".sig")))
             name = formats.announcement_asset(platform)
             checks.append((self.fixture.announcement_public, crypto.CONTEXT_ANNOUNCEMENT_V1,
+                           self.read(name), self.read(name + ".sig")))
+            name = formats.cache_lineage_asset(platform)
+            checks.append((self.fixture.release_public, crypto.CONTEXT_CACHE_LINEAGE_V1,
                            self.read(name), self.read(name + ".sig")))
         for key, context, payload, signature in checks:
             self.assertTrue(crypto.openssl_verify_framed(openssl, key, context, payload,
@@ -608,7 +687,10 @@ class CommandLineTests(unittest.TestCase):
         try:
             output = fixture.root / "cli-set"
             receipt = fixture.root / "evidence" / "sign-receipt.json"
+            gates = fixture.write_cache_gates(fixture.releases, "cli-set")
             arguments = ["sign", "--release", f"Win64={fixture.releases['Win64'].parent}",
+                         "--cache-gate", f"Win64={gates['Win64']}",
+                         "--cache-gate", f"Mac={gates['Mac']}",
                          "--release", f"Mac={fixture.releases['Mac']}",
                          "--key-ring", str(fixture.ring_dir / formats.KEY_RING_ASSET),
                          "--announcement-key", str(fixture.announcement_key),
@@ -639,6 +721,16 @@ class CommandLineTests(unittest.TestCase):
             # Repeating into the same directory is refused, not merged.
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(sign_release.main(arguments), 1)
+            # --cache-gate is a required input of every signing.
+            ungated = [argument for index, argument in enumerate(arguments)
+                       if argument != "--cache-gate"
+                       and (index == 0 or arguments[index - 1] != "--cache-gate")]
+            ungated[ungated.index("--output") + 1] = str(fixture.root / "cli-ungated")
+            with contextlib.redirect_stderr(io.StringIO()) as errors, \
+                    self.assertRaises(SystemExit):
+                sign_release.main(ungated)
+            self.assertIn("--cache-gate", errors.getvalue())
+            self.assertFalse((fixture.root / "cli-ungated").exists())
         finally:
             fixture.cleanup()
 

@@ -5,6 +5,9 @@
 #include "WoTBootstrapCore/Error.h"
 #include "WoTRetailReader/FrontEndWorld.h"
 
+/** Seal the entry descriptor to its cache build identity. ProductionDescriptorSha256
+ * carries the cache content label; the parameter and sidecar field keep their
+ * names for format compatibility. */
 WOTRETAILREADER_API TWoTBootstrapResult<TArray<uint8>>
 WriteSealedFrontEndDescriptorSidecar(
 	const FWoTFrontEndDescriptor& Descriptor,
@@ -12,6 +15,9 @@ WriteSealedFrontEndDescriptorSidecar(
 	const FWoTSha256& ContractSha256,
 	const FWoTSha256& ProductionDescriptorSha256);
 
+/** Parse a sealed sidecar against an expected build identity.
+ * ExpectedProductionDescriptorSha256 is the cache content label the manifest
+ * recorded; the name is kept for format compatibility. */
 WOTRETAILREADER_API TWoTBootstrapResult<FWoTFrontEndDescriptor>
 ParseSealedFrontEndDescriptorSidecar(
 	TConstArrayView<uint8> Bytes,

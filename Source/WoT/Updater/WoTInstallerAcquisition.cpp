@@ -505,6 +505,34 @@ bool WoTInstallerAcquisitionIsIdentityMutation(const FWoTBootstrapError& Error)
 			WoTInstallerIdentityMutated, ESearchCase::CaseSensitive);
 }
 
+TWoTBootstrapResult<FString> WoTCanonicalizeInstallerPickPath(
+	const FString& AbsolutePath)
+{
+	using FResult = TWoTBootstrapResult<FString>;
+	if (AbsolutePath.IsEmpty() || FPaths::IsRelative(AbsolutePath))
+	{
+		return FResult::Error(InstallerError(EWoTBootstrapError::UnsafePath,
+			TEXT("an installer pick must be an absolute path"), AbsolutePath));
+	}
+	FString ParentPath;
+	FString Leaf;
+	if (FWoTBootstrapStatus Split = SplitNativePathParentAndLeaf(
+			AbsolutePath, ParentPath, Leaf); Split.IsError())
+	{
+		return FResult::Error(MoveTemp(Split).GetError());
+	}
+	TWoTBootstrapResult<FWoTCanonicalNativeDirectory> Parent =
+		OpenCanonicalNativeDirectoryFollowing(ParentPath);
+	if (Parent.IsError())
+	{
+		return FResult::Error(MoveTemp(Parent).GetError());
+	}
+	FString CanonicalPath = FPaths::Combine(
+		Parent.GetValue().CanonicalPath, Leaf);
+	FPaths::NormalizeFilename(CanonicalPath);
+	return FResult::Success(MoveTemp(CanonicalPath));
+}
+
 TWoTBootstrapResult<FWoTHeldInstallerParent> WoTOpenInstallerParent(
 	const FString& CanonicalParentPath,
 	TOptional<FWoTNativeFileIdentity>& ParentIdentity)

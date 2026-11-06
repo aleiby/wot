@@ -21,6 +21,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from wot_config import original_dir  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cache_content_label  # noqa: E402
 
 
 FORMAT = "wot-front-end-descriptor-sidecar-v2"
@@ -1046,9 +1048,14 @@ def main(argv: list[str] | None = None) -> int:
     installer = parser.add_mutually_exclusive_group(required=True)
     installer.add_argument("--installer", type=Path)
     installer.add_argument("--installer-sha256")
+    # The sidecar field keeps its historical name, but caches record the cache
+    # content label there (CacheBuilder.cpp WoTCacheContentRevision), not the
+    # SHA-256 of the production descriptor file.
     production = parser.add_mutually_exclusive_group(required=True)
-    production.add_argument("--production-descriptor", type=Path)
-    production.add_argument("--production-descriptor-sha256")
+    production.add_argument("--content-revision", type=int,
+                            help="seal the label of this cache content revision")
+    production.add_argument("--production-descriptor-sha256",
+                            help="seal this content label, given as hex")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
@@ -1066,9 +1073,11 @@ def main(argv: list[str] | None = None) -> int:
             "contract_sha256": _sha256(contract_raw),
             "installer_sha256": _identity_from_args(
                 args.installer, args.installer_sha256, "installer"),
-            "production_descriptor_sha256": _identity_from_args(
-                args.production_descriptor, args.production_descriptor_sha256,
-                "production-descriptor"),
+            "production_descriptor_sha256": (
+                cache_content_label.label(args.content_revision)
+                if args.content_revision is not None
+                else _hex_digest(args.production_descriptor_sha256,
+                                 "production-descriptor")),
         }
         expected = write_sidecar(descriptor, bindings)
         _validate_output_boundary(args.output, retail_root)

@@ -1034,7 +1034,7 @@ bool FWoTFractalIdentityBindingSpec::RunTest(const FString& Parameters)
 {
 	// Flipbook excision phase 2: surface->record binding keys on the stable
 	// Pkg__Tex identity (importer material names / standalone texture paths),
-	// never on the dying sheet asset (PORT_NOTES 2026-07-18).
+	// never on the dying sheet asset (PORT_NOTES "Procedural textures animate when recently seen").
 	TestEqual(TEXT("identity key folds '-' like the importers"),
 		UWoTFractalSubsystem::MakeFractalIdentityKey(
 			TEXT("Pkg1"), TEXT("Te-xA")),

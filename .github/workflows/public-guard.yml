@@ -61,15 +61,16 @@ jobs:
         # siblings by bare name while others use relative imports.
         run: |
           set -o pipefail
-          # Known failures, tracked in https://github.com/aleiby/wot/issues/13: they
-          # still run and print, but do not fail the job. Remove a module when fixed.
-          known_failing=" Tools.build.test_public_blob_exemptions Tools.dist.test_automation_test_names Tools.dist.test_cache_v3_production_closure Tools.dist.test_run_first_run_funnel Tools.dist.test_smoke_shipping_release "
+          # Known failures, each tracked by an open issue: they still run and
+          # print, but do not fail the job. Space-separated module names with a
+          # leading and trailing space; empty while every module passes.
+          known_failing=" "
           status=0
           for module in $(git ls-files 'Tools/test_*.py' 'Tools/**/test_*.py' | sed -e 's|\.py$||' -e 's|/|.|g'); do
             directory=$(echo "$module" | sed -e 's|\.test_[^.]*$||' -e 's|\.|/|g')
             if ! PYTHONPATH="$directory" python -m unittest "$module" 2>&1 | tail -3; then
               if [[ "$known_failing" == *" $module "* ]]; then
-                echo "KNOWN FAILURE (issue #13): $module"
+                echo "KNOWN FAILURE: $module"
               else
                 echo "FAILED: $module"
                 status=1

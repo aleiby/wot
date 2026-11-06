@@ -17,8 +17,7 @@ WOT_API FString WoTWorldMapIdentity(const UWorld* World);
  * (uc:315-318; BattleScoreBoard.uc:70; CitadelTeamOverview inherits it). A
  * materialized world answers with its world record's LevelInfo Title, which
  * may legitimately be empty (retail then draws no map line). A development
- * umap carries no Title and answers with WoTWorldMapIdentity (PORT_NOTES
- * "Guarded map title"). */
+ * umap carries no Title and answers with WoTWorldMapIdentity. */
 WOT_API FString WoTWorldDisplayTitle(const UWorld* World);
 
 /** True when the world was materialized from an authenticated world record

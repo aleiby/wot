@@ -164,7 +164,7 @@ def make_particle_fb_master(name, modulated):
     """M_WoT_ParticleAdd/Mod graph at identity UV (gamma-space display-byte
     pass-through, per-instance custom data 0 = ScaleGlow). Historically these
     carried the flipbook sheet scrub (Cols/Rows/Frames/FPS) — the sheet lane is
-    RETIRED (PORT_NOTES "sheet-scrub retirement"): the fractal subsystem binds
+    RETIRED (PORT_NOTES "Procedural textures animate when recently seen"): the fractal subsystem binds
     the live procedural texture, which samples at plain frac(UV0). A legacy
     scrub graph (detected by its FPS param) is regenerated in place so existing
     MI_PS*FB_ instances keep their parent references."""

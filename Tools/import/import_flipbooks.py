@@ -4,7 +4,7 @@ DA_WoTFractalCatalog for Fire/Wet/Wave/Ice.
 UnrealEditor-Cmd WoT.uproject -run=pythonscript
   -script="...import_flipbooks.py <flipbooks_root>"
 
-The pregenerated SHEET lane is RETIRED (PORT_NOTES "sheet-scrub retirement"):
+The pregenerated SHEET lane is RETIRED (PORT_NOTES "Procedural textures animate when recently seen"):
 no sheet textures are imported and no sheet-scrub masters are created. Each
 record's MI_<Name> is a pure identity child of M_WoT_FractalLiveAdd (fire) or
 M_WoT_FractalLiveLit (wet/wave) — the runtime fractal subsystem binds the live
@@ -31,7 +31,7 @@ POSITIONALS = [argument for argument in RAW_ARGS
 # Fractal-source SEED fields hold the retail p8 (palette indices + initial
 # bitmaps) the runtime sim runs from. They are embedded in DA_WoTFractalCatalog
 # and thus ship retail pixel data into the stripped pak (the sole remaining
-# Audit-1 leak; PORT_NOTES 2026-07-18). The clean fix rehydrates the seed from
+# packaged-data leak; PORT_NOTES "Built from the player's own copy of the game"). The clean fix rehydrates the seed from
 # the payload cache at bind time via the record's source_texture_ref /
 # glass_texture_ref. That needs the Windows WoTFractalSubsystem C++ half; until
 # it lands this stays DORMANT (default off) so the current fleet is unchanged.

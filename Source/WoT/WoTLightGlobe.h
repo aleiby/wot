@@ -16,7 +16,7 @@ class UWoTAmbientSoundComponent;
 // retail cosmetic chain locally — PixieJarRotator (AWoTActorRotator) orbiting
 // the glass PixieJar shell (WoTMeshFX row) around this actor, and the Pixie
 // rotator orbiting the color PixieSprayer bundle (WoTWeaveFX row, LT_Steady
-// light + LoopLG ambient) around the jar. Divergences (PORT_NOTES "P04"):
+// light + LoopLG ambient) around the jar. Divergences (PORT_NOTES "Light Sphere pixies"):
 // the per-tick /MagicNumber follow ease is normalized to the era's 30Hz frame
 // (frame-rate independent), the jar's bCollideWorld 9x9 cylinder is not
 // ported (pure SetLocation cosmetic), and the retail

@@ -127,8 +127,8 @@ bool WoTRuntimeReadActorVisualPresentation(
 		}
 	}
 	// Retail shipped CurvedSurfaces=False, so nothing rendered curved; the port
-	// rounds the low-poly spheres that carry the flag (PORT_NOTES, curved
-	// vertex-mesh presentation). AngrealInvAMA also flags its pickup
+	// rounds the low-poly spheres that carry the flag
+	// (PORT_NOTES "Curved surfaces on round meshes"). AngrealInvAMA also flags its pickup
 	// (AngrealInvAMA.uc:56), a 12-triangle box that would round into a blob,
 	// so it stays a box.
 	if (Out.MeshPackage == FName(TEXT("Angreal"))
