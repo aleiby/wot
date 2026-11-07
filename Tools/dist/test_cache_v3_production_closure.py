@@ -103,12 +103,6 @@ class CacheV3ProductionClosureTests(unittest.TestCase):
         self.assertTrue(all("logical_id" in output and "schema" in output
                             for output in descriptor["importer_outputs"]))
 
-    @unittest.skipUnless(
-        (ROOT / "Source/WoT/Tests/WoTRetailBuilderMigrationProofTests.cpp").is_file(),
-        "public checkout: the checked-in descriptor still walks one Source/WoT test "
-        "file that is not public, so its inventory cannot be reproduced here "
-        "(github.com/aleiby/wot/issues/13) until the descriptor is regenerated from "
-        "this tree")
     def test_repository_descriptor_covers_the_real_shipping_graph(self) -> None:
         expected = build_descriptor(
             ROOT / "Tools/dist/cache-v3-importer-outputs-v1.json",
