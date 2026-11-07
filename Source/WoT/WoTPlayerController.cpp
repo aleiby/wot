@@ -1,4 +1,6 @@
 #include "WoTPlayerController.h"
+#include "Gamepad/WoTGamepadLayer.h"
+#include "EnhancedInputComponent.h"
 #include "WoTRandom.h"
 #include "WoTSound.h"
 #include "Kismet/GameplayStatics.h"
@@ -4010,6 +4012,10 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 
 void AWoTPlayerController::OnPossess(APawn* InPawn)
 {
+	if (GamepadLayer)
+	{
+		GamepadLayer->OnPawnChanged();
+	}
 	if (IsLocalController() && GetWorld() && !GetWorld()->IsEditorWorld())
 	{
 		const FVector Where = InPawn ? InPawn->GetActorLocation() : FVector::ZeroVector;
@@ -4149,10 +4155,26 @@ void AWoTPlayerController::SetupInputComponent()
 		InputComponent->BindAction(TEXT("Pause"), IE_Pressed,
 			this, &AWoTPlayerController::Pause).bExecuteWhenPaused = true;
 	}
+	if (IsLocalController())
+	{
+		if (UEnhancedInputComponent* Enhanced = Cast<UEnhancedInputComponent>(InputComponent))
+		{
+			if (GamepadLayer)
+			{
+				GamepadLayer->Shutdown();
+			}
+			GamepadLayer = NewObject<UWoTGamepadLayer>(this);
+			GamepadLayer->Initialize(*this, *Enhanced);
+		}
+	}
 }
 
 void AWoTPlayerController::OnUnPossess()
 {
+	if (GamepadLayer)
+	{
+		GamepadLayer->OnPawnChanged();
+	}
 	ReconcileOwnerLocalZoneFOVPawn(nullptr);
 	RemoveHelpWidget();
 	RemoveItemInfoWidget();
@@ -4237,6 +4259,10 @@ void AWoTPlayerController::Destroyed()
 
 void AWoTPlayerController::PlayerTick(float DeltaTime)
 {
+	if (GamepadLayer)
+	{
+		GamepadLayer->Tick(DeltaTime);
+	}
 	Super::PlayerTick(DeltaTime);
 	TickItemInfoLifecycle();
 	if (IsLocalController() && bForcedViewYaw)
@@ -4600,8 +4626,23 @@ bool AWoTPlayerController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
+FVector2D AWoTPlayerController::GetLegacyLookInputScale() const
+{
+	if (!GetDefault<UInputSettings>()->bEnableLegacyInputScales)
+	{
+		return FVector2D(1.0, 1.0);
+	}
+	return FVector2D(InputYawScale_DEPRECATED, InputPitchScale_DEPRECATED);
+}
+
 bool AWoTPlayerController::IsJoystickInputEnabled() const
 {
+#if WITH_AUTOMATION_TESTS
+	if (JoystickEnabledOverrideForTest.IsSet())
+	{
+		return JoystickEnabledOverrideForTest.GetValue();
+	}
+#endif
 	const UWoTPreferencesSubsystem* Preferences = GetGameInstance()
 		? GetGameInstance()->GetSubsystem<UWoTPreferencesSubsystem>() : nullptr;
 	return !Preferences || Preferences->GetGameSettings().bJoystickEnabled;

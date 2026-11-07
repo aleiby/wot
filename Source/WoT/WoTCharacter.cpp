@@ -5314,10 +5314,20 @@ void AWoTCharacter::ApplyStrafeAxis(float Value)
 void AWoTCharacter::ApplyStickLook(float YawDegrees, float PitchDegrees)
 {
 	// The same calls the mouse makes, so look-spring, center-view and the
-	// Impaled clamp apply unchanged. Both take degrees: the controller's legacy
-	// input scales are 1.
-	if (!FMath::IsNearlyZero(YawDegrees)) { AddControllerYawInput(YawDegrees); }
-	AddPitchInput(PitchDegrees, /*bFromLookDevice*/ true);
+	// Impaled clamp apply unchanged. The controller multiplies them by its
+	// legacy input scales; divide those out so the stick turns exactly the
+	// degrees asked for.
+	const AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController());
+	const FVector2D Scale = WoTController
+		? WoTController->GetLegacyLookInputScale() : FVector2D(1.0, 1.0);
+	if (!FMath::IsNearlyZero(YawDegrees) && !FMath::IsNearlyZero(Scale.X))
+	{
+		AddControllerYawInput(YawDegrees / static_cast<float>(Scale.X));
+	}
+	if (!FMath::IsNearlyZero(Scale.Y))
+	{
+		AddPitchInput(PitchDegrees / static_cast<float>(Scale.Y), /*bFromLookDevice*/ true);
+	}
 }
 
 float AWoTCharacter::DecayCenterViewPitch(float PitchDegrees, float DeltaSeconds)

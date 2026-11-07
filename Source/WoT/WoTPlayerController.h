@@ -61,12 +61,18 @@ class AWoTPlayerController : public APlayerController
 
 public:
 	virtual void UpdateRotation(float DeltaTime) override;
+	/** The legacy yaw/pitch input scales AddYaw/PitchInput multiply by (BaseGame.ini
+	 * 2.5 / -2.5), or 1 when legacy input scales are off. */
+	FVector2D GetLegacyLookInputScale() const;
 #if WITH_AUTOMATION_TESTS
 	void ApplyPitchRotationForTest(float PitchInputDegrees);
 	EWoTPlayerStateMachineState PlayerStateForTest() const
 	{
 		return PlayerStateMachineState;
 	}
+	class UWoTGamepadLayer* GetGamepadLayerForTest() const { return GamepadLayer; }
+	/** Stands in for the Joystick Enabled preference (spec worlds have no preferences). */
+	void SetJoystickEnabledOverrideForTest(TOptional<bool> bEnabled) { JoystickEnabledOverrideForTest = bEnabled; }
 #endif
 	// Authority-only citadel edit grant. This is deliberately not replicated; edit RPCs bind to
 	// the team and exact budget that granted the session instead of trusting the team shadow.
@@ -563,6 +569,13 @@ public:
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	friend class UWoTGamepadLayer;
+#if WITH_AUTOMATION_TESTS
+	TOptional<bool> JoystickEnabledOverrideForTest;
+#endif
+	/** The controller (gamepad) layer; local controllers only. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UWoTGamepadLayer> GamepadLayer;
 	void HandlePauseRequest(ENetMode NetMode);
 	float SavedCameraFOV = 90.0f;
 	float CameraFOVForTest = 90.0f;
