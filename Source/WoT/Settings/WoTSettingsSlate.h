@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FWoTFrontEndPresentationAuthority;
+class SCheckBox;
 class SScrollBox;
 class STextBlock;
 class UWoTPreferencesSubsystem;
@@ -99,6 +100,10 @@ public:
 		{ return WindowModeLabel; }
 	TSharedPtr<SWidget> WindowModeControlForTesting() const
 		{ return WindowModeControl; }
+	TSharedPtr<SWidget> ControllerSensitivitySliderForTesting() const
+		{ return ControllerSensitivitySlider; }
+	TSharedPtr<SCheckBox> ControllerInvertCheckBoxForTesting() const
+		{ return ControllerInvertCheckBox; }
 #endif
 
 private:
@@ -155,6 +160,8 @@ private:
 	TSharedPtr<SScrollBox> BodyScroll;
 	TSharedPtr<SWidget> WindowModeLabel;
 	TSharedPtr<SWidget> WindowModeControl;
+	TSharedPtr<SWidget> ControllerSensitivitySlider;
+	TSharedPtr<SCheckBox> ControllerInvertCheckBox;
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;

@@ -24,6 +24,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Styling/CoreStyle.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SWindow.h"
@@ -443,6 +444,49 @@ bool FWoTSettingsControlsCaptureSpec::RunTest(const FString&)
 	TestTrue(TEXT("reset restores the closed defaults"),
 		Second->ResetBindingsForTesting().IsEventHandled()
 		&& Second->DraftForTesting().Bindings == FWoTGameSettings::Defaults().Bindings);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsControllerLookSpec,
+	"WoT.FrontEnd.Settings.ControllerLook", ScreenFlags)
+
+bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	const TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, Callbacks);
+	Screen->SlatePrepass(1.0f);
+	TArray<TSharedRef<STextBlock>> Texts;
+	CollectText(Screen, Texts);
+	TestTrue(TEXT("Controls shows the controller sensitivity row"),
+		HasText(Texts, TEXT("Controller Sensitivity")));
+	TestTrue(TEXT("Controls shows the controller invert row"),
+		HasText(Texts, TEXT("Invert Controller Look")));
+
+	const TSharedPtr<SWidget> Slider = Screen->ControllerSensitivitySliderForTesting();
+	const TSharedPtr<SCheckBox> Invert = Screen->ControllerInvertCheckBoxForTesting();
+	if (!TestTrue(TEXT("both controller controls exist"), Slider.IsValid() && Invert.IsValid()))
+		return false;
+	// One step right on the shared sensitivity scale is 2x; the mouse is untouched.
+	TestTrue(TEXT("the slider takes Right"),
+		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right)).IsEventHandled());
+	TestEqual(TEXT("controller sensitivity steps to 2x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 2.0f);
+	TestEqual(TEXT("mouse sensitivity is unchanged"),
+		Screen->DraftForTesting().MouseSensitivity, Fixture.Owner->GetGameSettings().MouseSensitivity);
+	Invert->ToggleCheckedState();
+	TestTrue(TEXT("the checkbox inverts the controller"), Screen->DraftForTesting().bControllerInvertY);
+	TestEqual(TEXT("the mouse invert is unchanged"),
+		Screen->DraftForTesting().bInvertMouseY, Fixture.Owner->GetGameSettings().bInvertMouseY);
+
+	TestTrue(TEXT("save handled"), Screen->SaveForTesting().IsEventHandled());
+	TestEqual(TEXT("owner persisted the controller sensitivity"),
+		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 2.0f);
+	TestTrue(TEXT("owner persisted the controller invert"),
+		Fixture.Owner->GetGameSettings().bControllerInvertY);
 	return !HasAnyErrors();
 }
 

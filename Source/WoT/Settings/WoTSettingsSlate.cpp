@@ -462,6 +462,52 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 		&FWoTGameSettings::bAlwaysMouseLook);
 	AddFlag(TEXT("menuOptions.MenuList[6]"), &FWoTGameSettings::bLookSpring);
 	AddFlag(TEXT("menuOptions.MenuList[9]"), &FWoTGameSettings::bJoystickEnabled);
+	// Controller look: the mouse's sensitivity steps and its own invert.
+	Rows->AddSlot().AutoHeight()[BuildLabel(Literal(TEXT("Controller Sensitivity")))];
+	Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 22.0f)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.0f)
+		[
+			SAssignNew(ControllerSensitivitySlider, SWoTRetailSlider)
+			.MinValue(0.0f)
+			.StepSize(0.125f)
+			.Value_Lambda([this]()
+			{
+				return SensitivityIndex(Draft.ControllerLookSensitivity) / 7.0f;
+			})
+			.OnValueChanged_Lambda([this](float Value)
+			{
+				Draft.ControllerLookSensitivity = SensitivitySteps[CellIndexFromSliderValue(Value)];
+				SetError(FText::GetEmpty());
+			})
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f)
+		[
+			SNew(SWoTSliderValueLabel)
+			.Font(this, &SWoTSettingsScreen::Body)
+			.Text_Lambda([this]()
+			{
+				return FText::FromString(FString::Printf(TEXT("%gx"), Draft.ControllerLookSensitivity));
+			})
+		]
+	];
+	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 12.0f)
+	[
+		SAssignNew(ControllerInvertCheckBox, SCheckBox)
+		.Style(&BodyCheckBoxStyle)
+		.IsChecked_Lambda([this]()
+		{
+			return Draft.bControllerInvertY ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		})
+		.OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+		{
+			Draft.bControllerInvertY = State == ECheckBoxState::Checked;
+		})
+		[
+			BuildLabel(Literal(TEXT("Invert Controller Look")))
+		]
+	];
 	Rows->AddSlot().AutoHeight()[BuildLabel(Retail(TEXT("menuOptions.MenuList[8]")))];
 	Rows->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 16.0f)
 	[
