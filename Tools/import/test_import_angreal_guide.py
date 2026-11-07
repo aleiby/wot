@@ -546,7 +546,10 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
 
         def write(name, text):
             path = root / name
-            path.write_text(text, encoding="utf-8", newline="")
+            # Path.write_text only grew `newline` in Python 3.10; the suite
+            # must run on 3.9 (the CI floor), so write through open().
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
             return path
 
         good = write("overrides.csv", (

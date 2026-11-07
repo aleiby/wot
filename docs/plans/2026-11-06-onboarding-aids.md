@@ -145,7 +145,7 @@ ancestors(classes, name) -> List[str]  # lowercase chain, self-inclusive (class 
 
 Tests: synthetic `.uc` fixtures written to a temp dir (invented classes and
 text, nothing retail), covering scalar/array/inheritance/unquoting; plus
-reference-gated pins (`@unittest.skipUnless(reference_root_available(), …)`)
+reference-gated pins (unittest.skipUnless guards on `reference_root_available()`)
 asserting the real Fireball resolves element Fire, rarity Common, role
 Offensive, and the real Fire Shield's `ReflectorClasses` names the
 fire-element ignore reflector.
