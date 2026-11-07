@@ -15,10 +15,8 @@
 3  Tools/import/generate_neutral_map_shells.py
 2  Tools/import/test_generate_bootstrap_map.py
 1  Tools/import/test_generate_neutral_map_shells.py
-1  Tools/public/export_public_tree.py
 3  Tools/public/leak_guard.py
 8  Tools/public/provenance_scan.py
-1  Tools/public/test_export_public_tree.py
 6  Tools/public/test_provenance_scan.py
 3  Tools/test_wot_config.py
 1  Tools/wot_config.ps1

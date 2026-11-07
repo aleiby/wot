@@ -283,7 +283,7 @@ class FixtureScanTests(unittest.TestCase):
 
 
 class RepoModeTests(unittest.TestCase):
-    """Repository mode scans exactly the exporter's public set from HEAD."""
+    """Repository mode scans every file committed at HEAD."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -294,15 +294,9 @@ class RepoModeTests(unittest.TestCase):
         self._git("config", "user.name", "t")
         self.pasted = synthetic_function("Legend_Pasted")
         self._write("Source/WoT/Public.cpp", self.pasted + "\n")
-        self._write("original/System/Game.u", "retail bytes")
-        self._write("Tools/test/sweep/fixtures/x.json", self.pasted)
-        self._write("docs/HANDOFF-private.md", self.pasted)
         self._write("Tools/dist/fixtures/pointer.bin",
                     "version https://git-lfs.github.com/spec/v1\noid sha256:0\nsize 1\n")
-        self._write("Tools/public/public-files.txt",
-                    "Source/WoT/Public.cpp\n"
-                    "Tools/dist/fixtures/pointer.bin\n"
-                    "Tools/public/public-files.txt\n")
+        self._write("docs/notes.md", "Plain notes.\n")
         self._git("add", "-A")
         self._git("commit", "-q", "-m", "fixture")
         self.reference = Path(self.tmp.name) / "reference"
@@ -321,12 +315,12 @@ class RepoModeTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def test_public_paths_follow_export_rules(self):
+    def test_public_paths_are_every_committed_file(self):
         paths = scan.public_paths_from_head(self.repo)
         self.assertEqual(paths, [
             "Source/WoT/Public.cpp",
             "Tools/dist/fixtures/pointer.bin",
-            "Tools/public/public-files.txt",
+            "docs/notes.md",
         ])
 
     def test_repo_scan_reports_commit_and_skips_pointers(self):
@@ -340,9 +334,7 @@ class RepoModeTests(unittest.TestCase):
         self.assertEqual(len(report["candidate"]["commit"]), 40)
         self.assertEqual(report["candidate"]["dirty_paths"], ["Source/WoT/Public.cpp"])
         scanned = [entry["path"] for entry in report["results"]["files"]]
-        self.assertEqual(scanned, [
-            "Source/WoT/Public.cpp", "Tools/public/public-files.txt",
-        ])
+        self.assertEqual(scanned, ["Source/WoT/Public.cpp", "docs/notes.md"])
         self.assertEqual(report["results"]["summary"]["code_findings"], 1)
 
 

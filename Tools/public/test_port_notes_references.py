@@ -1,13 +1,13 @@
 """Validate public references to the curated port-notes entries."""
 
 import re
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PUBLIC_FILES = REPO_ROOT / "Tools" / "public" / "public-files.txt"
 MARKER = "PORT" + "_NOTES"
 
 TITLE_REFERENCE_RE = re.compile(
@@ -86,12 +86,13 @@ def scan_file(path, display_path, titles):
     return scan_text(display_path, text, titles)
 
 
-def public_source_paths(root, list_path):
-    """Yield listed files under the public source/tool/config roots."""
-    for raw_line in list_path.read_text(encoding="utf-8").splitlines():
-        relative = raw_line.strip()
-        if relative.startswith(("Source/", "Tools/", "Config/")):
-            yield relative, root / Path(relative)
+def public_source_paths(root):
+    """Yield the committed files under the source/tool/config roots."""
+    listing = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "Source", "Tools", "Config"],
+        check=True, stdout=subprocess.PIPE).stdout.decode("utf-8")
+    for relative in sorted(path for path in listing.split("\0") if path):
+        yield relative, root / Path(relative)
 
 
 class PortNotesScannerTests(unittest.TestCase):
@@ -164,7 +165,7 @@ class PublicTreePortNotesTests(unittest.TestCase):
     def test_public_tree_references(self):
         titles = read_titles(REPO_ROOT / (MARKER + ".md"))
         errors = []
-        for display_path, path in public_source_paths(REPO_ROOT, PUBLIC_FILES):
+        for display_path, path in public_source_paths(REPO_ROOT):
             errors.extend(scan_file(path, display_path, titles))
         self.assertEqual([], errors, "\n" + "\n".join(errors))
 
