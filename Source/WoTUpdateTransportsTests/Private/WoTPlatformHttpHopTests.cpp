@@ -695,6 +695,42 @@ bool FWoTPlatformHttpHopRoundTripSpec::RunTest(const FString&)
 }
 
 
+#if PLATFORM_WINDOWS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTPlatformHttpHopConnectRetriesUnsupportedSpec,
+	"WoT.Update.PlatformHop.ConnectRetriesOptionUnsupported",
+	WoTPlatformHttpHopSpecFlags)
+
+bool FWoTPlatformHttpHopConnectRetriesUnsupportedSpec::RunTest(const FString&)
+{
+	// Wine's WinHttp refuses WINHTTP_OPTION_CONNECT_RETRIES; the hop must still
+	// complete inside its deadline instead of failing the update check.
+	WoTPlatformHttpHopWindowsFailConnectRetriesForTesting(true);
+	ON_SCOPE_EXIT { WoTPlatformHttpHopWindowsFailConnectRetriesForTesting(false); };
+	FWoTPlatformHttpHopSpecServer Server(
+		"HTTP/1.1 200 OK\r\n"
+		"Content-Length: 7\r\n"
+		"Connection: close\r\n"
+		"\r\n"
+		"payload");
+	if (!TestTrue(TEXT("the loopback server starts"), Server.IsReady()))
+	{
+		return false;
+	}
+	FWoTHttpHopResponse Response;
+	FWoTBootstrapStatus Status = WoTPlatformHttpHopSpecExecute(Server, Response);
+	if (!TestFalse(TEXT("the hop succeeds without the connect-retries bound"),
+		Status.IsError()))
+	{
+		AddError(Status.GetError().ToString());
+	}
+	TestEqual(TEXT("the status surfaces"), Response.Status, 200);
+	const TArray<uint8> Expected = {'p', 'a', 'y', 'l', 'o', 'a', 'd'};
+	TestTrue(TEXT("the body surfaces"), Response.Body == Expected);
+	return !HasAnyErrors();
+}
+#endif
+
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTPlatformHttpHopRedirectSpec,
 	"WoT.Update.PlatformHop.RedirectNotFollowed",
 	WoTPlatformHttpHopSpecFlags)
