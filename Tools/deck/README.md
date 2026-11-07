@@ -1,8 +1,10 @@
 # Steam Deck test harness
 
-Runs the Windows build of WoT Reborn on a Steam Deck under Proton and judges
-each run by the game's own heartbeat, so Deck-specific problems (Wine file
-semantics, installer discovery, self-update) can be tested from a desktop.
+Runs the Windows build of WoT Reborn on a Steam Deck under Proton from a
+desktop, reads the game's own bootstrap heartbeat back, and runs the Windows
+path probe (`probe/`) under Proton, so Deck-specific problems (Wine file
+semantics, installer discovery, self-update) can be investigated without
+sitting at the Deck.
 
 ## Setup
 
@@ -17,7 +19,8 @@ semantics, installer discovery, self-update) can be tested from a desktop.
 
 ## Commands
 
-All commands read `Tools/local.json`; pass `--local-json` to use another file.
+All commands read `Tools/local.json`. To use another file, put `--local-json`
+before the command: `python3 Tools/deck/deck.py --local-json other.json heartbeat ...`.
 
 ```
 python3 Tools/deck/deck.py deploy <local game folder> <remote folder>
@@ -25,7 +28,12 @@ python3 Tools/deck/deck.py launch <remote folder> --app-id <shortcut id> [--unit
 python3 Tools/deck/deck.py heartbeat <remote Data folder>
 python3 Tools/deck/deck.py show            # bring the game window forward
 python3 Tools/deck/deck.py stop [--unit wotdeck]
+python3 Tools/deck/deck.py probe <wot_path_probe.exe> --app-id <shortcut id> <probe args...>
 ```
+
+`probe` copies the probe into the shortcut's Proton prefix, runs it with the
+given arguments (for example `env`, `walk <Windows path>`, `census <dir>`),
+prints one JSON line per check and exits with the probe's own status.
 
 `launch` starts the game as a user service that outlives the SSH session. In
 Game Mode it runs off-screen until `show` brings its window forward, because

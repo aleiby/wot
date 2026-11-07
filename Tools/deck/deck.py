@@ -11,6 +11,7 @@ import json
 import shlex
 import subprocess
 import sys
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,10 @@ from typing import List
 STEAM = "$HOME/.local/share/Steam"
 COMMON = STEAM + "/steamapps/common"
 REPO = Path(__file__).resolve().parents[2]
+SSH_TRANSPORT_FAILURE = 255
+# GNU timeout only sends TERM; KILL after this grace so nothing outlives a run.
+KILL_AFTER_SECONDS = 30
+UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@-]+$")
 
 
 class DeckError(RuntimeError):
@@ -61,6 +66,20 @@ def ssh(target: DeckTarget, runner, script: str, timeout: float = 120):
     return runner.run(_ssh_argv(target), script.encode("utf-8"), timeout)
 
 
+def _require_reached(result, what: str):
+    """SSH exits 255 only when it could not run the script on the Deck."""
+    if result.returncode == SSH_TRANSPORT_FAILURE:
+        raise DeckError(f"{what}: could not reach the Deck: "
+                        + result.stderr.decode(errors="replace"))
+
+
+def _proton_command(runtime: str, proton: str) -> str:
+    """The Steam Linux Runtime + Proton launcher; names are shell-quoted."""
+    return (f"\"{COMMON}\"/{shlex.quote(runtime)}/_v2-entry-point "
+            f"--verb=waitforexitandrun -- "
+            f"\"{COMMON}\"/{shlex.quote(proton)}/proton waitforexitandrun")
+
+
 def deploy_tree(target: DeckTarget, runner, local_dir: Path, remote_dir: str):
     archive = subprocess.run(["tar", "-C", str(local_dir), "-cf", "-", "."],
                              capture_output=True, check=True).stdout
@@ -79,17 +98,18 @@ def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
     It runs off-screen in Game Mode (gamescope only shows apps Steam launched);
     use show_window to bring it forward.
     """
-    prefix = f"{STEAM}/steamapps/compatdata/{app_id}"
+    if not UNIT_NAME.match(unit):
+        raise DeckError(f"unit name must match {UNIT_NAME.pattern}: {unit!r}")
+    prefix = f"{STEAM}/steamapps/compatdata/{int(app_id)}"
     script = (
         f"cd {shlex.quote(remote_dir)} && "
         f"systemd-run --user --unit={unit} --collect "
         f"--setenv=STEAM_COMPAT_DATA_PATH={prefix} "
         f"--setenv=STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
-        f"--setenv=SteamAppId={app_id} --setenv=SteamGameId={app_id} "
+        f"--setenv=SteamAppId={int(app_id)} --setenv=SteamGameId={int(app_id)} "
         f"--setenv=DISPLAY=:0 -p WorkingDirectory=\"$PWD\" "
-        f"timeout 3600 \"{COMMON}/{runtime}/_v2-entry-point\" "
-        f"--verb=waitforexitandrun -- "
-        f"\"{COMMON}/{proton}/proton\" waitforexitandrun 'WoT Reborn.exe'"
+        f"timeout --kill-after={KILL_AFTER_SECONDS} 3600 "
+        f"{_proton_command(runtime, proton)} 'WoT Reborn.exe'"
     )
     result = ssh(target, runner, script)
     if result.returncode != 0:
@@ -97,13 +117,17 @@ def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
 
 
 def stop(target: DeckTarget, runner, unit: str):
-    ssh(target, runner, f"systemctl --user stop {shlex.quote(unit)} || true")
+    """Stop a launched unit; an already-stopped unit is not an error."""
+    result = ssh(target, runner, f"systemctl --user stop {shlex.quote(unit)} || true")
+    _require_reached(result, "stop")
 
 
 def heartbeat_events(target: DeckTarget, runner, data_dir: str) -> List[dict]:
     script = (f"cat {shlex.quote(data_dir)}/UpdaterState/"
               f"bootstrap-heartbeat-v1*.jsonl 2>/dev/null || true")
-    out = ssh(target, runner, script).stdout.decode("utf-8", "replace")
+    result = ssh(target, runner, script)
+    _require_reached(result, "heartbeat")
+    out = result.stdout.decode("utf-8", "replace")
     events = []
     for line in out.splitlines():
         try:
@@ -142,15 +166,21 @@ PROBE_DIR_WINDOWS = r"C:\wot-probe"
 
 
 def probe_batch(args: List[str]) -> str:
-    """A Windows batch file that runs the probe with args, output to out.jsonl."""
+    """A Windows batch file that runs the probe with args, output to out.jsonl.
+
+    The batch exits with the probe's own status, after writing done.txt.
+    """
     for arg in args:
-        if '"' in arg:
-            raise DeckError(f"probe argument may not contain a quote: {arg!r}")
-    quoted = " ".join(f'"{arg}"' for arg in args)
+        if '"' in arg or "\r" in arg or "\n" in arg:
+            raise DeckError(f"probe argument may not contain a quote or line break: {arg!r}")
+    # cmd.exe expands %NAME% even inside quotes; %% is a literal percent.
+    quoted = " ".join('"' + arg.replace("%", "%%") + '"' for arg in args)
     lines = [
         "@echo off",
         rf"{PROBE_DIR_WINDOWS}\wot_path_probe.exe {quoted} > {PROBE_DIR_WINDOWS}\out.jsonl 2>&1",
+        "set WOT_PROBE_STATUS=%ERRORLEVEL%",
         rf"echo done > {PROBE_DIR_WINDOWS}\done.txt",
+        "exit /b %WOT_PROBE_STATUS%",
     ]
     return "".join(line + "\r\n" for line in lines)
 
@@ -169,12 +199,23 @@ def parse_probe_output(raw: bytes) -> List[dict]:
     return rows
 
 
+@dataclass(frozen=True)
+class ProbeResult:
+    rows: List[dict]
+    # The probe's own exit status: nonzero when one of its checks hit an error.
+    exit_status: int
+
+
 def run_probe(target: DeckTarget, runner, exe: Path, app_id: int, args: List[str],
               proton: str = "Proton 11.0",
-              runtime: str = "SteamLinuxRuntime_4") -> List[dict]:
-    """Run the Windows path probe under Proton in the shortcut's prefix."""
+              runtime: str = "SteamLinuxRuntime_4") -> ProbeResult:
+    """Run the Windows path probe under Proton in the shortcut's prefix.
+
+    Raises DeckError when the probe could not be copied, run or read back; a
+    probe that ran and reported failing checks returns its rows and status.
+    """
     batch = probe_batch(args)
-    prefix = f"{STEAM}/steamapps/compatdata/{app_id}"
+    prefix = f"{STEAM}/steamapps/compatdata/{int(app_id)}"
     probe_dir = f"{prefix}/pfx/drive_c/wot-probe"
     copy = runner.run(_ssh_argv(target) + [
         f"mkdir -p {probe_dir} && cat > {probe_dir}/wot_path_probe.exe"],
@@ -182,22 +223,26 @@ def run_probe(target: DeckTarget, runner, exe: Path, app_id: int, args: List[str
     if copy.returncode != 0:
         raise DeckError("probe copy failed: " + copy.stderr.decode(errors="replace"))
     script = (
-        f"rm -f {probe_dir}/out.jsonl {probe_dir}/done.txt && "
+        "set -e\n"
+        f"rm -f {probe_dir}/out.jsonl {probe_dir}/done.txt\n"
         f"cat > {probe_dir}/run.bat <<'WOT_PROBE_EOF'\n{batch}WOT_PROBE_EOF\n"
         f"STEAM_COMPAT_DATA_PATH={prefix} STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
-        f"SteamAppId={app_id} SteamGameId={app_id} DISPLAY=:0 WINEDEBUG=-all "
-        f"timeout 900 \"{COMMON}/{runtime}/_v2-entry-point\" --verb=waitforexitandrun -- "
-        f"\"{COMMON}/{proton}/proton\" waitforexitandrun "
+        f"SteamAppId={int(app_id)} SteamGameId={int(app_id)} "
+        # Proton stalls during Wine startup without a display.
+        f"DISPLAY=:0 WINEDEBUG=-all "
+        f"timeout --kill-after={KILL_AFTER_SECONDS} 900 {_proton_command(runtime, proton)} "
         f"'C:\\windows\\system32\\cmd.exe' /c '{PROBE_DIR_WINDOWS}\\run.bat'"
         # Wine's background server inherits this command's stdio; left on the
         # SSH channel, it keeps the session open after the probe exits.
         f" < /dev/null > {probe_dir}/proton.log 2>&1\n"
     )
     ran = ssh(target, runner, script, timeout=960)
-    if ran.returncode != 0:
-        raise DeckError("probe run failed: " + ran.stderr.decode(errors="replace"))
+    _require_reached(ran, "probe run")
     fetched = ssh(target, runner, f"cat {probe_dir}/out.jsonl")
-    return parse_probe_output(fetched.stdout)
+    if fetched.returncode != 0:
+        raise DeckError("probe output could not be read: "
+                        + fetched.stderr.decode(errors="replace"))
+    return ProbeResult(parse_probe_output(fetched.stdout), ran.returncode)
 
 
 def _summarize(events: List[dict]) -> str:
@@ -247,9 +292,11 @@ def main(argv: List[str] = None) -> int:
     elif args.command == "heartbeat":
         print(_summarize(heartbeat_events(target, runner, args.data_dir)))
     elif args.command == "probe":
-        for row in run_probe(target, runner, args.exe, args.app_id, args.probe_args,
-                             args.proton):
+        result = run_probe(target, runner, args.exe, args.app_id, args.probe_args,
+                           args.proton)
+        for row in result.rows:
             print(json.dumps(row))
+        return result.exit_status
     elif args.command == "show":
         if not show_window(target, runner, args.class_name):
             print("no matching window", file=sys.stderr)
