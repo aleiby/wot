@@ -96,7 +96,10 @@ def write_if_changed(path, text):
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="")
+    # Path.write_text only grew `newline` in Python 3.10; this runs on the
+    # 3.9 floor too, so write the exact bytes through open().
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
     return True
 
 
