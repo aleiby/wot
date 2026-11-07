@@ -59,6 +59,9 @@ struct FWoTNativeHandleState
 	/** Opened absolutely as a drive root ("Z:/"): under Wine its mapping reparse
 	 * point is the directory it stands for. Every re-query keeps this context. */
 	bool bDriveRoot = false;
+	/** Under Wine: the object itself is a mount point (its volume differs from
+	 * its parent directory's). Kept for every re-query, like bDriveRoot. */
+	bool bVolumeBoundary = false;
 
 	/** The original spelling, retained only for diagnostics and executable reporting. */
 	FString Path;
@@ -584,6 +587,54 @@ bool IsDriveRootPath(FStringView Path)
 		&& (Path[2] == TEXT('/') || Path[2] == TEXT('\\'));
 }
 
+/**
+ * Under Wine only: whether an absolutely opened reparse directory is a mount
+ * point, i.e. its volume differs from its parent path's. Native Windows never
+ * asks (and keeps every reparse point a link); any failed query answers false.
+ */
+bool WineVolumeBoundaryForAbsolutePath(HANDLE Handle, FStringView Path)
+{
+	if (!WoTIsRunningUnderWine() || IsDriveRootPath(Path))
+	{
+		return false;
+	}
+	FILE_ATTRIBUTE_TAG_INFO Tag = {};
+	constexpr DWORD ReparseDirectory = FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY;
+	if (!::GetFileInformationByHandleEx(Handle, FileAttributeTagInfo, &Tag, sizeof(Tag))
+		|| (Tag.FileAttributes & ReparseDirectory) != ReparseDirectory)
+	{
+		return false;
+	}
+	FString Parent = FPaths::GetPath(FString(Path));
+	if (Parent.Len() == 2 && Parent[1] == TEXT(':'))
+	{
+		Parent += TEXT("/");
+	}
+	if (Parent.IsEmpty())
+	{
+		return false;
+	}
+	// The parent is opened by path after the child is held. That is enough
+	// here: it is consulted only under Wine and only for a reparse directory,
+	// and a junction object lives on its parent's volume, so only a genuine
+	// mount point differs. Swapping the parent in between needs a same-user
+	// process, which under Proton can already change the install directly.
+	const HANDLE ParentHandle = ::CreateFileW(*Parent, FILE_READ_ATTRIBUTES,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+		OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+	if (ParentHandle == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	FILE_ID_INFO ParentId = {};
+	FILE_ID_INFO ChildId = {};
+	const bool bKnown =
+		::GetFileInformationByHandleEx(ParentHandle, FileIdInfo, &ParentId, sizeof(ParentId))
+		&& ::GetFileInformationByHandleEx(Handle, FileIdInfo, &ChildId, sizeof(ChildId));
+	::CloseHandle(ParentHandle);
+	return bKnown && ParentId.VolumeSerialNumber != ChildId.VolumeSerialNumber;
+}
+
 template<class HandleType>
 HANDLE HeldHandle(const HandleType& Held)
 {
@@ -613,7 +664,8 @@ TOptional<FWoTBootstrapError> RejectLink(const FWoTNativeFileIdentity& Identity,
 template<class HandleType>
 TWoTBootstrapResult<HandleType> AdoptHandle(HANDLE Handle, FStringView Path,
 	bool bInstallerSource = false, HANDLE DataHandle = INVALID_HANDLE_VALUE,
-	bool bInstallerOnlineOnlyAtOpen = false, bool bDriveRoot = false)
+	bool bInstallerOnlineOnlyAtOpen = false, bool bDriveRoot = false,
+	bool bVolumeBoundary = false)
 {
 	using FResult = TWoTBootstrapResult<HandleType>;
 
@@ -624,8 +676,10 @@ TWoTBootstrapResult<HandleType> AdoptHandle(HANDLE Handle, FStringView Path,
 	State->bInstallerSource = bInstallerSource;
 	State->bInstallerOnlineOnlyAtOpen = bInstallerOnlineOnlyAtOpen;
 	State->bDriveRoot = bDriveRoot;
+	State->bVolumeBoundary = bVolumeBoundary;
 	FWoTReparseComponentFacts Context;
 	Context.bDriveRoot = bDriveRoot;
+	Context.bVolumeBoundary = bVolumeBoundary;
 	if (TOptional<FWoTBootstrapError> Error =
 			IdentityFromHandle(Handle, Path, State->Identity,
 				bInstallerSource, &State->bInstallerDataReparse, &Context); Error.IsSet())
@@ -682,7 +736,7 @@ TWoTBootstrapResult<HandleType> DuplicateHeldHandle(const HandleType& Source)
 	}
 	TWoTBootstrapResult<HandleType> Adopted = AdoptHandle<HandleType>(
 		Duplicate, State->Path, State->bInstallerSource, DataDuplicate,
-		State->bInstallerOnlineOnlyAtOpen, State->bDriveRoot);
+		State->bInstallerOnlineOnlyAtOpen, State->bDriveRoot, State->bVolumeBoundary);
 	if (Adopted.IsError())
 	{
 		return Adopted;
@@ -700,9 +754,14 @@ TWoTBootstrapResult<HANDLE> OpenRelativeThroughComponents(
 	const FWoTNativeHandleState& Root, FStringView RelativePath,
 	bool bFinalIsDirectory, bool bAllowFinalInstallerDataReparse = false,
 	HANDLE* OutInstallerDataHandle = nullptr,
-	bool* bOutInstallerOnlineOnly = nullptr)
+	bool* bOutInstallerOnlineOnly = nullptr,
+	bool* bOutFinalVolumeBoundary = nullptr)
 {
 	using FResult = TWoTBootstrapResult<HANDLE>;
+	if (bOutFinalVolumeBoundary != nullptr)
+	{
+		*bOutFinalVolumeBoundary = false;
+	}
 	if (OutInstallerDataHandle != nullptr)
 	{
 		*OutInstallerDataHandle = INVALID_HANDLE_VALUE;
@@ -813,6 +872,10 @@ TWoTBootstrapResult<HANDLE> OpenRelativeThroughComponents(
 			Current = INVALID_HANDLE_VALUE;
 			::CloseHandle(Next);
 			return FResult::Error(MoveTemp(LinkError.GetValue()));
+		}
+		if (bFinal && bOutFinalVolumeBoundary != nullptr)
+		{
+			*bOutFinalVolumeBoundary = Context.bVolumeBoundary;
 		}
 		if (!bFinal && Identity.Type != EWoTTreeEntryType::Directory)
 		{
@@ -1211,6 +1274,7 @@ TWoTBootstrapResult<FWoTNativeFileIdentity> FWoTNativeFileHandle::QueryCurrentId
 	FWoTNativeFileIdentity Identity;
 	FWoTReparseComponentFacts Context;
 	Context.bDriveRoot = State->bDriveRoot;
+	Context.bVolumeBoundary = State->bVolumeBoundary;
 	if (TOptional<FWoTBootstrapError> Error = IdentityFromHandle(
 			static_cast<HANDLE>(State->Handle), State->Path, Identity,
 			State->bInstallerDataReparse, nullptr, &Context); Error.IsSet())
@@ -1316,6 +1380,7 @@ TWoTBootstrapResult<FWoTNativeFileIdentity> FWoTNativeDirectoryHandle::QueryCurr
 	FWoTNativeFileIdentity Identity;
 	FWoTReparseComponentFacts Context;
 	Context.bDriveRoot = State->bDriveRoot;
+	Context.bVolumeBoundary = State->bVolumeBoundary;
 	if (TOptional<FWoTBootstrapError> Error = IdentityFromHandle(
 			static_cast<HANDLE>(State->Handle), State->Path, Identity, false, nullptr,
 			&Context); Error.IsSet())
@@ -1362,6 +1427,7 @@ TWoTBootstrapResult<FWoTNativeFileIdentity>
 	FWoTNativeFileIdentity Identity;
 	FWoTReparseComponentFacts Context;
 	Context.bDriveRoot = State->bDriveRoot;
+	Context.bVolumeBoundary = State->bVolumeBoundary;
 	if (TOptional<FWoTBootstrapError> Error = IdentityFromHandle(
 			static_cast<HANDLE>(State->Handle), State->Path, Identity, false, nullptr,
 			&Context); Error.IsSet())
@@ -1390,7 +1456,8 @@ TWoTBootstrapResult<FWoTNativeFileHandle> OpenNativeFileReadNoFollow(
 	}
 	TWoTBootstrapResult<FWoTNativeFileHandle> Adopted =
 		AdoptHandle<FWoTNativeFileHandle>(Handle.GetValue(), CanonicalAbsolutePath, false,
-			INVALID_HANDLE_VALUE, false, IsDriveRootPath(CanonicalAbsolutePath));
+			INVALID_HANDLE_VALUE, false, IsDriveRootPath(CanonicalAbsolutePath),
+			WineVolumeBoundaryForAbsolutePath(Handle.GetValue(), CanonicalAbsolutePath));
 	if (Adopted.IsError())
 	{
 		return Adopted;
@@ -1416,7 +1483,8 @@ TWoTBootstrapResult<FWoTNativeDirectoryHandle> OpenNativeDirectoryNoFollow(
 	}
 	TWoTBootstrapResult<FWoTNativeDirectoryHandle> Adopted =
 		AdoptHandle<FWoTNativeDirectoryHandle>(Handle.GetValue(), CanonicalAbsolutePath, false,
-			INVALID_HANDLE_VALUE, false, IsDriveRootPath(CanonicalAbsolutePath));
+			INVALID_HANDLE_VALUE, false, IsDriveRootPath(CanonicalAbsolutePath),
+			WineVolumeBoundaryForAbsolutePath(Handle.GetValue(), CanonicalAbsolutePath));
 	if (Adopted.IsError())
 	{
 		return Adopted;
@@ -1651,13 +1719,16 @@ TWoTBootstrapResult<FWoTNativeFileHandle> OpenNativeFileAtReadNoFollow(
 		return FResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
 			TEXT("the directory handle is not open")));
 	}
+	bool bFinalVolumeBoundary = false;
 	TWoTBootstrapResult<HANDLE> Handle = OpenRelativeThroughComponents(
-		*FWoTNativeHandleAccess::State(Directory), CanonicalRelativePath, false);
+		*FWoTNativeHandleAccess::State(Directory), CanonicalRelativePath, false,
+		false, nullptr, nullptr, &bFinalVolumeBoundary);
 	if (Handle.IsError())
 	{
 		return FResult::Error(MoveTemp(Handle).GetError());
 	}
-	return AdoptHandle<FWoTNativeFileHandle>(Handle.GetValue(), CanonicalRelativePath);
+	return AdoptHandle<FWoTNativeFileHandle>(Handle.GetValue(), CanonicalRelativePath,
+		false, INVALID_HANDLE_VALUE, false, false, bFinalVolumeBoundary);
 }
 
 TWoTBootstrapResult<FWoTNativeFileHandle>
@@ -1673,9 +1744,10 @@ OpenNativeInstallerSourceFileAtReadNoFollow(
 	}
 	HANDLE DataHandle = INVALID_HANDLE_VALUE;
 	bool bOnlineOnlyAtOpen = false;
+	bool bFinalVolumeBoundary = false;
 	TWoTBootstrapResult<HANDLE> Handle = OpenRelativeThroughComponents(
 		*FWoTNativeHandleAccess::State(Directory), CanonicalRelativePath,
-		false, true, &DataHandle, &bOnlineOnlyAtOpen);
+		false, true, &DataHandle, &bOnlineOnlyAtOpen, &bFinalVolumeBoundary);
 	if (Handle.IsError())
 	{
 		return FResult::Error(MoveTemp(Handle).GetError());
@@ -1686,7 +1758,7 @@ OpenNativeInstallerSourceFileAtReadNoFollow(
 	FPaths::NormalizeFilename(DiagnosticPath);
 	return AdoptHandle<FWoTNativeFileHandle>(
 		Handle.GetValue(), DiagnosticPath, true, DataHandle,
-		bOnlineOnlyAtOpen);
+		bOnlineOnlyAtOpen, false, bFinalVolumeBoundary);
 }
 
 TWoTBootstrapResult<TOptional<EWoTTreeEntryType>> QueryNativeEntryTypeAtNoFollow(
@@ -1816,13 +1888,16 @@ TWoTBootstrapResult<FWoTNativeDirectoryHandle> OpenNativeDirectoryAtNoFollow(
 		return FResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
 			TEXT("the directory handle is not open")));
 	}
+	bool bFinalVolumeBoundary = false;
 	TWoTBootstrapResult<HANDLE> Handle = OpenRelativeThroughComponents(
-		*FWoTNativeHandleAccess::State(Directory), CanonicalRelativePath, true);
+		*FWoTNativeHandleAccess::State(Directory), CanonicalRelativePath, true,
+		false, nullptr, nullptr, &bFinalVolumeBoundary);
 	if (Handle.IsError())
 	{
 		return FResult::Error(MoveTemp(Handle).GetError());
 	}
-	return AdoptHandle<FWoTNativeDirectoryHandle>(Handle.GetValue(), CanonicalRelativePath);
+	return AdoptHandle<FWoTNativeDirectoryHandle>(Handle.GetValue(), CanonicalRelativePath,
+		false, INVALID_HANDLE_VALUE, false, false, bFinalVolumeBoundary);
 }
 
 TWoTBootstrapResult<TPair<FString, FString>>

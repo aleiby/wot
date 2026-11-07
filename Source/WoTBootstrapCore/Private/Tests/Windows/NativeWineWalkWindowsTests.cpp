@@ -105,9 +105,26 @@ bool FWoTNativeWineLinkStillRefusedSpec::RunTest(const FString&)
 			}
 		}
 
-		// The real directory still opens and walks: the allowance changed nothing else.
-		TestFalse(Mode + TEXT(": the real directory still opens"),
-			OpenNativeDirectoryNoFollow(Real).IsError());
+		// A relative open that ENDS on the junction is refused the same way.
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> Final =
+			OpenNativeDirectoryAtNoFollow(Parent.GetValue(), TEXT("Junction"));
+		if (TestTrue(Mode + TEXT(": a relative open ending on a junction is refused"),
+			Final.IsError()))
+		{
+			TestEqual(Mode + TEXT(": recording the junction tag"),
+				Final.GetError().NativeCode, WoTTagMountPoint);
+		}
+
+		// The real directory still opens and walks: the allowance changed nothing
+		// else, and a held directory re-queries to the identity it was adopted with.
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> Held = OpenNativeDirectoryNoFollow(Real);
+		if (TestFalse(Mode + TEXT(": the real directory still opens"), Held.IsError()))
+		{
+			TWoTBootstrapResult<FWoTNativeFileIdentity> Requeried =
+				Held.GetValue().QueryCurrentIdentity();
+			TestTrue(Mode + TEXT(": a held directory re-queries to the same identity"),
+				!Requeried.IsError() && Requeried.GetValue() == Held.GetValue().GetIdentity());
+		}
 		TestFalse(Mode + TEXT(": walking through the real directory still works"),
 			OpenNativeFileAtReadNoFollow(Parent.GetValue(), TEXT("Real/Data.bin")).IsError());
 	}
