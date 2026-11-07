@@ -2255,7 +2255,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		UpdateStateRecord.NewestAnnouncementSequence = FMath::Max(
 			UpdateStateRecord.NewestAnnouncementSequence,
 			ReadState.State.NewestAnnouncementSequence);
-		if (!ReadState.Diagnostic.IsEmpty())
+		if (!ReadState.Diagnostic.IsEmpty() && !ReadState.bMissing)
 		{
 			WoTRecordBootstrapHeartbeat(TEXT("update-state-defaulted"), Phase,
 				OperationEpoch, {}, {}, ReadState.Diagnostic.Left(1024));
