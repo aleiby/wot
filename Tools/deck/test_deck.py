@@ -140,6 +140,22 @@ class DeckRobustnessTests(unittest.TestCase):
             with self.assertRaises(deck.DeckError):
                 deck.launch_hidden(deck.DeckTarget("h"), FakeRunner(), "/x", unit=unit, app_id=1)
 
+    def test_launch_game_direct_refuses_unsafe_unit_names(self):
+        for unit in ["ok; echo hi #", "a b", ""]:
+            with self.assertRaises(deck.DeckError):
+                deck.launch_game_direct(deck.DeckTarget("h"), FakeRunner(), "/x",
+                                        unit=unit, app_id=1)
+
+    def test_launch_game_direct_starts_the_game_exe_from_its_directory(self):
+        runner = FakeRunner()
+        deck.launch_game_direct(deck.DeckTarget("h"), runner, "/srv/games/WoT Reborn",
+                                unit="wotgame", app_id=7)
+        script = runner.calls[0][1].decode()
+        self.assertTrue(script.startswith("cd '/srv/games/WoT Reborn'/Game && "))
+        self.assertIn("WoT/Binaries/Win64/WoT-Win64-*.exe", script)
+        self.assertIn("--unit=wotgame", script)
+        self.assertIn("SteamGameId=7", script)
+
     def test_launch_hidden_single_quotes_proton_and_runtime_names(self):
         runner = FakeRunner()
         deck.launch_hidden(deck.DeckTarget("h"), runner, "/x", unit="wotdeck", app_id=1,
