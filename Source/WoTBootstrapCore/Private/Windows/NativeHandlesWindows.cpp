@@ -2438,6 +2438,11 @@ TWoTBootstrapResult<bool> CheckNativeDirectoryMutationAccessAtNoFollow(
 	return FResult::Success(true);
 }
 
+void WoTFailCriticalErrorsOnThisThread()
+{
+	::SetThreadErrorMode(::GetThreadErrorMode() | SEM_FAILCRITICALERRORS, nullptr);
+}
+
 #if WITH_AUTOMATION_TESTS
 TWoTBootstrapResult<bool> ProbeNativeDirectoryWritableNoFollowForTesting(
 	const FWoTNativeDirectoryHandle& Directory, FStringView UniqueLeaf,

@@ -48,6 +48,11 @@ public:
 		FString UpdateDisableReason;
 		FString AnnouncementJsonUrl;
 		WoTReleaseIdentity::FIdentity RunningIdentity;
+		/** The running game's build configuration ("Shipping", "Test"). A
+		 * release attested for another configuration is never staged: its
+		 * executable is not the one this copy's launcher starts. Empty skips
+		 * the check. */
+		FString RunningConfiguration;
 		double AnnouncementDeadlineSeconds = 15.0;
 		double DownloadOperationDeadlineSeconds = 0.0;
 		double OriginalGameProbeIntervalSeconds = 2.0;

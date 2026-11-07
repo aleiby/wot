@@ -305,6 +305,14 @@ WOTBOOTSTRAPCORE_API void WoTSetNativeVolumeGuidPathFailsForTesting(bool bFails)
  * use it only to accept a measured Wine behaviour, never to relax a check. */
 WOTBOOTSTRAPCORE_API bool WoTIsRunningUnderWine();
 
+/** Windows: makes the system return a "no disk in the drive"-class error to
+ * the caller on THIS thread instead of showing the critical-error dialog. UE
+ * sets that only under -unattended, so a player's game would otherwise show
+ * the dialog when a probe touches an empty card reader or optical drive (a
+ * remembered installer location, retried every sweep). Call it on threads
+ * that probe player-chosen paths. No-op on other platforms. */
+WOTBOOTSTRAPCORE_API void WoTFailCriticalErrorsOnThisThread();
+
 #if WITH_AUTOMATION_TESTS
 /** Forces WoTIsRunningUnderWine; an unset value restores detection. */
 WOTBOOTSTRAPCORE_API void WoTSetRunningUnderWineForTesting(TOptional<bool> bRunningUnderWine);

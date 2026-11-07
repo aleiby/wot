@@ -1461,7 +1461,8 @@ WoTGameBootstrapWorkerSpecMakeWorker(
 		AdjacentParentWritableForTesting = {},
 	TFunction<TOptional<FWoTBootstrapError>(
 		EWoTInstallerSource, const FString&)>
-		InstallerLocationFaultForTesting = {})
+		InstallerLocationFaultForTesting = {},
+	FString RunningConfiguration = FString())
 {
 	FWoTGameBootstrapWorker::FDependencies Deps;
 	Deps.Hops =
@@ -1523,6 +1524,7 @@ WoTGameBootstrapWorkerSpecMakeWorker(
 		MoveTemp(AdjacentParentWritableForTesting);
 	Deps.InstallerLocationFaultForTesting =
 		MoveTemp(InstallerLocationFaultForTesting);
+	Deps.RunningConfiguration = MoveTemp(RunningConfiguration);
 	return MakeUnique<FWoTGameBootstrapWorker>(MoveTemp(Deps));
 }
 
@@ -2346,6 +2348,76 @@ bool FWoTGameBootstrapWorkerSpecTranslocatedNotifyOnly::RunTest(const FString&)
 		Checked.NotifyOnlyReason, FString(TEXT("translocated")));
 	TestEqual(TEXT("translocated update assessment still skips recovery"),
 		RecoveryCalls, 0);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecConfigurationDiffers,
+	"WoT.Update.Worker.NotifyOnly.ReleaseConfigurationDiffers",
+	WoTGameBootstrapWorkerSpecFlags)
+
+// A Test build offered the published Shipping release (the fixture manifest
+// attests "Shipping") must not stage it: the Test launcher would discard the
+// tree as torn and the next session would download it again.
+bool FWoTGameBootstrapWorkerSpecConfigurationDiffers::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	WoTGameBootstrapWorkerSpecAppendAnnouncementScript(*Hops, Fixture.V2);
+	// The configuration is attested in the signed manifest, so the worker
+	// reads the metadata; the archive is never requested.
+	WoTGameBootstrapWorkerSpecAppendMetadataScript(*Hops, Fixture.V2);
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(
+			Fixture.InstallRoot, Hops, {},
+			WoTGameBootstrapWorkerSpecAnnouncementUrl, {}, {}, {}, {}, {},
+			{}, {}, {}, {}, {}, {}, {}, {},
+			[]() { return true; }, {}, {}, TEXT("Test"));
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Bootstrap;
+	TestTrue(TEXT("bootstrap local check completes"),
+		WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingGameUpdates, 2, Bootstrap));
+	TestTrue(TEXT("bootstrap local check succeeds"), Bootstrap.bSucceeded);
+	FWoTUpdateState Completion;
+	TestTrue(TEXT("the background assessment completes"),
+		WoTGameBootstrapWorkerSpecRunBackground(*Worker, Completion));
+	TestEqual(TEXT("a release of another configuration is only announced"),
+		static_cast<int32>(Completion.Status),
+		static_cast<int32>(EWoTUpdateStatus::Available));
+	TestEqual(TEXT("the notify-only reason names the configuration"),
+		Completion.Reason,
+		FString(TEXT("release-configuration-differs")));
+	TestEqual(TEXT("the announced release is still the authenticated one"),
+		Completion.ReleaseSequence, uint64(2));
+	TestEqual(TEXT("announcement and signed metadata only; no archive download"),
+		Hops->Requests.Num(), 6);
+	TestFalse(TEXT("nothing is staged for a configuration this copy can't run"),
+		IFileManager::Get().DirectoryExists(*FPaths::Combine(
+			Fixture.Root.StagingDir, TEXT("staged-2"))));
+
+	FString Heartbeat;
+	TestTrue(TEXT("the heartbeat is readable"),
+		FFileHelper::LoadFileToString(Heartbeat, *FPaths::Combine(
+			Fixture.UserStateRoot, TEXT("UpdaterState"),
+			WoTBootstrapHeartbeatFileName())));
+	TestTrue(TEXT("the heartbeat names both configurations"),
+		Heartbeat.Contains(
+			TEXT("notify-only reason=release-configuration-differs detail=running=Test release=Shipping"),
+			ESearchCase::CaseSensitive));
 	return !HasAnyErrors();
 }
 

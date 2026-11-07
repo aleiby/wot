@@ -78,6 +78,7 @@ bool FWoTUpdateStateReadSpec::RunTest(const FString&)
 		Missing.State.NewestAnnouncementSequence, uint64(0));
 	TestFalse(TEXT("an absent optional record reports a diagnostic"),
 		Missing.Diagnostic.IsEmpty());
+	TestTrue(TEXT("an absent record is marked missing"), Missing.bMissing);
 
 	const FString Exact = TEXT("{\"key_revocation_floor\":18446744073709551615,")
 		TEXT("\"newest_announcement_sequence\":9007199254740993}");
@@ -92,6 +93,7 @@ bool FWoTUpdateStateReadSpec::RunTest(const FString&)
 		AddError(TEXT("valid update-state diagnostic: ") + Read.Diagnostic);
 	}
 	TestTrue(TEXT("valid state has no diagnostic"), Read.Diagnostic.IsEmpty());
+	TestFalse(TEXT("a present record is not marked missing"), Read.bMissing);
 	TestEqual(TEXT("the full uint64 range is parsed without floating point"),
 		Read.State.KeyRevocationFloor, MAX_uint64);
 	TestEqual(TEXT("integers above double precision stay exact"),
@@ -126,7 +128,18 @@ bool FWoTUpdateStateMalformedSpec::RunTest(const FString&)
 			Read.State.NewestAnnouncementSequence, uint64(0));
 		TestFalse(TEXT("malformed state reports a diagnostic"),
 			Read.Diagnostic.IsEmpty());
+		TestFalse(TEXT("malformed state is not marked missing"), Read.bMissing);
 	}
+
+	// Replacing an unusable record still reports it; only a record that does
+	// not exist yet is silent.
+	FWoTUpdateStateRecord Replacement;
+	FString MergeDiagnostic;
+	const FWoTBootstrapStatus Replaced =
+		MergeAndWriteWoTUpdateState(Root, Replacement, &MergeDiagnostic);
+	TestFalse(TEXT("an unusable record is replaced"), Replaced.IsError());
+	TestFalse(TEXT("replacing an unusable record reports why defaults won"),
+		MergeDiagnostic.IsEmpty());
 
 	TestTrue(TEXT("the oversized fixture is written"),
 		WoTUpdateStateSpecWriteText(Root, FString::ChrN(1025, TEXT('0'))));
@@ -159,7 +172,9 @@ bool FWoTUpdateStateMergePublishSpec::RunTest(const FString&)
 		if (Written.IsError()) AddError(Written.GetError().ToString());
 		return false;
 	}
-	TestFalse(TEXT("the initial write reports that no prior record existed"),
+	// No record yet is the normal first run: the worker logs any diagnostic
+	// here as update-state-save-failed, so a first write must report nothing.
+	TestTrue(TEXT("the initial write over no prior record reports nothing"),
 		Diagnostic.IsEmpty());
 
 	FWoTUpdateStateRecord Second;

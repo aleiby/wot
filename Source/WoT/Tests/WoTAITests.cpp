@@ -768,6 +768,11 @@ bool FWoTAIUnnavigableTest::RunTest(const FString&)
 	AWoTNPCCharacter* Hunter = WoTCreatureData::SpawnCreature(
 		*World, TEXT("Trolloc"), FVector(0, 0, 54), 1,
 		/*bCombatReady*/ true, AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("Hunter spawned"), Hunter))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	Hunter->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 	SpawnAIActivityAnchor(World, Hunter->GetActorLocation());
 	AWoTTestNPCCharacter* Prey = SpawnCombatNPC(World, FVector(600, 0, 54), 2);
@@ -1228,6 +1233,11 @@ bool FWoTAIHelpPropagationTest::RunTest(const FString&)
 	AWoTNPCCharacter* Captain = WoTCreatureData::SpawnCreature(
 		*World, TEXT("Sister"), FVector(0, 0, 100), 1, true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("Captain spawned"), Captain))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	WoTTest::TickWorld(World, 0.1f);
 	AWoTNPCController* Ctl = Cast<AWoTNPCController>(Captain->GetController());
 	Ctl->ChangeOrders(EWoTOrders::Automatic);
@@ -1241,6 +1251,11 @@ bool FWoTAIHelpPropagationTest::RunTest(const FString&)
 	AWoTNPCCharacter* Bystander = WoTCreatureData::SpawnCreature(
 		*World, TEXT("Minion"), FVector(0, 30, 100), 1, true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("HelpTarget spawned"), HelpTarget) || !TestNotNull(TEXT("Bystander spawned"), Bystander))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	Bystander->SetActorEnableCollision(false);
 	WoTTest::TickWorld(World, 0.1f);
 	AWoTNPCController* BystanderCtl = Bystander
@@ -2655,6 +2670,11 @@ bool FWoTAIMinionFreezeTest::RunTest(const FString&)
 	AWoTNPCCharacter* RetailMinion = WoTCreatureData::SpawnCreature(
 		*World, TEXT("Minion"), FVector(0, 800, 100), 1, /*bCombatReady*/ true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("RetailMinion spawned"), RetailMinion))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	RetailMinion->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 	AWoTTestNPCCharacter* Starer = SpawnCombatNPC(World, FVector(400, 800, 100), 2);
 	if (AController* SC = Starer->GetController()) { SC->UnPossess(); }
@@ -2848,6 +2868,11 @@ bool FWoTAILegionStompTest::RunTest(const FString&)
 	Legion = WoTCreatureData::SpawnCreature(
 		*World, TEXT("Legion"), FVector(0, 0, 100), 1, /*bCombatReady*/ true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("Legion spawned"), Legion))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	Legion->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 	AWoTTestNPCCharacter* Prey = SpawnCombatNPC(World, FVector(400, 0, 100), 2);
 	Prey->MeleeRange = 0.0f;

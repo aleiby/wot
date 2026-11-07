@@ -278,9 +278,11 @@ bool FWoTInstallerAcquisitionSpec::RunTest(const FString& Parameters)
 		TestFalse(TEXT("hard-link inspection succeeds"), HardLink.IsError());
 		if (!HardLink.IsError())
 		{
-			TestEqual(TEXT("hard link is replaceable"),
+			// Refused like any non-installer, but named so the screen can say
+			// "copy it" instead of "download it again".
+			TestEqual(TEXT("a full-size hard link is reported as a hard link"),
 				HardLink.GetValue().State,
-				EWoTPinnedAdjacentInstallerProbe::NotTheInstaller);
+				EWoTPinnedAdjacentInstallerProbe::HardLinked);
 		}
 	}
 	{

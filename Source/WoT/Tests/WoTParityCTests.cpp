@@ -310,6 +310,11 @@ bool FWoTPCLegionCarcassBaseChange::RunTest(const FString&)
  PCPlayer(World, FVector(300,0,100));
  AWoTNPCCharacter* Legion = WoTCreatureData::SpawnCreature(*World, TEXT("Legion"),
   FVector(0,0,100), 1, true, AWoTTestNPCCharacter::StaticClass());
+ if (!TestNotNull(TEXT("Legion spawned"), Legion))
+ {
+  WoTTest::DestroySpecWorld(World);
+  return false;
+ }
  Legion->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
  Legion->Health = 10;
  FWoTDamageEvent Damage;
