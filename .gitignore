@@ -45,6 +45,8 @@ DerivedDataCache/
 .guarded-build/
 Build/TestFixtures/
 Build/ThirdPartyBuild/
+# The Mac build writes a version counter named after the checkout folder.
+Build/Mac/*.PackageVersionCounter
 Build/ThirdPartyStage/
 /ThirdParty/innoextract/1.9/lib/
 

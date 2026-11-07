@@ -77,3 +77,9 @@ published; the prebuilt libraries are not, and a checkout fetches or builds them
 `binary-allowlist.sha256` is a separate reviewed list for non-text content. Each
 entry is an exact SHA-256 and path; changing any listed file's bytes requires an
 explicit hash review.
+
+`reference-term-allowlist.txt` pins the public files that may name the
+maintainer-only development snapshot (only the tools that resolve or deny its
+directory) to an exact number of mentions. Public prose describes the original
+engine in its own words; the leak guard fails any other mention and any change
+to a pinned count.

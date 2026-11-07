@@ -152,8 +152,16 @@ for module in $(git ls-files 'Tools/test_*.py' 'Tools/**/test_*.py' | sed -e 's|
 done
 ```
 
+Always run them by module path as above: `Tools.import` cannot be written in a
+Python `import` statement (`import` is a keyword), and `unittest` loads it
+through `importlib` instead.
+
 Tests that need the private reference data skip themselves when
-`WOT_REFERENCE_ROOT` has no such data, and say so.
+`WOT_REFERENCE_ROOT` has no such data, and say so. A test that runs either way
+uses synthetic fixtures, so its passing does not show that the retail parsing
+path was exercised. The exported script and map text (`exports/**/*.uc`,
+`*.t3d`) is Windows-1252, not UTF-8: read it with `encoding="latin-1"` (the
+`.int` string tables use `cp1252`).
 
 Native (engine-side) behavior that the shipped script only declares is ported
 from observed behavior and the script's contract. If your change touches a

@@ -1,0 +1,25 @@
+# Public files that may name the maintainer-only development snapshot,
+# each pinned to its exact number of mentions (Tools/public/leak_guard.py).
+# Only tools that resolve or deny that directory belong here; public prose
+# describes the original engine in its own words. Format: <count>  <path>.
+1  .gitignore
+1  Source/WoT/Tests/WoTMaterializedListenHarnessTests.cpp
+4  Source/WoTRetailReader/Private/Tests/ReferencePathsTests.cpp
+2  Source/WoTRetailReader/Public/WoTRetailReader/Testing/ReferencePaths.h
+3  Tools/convert/lightmaps.py
+8  Tools/convert/mesh2glb.py
+11  Tools/convert/verify_meshes.py
+2  Tools/dist/build_stripped_pak.py
+23  Tools/extract/inventory.py
+3  Tools/import/generate_bootstrap_map.py
+3  Tools/import/generate_neutral_map_shells.py
+2  Tools/import/test_generate_bootstrap_map.py
+1  Tools/import/test_generate_neutral_map_shells.py
+1  Tools/public/export_public_tree.py
+3  Tools/public/leak_guard.py
+8  Tools/public/provenance_scan.py
+1  Tools/public/test_export_public_tree.py
+6  Tools/public/test_provenance_scan.py
+3  Tools/test_wot_config.py
+1  Tools/wot_config.ps1
+5  Tools/wot_config.py

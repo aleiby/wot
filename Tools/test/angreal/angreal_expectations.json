@@ -1,6 +1,6 @@
 {
  "schema": "wot-angreal-expectations-v1",
- "spec": "exports/script (shipped 333B). Every observable cites the .uc lines it is derived from.",
+ "spec": "exports/script (shipped 333B). Every observable cites the .uc lines it is derived from. A class row named Class@variant (listed in variants) is a second cast mode of the same class: group it with its class by the stem of its uc path, not by its class name.",
  "variants": [
   "Shift@aimed"
  ],
@@ -3362,7 +3362,7 @@
     "exports/script/Angreal/AngrealInvWhirlwind.uc:124-137 UnCast (release) removes the leech",
     "exports/script/Angreal/AngrealInvWhirlwind.uc:230 MaxAngle=22.5; :236 RoundsPerMinute=20; :237-239 Min/MaxInitialCharges=10/20, MaxCharges=40",
     "exports/script/Angreal/WhirlwindLeech.uc:116-142 eases victim toward DesiredLocation (AlignmentSpeed=2), spins it, SetLocation only if ActorFits",
-    "devtree/U2Radiosity/Engine/Src/UnLevAct.cpp:859-860 UE1 SetLocation->FarMoveActor->FindSpot keeps the victim out of world geometry",
+    "Original engine: SetLocation moves the victim through FarMoveActor, whose FindSpot keeps it out of world geometry",
     "Source/WoT/Inventory/WoTAngrealInvWhirlwind.cpp:94-125 Tick drain matches retail"
    ],
    "cpp_default_mismatches": [],

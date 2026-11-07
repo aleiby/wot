@@ -5,6 +5,8 @@
 .github/workflows/public-guard.yml
 .gitleaks.toml
 Build/Mac/Resources/Info.Template.plist
+Build/Mac/Resources/Sandbox.NoNet.entitlements
+Build/Mac/Resources/Sandbox.Server.entitlements
 Build/WoTRelease/announcement-public-key-v1.json
 Build/WoTRelease/bootstrap-trust-v1.json
 Build/WoTRelease/cache-contract-v3-production.json
@@ -1363,6 +1365,9 @@ Tools/extract/extract_all.sh
 Tools/extract/inventory.py
 Tools/import/bake_map.py
 Tools/import/bootstrap_mover_wave_instances.py
+Tools/import/data/angreal_counter_overrides.csv
+Tools/import/data/angreal_guide_facts.csv
+Tools/import/data/angreal_guide_hints.csv
 Tools/import/dynamic_light_material.py
 Tools/import/entry_weather_materials.py
 Tools/import/finalize_stripped_fractal_catalog.py
@@ -1372,6 +1377,7 @@ Tools/import/generate_neutral_map_shells.py
 Tools/import/import_all.py
 Tools/import/import_ambience.py
 Tools/import/import_andilay_roots.py
+Tools/import/import_angreal_guide.py
 Tools/import/import_angreal_hands.py
 Tools/import/import_animdata.py
 Tools/import/import_breakable_decorations.py
@@ -1429,6 +1435,7 @@ Tools/import/test_finalize_stripped_fractal_catalog.py
 Tools/import/test_fractal_seed_strip.py
 Tools/import/test_generate_bootstrap_map.py
 Tools/import/test_generate_neutral_map_shells.py
+Tools/import/test_import_angreal_guide.py
 Tools/import/test_import_menu_strings.py
 Tools/import/test_import_mesh.py
 Tools/import/test_import_path_nodes.py
@@ -1451,6 +1458,7 @@ Tools/public/export_public_tree.py
 Tools/public/leak_guard.py
 Tools/public/provenance_scan.py
 Tools/public/public-files.txt
+Tools/public/reference-term-allowlist.txt
 Tools/public/scaffold/gitattributes
 Tools/public/scaffold/gitignore
 Tools/public/test_check_export_receipt.py
@@ -1554,3 +1562,4 @@ Tools/wot_config.py
 WoT.uproject
 docs/BUILD-PATHS.md
 docs/LOCAL-CONFIGURATION.md
+docs/plans/2026-11-06-onboarding-aids.md

@@ -11,7 +11,7 @@
 #    Paths=..\* entries — run from a complete copy of original/, never in-place.
 #  - Core/Editor/Engine/IpDrv/WinDrv shipped with stripped ScriptText (Epic
 #    engine code); class export fails for them. All Legend game packages export
-#    completely. Stripped packages' dev-branch source is in devtree/.
+#    completely. Stripped packages have no shipped source to export.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 REFERENCE_ROOT="${WOT_REFERENCE_ROOT:-$ROOT}"

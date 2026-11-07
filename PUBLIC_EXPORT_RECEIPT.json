@@ -1,8 +1,8 @@
 {
-  "source_commit": "11ccb84524f2c9eae9db393259c9c276b56770cf",
+  "source_commit": "e1b452356f42ba604db4448005c024016f5f5225",
   "source_kind": "commit",
-  "source_tree": "11ccb84524f2c9eae9db393259c9c276b56770cf",
-  "file_count": 1556,
+  "source_tree": "e1b452356f42ba604db4448005c024016f5f5225",
+  "file_count": 1565,
   "paths": [
     ".gitattributes",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -13,6 +13,8 @@
     ".gitignore",
     ".gitleaks.toml",
     "Build/Mac/Resources/Info.Template.plist",
+    "Build/Mac/Resources/Sandbox.NoNet.entitlements",
+    "Build/Mac/Resources/Sandbox.Server.entitlements",
     "Build/WoTRelease/announcement-public-key-v1.json",
     "Build/WoTRelease/bootstrap-trust-v1.json",
     "Build/WoTRelease/cache-contract-v3-production.json",
@@ -1371,6 +1373,9 @@
     "Tools/extract/inventory.py",
     "Tools/import/bake_map.py",
     "Tools/import/bootstrap_mover_wave_instances.py",
+    "Tools/import/data/angreal_counter_overrides.csv",
+    "Tools/import/data/angreal_guide_facts.csv",
+    "Tools/import/data/angreal_guide_hints.csv",
     "Tools/import/dynamic_light_material.py",
     "Tools/import/entry_weather_materials.py",
     "Tools/import/finalize_stripped_fractal_catalog.py",
@@ -1380,6 +1385,7 @@
     "Tools/import/import_all.py",
     "Tools/import/import_ambience.py",
     "Tools/import/import_andilay_roots.py",
+    "Tools/import/import_angreal_guide.py",
     "Tools/import/import_angreal_hands.py",
     "Tools/import/import_animdata.py",
     "Tools/import/import_breakable_decorations.py",
@@ -1437,6 +1443,7 @@
     "Tools/import/test_fractal_seed_strip.py",
     "Tools/import/test_generate_bootstrap_map.py",
     "Tools/import/test_generate_neutral_map_shells.py",
+    "Tools/import/test_import_angreal_guide.py",
     "Tools/import/test_import_menu_strings.py",
     "Tools/import/test_import_mesh.py",
     "Tools/import/test_import_path_nodes.py",
@@ -1459,6 +1466,7 @@
     "Tools/public/leak_guard.py",
     "Tools/public/provenance_scan.py",
     "Tools/public/public-files.txt",
+    "Tools/public/reference-term-allowlist.txt",
     "Tools/public/test_check_export_receipt.py",
     "Tools/public/test_export_public_tree.py",
     "Tools/public/test_leak_guard.py",
@@ -1559,7 +1567,8 @@
     "Tools/wot_config.py",
     "WoT.uproject",
     "docs/BUILD-PATHS.md",
-    "docs/LOCAL-CONFIGURATION.md"
+    "docs/LOCAL-CONFIGURATION.md",
+    "docs/plans/2026-11-06-onboarding-aids.md"
   ],
   "files": [
     {
@@ -1596,7 +1605,7 @@
     {
       "mode": "100644",
       "path": ".gitignore",
-      "sha256": "307fd86f7c343a678befa6aa105cc4970cf54deeced6e62b653d4b09ce3ae290",
+      "sha256": "7fa6569b69699a17c2a411355ee4b18c64ff510e457dc45b6a40552c49333239",
       "source_path": "Tools/public/scaffold/gitignore"
     },
     {
@@ -1608,6 +1617,16 @@
       "mode": "100644",
       "path": "Build/Mac/Resources/Info.Template.plist",
       "sha256": "d5b42efb471683b8fb2524368450876b9d482e62c20030cf14395400636372a1"
+    },
+    {
+      "mode": "100644",
+      "path": "Build/Mac/Resources/Sandbox.NoNet.entitlements",
+      "sha256": "1707929a9e37f094644a958ec0b9127ba42669b61e6fcf5e7ac544ba9ee4e0ef"
+    },
+    {
+      "mode": "100644",
+      "path": "Build/Mac/Resources/Sandbox.Server.entitlements",
+      "sha256": "898c09145a83df5f7b73ae9aa2d7822ef9fd6e6e6064f9c830db8250d1007280"
     },
     {
       "mode": "100644",
@@ -1697,7 +1716,7 @@
     {
       "mode": "100644",
       "path": "CONTRIBUTING.md",
-      "sha256": "e1a14b3601fb41953f7587aa4db480be4eb1864df7a56682be16dcb25879f3d4"
+      "sha256": "62baa43e2eea695d0cdd5102828eca675d853d4df1f719500710d17c6e693dc5"
     },
     {
       "mode": "100644",
@@ -8382,7 +8401,7 @@
     {
       "mode": "100755",
       "path": "Tools/extract/extract_all.sh",
-      "sha256": "dce84be043d839d0e4a617e369282a01bb1feaf5d298cff7f8bd6500a1c17e0e"
+      "sha256": "26bbe3e366a822bfd152a0d66f47361fd43b867d6ac344daf12a61e479b44c56"
     },
     {
       "mode": "100644",
@@ -8398,6 +8417,21 @@
       "mode": "100644",
       "path": "Tools/import/bootstrap_mover_wave_instances.py",
       "sha256": "4dd56d0a4f930ee6e3d714f334640e3b8ee3af35bc8398358a7de7c38c37b93f"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/import/data/angreal_counter_overrides.csv",
+      "sha256": "2e9a73448ee766fc50e5520c503a11ff741834b1ce6f67120f046e62c0e40c1c"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/import/data/angreal_guide_facts.csv",
+      "sha256": "a47a2747b6a994be2b20b31d86e52f1f2277c4f32541d84a20f6c841390b5224"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/import/data/angreal_guide_hints.csv",
+      "sha256": "ee1c15431dfe851454170971b66841842656ff4df2cb301614f65f77625e4410"
     },
     {
       "mode": "100644",
@@ -8443,6 +8477,11 @@
       "mode": "100644",
       "path": "Tools/import/import_andilay_roots.py",
       "sha256": "799e1b14e7625e8afa1d3aa518a101416dcb3ebbaaf424c219d3b5f88c93b6ef"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/import/import_angreal_guide.py",
+      "sha256": "9401f3f2836a12ee3c3532f01c8966a58743ed82356dd06bb7ffdffe81d6dac3"
     },
     {
       "mode": "100644",
@@ -8522,7 +8561,7 @@
     {
       "mode": "100644",
       "path": "Tools/import/import_menu_strings.py",
-      "sha256": "9f4e3fd3cd5008791c705eb10d1c7d3d35cda0d147ab76812815a4401b396891"
+      "sha256": "d53d5e75bd84f3a02d7fb29d800bd0c34747b4063af0f3ae08da4c0262a372ab"
     },
     {
       "mode": "100644",
@@ -8731,6 +8770,11 @@
     },
     {
       "mode": "100644",
+      "path": "Tools/import/test_import_angreal_guide.py",
+      "sha256": "6775e0fae69a29a1ce22aa7c4721b00bbd40cabca595c19a5184fd7cbc7c2a8e"
+    },
+    {
+      "mode": "100644",
       "path": "Tools/import/test_import_menu_strings.py",
       "sha256": "ca05834ae0d652f9256a21dbb08ec5a7f53a251fc1cda012b0b0a4e469ba6a98"
     },
@@ -8807,7 +8851,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/MANIFEST.md",
-      "sha256": "8e9d95386e23b46081d0466a1df2f0d9d64857ed6ed3b8cb3231a37d5c2f8c25"
+      "sha256": "2adf2945c7ce42433ad06a6919ce5fb3dd7449be2faf03b9352ef5861b395f29"
     },
     {
       "mode": "100644",
@@ -8827,7 +8871,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/leak_guard.py",
-      "sha256": "cd8e2dad77d357024036cc4a3fdc11daa6017e3efbe7e34c616099db1ac98658"
+      "sha256": "2e834aab50f291ead241517c4c097ceccc48125b8e4a30e26a135469a3379fef"
     },
     {
       "mode": "100644",
@@ -8837,7 +8881,12 @@
     {
       "mode": "100644",
       "path": "Tools/public/public-files.txt",
-      "sha256": "d823f575fb16f6d2aaae6ee423af7f8ba215880223c7fe31019ffecb3e6fb008"
+      "sha256": "a9e1d31b17347f8acef71b4348becd30623f049cbef79cf0d995414a917f9750"
+    },
+    {
+      "mode": "100644",
+      "path": "Tools/public/reference-term-allowlist.txt",
+      "sha256": "471f23ebae69a3ed645df24f788ac4c18e336071cec7dc251b3959c7f8f04c2f"
     },
     {
       "mode": "100644",
@@ -8852,7 +8901,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/test_leak_guard.py",
-      "sha256": "4e44cc9ffda9b4609d6d8492f13f3c9ab5b839ddce064a4b67b73235651d0ef5"
+      "sha256": "1d174b9878749811a54552c3ffc237cdeab0d4fd375bc44a73b6da38aa3f8922"
     },
     {
       "mode": "100644",
@@ -8932,7 +8981,7 @@
     {
       "mode": "100644",
       "path": "Tools/test/angreal/angreal_expectations.json",
-      "sha256": "f398a6dda44ad633c4f99cbda8bcd7bb5dad17b53c3ae349376fe6de037fe020"
+      "sha256": "6788193eafd35770a25e1a4b47930c54a2648c102ed1072f850ea81794935d6e"
     },
     {
       "mode": "100644",
@@ -8962,7 +9011,7 @@
     {
       "mode": "100644",
       "path": "Tools/test/angreal/verify_angreal_matrix.py",
-      "sha256": "2e161e17b0551622790a226163558b4b80548a48020f27e92233653f275d3ea4"
+      "sha256": "5bddb3f5718942c523a3ad6a41ca2ca83b1ae3e01dc6edbc81bcc4572d267036"
     },
     {
       "mode": "100644",
@@ -9262,12 +9311,12 @@
     {
       "mode": "100644",
       "path": "Tools/test/probe_mover_encroachingon.py",
-      "sha256": "c6ea41a727b48663cd6dbb0e445afc587baac87c529a4a3563f71b1062a3fc83"
+      "sha256": "93d754763bc8d1eb144bb5e30ce5169f96112b4d2ccd655b03a63ecd551d3600"
     },
     {
       "mode": "100644",
       "path": "Tools/test/probe_pawn_takedamage_momentum.py",
-      "sha256": "66fc33c2b0d7d72cf5b5b7de9357e2281a6654591007c391de76dfc824803c62"
+      "sha256": "2bfc7b323f026e8717b24ea6d170ea967103880af30b4f76f014e63ba4504d60"
     },
     {
       "mode": "100644",
@@ -9327,7 +9376,7 @@
     {
       "mode": "100644",
       "path": "Tools/wot_config.py",
-      "sha256": "d1af6912b1e5e5ef03c7052503f96e218d5f8294b7ab0e056074acd44ffe744a"
+      "sha256": "d191ed4a18d34524e0ea23a978691bf1f864b4cbe03a19c49911f98599b981f8"
     },
     {
       "mode": "100644",
@@ -9343,6 +9392,11 @@
       "mode": "100644",
       "path": "docs/LOCAL-CONFIGURATION.md",
       "sha256": "94edaa048ed6c958c6152d2249ba5dd3a7238cd30d0d1a366f5406e890a026d3"
+    },
+    {
+      "mode": "100644",
+      "path": "docs/plans/2026-11-06-onboarding-aids.md",
+      "sha256": "ba9c067ae6b531dd688a500efe0e875c67405cabb18bbe759a5755e9d10d42de"
     }
   ]
 }
