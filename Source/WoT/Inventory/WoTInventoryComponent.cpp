@@ -5,6 +5,7 @@
 #include "WoTSeal.h"
 #include "WoTInventory.h"
 #include "../WoTCharacter.h"
+#include "../WoTOnboardingSeams.h"
 
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
@@ -45,6 +46,37 @@ FName UWoTInventoryComponent::GetHandSetItemName(const AWoTInventory* Item)
 	return FName(*ItemClassName);
 }
 
+void UWoTInventoryComponent::BroadcastOnboardingItemsAdded()
+{
+	// Onboarding seam, behavior-neutral (the broadcast and its private dedup
+	// set are the only effects): announce item classes newly present on the
+	// owning client. OnRep_Inventory covers remote clients; the server-side
+	// add path covers listen hosts, whose arrays never rep back to themselves.
+	// An Items entry can be null while its actor channel is still opening;
+	// the next OnRep after it resolves lands here again, so skipping it loses
+	// nothing.
+	const AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
+	if (!CharacterOwner || !CharacterOwner->IsLocallyControlled())
+	{
+		return;
+	}
+	for (const AWoTInventory* Item : Items)
+	{
+		if (!IsValid(Item))
+		{
+			continue;
+		}
+		const FName ClassName = GetHandSetItemName(Item);
+		if (ClassName.IsNone()
+			|| OnboardingAnnouncedClasses.Contains(ClassName))
+		{
+			continue;
+		}
+		OnboardingAnnouncedClasses.Add(ClassName);
+		FWoTOnboardingSeams::Get().ClientItemAdded.Broadcast(ClassName);
+	}
+}
+
 void UWoTInventoryComponent::OnRep_Inventory()
 {
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
@@ -52,6 +84,7 @@ void UWoTInventoryComponent::OnRep_Inventory()
 	{
 		CharacterOwner->ReconcileHandSet();
 	}
+	BroadcastOnboardingItemsAdded();
 }
 
 void UWoTInventoryComponent::OnRep_SelectedItem(AWoTInventory* PreviousSelectedItem)
@@ -87,6 +120,7 @@ bool UWoTInventoryComponent::AddInventory(AWoTInventory* NewItem)
 	{
 		CharacterOwner->NotifyItemAdded(GetHandSetItemName(NewItem));
 	}
+	BroadcastOnboardingItemsAdded();
 	return true;
 }
 

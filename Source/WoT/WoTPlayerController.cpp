@@ -18,6 +18,7 @@
 #include "WoTMenuStyle.h"
 #include "WoTPlayerState.h"
 #include "WoTBootstrapHeartbeat.h"
+#include "WoTOnboardingSeams.h"
 #include "WoTPreferencesSubsystem.h"
 #include "Settings/WoTGameSettings.h"
 #include "WoTRetailText.h"
@@ -4464,6 +4465,9 @@ void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool 
 			{
 				HUD->AddRightMessage(S);
 			}
+			// Onboarding seam, behavior-neutral: the death-recap aid reads
+			// the same line the right queue just received.
+			FWoTOnboardingSeams::Get().ClientDeathMessage.Broadcast(S);
 		}
 	}
 	else if (Type == FName(TEXT("DeathMessage")))
