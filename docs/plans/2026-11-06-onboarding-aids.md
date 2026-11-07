@@ -59,7 +59,7 @@ project policy separates retail parity from improvements.
 |---|---|---|
 | `Tools/import/data/angreal_guide_facts.csv` | generated, **checked in** | one row per item: `Class, CppClass, Elements, Rarity, Roles, MaxInitialCharges, MaxCharges, Counters, HintKey` — facts only, no prose |
 | `Tools/import/data/angreal_counter_overrides.csv` | authored | `Class, Field, Value, Supersedes, Citation` — every edge removed or added by hand carries an `exports/script/...` citation |
-| `Tools/import/data/angreal_guide_hints.csv` | authored | `HintKey, Text` — our own counter-hint strings (no retail text) |
+| `Tools/import/data/angreal_guide_hints.csv` | authored | `HintKey, Template` — our own counter-hint templates (`{title}`/`{counter}` resolved at runtime; no retail text) |
 
 `Tools/import/import_angreal_guide.py` derives the facts CSV from the exported
 script (`$WOT_REFERENCE_ROOT`), and, run under the editor's python commandlet,
@@ -286,4 +286,26 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
   imports via importlib — an `import Tools.import.x` *statement* is a syntax
   error, so modules under `Tools/import` are imported bare-name via the
   `PYTHONPATH` idiom; (b) the exported `.uc` corpus is latin-1 — CONTRIBUTING
-  never states the exports' encoding.
+  never states the exports' encoding; (c) `Tools/import/data/` exists only
+  after a generator first runs, although the importers document writing
+  there; (d) `angreal_expectations.json` consumers must collapse variant
+  entries (`Shift@aimed`) via their `uc` stem — the schema string does not
+  say so.
+- 2026-11-06 — Task 2 landed: 44-row facts CSV (37 angreal + 7 budget-sold
+  traps), 43 derived counter edges, 9 cited overrides, 19 hint templates;
+  35 tests (7 reference-gated). Decisions recorded:
+  - `ForkRTSReflector` descends from `ReturnToSenderReflector`
+    (ForkRTSReflector.uc:12), so Fork carries the same edges as Reflect.
+  - The Balefire shield strip is verified on both defense paths
+    (AngrealInvBalefire.uc:321-322 invokes its damage effect directly,
+    bypassing the reflector pipeline; the damage-type table at
+    AngrealInventory.uc:861 matches no element for it).
+  - `ReflectSeekerReflector` is referenced by no shipped `ReflectorClasses`
+    entry, so its rule yields zero edges on retail data — kept so a modded
+    or future row derives correctly; not a bug.
+  - Citadel defender resources (`SisterInventory`/`SitterInventory`,
+    WOTPawns) are budget-sold but not angreal or traps; out of the v1
+    roster, a possible later guide section.
+  - Open for Task 5: the `{counter}` placeholder on rows countered by many
+    things needs a selection rule (most-specific-first: the dedicated
+    counter, then Reflect, then element shields).
