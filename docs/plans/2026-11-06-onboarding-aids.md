@@ -140,7 +140,7 @@ parse_script_classes(script_root) -> Dict[str, UcClass]
   # UcClass: name, package, parent, props: Dict[str,str], array_props: Dict[str, List[str]]
 resolved_prop(classes, name, prop) -> Optional[str]   # parent-chain walk
 resolved_bool(classes, name, prop) -> bool
-ancestors(classes, name) -> List[str]                 # lowercase chain
+ancestors(classes, name) -> List[str]  # lowercase chain, self-inclusive (class itself first)
 ```
 
 Tests: synthetic `.uc` fixtures written to a temp dir (invented classes and
@@ -276,3 +276,14 @@ Tasks 1-2 are engine-free and land first (one PR). Task 3 starts the C++
 wave: build-footprint changes should coordinate with any in-flight packaging
 on the same machine. Tasks 4-7 land in review-sized PRs per CONTRIBUTING,
 each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
+
+## Status log
+
+- 2026-11-06 — Task 1 landed (`tools(import): angreal guide facts parse
+  layer`); gated suite 10/10, ungated skips the 3 reference pins cleanly.
+- Funnel notes for the Task 7 CONTRIBUTING delta: (a) the documented
+  `python3 -m unittest Tools.import.test_…` form works because unittest
+  imports via importlib — an `import Tools.import.x` *statement* is a syntax
+  error, so modules under `Tools/import` are imported bare-name via the
+  `PYTHONPATH` idiom; (b) the exported `.uc` corpus is latin-1 — CONTRIBUTING
+  never states the exports' encoding.
