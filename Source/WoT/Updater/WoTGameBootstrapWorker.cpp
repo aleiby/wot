@@ -1161,6 +1161,9 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		WorkEvent->Trigger();
 	}
 
+	/** Pause before the single announcement retry (a transient read). */
+	static constexpr double AnnouncementRetryDelaySeconds = 0.5;
+
 	virtual uint32 Run() override
 	{
 		// This thread probes player-chosen installer locations; an empty card
@@ -2332,9 +2335,32 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		// authenticated bytes.
 		TArray<uint8> PrefetchedAnnouncement;
 		TArray<uint8> PrefetchedSignature;
-		if (FWoTBootstrapStatus Prefetched = Recording.FetchPair(
-				PrefetchedAnnouncement, PrefetchedSignature);
-			Prefetched.IsError())
+		FWoTBootstrapStatus Prefetched = Recording.FetchPair(
+			PrefetchedAnnouncement, PrefetchedSignature);
+		// One retry: a single failed read (seen on the Deck under Proton,
+		// "WinHttp body availability read failed", passing a moment later)
+		// shouldn't cost the player this launch's update check. It shares
+		// the same deadline, and a cancel is never retried.
+		if (Prefetched.IsError() && !bCancelled.Load()
+			&& Deps.NowSeconds() + AnnouncementRetryDelaySeconds
+				< AbsoluteDeadline)
+		{
+			WoTRecordBootstrapHeartbeat(TEXT("update-check-retry"),
+				EWoTBootstrapPhase::CheckingGameUpdates,
+				Work.Request.OperationEpoch, {}, {},
+				Prefetched.GetError().ToString().Left(1024));
+			for (double Waited = 0.0; Waited < AnnouncementRetryDelaySeconds
+				&& !bCancelled.Load(); Waited += 0.05)
+			{
+				FPlatformProcess::SleepNoStats(0.05f);
+			}
+			if (!bCancelled.Load())
+			{
+				Prefetched = Recording.FetchPair(
+					PrefetchedAnnouncement, PrefetchedSignature);
+			}
+		}
+		if (Prefetched.IsError())
 		{
 			return Failure(Work, MoveTemp(Prefetched).GetError());
 		}

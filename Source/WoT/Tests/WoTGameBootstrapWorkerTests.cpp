@@ -2422,6 +2422,105 @@ bool FWoTGameBootstrapWorkerSpecConfigurationDiffers::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecAnnouncementRetry,
+	"WoT.Update.Worker.AnnouncementReadRetriedOnce",
+	WoTGameBootstrapWorkerSpecFlags)
+
+// A single failed announcement read (seen on the Deck under Proton) is retried
+// once within the same deadline; a second failure is not retried again.
+bool FWoTGameBootstrapWorkerSpecAnnouncementRetry::RunTest(const FString&)
+{
+	auto ForcedNotWritable = []()
+	{
+		return FWoTBootstrapStatus::Error(MakeWoTBootstrapError(
+			EWoTBootstrapError::Io, TEXT("forced install-root probe refusal")));
+	};
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this))
+		{
+			return false;
+		}
+		SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+		ON_SCOPE_EXIT
+		{
+			SetWoTBootstrapHeartbeatRootForTesting(FString());
+		};
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		Hops->Steps.Add(WoTGameBootstrapWorkerSpecFailureHop());
+		WoTGameBootstrapWorkerSpecAppendAnnouncementScript(*Hops, Fixture.V2);
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(
+				Fixture.InstallRoot, Hops, {},
+				WoTGameBootstrapWorkerSpecAnnouncementUrl, {}, {}, {}, {}, {},
+				ForcedNotWritable);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Bootstrap;
+		TestTrue(TEXT("bootstrap local check completes"),
+			WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingGameUpdates, 2, Bootstrap));
+		FWoTUpdateState Completion;
+		TestTrue(TEXT("the background check completes"),
+			WoTGameBootstrapWorkerSpecRunBackground(*Worker, Completion));
+		TestEqual(TEXT("the retried check still finds the release"),
+			static_cast<int32>(Completion.Status),
+			static_cast<int32>(EWoTUpdateStatus::Available));
+		TestEqual(TEXT("the retried check reads the authenticated release"),
+			Completion.ReleaseSequence, uint64(2));
+		TestEqual(TEXT("one failed read plus the announcement pair"),
+			Hops->Requests.Num(), 3);
+		FString Heartbeat;
+		TestTrue(TEXT("the heartbeat is readable"),
+			FFileHelper::LoadFileToString(Heartbeat, *FPaths::Combine(
+				Fixture.UserStateRoot, TEXT("UpdaterState"),
+				WoTBootstrapHeartbeatFileName())));
+		TestTrue(TEXT("the retry is recorded with the failed read"),
+			Heartbeat.Contains(TEXT("\"event\":\"update-check-retry\""),
+				ESearchCase::CaseSensitive)
+			&& Heartbeat.Contains(TEXT("scripted worker transport failure"),
+				ESearchCase::CaseSensitive));
+	}
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this))
+		{
+			return false;
+		}
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		Hops->Steps.Add(WoTGameBootstrapWorkerSpecFailureHop());
+		Hops->Steps.Add(WoTGameBootstrapWorkerSpecFailureHop());
+		WoTGameBootstrapWorkerSpecAppendAnnouncementScript(*Hops, Fixture.V2);
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(
+				Fixture.InstallRoot, Hops, {},
+				WoTGameBootstrapWorkerSpecAnnouncementUrl, {}, {}, {}, {}, {},
+				ForcedNotWritable);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Bootstrap;
+		TestTrue(TEXT("bootstrap local check completes"),
+			WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingGameUpdates, 2, Bootstrap));
+		FWoTUpdateState Completion;
+		TestTrue(TEXT("the background check completes"),
+			WoTGameBootstrapWorkerSpecRunBackground(*Worker, Completion));
+		TestEqual(TEXT("two failed reads leave no update known"),
+			static_cast<int32>(Completion.Status),
+			static_cast<int32>(EWoTUpdateStatus::None));
+		TestEqual(TEXT("exactly one retry: two requests, not three"),
+			Hops->Requests.Num(), 2);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FWoTGameBootstrapWorkerSpecNotifyOnly,
 	"WoT.Update.Worker.NotifyOnly.InstallRootNotWritable",
 	WoTGameBootstrapWorkerSpecFlags)
