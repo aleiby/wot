@@ -2531,6 +2531,24 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 
 		FWoTGameBootstrapWorkerVerifiedMetadata Accepted =
 			MoveTemp(Verified).GetValue();
+		// A Test build is offered the published Shipping release, whose tree
+		// has no Test executable: the Test launcher discards it as torn and
+		// the next session downloads it again. Say a newer release exists
+		// instead of staging one this copy cannot run.
+		const FString& ReleaseConfiguration =
+			Accepted.Manifest.Attestation.Configuration;
+		if (!Deps.RunningConfiguration.IsEmpty()
+			&& !ReleaseConfiguration.Equals(Deps.RunningConfiguration,
+				ESearchCase::CaseSensitive))
+		{
+			NotifyOnlyReason = TEXT("release-configuration-differs");
+			NotifyOnlyDetail = FString::Printf(TEXT("running=%s release=%s"),
+				*Deps.RunningConfiguration, *ReleaseConfiguration.Left(64));
+			// Kept only so the banner can name the version; nothing stages it.
+			Manifest = Accepted.Manifest;
+			return CompleteGameUpdateCheck(
+				Work, false, &Announcement.GetValue());
+		}
 		Download->SetVerifiedArchiveSource(
 			Accepted.Manifest.Archive.Url,
 			Accepted.Manifest.Archive.Size);
@@ -3641,6 +3659,13 @@ TUniquePtr<IWoTBootstrapWorker> WoTCreateProductionBootstrapWorker(
 	Deps.AnnouncementJsonUrl =
 		WoT::Bootstrap::Trust::AnnouncementUrl;
 	Deps.RunningIdentity = WoTReleaseIdentity::LoadRunning();
+#if UE_BUILD_SHIPPING
+	Deps.RunningConfiguration = TEXT("Shipping");
+#elif UE_BUILD_TEST
+	Deps.RunningConfiguration = TEXT("Test");
+#else
+	Deps.RunningConfiguration = TEXT("Development");
+#endif
 	return MakeUnique<FWoTGameBootstrapWorker>(MoveTemp(Deps));
 }
 
