@@ -520,6 +520,9 @@ private:
 	FScrollBoxStyle BrowserScrollBoxStyle;
 };
 
+/** Keys that back out of an in-game menu or window: Escape, and B or View on a controller. */
+bool WoTIsMenuBackKey(const FKey& Key);
+
 // SButton only applies its hovered foreground automatically. This small wrapper
 // also treats keyboard focus as retail Selection and refreshes after key/mouse
 // transitions so focused menu text remains pure white.

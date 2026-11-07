@@ -364,6 +364,12 @@ bool FWoTGameSettings::Validate(FString& OutError) const
 	const FWoTEarlyUILimits Limits = FWoTEarlyUILimits::Production();
 	if (!FMath::IsFinite(MouseSensitivity) || MouseSensitivity < 0.1f || MouseSensitivity > 10.0f)
 	{ OutError = TEXT("Mouse sensitivity must be between 0.1 and 10."); return false; }
+	if (!FMath::IsFinite(ControllerLookSensitivity) || ControllerLookSensitivity < 0.1f
+		|| ControllerLookSensitivity > 10.0f)
+	{ OutError = TEXT("Controller look sensitivity must be between 0.1 and 10."); return false; }
+	if (!FMath::IsFinite(ControllerDeadZone) || ControllerDeadZone < 0.05f
+		|| ControllerDeadZone > 0.35f)
+	{ OutError = TEXT("Controller dead zone must be between 0.05 and 0.35."); return false; }
 	if (!FMath::IsFinite(Brightness) || Brightness < 0.0f || Brightness > 0.9f)
 	{ OutError = TEXT("Brightness must be between 0 and 0.9."); return false; }
 	if (!FMath::IsFinite(MasterVolume) || MasterVolume < 0.0f || MasterVolume > 1.0f)
@@ -425,7 +431,11 @@ bool FWoTGameSettings::operator==(const FWoTGameSettings& Other) const
 		&& bLookSpring == Other.bLookSpring
 		&& Crosshair == Other.Crosshair && ViewBob == Other.ViewBob
 		&& bJoystickEnabled == Other.bJoystickEnabled
-		&& GoreDetailLevel == Other.GoreDetailLevel && Bindings == Other.Bindings;
+		&& GoreDetailLevel == Other.GoreDetailLevel
+		&& ControllerLookSensitivity == Other.ControllerLookSensitivity
+		&& bControllerInvertY == Other.bControllerInvertY
+		&& ControllerDeadZone == Other.ControllerDeadZone
+		&& Bindings == Other.Bindings;
 }
 
 FWoTManagedKeyBinding* FWoTGameSettings::FindBinding(EWoTManagedBinding Action)
@@ -495,11 +505,12 @@ void FWoTGameSettings::ApplyToInput(UPlayerInput& Input) const
 FString FWoTGameSettingsCodec::Serialize(const FWoTGameSettings& Settings)
 {
 	FString Text = FString::Printf(
-		TEXT("GameSettingsVersion=9\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
+		TEXT("GameSettingsVersion=10\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
 		TEXT("GameWidth=%u\nGameHeight=%u\nGameWindowMode=%s\nGameVSync=%d\n")
 		TEXT("GameGraphicsQuality=%u\nGameFrameRateLimit=%u\nGameMasterVolume=%.9g\n")
 		TEXT("GameAlwaysMouseLook=%d\nGameAutoSlopeLook=%d\nGamePlayerID=%d\n")
-		TEXT("GameLookSpring=%d\nGameCrosshair=%u\nGameViewBob=%.9g\nGameJoystick=%d\nGameGoreDetail=%u\n"),
+		TEXT("GameLookSpring=%d\nGameCrosshair=%u\nGameViewBob=%.9g\nGameJoystick=%d\nGameGoreDetail=%u\n")
+		TEXT("GameControllerLookSensitivity=%.9g\nGameControllerInvertY=%d\nGameControllerDeadZone=%.9g\n"),
 		Settings.MouseSensitivity, Settings.Brightness, Settings.bInvertMouseY ? 1 : 0,
 		Settings.Width, Settings.Height, ModeName(Settings.WindowMode),
 		Settings.bVSync ? 1 : 0, static_cast<uint32>(Settings.GraphicsQuality),
@@ -507,7 +518,9 @@ FString FWoTGameSettingsCodec::Serialize(const FWoTGameSettings& Settings)
 		Settings.bAlwaysMouseLook ? 1 : 0, Settings.bAutoSlopeLook ? 1 : 0,
 		Settings.bPlayerIDEnabled ? 1 : 0, Settings.bLookSpring ? 1 : 0,
 		Settings.Crosshair, Settings.ViewBob,
-		Settings.bJoystickEnabled ? 1 : 0, Settings.GoreDetailLevel);
+		Settings.bJoystickEnabled ? 1 : 0, Settings.GoreDetailLevel,
+		Settings.ControllerLookSensitivity, Settings.bControllerInvertY ? 1 : 0,
+		Settings.ControllerDeadZone);
 	for (const FBindingDefinition& Entry : BindingDefinitions)
 	{
 		const FWoTManagedKeyBinding* Binding = Settings.FindBinding(Entry.Id);
@@ -565,7 +578,7 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 					&& SettingsVersion != 3 && SettingsVersion != 4
 					&& SettingsVersion != 5 && SettingsVersion != 6
 					&& SettingsVersion != 7 && SettingsVersion != 8
-					&& SettingsVersion != 9))
+					&& SettingsVersion != 9 && SettingsVersion != 10))
 			{
 				OutError = TEXT("Unsupported game settings version.");
 				return false;
@@ -601,6 +614,17 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 			else if (Key == TEXT("GamePlayerID")) { Candidate.bPlayerIDEnabled = Value == TEXT("1"); }
 			else if (Key == TEXT("GameLookSpring")) { Candidate.bLookSpring = Value == TEXT("1"); }
 			else { Candidate.bJoystickEnabled = Value == TEXT("1"); }
+		}
+		else if (Key == TEXT("GameControllerLookSensitivity") || Key == TEXT("GameControllerDeadZone"))
+		{
+			if (!ParseScalar(Value, Scalar)) { OutError = TEXT("Invalid controller setting."); return false; }
+			if (Key == TEXT("GameControllerLookSensitivity")) { Candidate.ControllerLookSensitivity = Scalar; }
+			else { Candidate.ControllerDeadZone = Scalar; }
+		}
+		else if (Key == TEXT("GameControllerInvertY"))
+		{
+			if (Value != TEXT("0") && Value != TEXT("1")) { OutError = TEXT("Invalid controller flag."); return false; }
+			Candidate.bControllerInvertY = Value == TEXT("1");
 		}
 		else if (Key == TEXT("GameCrosshair") || Key == TEXT("GameGoreDetail"))
 		{
@@ -654,7 +678,9 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 	}
 	if (bHasGameRecord)
 	{
-		const bool bCompleteCurrent = SettingsVersion == 9
+		const bool bCompleteCurrent = SettingsVersion == 10
+			&& Seen.Num() == BindingCount + 22;
+		const bool bCompleteVersion9 = SettingsVersion == 9
 			&& Seen.Num() == BindingCount + 19;
 		const bool bCompleteVersion8 = SettingsVersion == 8
 			&& Seen.Num() == BindingCount + 17;
@@ -727,7 +753,7 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 			&& ((Seen.Num() == Version3BindingCount + 10
 					&& bHasVersion3Identities)
 				|| Seen.Num() == BindingCount + 11);
-		if (!bCompleteCurrent && !bCompleteVersion8 && !bCompleteVersion7
+		if (!bCompleteCurrent && !bCompleteVersion9 && !bCompleteVersion8 && !bCompleteVersion7
 			&& !bCompleteVersion6 && !bCompleteLegacy
 			&& !bCompleteVersion3 && !bCompleteVersion4 && !bCompleteVersion5)
 		{ OutError = TEXT("Game settings record set is incomplete."); return false; }
@@ -866,6 +892,12 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 				else if (Key->IsValid()) { SavedKeys.Add(*Key); }
 			}
 		}
+	}
+	if (bHasGameRecord && SettingsVersion <= 9)
+	{
+		// Controllers never worked before version 10, so an old "off" was never a
+		// real choice. Turn the joystick on once; version 10 files keep theirs.
+		Candidate.bJoystickEnabled = true;
 	}
 	if (!Candidate.Validate(OutError)) { return false; }
 	Out = MoveTemp(Candidate);

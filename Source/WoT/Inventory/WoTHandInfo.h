@@ -40,6 +40,8 @@ public:
 	void Select(int32 Index);
 	void SelectItem(FName ItemName);
 	void SelectFirst();
+	/** The last held slot (the mirror of SelectFirst). */
+	void SelectLast();
 	void SelectNext();
 	void SelectPrevious();
 

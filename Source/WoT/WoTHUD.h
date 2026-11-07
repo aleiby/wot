@@ -395,11 +395,16 @@ public:
 	bool IsEditorMode() const { return HUDMode == EWoTHUDMode::CitadelEditor; }
 
 	// Pure decisions. Runtime drawing/input are thin consumers of these seams.
+	/** bControllerHint also names the D-pad buttons that choose each team. */
 	FString TeamSelectPrompt(uint8 PlayerTeam, int32 NumTeams,
-		int32 JoinTeamTimeout) const;
+		int32 JoinTeamTimeout, bool bControllerHint = false) const;
 	static bool ShouldInterceptTeamDigit(uint8 PlayerTeam, int32 NumTeams,
 		int32 TeamIndex);
 	bool HandleTeamSelectDigit(int32 TeamIndex);
+	/** True while the owner is on a Battle map without a team (the 1-N prompt is up). */
+	bool IsChoosingTeam() const;
+	/** The Battle map's team count; zero off Battle maps. */
+	int32 BattleTeamCount() const;
 	static FString PlayerIDName(const APawn* HitPawn);
 	// Public: the PlayerID spec drives the real trace (object-type pawn find + world
 	// occlusion) headlessly with a null canvas and asserts IdentifyTarget/FadeTime.

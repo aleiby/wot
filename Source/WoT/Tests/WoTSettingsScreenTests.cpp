@@ -24,6 +24,7 @@
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "Styling/CoreStyle.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SWindow.h"
@@ -443,6 +444,58 @@ bool FWoTSettingsControlsCaptureSpec::RunTest(const FString&)
 	TestTrue(TEXT("reset restores the closed defaults"),
 		Second->ResetBindingsForTesting().IsEventHandled()
 		&& Second->DraftForTesting().Bindings == FWoTGameSettings::Defaults().Bindings);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsControllerLookSpec,
+	"WoT.FrontEnd.Settings.ControllerLook", ScreenFlags)
+
+bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	const TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, Callbacks);
+	Screen->SlatePrepass(1.0f);
+	TArray<TSharedRef<STextBlock>> Texts;
+	CollectText(Screen, Texts);
+	TestTrue(TEXT("Controls shows the controller sensitivity row"),
+		HasText(Texts, TEXT("Controller Sensitivity")));
+	TestTrue(TEXT("Controls shows the controller invert row"),
+		HasText(Texts, TEXT("Invert Controller Look")));
+
+	const TSharedPtr<SWidget> Slider = Screen->ControllerSensitivitySliderForTesting();
+	const TSharedPtr<SCheckBox> Invert = Screen->ControllerInvertCheckBoxForTesting();
+	if (!TestTrue(TEXT("both controller controls exist"), Slider.IsValid() && Invert.IsValid()))
+		return false;
+	// The controller's own scale tops out at 4x; one step right of 1x is 1.5x.
+	TestTrue(TEXT("the slider takes End"),
+		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::End)).IsEventHandled());
+	TestEqual(TEXT("the controller sensitivity tops out at 4x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 4.0f);
+	Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Home));
+	TestEqual(TEXT("the controller sensitivity starts at 0.25x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 0.25f);
+	for (int32 Step = 0; Step < 4; ++Step)
+	{
+		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	}
+	TestEqual(TEXT("one step right of 1x is 1.5x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 1.5f);
+	TestEqual(TEXT("mouse sensitivity is unchanged"),
+		Screen->DraftForTesting().MouseSensitivity, Fixture.Owner->GetGameSettings().MouseSensitivity);
+	Invert->ToggleCheckedState();
+	TestTrue(TEXT("the checkbox inverts the controller"), Screen->DraftForTesting().bControllerInvertY);
+	TestEqual(TEXT("the mouse invert is unchanged"),
+		Screen->DraftForTesting().bInvertMouseY, Fixture.Owner->GetGameSettings().bInvertMouseY);
+
+	TestTrue(TEXT("save handled"), Screen->SaveForTesting().IsEventHandled());
+	TestEqual(TEXT("owner persisted the controller sensitivity"),
+		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 1.5f);
+	TestTrue(TEXT("owner persisted the controller invert"),
+		Fixture.Owner->GetGameSettings().bControllerInvertY);
 	return !HasAnyErrors();
 }
 
