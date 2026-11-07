@@ -81,6 +81,8 @@ public:
 #if WITH_AUTOMATION_TESTS
 	void SetAccelerationForTesting(const FVector& Value) { Acceleration=Value; }
 	FVector GetAccelerationForTesting() const { return Acceleration; }
+	/** Sets the acceleration and returns the analog modifier it implies. */
+	float ComputeAnalogInputModifierForTest(const FVector& InAcceleration);
 #endif
 	void SetWalkingRequested(bool bRequested) { bWantsToWalk = bRequested; }
 	bool IsWalkingRequested() const { return bWantsToWalk; }
@@ -94,6 +96,7 @@ public:
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 	virtual float GetGravityZ() const override;
 	virtual float GetMaxSpeed() const override;
+	virtual float ComputeAnalogInputModifier() const override;
 	virtual void ClientHandleMoveResponse(
 		const FCharacterMoveResponseDataContainer& MoveResponse) override;
 	virtual bool StepUp(const FVector& GravDir, const FVector& Delta,

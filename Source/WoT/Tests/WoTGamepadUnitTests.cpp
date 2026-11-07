@@ -5,6 +5,11 @@
 
 #include "../Gamepad/WoTGamepadLayout.h"
 #include "../Gamepad/WoTStickShaping.h"
+#include "../WoTCharacter.h"
+#include "../WoTCharacterMovement.h"
+#include "Engine/World.h"
+#include "Misc/ScopeExit.h"
+#include "WoTTestWorld.h"
 
 namespace
 {
@@ -109,6 +114,30 @@ bool FWoTGamepadStickShapingSpec::RunTest(const FString&)
 	const FVector2D Scaled = S::LookDegrees(FVector2D(1.0f, 0.0f), 0.2f, 0.95f, 2.0f,
 		220.0f, 150.0f, 2.0f, false, 0.5f, Dt);
 	TestEqual(TEXT("sensitivity and FOV scale multiply"), Scaled.X, FullRight.X, Tol);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadAnalogTopSpeedSpec,
+	"WoT.Input.Gamepad.AnalogTopSpeed", Gamepad_UnitFlags)
+
+bool FWoTGamepadAnalogTopSpeedSpec::RunTest(const FString&)
+{
+	UWorld* World = WoTTest::CreateSpecWorld();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	AWoTCharacter* Pawn = World ? World->SpawnActor<AWoTCharacter>(
+		FVector(0.0f, 0.0f, 100.0f), FRotator::ZeroRotator) : nullptr;
+	UWoTCharacterMovement* Move = Pawn
+		? Cast<UWoTCharacterMovement>(Pawn->GetCharacterMovement()) : nullptr;
+	if (!TestNotNull(TEXT("player movement"), Move)) { return false; }
+	const float MaxAccel = Move->GetMaxAcceleration();
+	// The original has no analog top-speed cap: partial input lowers the
+	// acceleration, never the speed it can reach.
+	TestEqual(TEXT("a partial stick still allows full speed"),
+		Move->ComputeAnalogInputModifierForTest(FVector(0.3f * MaxAccel, 0.0f, 0.0f)), 1.0f);
+	TestEqual(TEXT("full input is full speed"),
+		Move->ComputeAnalogInputModifierForTest(FVector(MaxAccel, 0.0f, 0.0f)), 1.0f);
+	TestEqual(TEXT("no input is no speed"),
+		Move->ComputeAnalogInputModifierForTest(FVector::ZeroVector), 0.0f);
 	return !HasAnyErrors();
 }
 

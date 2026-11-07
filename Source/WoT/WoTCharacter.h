@@ -619,6 +619,8 @@ public:
 	void AddStrafeInputForTest(float Value) { AddStrafeInput(Value); }
 	void AddSwimVerticalInputForTest() { AddSwimVerticalInput(); }
 	void AddPitchInputForTest(float Value) { AddPitchInput(Value, true); }
+	/** Swim-up inputs actually added (held Jump while swimming). */
+	int32 SwimVerticalInputCountForTest = 0;
 #endif
 	virtual void OnJumped_Implementation() override;
 
@@ -945,6 +947,7 @@ public:
 
 private:
 	friend class UWoTInventoryComponent;
+	friend class UWoTGamepadLayer;
 	void ApplyPendingZoneFOV();
 	bool bHasZoneFOV = false;
 	float PendingZoneFOV = 90.0f;
@@ -982,6 +985,13 @@ private:
 	void SendSelectItemHandMessage(FName ItemName);
 	void MoveForward(float Value);
 	void MoveRight(float Value);
+	/** MoveForward without its per-frame swim-up: orbit zoom, FreeLook pitch or forward. */
+	void ApplyForwardAxis(float Value);
+	/** MoveRight's body: consumed while orbiting, otherwise strafe. */
+	void ApplyStrafeAxis(float Value);
+	/** Stick look in degrees: yaw through the controller, pitch as a look device. */
+	void ApplyStickLook(float YawDegrees, float PitchDegrees);
+	bool IsCitadelOrbitInput() const;
 	void TurnInput(float Value);
 	void KeyboardLookInput(float Value);
 	void MouseXInput(float Value);

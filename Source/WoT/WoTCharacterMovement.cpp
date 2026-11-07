@@ -387,6 +387,28 @@ float UWoTCharacterMovement::GetGravityZ() const
 	return Super::GetGravityZ();
 }
 
+float UWoTCharacterMovement::ComputeAnalogInputModifier() const
+{
+	// The original's velocity update has no analog top-speed cap: a partial
+	// stick lowers the acceleration, never the speed it reaches. Keyboard input
+	// is always full scale, so only analog sticks see a difference. NPC pawns
+	// keep the engine's rule, which their path following relies on.
+	const AWoTCharacter* WoTCharacter = Cast<AWoTCharacter>(CharacterOwner);
+	if (!WoTCharacter || WoTCharacter->IsNPCPawn())
+	{
+		return Super::ComputeAnalogInputModifier();
+	}
+	return Acceleration.SizeSquared() > 0.0f ? 1.0f : 0.0f;
+}
+
+#if WITH_AUTOMATION_TESTS
+float UWoTCharacterMovement::ComputeAnalogInputModifierForTest(const FVector& InAcceleration)
+{
+	Acceleration = InAcceleration;
+	return ComputeAnalogInputModifier();
+}
+#endif
+
 float UWoTCharacterMovement::GetMaxSpeed() const
 {
 	const AWoTCharacter* WoTCharacter = Cast<AWoTCharacter>(CharacterOwner);

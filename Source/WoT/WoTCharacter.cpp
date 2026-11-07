@@ -5251,21 +5251,35 @@ void AWoTCharacter::DropAllSeals(bool bIgnoreInteractionGuards)
 	}
 }
 
+bool AWoTCharacter::IsCitadelOrbitInput() const
+{
+	const AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController());
+	return IsValid(WoTController)
+		&& WoTController->GetCitadelEditCameraMode() == EWoTCitadelEditCameraMode::Orbit;
+}
+
 void AWoTCharacter::MoveForward(float Value)
 {
-	if (AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
+	// MoveForward runs every frame (an axis binding), so it also carries the
+	// held-Jump swim-up input. Orbit mode consumes movement before that.
+	if (!IsCitadelOrbitInput())
 	{
-		WoTController->AdjustCitadelOrbitDistance(
-			Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+		AddSwimVerticalInput();
+	}
+	ApplyForwardAxis(Value);
+}
+
+void AWoTCharacter::ApplyForwardAxis(float Value)
+{
+	if (IsCitadelOrbitInput())
+	{
+		if (AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController()))
+		{
+			WoTController->AdjustCitadelOrbitDistance(
+				Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+		}
 		return;
 	}
-	// MoveForward runs every frame (an axis binding), so it also carries the
-	// held-Jump swim-up input.
-	AddSwimVerticalInput();
 	if (bFreeLookHeld) { AddPitchInput(Value * 0.5f * RetailFOVScale(), true); }
 	else { AddForwardInput(Value); }
 }
@@ -5283,17 +5297,27 @@ void AWoTCharacter::CitadelOrbitZoom(float Value)
 
 void AWoTCharacter::MoveRight(float Value)
 {
-	if (const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
+	ApplyStrafeAxis(Value);
+}
+
+void AWoTCharacter::ApplyStrafeAxis(float Value)
+{
+	if (IsCitadelOrbitInput())
 	{
 		// CitadelOrbitMode consumes movement input: a strafe must not drag the ghosted
 		// body (the orbit camera is zone-driven, not pawn-driven — WOTPlayer.uc:5262).
 		return;
 	}
 	AddStrafeInput(Value);
+}
+
+void AWoTCharacter::ApplyStickLook(float YawDegrees, float PitchDegrees)
+{
+	// The same calls the mouse makes, so look-spring, center-view and the
+	// Impaled clamp apply unchanged. Both take degrees: the controller's legacy
+	// input scales are 1.
+	if (!FMath::IsNearlyZero(YawDegrees)) { AddControllerYawInput(YawDegrees); }
+	AddPitchInput(PitchDegrees, /*bFromLookDevice*/ true);
 }
 
 float AWoTCharacter::DecayCenterViewPitch(float PitchDegrees, float DeltaSeconds)
@@ -5420,6 +5444,9 @@ void AWoTCharacter::AddSwimVerticalInput()
 	// nothing in water). Retail binds no key to Duck (aUp < 0) by default.
 	if (bSwimUpHeld && !IsPlayerMovementConstrained() && IsSwimmingForInput())
 	{
+#if WITH_AUTOMATION_TESTS
+		++SwimVerticalInputCountForTest;
+#endif
 		AddMovementInput(FVector::UpVector,
 			RetailSwimSideAccel / GetCharacterMovement()->GetMaxAcceleration());
 	}
