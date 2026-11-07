@@ -49,7 +49,10 @@ void StripVersionSevenPresentationRecords(FString& Text)
 		TEXT("GameViewBob="), TEXT("GameLookSpring="), TEXT("GameJoystick="),
 		TEXT("GameAlwaysMouseLook="),
 		TEXT("GameAutoSlopeLook="), TEXT("GamePlayerID="),
-		TEXT("GameCrosshair="), TEXT("GameGoreDetail=")})
+		TEXT("GameCrosshair="), TEXT("GameGoreDetail="),
+		// and the version-10 controller records
+		TEXT("GameControllerLookSensitivity="), TEXT("GameControllerInvertY="),
+		TEXT("GameControllerDeadZone=")})
 	{
 		const int32 Start = Text.Find(Key, ESearchCase::CaseSensitive);
 		if (Start != INDEX_NONE)
@@ -142,7 +145,8 @@ bool FWoTGameSettingsValidationSpec::RunTest(const FString&)
 		Settings.GoreDetailLevel, uint8(2));
 	TestFalse(TEXT("retail look spring defaults off"), Settings.bLookSpring);
 	TestTrue(TEXT("retail always-mouse-look defaults on"), Settings.bAlwaysMouseLook);
-	TestFalse(TEXT("retail joystick preference defaults off"),
+	// Retail's UseJoystick defaults off; controller support turns it on (PORT_NOTES).
+	TestTrue(TEXT("the joystick preference defaults on"),
 		Settings.bJoystickEnabled);
 	TestTrue(TEXT("retail Tab Type binding is managed"),
 		Settings.FindBinding(EWoTManagedBinding::Type)->Primary == EKeys::Tab);
@@ -247,8 +251,8 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 		Scores->Primary = EKeys::F5;
 	}
 	const FString Encoded = FWoTGameSettingsCodec::Serialize(Edited);
-	TestTrue(TEXT("new saves use game settings version 9"),
-		Encoded.StartsWith(TEXT("GameSettingsVersion=9\n")));
+	TestTrue(TEXT("new saves use game settings version 10"),
+		Encoded.StartsWith(TEXT("GameSettingsVersion=10\n")));
 	const FTCHARToUTF8 Bytes(*Encoded);
 	TArray<uint8> Full = Old;
 	Full.Append(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
@@ -257,7 +261,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	TestTrue(TEXT("roundtrip preserves both binding slots and numeric fields"), Out == Edited);
 	FString VersionOneText = Encoded;
 	StripVersionSevenPresentationRecords(VersionOneText);
-	VersionOneText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionOneText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=1"));
 	VersionOneText.ReplaceInline(TEXT("GameVSync=1"), TEXT("GameVSync=0"));
 	VersionOneText.ReplaceInline(TEXT("GameMouseSensitivity=2"),
@@ -276,7 +280,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// from their retail defaults without discarding any saved legacy binding.
 	FString VersionTwoText = Encoded;
 	StripVersionSevenPresentationRecords(VersionTwoText);
-	VersionTwoText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionTwoText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=2"));
 	// Authentic v2 records predate the newly introduced secondary aliases.
 	VersionTwoText.ReplaceInline(TEXT("GameBinding.MoveForward=W,Up"),
@@ -338,7 +342,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// migrate from retail defaults while every saved v3 choice is retained.
 	FString VersionThreeText = Encoded;
 	StripVersionSevenPresentationRecords(VersionThreeText);
-	VersionThreeText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionThreeText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=3"));
 	for (const TCHAR* ChatIdentity : {
 		TEXT("Type"), TEXT("Talk"), TEXT("TeamTalk"),
@@ -419,7 +423,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// with its saved action and leaves the colliding new slot visibly unbound.
 	FString VersionFourText = Encoded;
 	StripVersionSevenPresentationRecords(VersionFourText);
-	VersionFourText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionFourText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=4"));
 	for (const TCHAR* DropIdentity : {
 		TEXT("Drop"), TEXT("DropTainted"),
@@ -481,7 +485,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// already owns one of those keys.
 	FString VersionFiveText = Encoded;
 	StripVersionSevenPresentationRecords(VersionFiveText);
-	VersionFiveText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionFiveText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=5"));
 	for (const TCHAR* NewIdentity : {
 		TEXT("Walking"), TEXT("PlayTaunt1"), TEXT("PlayTaunt2"), TEXT("PlayTaunt3"),
@@ -533,7 +537,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	}
 	FString VersionSixText = Encoded;
 	StripVersionSevenPresentationRecords(VersionSixText);
-	VersionSixText.ReplaceInline(TEXT("GameSettingsVersion=9"),
+	VersionSixText.ReplaceInline(TEXT("GameSettingsVersion=10"),
 		TEXT("GameSettingsVersion=6"));
 	{
 		const FTCHARToUTF8 VersionSixUtf8(*VersionSixText);
@@ -547,7 +551,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 		TestEqual(TEXT("version 6 fills retail gore detail"),
 			Out.GoreDetailLevel, uint8(2));
 		TestFalse(TEXT("version 6 fills disabled look spring"), Out.bLookSpring);
-		TestFalse(TEXT("version 6 fills disabled joystick"), Out.bJoystickEnabled);
+		TestTrue(TEXT("version 6 migrates the joystick on"), Out.bJoystickEnabled);
 	}
 	FString MalformedLegacy = VersionTwoText;
 	MalformedLegacy.ReplaceInline(TEXT("GameBinding.NextItem=MouseScrollDown,-"),
@@ -1137,6 +1141,70 @@ bool FWoTGameSettingsEffectsSpec::RunTest(const FString&)
 	TestTrue(TEXT("chunk at the local gore level is visible"),
 		Chunk->Mesh->IsVisible());
 
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGameSettingsControllerFieldsSpec,
+	"WoT.Preferences.GameSettings.ControllerFields", SettingsFlags)
+
+bool FWoTGameSettingsControllerFieldsSpec::RunTest(const FString&)
+{
+	const FWoTGameSettings Defaults = FWoTGameSettings::Defaults();
+	TestTrue(TEXT("new installs have the joystick on"), Defaults.bJoystickEnabled);
+	TestEqual(TEXT("default look sensitivity"), Defaults.ControllerLookSensitivity, 1.0f);
+	TestFalse(TEXT("default invert Y"), Defaults.bControllerInvertY);
+	TestEqual(TEXT("default dead zone"), Defaults.ControllerDeadZone, 0.20f);
+
+	FWoTGameSettings Edited = Defaults;
+	Edited.ControllerLookSensitivity = 2.0f;
+	Edited.bControllerInvertY = true;
+	Edited.ControllerDeadZone = 0.3f;
+	Edited.bJoystickEnabled = false;
+	const FString Encoded = FWoTGameSettingsCodec::Serialize(Edited);
+	TestTrue(TEXT("controller records are written"),
+		Encoded.Contains(TEXT("GameControllerLookSensitivity=2\n"))
+		&& Encoded.Contains(TEXT("GameControllerInvertY=1\n"))
+		&& Encoded.Contains(TEXT("GameControllerDeadZone=0.300000012\n")));
+	const FTCHARToUTF8 Bytes(*Encoded);
+	TArray<uint8> Full = Utf8("Schema=EarlyUI-v1\n");
+	Full.Append(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
+	FWoTGameSettings Out;
+	FString Error;
+	TestTrue(TEXT("version 10 roundtrips"), FWoTGameSettingsCodec::Parse(Full, Out, Error));
+	TestTrue(TEXT("roundtrip keeps controller fields and an explicit joystick off"), Out == Edited);
+
+	FString VersionNine = Encoded;
+	VersionNine.ReplaceInline(TEXT("GameSettingsVersion=10"), TEXT("GameSettingsVersion=9"));
+	for (const TCHAR* Key : {TEXT("GameControllerLookSensitivity="),
+		TEXT("GameControllerInvertY="), TEXT("GameControllerDeadZone=")})
+	{
+		const int32 Start = VersionNine.Find(Key, ESearchCase::CaseSensitive);
+		const int32 End = VersionNine.Find(TEXT("\n"), ESearchCase::CaseSensitive,
+			ESearchDir::FromStart, Start);
+		VersionNine.RemoveAt(Start, End - Start + 1);
+	}
+	const FTCHARToUTF8 NineBytes(*VersionNine);
+	TArray<uint8> Nine = Utf8("Schema=EarlyUI-v1\n");
+	Nine.Append(reinterpret_cast<const uint8*>(NineBytes.Get()), NineBytes.Length());
+	TestTrue(TEXT("version 9 still parses"), FWoTGameSettingsCodec::Parse(Nine, Out, Error));
+	TestTrue(TEXT("version 9 migrates the joystick on once"), Out.bJoystickEnabled);
+	TestEqual(TEXT("version 9 fills the default sensitivity"), Out.ControllerLookSensitivity, 1.0f);
+	TestEqual(TEXT("version 9 fills the default dead zone"), Out.ControllerDeadZone, 0.20f);
+
+	FString NineWithController = VersionNine + TEXT("GameControllerInvertY=1\n");
+	const FTCHARToUTF8 BadBytes(*NineWithController);
+	TArray<uint8> Bad = Utf8("Schema=EarlyUI-v1\n");
+	Bad.Append(reinterpret_cast<const uint8*>(BadBytes.Get()), BadBytes.Length());
+	TestFalse(TEXT("a version 9 record set cannot carry controller records"),
+		FWoTGameSettingsCodec::Parse(Bad, Out, Error));
+
+	FWoTGameSettings Range = Defaults;
+	Range.ControllerDeadZone = 0.4f;
+	TestFalse(TEXT("a dead zone above 0.35 is refused"), Range.Validate(Error));
+	Range.ControllerDeadZone = 0.05f;
+	TestTrue(TEXT("a dead zone of 0.05 is accepted"), Range.Validate(Error));
+	Range.ControllerLookSensitivity = NAN;
+	TestFalse(TEXT("a non-finite sensitivity is refused"), Range.Validate(Error));
 	return !HasAnyErrors();
 }
 

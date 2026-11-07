@@ -65,7 +65,12 @@ struct FWoTGameSettings
 	bool bLookSpring = false;
 	uint8 Crosshair = 13;
 	float ViewBob = 0.016f;
-	bool bJoystickEnabled = false;
+	bool bJoystickEnabled = true;
+	// Controller layer (version 10). The dead zone is radial, as a fraction of
+	// full deflection; sensitivity multiplies the look rates.
+	float ControllerLookSensitivity = 1.0f;
+	bool bControllerInvertY = false;
+	float ControllerDeadZone = 0.20f;
 	uint8 GoreDetailLevel = 2;
 	TArray<FWoTManagedKeyBinding> Bindings;
 
