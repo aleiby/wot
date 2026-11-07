@@ -21,6 +21,7 @@
 #include "Engine/World.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/WorldSettings.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputKeyEventArgs.h"
@@ -481,6 +482,39 @@ bool FWoTGamepadEditorContextSpec::RunTest(const FString&)
 	Fx.Frames(2);
 	TestEqual(TEXT("leaving restores gameplay"),
 		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::Gameplay));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadPausedFirePressSpec,
+	"WoT.Input.Gamepad.PausedFirePress", Gamepad_WorldFlags)
+
+bool FWoTGamepadPausedFirePressSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	// Only Fire's release runs while paused (the legacy press binding does not
+	// execute when paused); an RT press on a paused game must not respawn.
+	Fx.Controller->ArmRespawnFire(nullptr, 0.0f);
+	Fx.Frames(1);
+	AWorldSettings* Settings = Fx.World->GetWorldSettings();
+	Settings->SetPauserPlayerState(Fx.Controller->PlayerState);
+	TestTrue(TEXT("the world is paused"), Fx.World->IsPaused());
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(2);
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Released, 0.0f);
+	Fx.Frames(1);
+	TestEqual(TEXT("a paused RT press does not respawn"),
+		static_cast<int32>(Fx.Controller->GetPlayerStateMachineState()),
+		static_cast<int32>(EWoTPlayerStateMachineState::Dying));
+	Settings->SetPauserPlayerState(nullptr);
+	Fx.Frames(1);
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(2);
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Released, 0.0f);
+	Fx.Frames(1);
+	TestNotEqual(TEXT("unpaused, the same press respawns"),
+		static_cast<int32>(Fx.Controller->GetPlayerStateMachineState()),
+		static_cast<int32>(EWoTPlayerStateMachineState::Dying));
 	return !HasAnyErrors();
 }
 

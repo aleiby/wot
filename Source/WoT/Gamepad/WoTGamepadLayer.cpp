@@ -188,11 +188,15 @@ void UWoTGamepadLayer::OnPawnChanged()
 
 void UWoTGamepadLayer::OnFirePressed()
 {
-	if (AWoTPlayerController* PC = Controller.Get())
+	AWoTPlayerController* PC = Controller.Get();
+	// Fire triggers while paused only for its release (the keyboard's Fire press
+	// binding does not run when paused): a paused press must not cast or respawn.
+	if (!PC || (PC->GetWorld() && PC->GetWorld()->IsPaused()))
 	{
-		bFireHeld = true;
-		PC->Fire();
+		return;
 	}
+	bFireHeld = true;
+	PC->Fire();
 }
 
 void UWoTGamepadLayer::OnFireReleased()
