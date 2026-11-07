@@ -61,6 +61,17 @@ private:
 
 	void OnMove(const FInputActionValue& Value);
 	void OnLook(const FInputActionValue& Value);
+	void BindButtons(UEnhancedInputComponent& Input);
+	void OnFirePressed();
+	void OnFireReleased();
+	void OnJumpPressed();
+	void OnJumpReleased();
+	void OnCenterViewPressed();
+	void OnCenterViewReleased();
+	void OnScoreboardPressed();
+	void OnScoreboardReleased();
+	void OnWalkToggle();
+	void OnButton(EWoTGamepadAction Action);
 
 	TWeakObjectPtr<AWoTPlayerController> Controller;
 	UPROPERTY()
@@ -68,6 +79,11 @@ private:
 	UPROPERTY()
 	TArray<TObjectPtr<UInputMappingContext>> Contexts;   // by EWoTGamepadContext
 	EWoTGamepadMode Mode = EWoTGamepadMode::None;
+	bool bFireHeld = false;
+	bool bJumpHeld = false;
+	bool bScoreboardShownByHold = false;
+	TWeakObjectPtr<AWoTCharacter> CenterViewPawn;
+	TWeakObjectPtr<AWoTCharacter> WalkToggledPawn;
 #if WITH_AUTOMATION_TESTS
 	TOptional<FStickSettings> StickSettingsOverrideForTest;
 #endif

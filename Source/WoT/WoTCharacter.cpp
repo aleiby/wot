@@ -4588,11 +4588,17 @@ void AWoTCharacter::PrevInventory()
 
 void AWoTCharacter::Drop()
 {
+#if WITH_AUTOMATION_TESTS
+	++DropRequestCountForTest;
+#endif
 	ServerDrop();
 }
 
 void AWoTCharacter::DropTainted()
 {
+#if WITH_AUTOMATION_TESTS
+	++DropTaintedRequestCountForTest;
+#endif
 	ServerDropTainted();
 }
 

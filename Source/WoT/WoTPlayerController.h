@@ -73,6 +73,8 @@ public:
 	class UWoTGamepadLayer* GetGamepadLayerForTest() const { return GamepadLayer; }
 	/** Stands in for the Joystick Enabled preference (spec worlds have no preferences). */
 	void SetJoystickEnabledOverrideForTest(TOptional<bool> bEnabled) { JoystickEnabledOverrideForTest = bEnabled; }
+	/** Sets the owner's edit-session mirror IsOwnerEditingCitadel reads. */
+	void SetOwnerEditSessionTeamForTest(uint8 Team) { OwnerEditSessionTeam = Team; }
 #endif
 	// Authority-only citadel edit grant. This is deliberately not replicated; edit RPCs bind to
 	// the team and exact budget that granted the session instead of trusting the team shadow.

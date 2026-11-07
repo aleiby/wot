@@ -71,6 +71,33 @@ void UWoTGamepadLayer::Initialize(AWoTPlayerController& InController, UEnhancedI
 		ETriggerEvent::Triggered, this, &UWoTGamepadLayer::OnMove);
 	Input.BindAction(Actions[static_cast<int32>(EWoTGamepadAction::Look)],
 		ETriggerEvent::Triggered, this, &UWoTGamepadLayer::OnLook);
+	BindButtons(Input);
+}
+
+void UWoTGamepadLayer::BindButtons(UEnhancedInputComponent& Input)
+{
+	auto Action = [this](EWoTGamepadAction Id) { return Actions[static_cast<int32>(Id)].Get(); };
+	Input.BindAction(Action(EWoTGamepadAction::Fire), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnFirePressed);
+	Input.BindAction(Action(EWoTGamepadAction::Fire), ETriggerEvent::Completed, this, &UWoTGamepadLayer::OnFireReleased);
+	Input.BindAction(Action(EWoTGamepadAction::Jump), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnJumpPressed);
+	Input.BindAction(Action(EWoTGamepadAction::Jump), ETriggerEvent::Completed, this, &UWoTGamepadLayer::OnJumpReleased);
+	Input.BindAction(Action(EWoTGamepadAction::CenterView), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnCenterViewPressed);
+	Input.BindAction(Action(EWoTGamepadAction::CenterView), ETriggerEvent::Completed, this, &UWoTGamepadLayer::OnCenterViewReleased);
+	Input.BindAction(Action(EWoTGamepadAction::Scoreboard), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnScoreboardPressed);
+	Input.BindAction(Action(EWoTGamepadAction::Scoreboard), ETriggerEvent::Completed, this, &UWoTGamepadLayer::OnScoreboardReleased);
+	Input.BindAction(Action(EWoTGamepadAction::WalkToggle), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnWalkToggle);
+	for (EWoTGamepadAction Id : {EWoTGamepadAction::EditCitadel, EWoTGamepadAction::Drop,
+		EWoTGamepadAction::DropTainted, EWoTGamepadAction::ItemInfo, EWoTGamepadAction::PrevItem,
+		EWoTGamepadAction::NextItem, EWoTGamepadAction::PrevHand, EWoTGamepadAction::NextHand,
+		EWoTGamepadAction::ViewUp, EWoTGamepadAction::ViewDown, EWoTGamepadAction::RandomTaunt,
+		EWoTGamepadAction::Menu})
+	{
+		// A plain press acts on its press edge; a tap or hold acts once when its
+		// trigger completes (Started would fire a tap on the press).
+		const ETriggerEvent Event = WoTGamepadActionTrigger(Id) == EWoTGamepadTrigger::Press
+			? ETriggerEvent::Started : ETriggerEvent::Triggered;
+		Input.BindAction(Action(Id), Event, this, &UWoTGamepadLayer::OnButton, Id);
+	}
 }
 
 void UWoTGamepadLayer::Shutdown()
@@ -141,12 +168,128 @@ void UWoTGamepadLayer::ApplyMode(EWoTGamepadMode NewMode)
 
 void UWoTGamepadLayer::ReleaseHeldEdges()
 {
-	// The button task releases Fire, Jump, CenterView and the scoreboard hold here.
+	// Every held edge gets its release exactly once, whatever removed the press:
+	// a mode change, a key flush or a possession change.
+	OnFireReleased();
+	OnJumpReleased();
+	OnCenterViewReleased();
+	OnScoreboardReleased();
 }
 
 void UWoTGamepadLayer::OnPawnChanged()
 {
 	ReleaseHeldEdges();
+	if (AWoTCharacter* Walker = WalkToggledPawn.Get())
+	{
+		Walker->WalkingReleased();
+	}
+	WalkToggledPawn.Reset();
+}
+
+void UWoTGamepadLayer::OnFirePressed()
+{
+	if (AWoTPlayerController* PC = Controller.Get())
+	{
+		bFireHeld = true;
+		PC->Fire();
+	}
+}
+
+void UWoTGamepadLayer::OnFireReleased()
+{
+	if (!bFireHeld) { return; }
+	bFireHeld = false;
+	if (AWoTPlayerController* PC = Controller.Get()) { PC->CeaseFire(); }
+}
+
+void UWoTGamepadLayer::OnJumpPressed()
+{
+	if (AWoTPlayerController* PC = Controller.Get())
+	{
+		bJumpHeld = true;
+		PC->Jump();
+	}
+}
+
+void UWoTGamepadLayer::OnJumpReleased()
+{
+	if (!bJumpHeld) { return; }
+	bJumpHeld = false;
+	if (AWoTPlayerController* PC = Controller.Get()) { PC->StopJumping(); }
+}
+
+void UWoTGamepadLayer::OnCenterViewPressed()
+{
+	if (AWoTCharacter* Pawn = Character())
+	{
+		CenterViewPawn = Pawn;
+		Pawn->CenterViewPressed();
+	}
+}
+
+void UWoTGamepadLayer::OnCenterViewReleased()
+{
+	if (AWoTCharacter* Pawn = CenterViewPawn.Get()) { Pawn->CenterViewReleased(); }
+	CenterViewPawn.Reset();
+}
+
+void UWoTGamepadLayer::OnScoreboardPressed()
+{
+	if (AWoTPlayerController* PC = Controller.Get())
+	{
+		PC->ShowScores();
+		bScoreboardShownByHold = PC->bShowScores;
+	}
+}
+
+void UWoTGamepadLayer::OnScoreboardReleased()
+{
+	AWoTPlayerController* PC = Controller.Get();
+	if (bScoreboardShownByHold && PC && PC->bShowScores)
+	{
+		PC->ShowScores();
+	}
+	bScoreboardShownByHold = false;
+}
+
+void UWoTGamepadLayer::OnWalkToggle()
+{
+	AWoTCharacter* Pawn = Character();
+	if (!Pawn) { return; }
+	if (WalkToggledPawn.Get() == Pawn)
+	{
+		Pawn->WalkingReleased();
+		WalkToggledPawn.Reset();
+	}
+	else
+	{
+		Pawn->WalkingPressed();
+		WalkToggledPawn = Pawn;
+	}
+}
+
+void UWoTGamepadLayer::OnButton(EWoTGamepadAction Action)
+{
+	AWoTPlayerController* PC = Controller.Get();
+	AWoTCharacter* Pawn = Character();
+	if (!PC) { return; }
+	switch (Action)
+	{
+	case EWoTGamepadAction::EditCitadel: PC->ServerEditCitadelInput(); break;
+	case EWoTGamepadAction::ItemInfo: PC->ShowInventoryInfo(); break;
+	case EWoTGamepadAction::ViewUp: PC->ViewUp(); break;
+	case EWoTGamepadAction::ViewDown: PC->ViewDown(); break;
+	case EWoTGamepadAction::RandomTaunt: PC->PlayTaunt(-1); break;
+	case EWoTGamepadAction::Menu: PC->ToggleInGameMenu(); break;
+	// Pawn-owned actions do nothing without a pawn, as their keys do.
+	case EWoTGamepadAction::Drop: if (Pawn) { Pawn->Drop(); } break;
+	case EWoTGamepadAction::DropTainted: if (Pawn) { Pawn->DropTainted(); } break;
+	case EWoTGamepadAction::PrevItem: if (Pawn) { Pawn->PrevItem(); } break;
+	case EWoTGamepadAction::NextItem: if (Pawn) { Pawn->NextItem(); } break;
+	case EWoTGamepadAction::PrevHand: if (Pawn) { Pawn->PrevHand(); } break;
+	case EWoTGamepadAction::NextHand: if (Pawn) { Pawn->NextHand(); } break;
+	default: break;
+	}
 }
 
 UEnhancedInputLocalPlayerSubsystem* UWoTGamepadLayer::Subsystem() const

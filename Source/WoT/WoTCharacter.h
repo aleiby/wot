@@ -621,6 +621,9 @@ public:
 	void AddPitchInputForTest(float Value) { AddPitchInput(Value, true); }
 	/** Swim-up inputs actually added (held Jump while swimming). */
 	int32 SwimVerticalInputCountForTest = 0;
+	int32 DropRequestCountForTest = 0;
+	int32 DropTaintedRequestCountForTest = 0;
+	bool IsWalkingRequestedForTest() const { return WalkingPressCount > 0; }
 #endif
 	virtual void OnJumped_Implementation() override;
 

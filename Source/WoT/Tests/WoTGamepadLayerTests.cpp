@@ -8,6 +8,8 @@
 #include "WoTTestWorld.h"
 #include "../Gamepad/WoTGamepadLayer.h"
 #include "../Gamepad/WoTGamepadLayout.h"
+#include "../Inventory/WoTAngrealInvBalefire.h"
+#include "../Inventory/WoTInventoryComponent.h"
 #include "../WoTCharacter.h"
 #include "../WoTGameMode.h"
 #include "../WoTPlayerController.h"
@@ -20,6 +22,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputAction.h"
+#include "InputMappingContext.h"
 #include "InputKeyEventArgs.h"
 #include "Slate/SceneViewport.h"
 #include "Widgets/SViewport.h"
@@ -304,6 +307,182 @@ bool FWoTGamepadJoystickOffSwallowsSpec::RunTest(const FString&)
 	Fx.ResetPawn();
 	Fx.HoldAxis(EKeys::Gamepad_LeftY, 1.0f, 20);
 	TestTrue(TEXT("the same stick moves once the joystick is back on"), Fx.Speed() > 10.0f);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadFireEdgesSpec,
+	"WoT.Input.Gamepad.FireEdges", Gamepad_WorldFlags)
+
+bool FWoTGamepadFireEdgesSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	// Balefire: hold to charge, release to fire. Only a delivered release lands it.
+	AWoTAngrealInvBalefire* Balefire = Fx.World->SpawnActor<AWoTAngrealInvBalefire>(
+		FVector(0.0f, 0.0f, 500.0f), FRotator::ZeroRotator);
+	if (!TestNotNull(TEXT("balefire"), Balefire)) { return false; }
+	Balefire->GiveTo(Fx.Pawn);
+	Fx.Pawn->InventoryComponent->SelectItem(Balefire);
+	AWoTCharacter* Victim = Fx.World->SpawnActor<AWoTCharacter>(
+		FVector(300.0f, 0.0f, 542.0f), FRotator::ZeroRotator);
+	Victim->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+	Victim->Health = 1000;
+	Fx.Frames(42);   // pickup + the cast gate
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(150);  // past the 2 s prime, still held
+	TestEqual(TEXT("a held weave has not fired"), Victim->Health, 1000);
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestEqual(TEXT("releasing RT lands the weave"), Victim->Health, 600);
+
+	// Focus loss / overlay: the engine flushes held keys; the release still arrives.
+	Victim->Health = 1000;
+	Fx.Frames(60);
+	Fx.Send(EKeys::Gamepad_RightTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(150);
+	Fx.Controller->FlushPressedKeys();
+	Fx.Frames(2);
+	TestEqual(TEXT("a key flush delivers the release once"), Victim->Health, 600);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadDeadRespawnSpec,
+	"WoT.Input.Gamepad.DeadRespawn", Gamepad_WorldFlags)
+
+bool FWoTGamepadDeadRespawnSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	for (const FKey& Key : {EKeys::Gamepad_RightTrigger, EKeys::Gamepad_FaceButton_Bottom})
+	{
+		Fx.Controller->ArmRespawnFire(nullptr, 0.0f);
+		Fx.Frames(1);
+		TestEqual(TEXT("armed: the controller is Dying"),
+			static_cast<int32>(Fx.Controller->GetPlayerStateMachineState()),
+			static_cast<int32>(EWoTPlayerStateMachineState::Dying));
+		Fx.Send(Key, IE_Pressed, 1.0f);
+		Fx.Frames(2);
+		Fx.Send(Key, IE_Released, 0.0f);
+		Fx.Frames(1);
+		TestNotEqual(FString::Printf(TEXT("%s requests a respawn"), *Key.ToString()),
+			static_cast<int32>(Fx.Controller->GetPlayerStateMachineState()),
+			static_cast<int32>(EWoTPlayerStateMachineState::Dying));
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadDropTapHoldSpec,
+	"WoT.Input.Gamepad.DropTapHold", Gamepad_WorldFlags)
+
+bool FWoTGamepadDropTapHoldSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	const int32 DropsBefore = Fx.Pawn->DropRequestCountForTest;
+	const int32 TaintedBefore = Fx.Pawn->DropTaintedRequestCountForTest;
+	Fx.Send(EKeys::Gamepad_FaceButton_Left, IE_Pressed, 1.0f);
+	Fx.Frames(6);    // 0.1 s
+	Fx.Send(EKeys::Gamepad_FaceButton_Left, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestEqual(TEXT("a tap drops once"), Fx.Pawn->DropRequestCountForTest, DropsBefore + 1);
+	TestEqual(TEXT("a tap does not drop tainted"), Fx.Pawn->DropTaintedRequestCountForTest, TaintedBefore);
+	Fx.Send(EKeys::Gamepad_FaceButton_Left, IE_Pressed, 1.0f);
+	Fx.Frames(36);   // 0.6 s
+	Fx.Send(EKeys::Gamepad_FaceButton_Left, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestEqual(TEXT("a hold drops tainted once"), Fx.Pawn->DropTaintedRequestCountForTest, TaintedBefore + 1);
+	TestEqual(TEXT("a hold does not also drop"), Fx.Pawn->DropRequestCountForTest, DropsBefore + 1);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadScoreboardHoldSpec,
+	"WoT.Input.Gamepad.ScoreboardHold", Gamepad_WorldFlags)
+
+bool FWoTGamepadScoreboardHoldSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	Fx.Controller->bShowScores = false;
+	Fx.Send(EKeys::Gamepad_Special_Left, IE_Pressed, 1.0f);
+	Fx.Frames(2);
+	TestTrue(TEXT("View held shows scores"), Fx.Controller->bShowScores);
+	Fx.Send(EKeys::Gamepad_Special_Left, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestFalse(TEXT("releasing View hides them"), Fx.Controller->bShowScores);
+	Fx.Controller->bShowScores = true;   // e.g. the death auto-show
+	Fx.Send(EKeys::Gamepad_Special_Left, IE_Pressed, 1.0f);
+	Fx.Frames(2);
+	Fx.Send(EKeys::Gamepad_Special_Left, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestFalse(TEXT("a press dismisses an already-shown scoreboard, as the key toggle does"),
+		Fx.Controller->bShowScores);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadWalkToggleSpec,
+	"WoT.Input.Gamepad.WalkToggle", Gamepad_WorldFlags)
+
+bool FWoTGamepadWalkToggleSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	auto Walking = [&Fx]() { return Fx.Pawn->IsWalkingRequestedForTest(); };
+	auto Click = [&Fx]()
+	{
+		Fx.Send(EKeys::Gamepad_LeftThumbstick, IE_Pressed, 1.0f);
+		Fx.Frames(1);
+		Fx.Send(EKeys::Gamepad_LeftThumbstick, IE_Released, 0.0f);
+		Fx.Frames(1);
+	};
+	Click();
+	TestTrue(TEXT("L3 toggles walking on"), Walking());
+	Click();
+	TestFalse(TEXT("L3 again toggles it off"), Walking());
+	Click();
+	AWoTCharacter* OldPawn = Fx.Pawn;
+	Fx.Controller->UnPossess();
+	TestFalse(TEXT("losing the pawn ends the toggle"), OldPawn->IsWalkingRequestedForTest());
+	Fx.Pawn = Fx.World->SpawnActor<AWoTCharacter>(FVector(200.0f, 0.0f, 500.0f), FRotator::ZeroRotator);
+	Fx.Controller->Possess(Fx.Pawn);
+	Fx.Frames(1);
+	TestFalse(TEXT("a new pawn does not inherit the toggle"), Walking());
+	Click();
+	TestTrue(TEXT("the toggle works on the new pawn"), Walking());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadEditorContextSpec,
+	"WoT.Input.Gamepad.EditorContext", Gamepad_WorldFlags)
+
+bool FWoTGamepadEditorContextSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	UWoTGamepadLayer* Layer = Fx.Controller->GetGamepadLayerForTest();
+	Fx.Controller->SetOwnerEditSessionTeamForTest(0);   // the owner mirror IsOwnerEditingCitadel reads
+	Fx.Frames(2);
+	TestEqual(TEXT("editing installs the editor context"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::CitadelEditor));
+	// RT reaches the controller's Fire, whose editing path (UseAngreal →
+	// HandleCitadelEditorClick) the citadel specs already cover; here the editor
+	// context must route the right keys to the right actions.
+	auto Maps = [Layer](const FKey& Key, EWoTGamepadAction Action)
+	{
+		for (const FEnhancedActionKeyMapping& Mapping :
+			Layer->GetContext(EWoTGamepadContext::CitadelEditor)->GetMappings())
+		{
+			if (Mapping.Key == Key && Mapping.Action == Layer->GetAction(Action)) { return true; }
+		}
+		return false;
+	};
+	TestTrue(TEXT("RT places (Fire)"), Maps(EKeys::Gamepad_RightTrigger, EWoTGamepadAction::Fire));
+	TestTrue(TEXT("B leaves the editor"), Maps(EKeys::Gamepad_FaceButton_Right, EWoTGamepadAction::EditCitadel));
+	TestTrue(TEXT("D-pad up cycles zones"), Maps(EKeys::Gamepad_DPad_Up, EWoTGamepadAction::ViewUp));
+	TestFalse(TEXT("A does nothing in the editor"), Maps(EKeys::Gamepad_FaceButton_Bottom, EWoTGamepadAction::Jump));
+	Fx.Controller->SetOwnerEditSessionTeamForTest(255);
+	Fx.Frames(2);
+	TestEqual(TEXT("leaving restores gameplay"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::Gameplay));
 	return !HasAnyErrors();
 }
 
