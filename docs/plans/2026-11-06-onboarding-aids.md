@@ -318,3 +318,8 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
   untracked files under `Build/Mac/` (two `Sandbox.*.entitlements`, one
   `*.PackageVersionCounter`) that a contributor's clean-tree expectations
   trip over — candidates for the public `.gitignore`.
+- 2026-11-06 — the funnel notes above (doc gaps, data-dir visibility, the
+  expectations variant rule, the build-output ignores) are handed to the
+  repository hygiene follow-up and are no longer carried by this plan;
+  Task 7's CONTRIBUTING delta now covers only the optional-improvements
+  (enhancements) policy lane.
