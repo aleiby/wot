@@ -145,7 +145,8 @@ bool FWoTGameSettingsValidationSpec::RunTest(const FString&)
 		Settings.GoreDetailLevel, uint8(2));
 	TestFalse(TEXT("retail look spring defaults off"), Settings.bLookSpring);
 	TestTrue(TEXT("retail always-mouse-look defaults on"), Settings.bAlwaysMouseLook);
-	// Retail's UseJoystick defaults off; controller support turns it on (PORT_NOTES).
+	// Retail's UseJoystick defaults off; controller support turns it on
+	// (PORT_NOTES "The joystick option is on by default").
 	TestTrue(TEXT("the joystick preference defaults on"),
 		Settings.bJoystickEnabled);
 	TestTrue(TEXT("retail Tab Type binding is managed"),
