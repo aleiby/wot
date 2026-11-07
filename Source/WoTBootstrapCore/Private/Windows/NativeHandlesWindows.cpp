@@ -205,6 +205,7 @@ constexpr float WoTReplaceRenameSharingWaitSeconds = 0.05f;
 
 #if WITH_AUTOMATION_TESTS
 TFunction<void(int32)> GWoTNativeDirectoryRenameRetryObserverForTesting;
+TFunction<void(int32)> GWoTNativeReplaceRenameRetryObserverForTesting;
 TAtomic<int64> GWoTNativeDirectoryRenameRetryBudgetMsForTesting(-1);
 #endif
 
@@ -2221,6 +2222,12 @@ void WoTSetNativeDirectoryRenameRetryObserverForTesting(
 	GWoTNativeDirectoryRenameRetryObserverForTesting = MoveTemp(Observer);
 }
 
+void WoTSetNativeReplaceRenameRetryObserverForTesting(
+	TFunction<void(int32 FailedAttempts)> Observer)
+{
+	GWoTNativeReplaceRenameRetryObserverForTesting = MoveTemp(Observer);
+}
+
 void WoTSetNativeDirectoryRenameRetryBudgetForTesting(double Seconds)
 {
 	GWoTNativeDirectoryRenameRetryBudgetMsForTesting.Store(Seconds < 0.0
@@ -2764,10 +2771,25 @@ FWoTBootstrapStatus RenameNativeEntryAtNoFollow(
 		{
 			break;
 		}
-		if (bReplaceExisting && RenameError == ERROR_SHARING_VIOLATION
+		// Under Wine (Proton) the replace has no POSIX semantics: a target that
+		// one of our own readers transiently holds is refused with access
+		// denied instead of being replaced. That holder lets go within
+		// milliseconds, exactly like the scanner behind a sharing violation, so
+		// a file replace takes the same bounded retry. Native Windows keeps
+		// treating access denied on a file as final.
+		const bool bTransientHolder = RenameError == ERROR_SHARING_VIOLATION
+			|| (RenameError == ERROR_ACCESS_DENIED && !bSourceIsDirectory
+				&& WoTIsRunningUnderWine());
+		if (bReplaceExisting && bTransientHolder
 			&& SharingRetries < WoTReplaceRenameSharingRetries)
 		{
 			++SharingRetries;
+#if WITH_AUTOMATION_TESTS
+			if (GWoTNativeReplaceRenameRetryObserverForTesting)
+			{
+				GWoTNativeReplaceRenameRetryObserverForTesting(SharingRetries);
+			}
+#endif
 			FPlatformProcess::Sleep(WoTReplaceRenameSharingWaitSeconds);
 			continue;
 		}
