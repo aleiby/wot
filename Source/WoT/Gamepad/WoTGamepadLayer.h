@@ -18,7 +18,7 @@ class UInputAction;
 class UInputMappingContext;
 struct FInputActionValue;
 
-enum class EWoTGamepadMode : uint8 { None, Gameplay, CitadelEditor };
+enum class EWoTGamepadMode : uint8 { None, Gameplay, CitadelEditor, TeamSelect };
 
 UCLASS(Transient)
 class UWoTGamepadLayer : public UObject

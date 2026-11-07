@@ -28,7 +28,9 @@ LAYOUT_RELATIVE = "Source/WoT/Gamepad/Resources/ControllerLayout.csv"
 TUNING_RELATIVE = "Source/WoT/Gamepad/Resources/ControllerTuning.csv"
 OUTPUT_RELATIVE = "Source/WoT/Gamepad/Generated/WoTControllerLayout.inl"
 
-CONTEXTS = ("Gameplay", "CitadelEditor")
+# TeamSelect overlays Gameplay while a Battle player has no team.
+CONTEXTS = ("Gameplay", "CitadelEditor", "TeamSelect")
+FULL_CONTEXTS = ("Gameplay", "CitadelEditor")
 STICKS = ("LeftStick", "RightStick")
 INPUTS = STICKS + ("LeftTrigger", "RightTrigger", "FaceBottom", "FaceRight",
                    "FaceLeft", "FaceTop", "LeftShoulder", "RightShoulder",
@@ -39,7 +41,8 @@ ACTIONS = STICK_ACTIONS + ("Fire", "Jump", "EditCitadel", "Drop", "DropTainted",
                            "ItemInfo", "PrevItem", "NextItem", "PrevHand",
                            "NextHand", "ViewUp", "ViewDown", "RandomTaunt",
                            "WalkToggle", "CenterView", "Scoreboard", "Menu",
-                           "TurnAround")
+                           "TurnAround", "JoinTeam1", "JoinTeam2", "JoinTeam3",
+                           "JoinTeam4")
 TRIGGERS = {"": "Press", "Tap": "Tap", "Hold": "Hold"}
 REQUIRED_ACTIONS = ("Move", "Look", "Menu")
 # FWoTGamepadTuning's field order.
@@ -103,7 +106,7 @@ def parse_layout(text: str) -> List[Tuple[str, str, str, str]]:
         if len(triggers) > 1 and sorted(triggers) != ["Hold", "Tap"]:
             raise LayoutError(f"{where}: {key} is bound twice in {context}")
         bindings.append((context, key, action, TRIGGERS[trigger]))
-    for context in CONTEXTS:
+    for context in FULL_CONTEXTS:
         for action in REQUIRED_ACTIONS:
             if (context, action) not in actions:
                 raise LayoutError(f"layout: {context} has no {action}")

@@ -64,6 +64,8 @@ public:
 	/** The legacy yaw/pitch input scales AddYaw/PitchInput multiply by (BaseGame.ini
 	 * 2.5 / -2.5), or 1 when legacy input scales are off. */
 	FVector2D GetLegacyLookInputScale() const;
+	/** The Joystick Enabled option (a test override first). */
+	bool IsJoystickInputEnabled() const;
 #if WITH_AUTOMATION_TESTS
 	void ApplyPitchRotationForTest(float PitchInputDegrees);
 	EWoTPlayerStateMachineState PlayerStateForTest() const
@@ -588,7 +590,6 @@ private:
 
 	void TickUE1ViewShake(float DeltaTime);
 	void TickUE1ViewFlash(float DeltaTime);
-	bool IsJoystickInputEnabled() const;
 	void TickRetailCamera(float DeltaTime);
 	void ResetRetailCameraState(APawn* NewPawn);
 	FVector UE1WalkBob = FVector::ZeroVector;

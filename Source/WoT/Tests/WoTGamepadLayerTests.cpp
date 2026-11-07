@@ -10,8 +10,13 @@
 #include "../Gamepad/WoTGamepadLayout.h"
 #include "../Inventory/WoTAngrealInvBalefire.h"
 #include "../Inventory/WoTInventoryComponent.h"
+#include "../WoTBattleGameMode.h"
+#include "../WoTBattleInfo.h"
 #include "../WoTCharacter.h"
 #include "../WoTGameMode.h"
+#include "../WoTHUD.h"
+#include "../WoTPlayerStart.h"
+#include "../WoTPlayerState.h"
 #include "../WoTPlayerController.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "Engine/Engine.h"
@@ -20,6 +25,8 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "EnhancedInputSubsystems.h"
+#include "EnhancedPlayerInput.h"
+#include "WoTTestBattleClasses.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/WorldSettings.h"
 #include "InputAction.h"
@@ -53,10 +60,11 @@ struct FGamepad_Fixture
 		WoTTest::DestroySpecWorld(World);
 	}
 
-	bool Initialize(FAutomationTestBase& Test)
+	bool Initialize(FAutomationTestBase& Test,
+		TSubclassOf<AGameModeBase> GameModeClass = AWoTGameMode::StaticClass())
 	{
 		WoTTest::FSpecWorldOptions Options;
-		Options.GameModeClass = AWoTGameMode::StaticClass();
+		Options.GameModeClass = GameModeClass;
 		World = WoTTest::CreateSpecWorld(Options);
 		Context = World ? GEngine->GetWorldContextFromWorld(World) : nullptr;
 		GameInstance = World ? World->GetGameInstance() : nullptr;
@@ -546,6 +554,81 @@ bool FWoTGamepadTurnAroundSpec::RunTest(const FString&)
 	Fx.Send(EKeys::Gamepad_LeftTrigger, IE_Released, 0.0f);
 	Fx.Frames(20);
 	TestEqual(TEXT("a second turn faces the start again"), Turned(), 0.0, 0.5);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadTeamSelectSpec,
+	"WoT.Input.Gamepad.TeamSelect", Gamepad_WorldFlags)
+
+bool FWoTGamepadTeamSelectSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this, AWoTBattleGameMode::StaticClass())) { return false; }
+	UWorld* World = Fx.World;
+	AWoTBattleGameMode* BattleMode = World->GetAuthGameMode<AWoTBattleGameMode>();
+	AWoTBattleInfo* BattleInfo = World->SpawnActorDeferred<AWoTBattleInfo>(
+		AWoTBattleInfo::StaticClass(), FTransform::Identity);
+	FActorSpawnParameters Always;
+	Always.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AWoTPlayerStart* Team0Start = World->SpawnActor<AWoTPlayerStart>(
+		FVector(-2000.0f, 0.0f, 100.0f), FRotator::ZeroRotator, Always);
+	AWoTPlayerStart* Team1Start = World->SpawnActor<AWoTPlayerStart>(
+		FVector(2000.0f, 0.0f, 100.0f), FRotator::ZeroRotator, Always);
+	if (!TestTrue(TEXT("battle fixture"), BattleMode && BattleInfo && Team0Start && Team1Start))
+	{
+		return false;
+	}
+	BattleInfo->NumTeams = 2;
+	BattleInfo->TeamClass[0] = AWoTTestTeamAlpha::StaticClass();
+	BattleInfo->TeamClass[1] = AWoTTestTeamBravo::StaticClass();
+	BattleInfo->FinishSpawning(FTransform::Identity);
+	BattleInfo->bTeleportersDisabled = false;
+	BattleMode->Battle = BattleInfo;
+	Team0Start->TeamNumber = 0;
+	Team1Start->TeamNumber = 1;
+	Fx.Controller->ClientSetHUD_Implementation(AWoTHUD::StaticClass());
+	AWoTPlayerState* State = Fx.Controller->GetPlayerState<AWoTPlayerState>();
+	if (!TestNotNull(TEXT("player state"), State)
+		|| !TestNotNull(TEXT("HUD"), Cast<AWoTHUD>(Fx.Controller->GetHUD())))
+	{
+		return false;
+	}
+	State->Team = 255;
+	Fx.Frames(2);
+
+	// Without a team, the D-pad chooses one on top of the gameplay context.
+	UWoTGamepadLayer* Layer = Fx.Controller->GetGamepadLayerForTest();
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+		Fx.Controller->GetLocalPlayer()->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+	TestEqual(TEXT("a player without a team is choosing one"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::TeamSelect));
+	TestTrue(TEXT("both the gameplay and team-select contexts are installed"),
+		Subsystem->HasMappingContext(Layer->GetContext(EWoTGamepadContext::Gameplay))
+		&& Subsystem->HasMappingContext(Layer->GetContext(EWoTGamepadContext::TeamSelect)));
+	// D-pad Down is team 4: no such team here, and the taunt it normally plays stays quiet.
+	Fx.Send(EKeys::Gamepad_DPad_Down, IE_Pressed, 1.0f);
+	Fx.Frames(1);
+	UEnhancedPlayerInput* PlayerInput = Subsystem->GetPlayerInput();
+	TestTrue(TEXT("D-pad Down drives team 4"),
+		PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::JoinTeam4)).Get<bool>());
+	TestFalse(TEXT("team selection takes D-pad Down from the taunt"),
+		PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::RandomTaunt)).Get<bool>());
+	Fx.Send(EKeys::Gamepad_DPad_Down, IE_Released, 0.0f);
+	Fx.Frames(1);
+	TestEqual(TEXT("an absent team is not joined"), static_cast<int32>(State->Team), 255);
+
+	Fx.Send(EKeys::Gamepad_DPad_Right, IE_Pressed, 1.0f);
+	Fx.Frames(1);
+	Fx.Send(EKeys::Gamepad_DPad_Right, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestEqual(TEXT("D-pad Right joins team 2"), static_cast<int32>(State->Team), 1);
+	APawn* Restarted = Fx.Controller->GetPawn();
+	TestTrue(TEXT("the player restarts as team 2's pawn"),
+		Restarted && Restarted->IsA(AWoTTestTeamBravo::StaticClass()));
+	TestEqual(TEXT("with a team, the D-pad is back on hands and taunts"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::Gameplay));
+	TestFalse(TEXT("the team-select context is gone"),
+		Subsystem->HasMappingContext(Layer->GetContext(EWoTGamepadContext::TeamSelect)));
 	return !HasAnyErrors();
 }
 

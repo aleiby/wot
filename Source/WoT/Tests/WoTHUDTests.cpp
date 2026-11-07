@@ -185,6 +185,12 @@ bool FWoTHUDTeamSelectSpec::RunTest(const FString&)
 	TestEqual(TEXT("zero countdown omits suffix"),
 		HUD->TeamSelectPrompt(255, 2, 0),
 		FString(TEXT("Choose a side: (1-2)")));
+	TestEqual(TEXT("with a controller the prompt names the D-pad buttons too"),
+		HUD->TeamSelectPrompt(255, 2, 0, /*bControllerHint*/ true),
+		FString(TEXT("Choose a side: (1-2 or D-pad Left/Right)")));
+	TestEqual(TEXT("a three-team map adds D-pad Up"),
+		HUD->TeamSelectPrompt(255, 3, 12, true),
+		FString(TEXT("Choose a side: (1-3 or D-pad Left/Right/Up) within 12 sec")));
 	TestTrue(TEXT("team-select fallback fragments remain localizable FText"),
 		!HUD->SelectTeamStr.IsEmpty() && !HUD->TimeLimitStr.IsEmpty() &&
 		!HUD->SecondsStr.IsEmpty());
@@ -194,6 +200,9 @@ bool FWoTHUDTeamSelectSpec::RunTest(const FString&)
 	TestEqual(TEXT("team prompt formats through the exposed localized fragments"),
 		HUD->TeamSelectPrompt(255, 4, 9),
 		FString(TEXT("Choose Side: (1-4) within 9 ticks")));
+	TestEqual(TEXT("a four-team map names all four D-pad buttons"),
+		HUD->TeamSelectPrompt(255, 4, 9, true),
+		FString(TEXT("Choose Side: (1-4 or D-pad Left/Right/Up/Down) within 9 ticks")));
 	const FVector2D WidePromptPosition = AWoTHUD::TeamSelectPosition(
 		1920.0f, 240.0f, 16.0f);
 	TestEqual(TEXT("wide team prompt centers against the actual viewport"),

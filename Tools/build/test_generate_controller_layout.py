@@ -51,6 +51,20 @@ class GeneratorTests(unittest.TestCase):
                       "EWoTGamepadAction::TurnAround, EWoTGamepadTrigger::Press},", text)
         self.assertIn("/*TurnAroundSeconds*/ 0.15f,", text)
 
+    def test_team_select_overlays_the_dpad_with_the_four_teams(self):
+        text = gen.render(LAYOUT, TUNING).decode()
+        for key, team in (("DPadLeft", 1), ("DPadRight", 2), ("DPadUp", 3), ("DPadDown", 4)):
+            self.assertIn("{EWoTGamepadContext::TeamSelect, EWoTGamepadInput::%s, "
+                          "EWoTGamepadAction::JoinTeam%d, EWoTGamepadTrigger::Press}," % (key, team),
+                          text)
+
+    def test_the_team_select_overlay_needs_no_move_look_or_menu(self):
+        # It sits on top of Gameplay, which keeps the sticks and the menu.
+        layout = LAYOUT.decode()
+        self.assertNotIn("TeamSelect,LeftStick", layout)
+        self.assertNotIn("TeamSelect,Menu", layout)
+        gen.render(LAYOUT, TUNING)
+
     def test_unknown_names_are_refused(self):
         for old, new in [("Gameplay,FaceTop,ItemInfo,", "Gameplay,FaceTip,ItemInfo,"),
                          ("Gameplay,FaceTop,ItemInfo,", "Gameplay,FaceTop,ItemInfos,"),

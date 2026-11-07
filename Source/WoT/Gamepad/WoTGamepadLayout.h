@@ -7,7 +7,8 @@
 #include "CoreMinimal.h"
 #include "InputCoreTypes.h"
 
-enum class EWoTGamepadContext : uint8 { Gameplay, CitadelEditor, Count };
+/** TeamSelect overlays Gameplay while a Battle player has no team. */
+enum class EWoTGamepadContext : uint8 { Gameplay, CitadelEditor, TeamSelect, Count };
 
 enum class EWoTGamepadInput : uint8
 {
@@ -23,6 +24,7 @@ enum class EWoTGamepadAction : uint8
 	Move, Look, Fire, Jump, EditCitadel, Drop, DropTainted, ItemInfo,
 	PrevItem, NextItem, PrevHand, NextHand, ViewUp, ViewDown,
 	RandomTaunt, WalkToggle, CenterView, Scoreboard, Menu, TurnAround,
+	JoinTeam1, JoinTeam2, JoinTeam3, JoinTeam4,
 	Count
 };
 

@@ -1,6 +1,7 @@
 #include "WoTGamepadLayer.h"
 
 #include "../WoTCharacter.h"
+#include "../WoTHUD.h"
 #include "../WoTPlayerController.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "Engine/GameInstance.h"
@@ -36,8 +37,10 @@ void UWoTGamepadLayer::Initialize(AWoTPlayerController& InController, UEnhancedI
 	Contexts.SetNum(NumContexts);
 	for (int32 Index = 0; Index < NumContexts; ++Index)
 	{
-		Contexts[Index] = NewObject<UInputMappingContext>(this,
-			Index == 0 ? FName(TEXT("Gameplay")) : FName(TEXT("CitadelEditor")));
+		static const TCHAR* const ContextNames[] = {
+			TEXT("Gameplay"), TEXT("CitadelEditor"), TEXT("TeamSelect")};
+		static_assert(UE_ARRAY_COUNT(ContextNames) == static_cast<int32>(EWoTGamepadContext::Count));
+		Contexts[Index] = NewObject<UInputMappingContext>(this, FName(ContextNames[Index]));
 	}
 	for (const FWoTGamepadBinding& Row : WoTGamepadLayout())
 	{
@@ -91,7 +94,8 @@ void UWoTGamepadLayer::BindButtons(UEnhancedInputComponent& Input)
 		EWoTGamepadAction::DropTainted, EWoTGamepadAction::ItemInfo, EWoTGamepadAction::PrevItem,
 		EWoTGamepadAction::NextItem, EWoTGamepadAction::PrevHand, EWoTGamepadAction::NextHand,
 		EWoTGamepadAction::ViewUp, EWoTGamepadAction::ViewDown, EWoTGamepadAction::RandomTaunt,
-		EWoTGamepadAction::Menu})
+		EWoTGamepadAction::Menu, EWoTGamepadAction::JoinTeam1, EWoTGamepadAction::JoinTeam2,
+		EWoTGamepadAction::JoinTeam3, EWoTGamepadAction::JoinTeam4})
 	{
 		// A plain press acts on its press edge; a tap or hold acts once when its
 		// trigger completes (Started would fire a tap on the press).
@@ -157,7 +161,12 @@ EWoTGamepadMode UWoTGamepadLayer::DesiredMode() const
 		// The chat line drops gamepad presses; a stick must not walk the player either.
 		return EWoTGamepadMode::None;
 	}
-	return PC->IsOwnerEditingCitadel() ? EWoTGamepadMode::CitadelEditor : EWoTGamepadMode::Gameplay;
+	if (PC->IsOwnerEditingCitadel())
+	{
+		return EWoTGamepadMode::CitadelEditor;
+	}
+	const AWoTHUD* HUD = Cast<AWoTHUD>(PC->GetHUD());
+	return HUD && HUD->IsChoosingTeam() ? EWoTGamepadMode::TeamSelect : EWoTGamepadMode::Gameplay;
 }
 
 void UWoTGamepadLayer::ApplyMode(EWoTGamepadMode NewMode)
@@ -175,9 +184,15 @@ void UWoTGamepadLayer::ApplyMode(EWoTGamepadMode NewMode)
 	for (UInputMappingContext* Context : Contexts) { Input->RemoveMappingContext(Context, Options); }
 	if (NewMode != EWoTGamepadMode::None)
 	{
-		const EWoTGamepadContext Context = NewMode == EWoTGamepadMode::Gameplay
-			? EWoTGamepadContext::Gameplay : EWoTGamepadContext::CitadelEditor;
+		const EWoTGamepadContext Context = NewMode == EWoTGamepadMode::CitadelEditor
+			? EWoTGamepadContext::CitadelEditor : EWoTGamepadContext::Gameplay;
 		Input->AddMappingContext(Contexts[static_cast<int32>(Context)], 0, Options);
+	}
+	if (NewMode == EWoTGamepadMode::TeamSelect)
+	{
+		// Above Gameplay: its D-pad mappings consume the keys the hands and taunt use.
+		Input->AddMappingContext(
+			Contexts[static_cast<int32>(EWoTGamepadContext::TeamSelect)], 1, Options);
 	}
 	Mode = NewMode;
 }
@@ -315,6 +330,17 @@ void UWoTGamepadLayer::OnButton(EWoTGamepadAction Action)
 	case EWoTGamepadAction::ViewDown: PC->ViewDown(); break;
 	case EWoTGamepadAction::RandomTaunt: PC->PlayTaunt(-1); break;
 	case EWoTGamepadAction::Menu: PC->ToggleInGameMenu(); break;
+	// The number keys' team choice (BattleHUD.KeyEvent), on the D-pad.
+	case EWoTGamepadAction::JoinTeam1:
+	case EWoTGamepadAction::JoinTeam2:
+	case EWoTGamepadAction::JoinTeam3:
+	case EWoTGamepadAction::JoinTeam4:
+		if (AWoTHUD* HUD = Cast<AWoTHUD>(PC->GetHUD()))
+		{
+			HUD->HandleTeamSelectDigit(static_cast<int32>(Action)
+				- static_cast<int32>(EWoTGamepadAction::JoinTeam1));
+		}
+		break;
 	// Pawn-owned actions do nothing without a pawn, as their keys do.
 	case EWoTGamepadAction::Drop: if (Pawn) { Pawn->Drop(); } break;
 	case EWoTGamepadAction::DropTainted: if (Pawn) { Pawn->DropTainted(); } break;
