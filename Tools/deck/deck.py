@@ -138,6 +138,68 @@ def show_window(target: DeckTarget, runner, class_name: str) -> bool:
     return ssh(target, runner, script).returncode == 0
 
 
+PROBE_DIR_WINDOWS = r"C:\wot-probe"
+
+
+def probe_batch(args: List[str]) -> str:
+    """A Windows batch file that runs the probe with args, output to out.jsonl."""
+    for arg in args:
+        if '"' in arg:
+            raise DeckError(f"probe argument may not contain a quote: {arg!r}")
+    quoted = " ".join(f'"{arg}"' for arg in args)
+    lines = [
+        "@echo off",
+        rf"{PROBE_DIR_WINDOWS}\wot_path_probe.exe {quoted} > {PROBE_DIR_WINDOWS}\out.jsonl 2>&1",
+        rf"echo done > {PROBE_DIR_WINDOWS}\done.txt",
+    ]
+    return "".join(line + "\r\n" for line in lines)
+
+
+def parse_probe_output(raw: bytes) -> List[dict]:
+    """One dict per probe line; a line that is not JSON is kept as {"raw": line}."""
+    rows = []
+    for line in raw.decode("utf-8", "replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            rows.append({"raw": line})
+    return rows
+
+
+def run_probe(target: DeckTarget, runner, exe: Path, app_id: int, args: List[str],
+              proton: str = "Proton 11.0",
+              runtime: str = "SteamLinuxRuntime_4") -> List[dict]:
+    """Run the Windows path probe under Proton in the shortcut's prefix."""
+    batch = probe_batch(args)
+    prefix = f"{STEAM}/steamapps/compatdata/{app_id}"
+    probe_dir = f"{prefix}/pfx/drive_c/wot-probe"
+    copy = runner.run(_ssh_argv(target) + [
+        f"mkdir -p {probe_dir} && cat > {probe_dir}/wot_path_probe.exe"],
+        Path(exe).read_bytes(), 600)
+    if copy.returncode != 0:
+        raise DeckError("probe copy failed: " + copy.stderr.decode(errors="replace"))
+    script = (
+        f"rm -f {probe_dir}/out.jsonl {probe_dir}/done.txt && "
+        f"cat > {probe_dir}/run.bat <<'WOT_PROBE_EOF'\n{batch}WOT_PROBE_EOF\n"
+        f"STEAM_COMPAT_DATA_PATH={prefix} STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
+        f"SteamAppId={app_id} SteamGameId={app_id} DISPLAY=:0 WINEDEBUG=-all "
+        f"timeout 900 \"{COMMON}/{runtime}/_v2-entry-point\" --verb=waitforexitandrun -- "
+        f"\"{COMMON}/{proton}/proton\" waitforexitandrun "
+        f"'C:\\windows\\system32\\cmd.exe' /c '{PROBE_DIR_WINDOWS}\\run.bat'"
+        # Wine's background server inherits this command's stdio; left on the
+        # SSH channel, it keeps the session open after the probe exits.
+        f" < /dev/null > {probe_dir}/proton.log 2>&1\n"
+    )
+    ran = ssh(target, runner, script, timeout=960)
+    if ran.returncode != 0:
+        raise DeckError("probe run failed: " + ran.stderr.decode(errors="replace"))
+    fetched = ssh(target, runner, f"cat {probe_dir}/out.jsonl")
+    return parse_probe_output(fetched.stdout)
+
+
 def _summarize(events: List[dict]) -> str:
     seen, lines = set(), []
     for e in events:
@@ -167,6 +229,11 @@ def main(argv: List[str] = None) -> int:
     p.add_argument("data_dir")
     p = sub.add_parser("show", help="bring the game window forward")
     p.add_argument("--class-name", default="steam_app_")
+    p = sub.add_parser("probe", help="run the Windows path probe under Proton")
+    p.add_argument("exe", type=Path)
+    p.add_argument("--app-id", type=int, required=True)
+    p.add_argument("--proton", default="Proton 11.0")
+    p.add_argument("probe_args", nargs="+")
     args = parser.parse_args(argv)
 
     target, runner = load_target(args.local_json), SubprocessRunner()
@@ -179,6 +246,10 @@ def main(argv: List[str] = None) -> int:
         stop(target, runner, args.unit)
     elif args.command == "heartbeat":
         print(_summarize(heartbeat_events(target, runner, args.data_dir)))
+    elif args.command == "probe":
+        for row in run_probe(target, runner, args.exe, args.app_id, args.probe_args,
+                             args.proton):
+            print(json.dumps(row))
     elif args.command == "show":
         if not show_window(target, runner, args.class_name):
             print("no matching window", file=sys.stderr)

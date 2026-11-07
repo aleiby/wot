@@ -63,5 +63,40 @@ class DeckHarnessTests(unittest.TestCase):
         self.assertEqual(caught.exception.events[0]["event"], "phase-begin")
 
 
+class DeckProbeTests(unittest.TestCase):
+    def test_probe_batch_quotes_every_argument_with_crlf_lines(self):
+        text = deck.probe_batch(["walk", r"Z:\home\deck\Games\WoT Reborn"])
+        self.assertIn('"walk" "Z:\\home\\deck\\Games\\WoT Reborn"', text)
+        self.assertIn(r"> C:\wot-probe\out.jsonl 2>&1", text)
+        self.assertTrue(all(line.endswith("\r") for line in text.split("\n")[:-1]))
+
+    def test_probe_batch_refuses_quotes_inside_an_argument(self):
+        with self.assertRaises(deck.DeckError):
+            deck.probe_batch(['walk', 'C:\\a"b'])
+
+    def test_parse_probe_output_keeps_non_json_lines_as_raw(self):
+        rows = deck.parse_probe_output(b'{"check":"env","wine":true}\r\nnot json\r\n\r\n')
+        self.assertEqual(rows, [{"check": "env", "wine": True}, {"raw": "not json"}])
+
+    def test_run_probe_runs_the_batch_under_proton_and_fetches_output(self):
+        runner = FakeRunner([b"", b"", b'{"check":"env"}\n'])
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "wot_path_probe.exe"
+            exe.write_bytes(b"MZ")
+            rows = deck.run_probe(deck.DeckTarget("h"), runner, exe, 2524773648, ["env"])
+        scripts = [call[1] for call in runner.calls]
+        self.assertEqual(scripts[0], b"MZ")  # exe copied over stdin
+        run_script = runner.calls[1][1].decode()
+        self.assertIn("SteamLinuxRuntime_4/_v2-entry-point", run_script)
+        self.assertIn("cmd.exe", run_script)
+        self.assertIn("wot-probe", run_script)
+        # Wine's background server inherits the command's stdio; unless it is
+        # redirected, the SSH session never ends.
+        self.assertRegex(run_script, r"run\.bat' < /dev/null > \S*proton\.log 2>&1")
+        # Proton stalls during Wine startup without a display, even for a console program.
+        self.assertIn("DISPLAY=:0", run_script)
+        self.assertEqual(rows, [{"check": "env"}])
+
+
 if __name__ == "__main__":
     unittest.main()
