@@ -1687,3 +1687,8 @@ OpenCurrentExecutableIdentityNoFollow(FString* OutPathResolutionFailureReason)
 	FWoTNativeHandleAccess::SetReportedPath(Handle.GetValue(), MoveTemp(Path));
 	return Handle;
 }
+
+void WoTFailCriticalErrorsOnThisThread()
+{
+	// macOS has no critical-error dialog for unreachable media.
+}

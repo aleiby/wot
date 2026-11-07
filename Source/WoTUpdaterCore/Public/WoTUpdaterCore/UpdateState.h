@@ -20,6 +20,9 @@ struct FWoTUpdateStateRecordReadResult
 
 	/** Empty for a valid record; otherwise explains why defaults won. */
 	FString Diagnostic;
+
+	/** True when no record exists yet (the normal first-run case). */
+	bool bMissing = false;
 };
 
 /** Missing state is normal. Unreadable, oversized, or malformed state defaults to zero. */
@@ -30,6 +33,8 @@ WOTUPDATERCORE_API FWoTUpdateStateRecordReadResult ReadWoTUpdateState(
  * Reread, merge fieldwise maxima into InOutState, and best-effort replace the
  * record through a unique sibling temporary. No lock or strict cross-process
  * monotonicity is implied. InOutState keeps its maxima when persistence fails.
+ * OutDiagnostic reports a failed write or an unusable prior record; a record
+ * that does not exist yet is normal and reports nothing.
  */
 WOTUPDATERCORE_API FWoTBootstrapStatus MergeAndWriteWoTUpdateState(
 	const FWoTUpdaterStateRoot& Root, FWoTUpdateStateRecord& InOutState,

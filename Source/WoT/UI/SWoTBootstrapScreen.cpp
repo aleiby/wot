@@ -363,6 +363,11 @@ FText SWoTBootstrapScreen::OriginalGameText() const
 		return LOCTEXT("OriginalGameUnsupportedReparsePoint",
 			"That installer is stored through an unsupported Windows reparse "
 			"point. Move or copy it to a normal local file, then click Browse.");
+	case EWoTOriginalGameNeededReason::HardLinked:
+		return LOCTEXT("OriginalGameHardLinked",
+			"That installer is a hard link (one file with more than one name), "
+			"which WoT Reborn won't read. Copy it to an ordinary file instead of "
+			"linking it, then click Browse.");
 	case EWoTOriginalGameNeededReason::Missing:
 	default:
 		return LOCTEXT("OriginalGameInstructions",

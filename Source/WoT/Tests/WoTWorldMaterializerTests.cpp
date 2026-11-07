@@ -675,9 +675,11 @@ bool FWoTRuntimeIntegrityNonWorldLoaderSpec::RunTest(const FString&)
 		PhysicalReads, 2);
 	FWorldDelegates::OnWorldTickStart.Broadcast(ActivationWorld.World, LEVELTICK_All, 0.f);
 	FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
-	const FString ExpectedMessage = FString::Printf(
-		TEXT("Some of WoT Reborn's game data is damaged (%s). It will be rebuilt the next time you start the game."),
-		*LogicalId);
+	// A non-map output identity is internal, so the visible message omits it.
+	const FString ExpectedMessage(
+		TEXT("Some of WoT Reborn's game data is damaged. It will be rebuilt the next time you start the game."));
+	TestFalse(TEXT("the non-world message does not show the internal identity"),
+		Presented.Contains(LogicalId));
 	TestEqual(TEXT("the non-world loader publishes the exact visible message"),
 		Presented, ExpectedMessage);
 	TestEqual(TEXT("the exact message remains retained across return travel"),
