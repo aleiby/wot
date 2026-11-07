@@ -2934,6 +2934,11 @@ bool FWoTRC33GruntDamageReactionSpec::RunTest(const FString&)
 	AWoTNPCCharacter* Champion = WoTCreatureData::SpawnCreature(*World,
 		TEXT("BATrolloc"), FVector(0, 250, 0), 1, true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("Champion spawned"), Champion))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	WoTTest::TickWorld(World, 0.1f);
 	Champion->TakeDamage(100.0f, Hurt, Enemy->GetController(), Enemy);
 	TestFalse(TEXT("Champion-class -1 override disables hostile retreat"),
@@ -3389,6 +3394,10 @@ bool FWoTRC33WarderBATMovementSpec::RunTest(const FString&)
 		AWoTNPCCharacter* Warder = WoTCreatureData::SpawnCreature(*ServerWorld,
 			TEXT("Warder"), FVector(0, 0, 5000), 1, true,
 			AWoTTestNPCCharacter::StaticClass());
+		if (!TestNotNull(TEXT("Warder spawned"), Warder))
+		{
+			return false;
+		}
 		Warder->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 		auto HasAttack = [](const AWoTNPCCharacter* NPC, FName Type, float Fraction)
 		{
@@ -3477,6 +3486,10 @@ bool FWoTRC33WarderBATMovementSpec::RunTest(const FString&)
 		AWoTNPCCharacter* BAT = WoTCreatureData::SpawnCreature(*ServerWorld,
 			TEXT("BATrolloc"), FVector(0, 500, 5000), 1, true,
 			AWoTTestNPCCharacter::StaticClass());
+		if (!TestNotNull(TEXT("BAT spawned"), BAT))
+		{
+			return false;
+		}
 		BAT->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
 		TestTrue(*FString::Printf(TEXT("%s generated BAT .25 Tossed row"), *Label),
 			HasAttack(BAT, TEXT("Tossed"), 0.25f));
@@ -3757,6 +3770,11 @@ bool FWoTRC33CasterIntervalSpec::RunTest(const FString&)
 	AWoTNPCCharacter* Sitter = WoTCreatureData::SpawnCreature(*World,
 		TEXT("Sitter"), FVector::ZeroVector, 1, true,
 		AWoTTestNPCCharacter::StaticClass());
+	if (!TestNotNull(TEXT("Sitter spawned"), Sitter))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	UWoTInventoryComponent* Inventory =
 		Sitter->FindComponentByClass<UWoTInventoryComponent>();
 	AWoTAngrealInvEarthTremor* Tremor = Inventory

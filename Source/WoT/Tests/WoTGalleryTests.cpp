@@ -11,13 +11,44 @@
 #include "Serialization/JsonSerializer.h"
 #include "UObject/UObjectGlobals.h"
 
+namespace
+{
+// The gallery configs hold retail map coordinates, so they are private
+// reference inputs: a public clone reaches them through WOT_REFERENCE_ROOT
+// (the same rule as WoTReferenceRoot() in WoTRetailReader's ReferencePaths.h,
+// restated here so this spec adds no include), and without one the specs skip.
+FString WoTGalleryReferenceConfig(const TCHAR* Relative)
+{
+	const FString Root = FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_REFERENCE_ROOT"));
+	return FPaths::ConvertRelativePathToFull(
+		(Root.IsEmpty() ? FPaths::ProjectDir() : Root) / Relative);
+}
+
+bool WoTGalleryConfigMissing(FAutomationTestBase& Test, const TCHAR* Relative,
+	const FString& Path)
+{
+	if (FPaths::FileExists(Path))
+	{
+		return false;
+	}
+	Test.AddWarning(FString::Printf(TEXT(
+		"private reference input %s is absent; set WOT_REFERENCE_ROOT; spec skipped"),
+		Relative));
+	return true;
+}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGalleryConfigResolvesSpec,
 	"WoT.Gallery.ConfigResolves",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWoTGalleryConfigResolvesSpec::RunTest(const FString&)
 {
-	const FString Path = FPaths::ProjectDir() /
-		TEXT("Tools/test/gallery/gallery.json");
+	const TCHAR* Relative = TEXT("Tools/test/gallery/gallery.json");
+	const FString Path = WoTGalleryReferenceConfig(Relative);
+	if (WoTGalleryConfigMissing(*this, Relative, Path))
+	{
+		return true;
+	}
 	FString Raw;
 	if (!TestTrue(TEXT("gallery config can be read"),
 		FFileHelper::LoadFileToString(Raw, *Path)))
@@ -248,8 +279,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGallerySkyPoseConfigSpec,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWoTGallerySkyPoseConfigSpec::RunTest(const FString&)
 {
-	const FString Path = FPaths::ProjectDir() /
-		TEXT("Tools/test/gallery/runtime-map-t5-2-sky.json");
+	const TCHAR* Relative = TEXT("Tools/test/gallery/runtime-map-t5-2-sky.json");
+	const FString Path = WoTGalleryReferenceConfig(Relative);
+	if (WoTGalleryConfigMissing(*this, Relative, Path))
+	{
+		return true;
+	}
 	FString Raw;
 	TSharedPtr<FJsonObject> Root;
 	if (!TestTrue(TEXT("sky pose config can be read"),
