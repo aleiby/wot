@@ -2151,6 +2151,12 @@ void FWoTMenuStyle::SizeCheckBoxImages(FCheckBoxStyle& Style, float GlyphSize)
 	}
 }
 
+bool WoTIsMenuBackKey(const FKey& Key)
+{
+	return Key == EKeys::Escape || Key == EKeys::Gamepad_FaceButton_Right
+		|| Key == EKeys::Gamepad_Special_Left;
+}
+
 void SWoTMenuButton::Construct(const FArguments& InArgs)
 {
 	ExternalSelection = InArgs._IsSelected;

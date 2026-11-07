@@ -1125,6 +1125,118 @@ bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuControllerNavSpec,
+	"WoT.FrontEnd.InGameMenu.ControllerNav",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
+{
+	if (!TestTrue(TEXT("Slate application is initialized"),
+		FSlateApplication::IsInitialized()))
+	{
+		return false;
+	}
+	UWorld* World = WoTFrontEndTests_CreateWorld();
+	if (!TestNotNull(TEXT("controller-nav world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTFrontEndTests_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller-nav controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	const TSharedRef<FWoTRequiredMenuFontGeneration> Generation =
+		FWoTRequiredMenuFontGeneration::CreateForTesting();
+	TSharedRef<FWoTRequiredMenuFonts> Fonts = MakeShared<FWoTRequiredMenuFonts>();
+	Fonts->Title = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30);
+	Fonts->List = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+	Fonts->Generation = Generation;
+	const TSharedRef<SWoTInGameMenuOverlay> Overlay =
+		SNew(SWoTInGameMenuOverlay)
+		.PlayerController(Controller)
+		.RequiredFontsForTesting(Fonts);
+	const TSharedRef<SWindow> Window = SNew(SWindow)
+		.ClientSize(FVector2D(1024.0f, 768.0f))
+		.SupportsMaximize(false)
+		.SupportsMinimize(false)
+		.CreateTitleBar(false)
+		[Overlay];
+	FSlateApplication& Slate = FSlateApplication::Get();
+	Slate.AddWindow(Window, true);
+	ON_SCOPE_EXIT
+	{
+		Window->RequestDestroyWindow();
+		Slate.Tick();
+	};
+	Slate.Tick();
+	Window->SlatePrepass(1.0f);
+	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1024.0f, 768.0f),
+		FSlateLayoutTransform()), 0.0, 0.0f);
+	Window->SlatePrepass(1.0f);
+	Slate.Tick();
+	Overlay->FocusResumeButton();
+	Slate.Tick();
+	if (!TestTrue(TEXT("Resume starts focused"),
+		Slate.GetKeyboardFocusedWidget() == Overlay->MainMenuButtonForTesting(0)))
+	{
+		return false;
+	}
+
+	auto PressKey = [&Slate](FKey Key)
+	{
+		const FKeyEvent Event = MakeFrontEndKeyEvent(Key);
+		const bool bHandled = Slate.ProcessKeyDownEvent(Event);
+		Slate.ProcessKeyUpEvent(Event);
+		Slate.Tick();
+		return bHandled;
+	};
+	auto FocusedIs = [&Slate, &Overlay](int32 Index)
+	{
+		return Slate.GetKeyboardFocusedWidget() == Overlay->MainMenuButtonForTesting(Index)
+			&& Overlay->SelectedMainMenuIndexForTesting() == Index;
+	};
+	// The D-pad moves the one highlighted entry and wraps like the arrow keys.
+	PressKey(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("D-pad down selects the next entry"), FocusedIs(1));
+	PressKey(EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("D-pad up returns to Resume"), FocusedIs(0));
+	PressKey(EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("D-pad up wraps from first to last"), FocusedIs(6));
+	PressKey(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("D-pad down wraps from last to first"), FocusedIs(0));
+	// The stick arrives as analog navigation, not keys; it wraps the same way.
+	const FNavigationEvent StickUp(FModifierKeysState(), 0, EUINavigation::Up,
+		ENavigationGenesis::Controller);
+	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickUp);
+	Slate.Tick();
+	TestTrue(TEXT("stick up wraps from first to last"), FocusedIs(6));
+	const FNavigationEvent StickDown(FModifierKeysState(), 0, EUINavigation::Down,
+		ENavigationGenesis::Controller);
+	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickDown);
+	Slate.Tick();
+	TestTrue(TEXT("stick down wraps from last to first"), FocusedIs(0));
+
+	// B backs out one level, then resumes, like Escape.
+	for (int32 Step = 0; Step < 4; ++Step)
+	{
+		PressKey(EKeys::Gamepad_DPad_Down);
+	}
+	TestTrue(TEXT("Controls is selected"), FocusedIs(4));
+	PressKey(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("A opens Controls"), Overlay->SettingsScreenForTesting().IsValid());
+	TestTrue(TEXT("B is handled on Controls"), PressKey(EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B returns from Controls to the menu"),
+		Overlay->SettingsScreenForTesting().IsValid());
+	TestTrue(TEXT("the menu is still open after backing out of Controls"),
+		Controller->IsInGameMenuOpen());
+	TestTrue(TEXT("B is handled on the menu"), PressKey(EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B on the menu resumes gameplay"), Controller->IsInGameMenuOpen());
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuStableActionSpec,
 	"WoT.FrontEnd.InGameMenu.StableAction",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -1352,6 +1464,10 @@ bool FWoTHelpWindowSpec::RunTest(const FString&)
 	TestEqual(TEXT("rebound secondary ShowHelp key closes UI-only help"), CloseCount, 3);
 	Help->OnPreviewKeyDown(FGeometry(), MakeFrontEndKeyEvent(EKeys::Escape));
 	TestEqual(TEXT("Escape closes help too"), CloseCount, 4);
+	Help->OnPreviewKeyDown(FGeometry(), MakeFrontEndKeyEvent(EKeys::Gamepad_FaceButton_Right));
+	TestEqual(TEXT("B closes help"), CloseCount, 5);
+	Help->OnPreviewKeyDown(FGeometry(), MakeFrontEndKeyEvent(EKeys::Gamepad_Special_Left));
+	TestEqual(TEXT("View closes help"), CloseCount, 6);
 	return !HasAnyErrors();
 }
 

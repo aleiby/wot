@@ -381,7 +381,7 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Controller layout
 - **Original:** The default joystick setup binds Fire, Jump and four hat directions only.
-- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. Chat and menus by controller arrive with on-screen keyboard and menu navigation.
+- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. In the game menu and its windows the D-pad or stick moves the selection, A chooses and B backs out. Chat and the front-end menus by controller arrive with an on-screen keyboard and menu navigation.
 - **Why:** A match must be playable on a controller alone.
 
 ## Networking
