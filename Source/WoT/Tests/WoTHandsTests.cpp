@@ -306,4 +306,59 @@ bool FWoTHandsContinuousScrollSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTHandsSingleHandScrollWrapsSpec,
+	"WoT.Hands.SingleHandScrollWraps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTHandsSingleHandScrollWrapsSpec::RunTest(const FString&)
+{
+	UWorld* World = WoTTest::CreateSpecWorld();
+	AWoTPlayerController* PlayerController = World->SpawnActor<AWoTPlayerController>();
+	AWoTCharacter* Character = World->SpawnActor<AWoTCharacter>(
+		FVector(0, 0, 100), FRotator::ZeroRotator, WoTHandsTests_AlwaysSpawnParams());
+	if (!PlayerController || !Character)
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
+	PlayerController->SetAsLocalPlayerController();
+	PlayerController->Possess(Character);
+	UWoTInventoryComponent* Inventory = Character->InventoryComponent;
+	// Every angreal is in hand 0: Balefire (slot 0), Fireball (1), Dart (4).
+	AWoTInventory* Balefire = World->SpawnActor<AWoTAngrealInvBalefire>(WoTHandsTests_AlwaysSpawnParams());
+	AWoTInventory* Fireball = World->SpawnActor<AWoTAngrealInvFireball>(WoTHandsTests_AlwaysSpawnParams());
+	AWoTInventory* Dart = World->SpawnActor<AWoTAngrealInvDart>(WoTHandsTests_AlwaysSpawnParams());
+	if (!Balefire || !Fireball || !Dart)
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
+	for (AWoTInventory* Item : {Balefire, Fireball, Dart})
+	{
+		Inventory->AddInventory(Item);
+	}
+	WoTTest::TickWorld(World, 0.1f);   // the hands register new inventory on a tick
+	auto Sel = [Inventory]() -> FString
+	{
+		const AWoTInventory* Item = Inventory->SelectedItem.Get();
+		return Item ? Item->GetClass()->GetName() : FString(TEXT("none"));
+	};
+	Inventory->SelectItem(Dart);
+	WoTTest::TickWorld(World, 0.05f);
+	TestTrue(FString::Printf(TEXT("%s (selected %s)"), TEXT("the hand starts on Dart"), *Sel()),
+		Inventory->SelectedItem.Get() == Dart);
+	// The only hand is its own neighbour: scrolling wraps within it.
+	Character->NextItem();
+	TestTrue(FString::Printf(TEXT("%s (selected %s)"), TEXT("next past the last wraps to the first"), *Sel()),
+		Inventory->SelectedItem.Get() == Balefire);
+	Character->PrevItem();
+	TestTrue(FString::Printf(TEXT("%s (selected %s)"), TEXT("previous past the first wraps to the last"), *Sel()),
+		Inventory->SelectedItem.Get() == Dart);
+	Character->PrevItem();
+	TestTrue(FString::Printf(TEXT("%s (selected %s)"), TEXT("previous within the hand reaches Fireball"), *Sel()),
+		Inventory->SelectedItem.Get() == Fireball);
+	WoTTest::DestroySpecWorld(World);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS

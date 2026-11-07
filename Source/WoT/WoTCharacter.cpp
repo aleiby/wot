@@ -4713,8 +4713,13 @@ void AWoTCharacter::EnterAdjacentHand(int32 HandIndex, bool bAtFirst)
 	else { Hand->SelectLast(); }
 	// SelectHand's own reconcile would re-sync this hand to the inventory's
 	// selection, so select it directly (the hands were reconciled on entry).
+	// With one occupied hand it is its own neighbour; re-selecting it would
+	// step past the slot just chosen (a repeated hand press cycles items).
 	const bool bNewHand = HandIndex != CurrentHandSet->Selected;
-	CurrentHandSet->Select(HandIndex);
+	if (bNewHand)
+	{
+		CurrentHandSet->Select(HandIndex);
+	}
 	DriveHandSelection(bNewHand);
 }
 
