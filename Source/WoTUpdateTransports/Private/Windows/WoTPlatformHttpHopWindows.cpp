@@ -14,8 +14,16 @@
 #include <winhttp.h>
 #include "Windows/HideWindowsPlatformTypes.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogWoTPlatformHttpHop, Log, All);
+
 namespace
 {
+#if WITH_AUTOMATION_TESTS
+TAtomic<bool> GWoTPlatformHttpHopFailConnectRetriesForTesting{false};
+#endif
+// The connect-retries diagnostic is written once per process, not once per hop.
+TAtomic<bool> GWoTPlatformHttpHopConnectRetriesReported{false};
+
 class FWoTPlatformHttpHopWindowsHandle
 {
 public:
@@ -332,12 +340,30 @@ public:
 		// Keep the synchronous connect phase to one native attempt. Otherwise
 		// WinHttp can apply the full remaining connect timeout repeatedly.
 		DWORD ConnectAttempts = 1;
-		if (::WinHttpSetOption(Session.Get(),
-				WINHTTP_OPTION_CONNECT_RETRIES,
-				&ConnectAttempts, sizeof(ConnectAttempts)) == 0)
+		bool bConnectRetriesBounded = ::WinHttpSetOption(Session.Get(),
+			WINHTTP_OPTION_CONNECT_RETRIES,
+			&ConnectAttempts, sizeof(ConnectAttempts)) != 0;
+		DWORD ConnectRetriesError = bConnectRetriesBounded ? 0 : ::GetLastError();
+#if WITH_AUTOMATION_TESTS
+		if (GWoTPlatformHttpHopFailConnectRetriesForTesting.Load())
 		{
-			return WoTPlatformHttpHopWindowsFailure(
-				OutResponse, TEXT("could not bound WinHttp connection attempts"));
+			bConnectRetriesBounded = false;
+			ConnectRetriesError = ERROR_WINHTTP_INVALID_OPTION;
+		}
+#endif
+		if (!bConnectRetriesBounded)
+		{
+			// Best effort: Wine's WinHttp (Proton) does not implement this option.
+			// The remaining-timeouts call below stays mandatory and still bounds
+			// every phase by the absolute deadline, so a refused option only
+			// lets WinHttp use its own connect retry count within that bound.
+			if (!GWoTPlatformHttpHopConnectRetriesReported.Exchange(true))
+			{
+				UE_LOG(LogWoTPlatformHttpHop, Warning,
+					TEXT("WinHttp refused WINHTTP_OPTION_CONNECT_RETRIES (error %u); "
+						"the per-phase deadline still bounds every connection attempt"),
+					static_cast<uint32>(ConnectRetriesError));
+			}
 		}
 
 		if (!WoTPlatformHttpHopWindowsSetRemainingTimeouts(
@@ -632,6 +658,13 @@ private:
 	TAtomic<bool> bAbortRequested{false};
 };
 } // namespace
+
+#if WITH_AUTOMATION_TESTS
+void WoTPlatformHttpHopWindowsFailConnectRetriesForTesting(bool bFail)
+{
+	GWoTPlatformHttpHopFailConnectRetriesForTesting.Store(bFail);
+}
+#endif
 
 #if WOT_BOOTSTRAP_TEST_ENDPOINTS
 bool WoTPlatformHttpHopRewriteReleaseUrlForTesting(
