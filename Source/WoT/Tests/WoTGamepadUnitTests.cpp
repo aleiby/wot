@@ -4,6 +4,7 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "../Gamepad/WoTGamepadLayout.h"
+#include "../Gamepad/WoTStickShaping.h"
 
 namespace
 {
@@ -64,6 +65,50 @@ bool FWoTGamepadLayoutTableSpec::RunTest(const FString&)
 	const FWoTGamepadTuning& Tuning = WoTGamepadTuning();
 	TestTrue(TEXT("tuning came from the CSV"), Tuning.MoveGain > 1.0f && Tuning.YawRate > 0.0f
 		&& Tuning.OuterZone > 0.35f && Tuning.OuterZone <= 1.0f);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadStickShapingSpec,
+	"WoT.Input.Gamepad.StickShaping", Gamepad_UnitFlags)
+
+bool FWoTGamepadStickShapingSpec::RunTest(const FString&)
+{
+	using S = FWoTStickShaping;
+	const double Tol = 1.0e-4;
+	TestTrue(TEXT("inside the dead zone is zero"),
+		S::RadialDeadZone(FVector2D(0.19f, 0.0f), 0.2f, 0.95f).IsZero());
+	TestTrue(TEXT("the dead-zone edge is zero"),
+		S::RadialDeadZone(FVector2D(0.0f, 0.2f), 0.2f, 0.95f).IsZero());
+	const FVector2D Mid = S::RadialDeadZone(FVector2D(0.575f, 0.0f), 0.2f, 0.95f);
+	TestEqual(TEXT("halfway between the zones rescales to 0.5"), Mid.X, 0.5, Tol);
+	const FVector2D Diag = S::RadialDeadZone(FVector2D(1.0f, 1.0f), 0.2f, 0.95f);
+	TestEqual(TEXT("a corner clamps to magnitude 1"), Diag.Size(), 1.0, Tol);
+	TestEqual(TEXT("direction is kept"), Diag.X, Diag.Y, Tol);
+	TestTrue(TEXT("a dead zone at or past the outer zone gives nothing"),
+		S::RadialDeadZone(FVector2D(0.9f, 0.0f), 0.95f, 0.95f).IsZero());
+
+	// MoveGain 4.7: full input from 1/4.7 = 21.3% past the dead zone.
+	const FVector2D Saturated = S::Move(FVector2D(0.0f, 0.2f + 0.75f * 0.22f), 0.2f, 0.95f, 4.7f);
+	TestEqual(TEXT("22% past the dead zone saturates"), Saturated.Y, 1.0, Tol);
+	const FVector2D Partial = S::Move(FVector2D(0.0f, 0.2f + 0.75f * 0.1f), 0.2f, 0.95f, 4.7f);
+	TestEqual(TEXT("10% past the dead zone is partial"), Partial.Y, 0.47, Tol);
+	TestEqual(TEXT("a saturated diagonal is not faster than straight"),
+		S::Move(FVector2D(0.7f, 0.7f), 0.2f, 0.95f, 4.7f).Size(), 1.0, Tol);
+
+	const float Dt = 1.0f / 60.0f;
+	const FVector2D FullRight = S::LookDegrees(FVector2D(1.0f, 0.0f), 0.2f, 0.95f, 2.0f,
+		220.0f, 150.0f, 1.0f, false, 1.0f, Dt);
+	TestEqual(TEXT("full right yaws YawRate * dt"), FullRight.X, double(220.0f * Dt), Tol);
+	TestEqual(TEXT("no pitch from pure yaw"), FullRight.Y, 0.0, Tol);
+	const FVector2D HalfUp = S::LookDegrees(FVector2D(0.0f, 0.575f), 0.2f, 0.95f, 2.0f,
+		220.0f, 150.0f, 1.0f, false, 1.0f, Dt);
+	TestEqual(TEXT("half tilt up follows the curve (0.5^2)"), HalfUp.Y, double(0.25f * 150.0f * Dt), Tol);
+	const FVector2D Inverted = S::LookDegrees(FVector2D(0.0f, 0.575f), 0.2f, 0.95f, 2.0f,
+		220.0f, 150.0f, 1.0f, true, 1.0f, Dt);
+	TestEqual(TEXT("invert flips pitch"), Inverted.Y, -HalfUp.Y, Tol);
+	const FVector2D Scaled = S::LookDegrees(FVector2D(1.0f, 0.0f), 0.2f, 0.95f, 2.0f,
+		220.0f, 150.0f, 2.0f, false, 0.5f, Dt);
+	TestEqual(TEXT("sensitivity and FOV scale multiply"), Scaled.X, FullRight.X, Tol);
 	return !HasAnyErrors();
 }
 
