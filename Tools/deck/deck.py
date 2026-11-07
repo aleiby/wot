@@ -279,6 +279,10 @@ def main(argv: List[str] = None) -> int:
     p.add_argument("--app-id", type=int, required=True)
     p.add_argument("--proton", default="Proton 11.0")
     p.add_argument("probe_args", nargs="+")
+    p = sub.add_parser("cells", help="run the first-run cells on a deployed install")
+    p.add_argument("remote_dir")
+    p.add_argument("--app-id", type=int, required=True)
+    p.add_argument("--timeout", type=float, default=900.0)
     args = parser.parse_args(argv)
 
     target, runner = load_target(args.local_json), SubprocessRunner()
@@ -297,6 +301,13 @@ def main(argv: List[str] = None) -> int:
         for row in result.rows:
             print(json.dumps(row))
         return result.exit_status
+    elif args.command == "cells":
+        import cells
+        verdicts = cells.run_first_run_cells(target, runner, args.remote_dir,
+                                             args.app_id, timeout=args.timeout)
+        for name, verdict in verdicts:
+            print(f"{'PASS' if verdict.ok else 'FAIL'} {name}: {verdict.reason}")
+        return 0 if all(v.ok for _, v in verdicts) else 1
     elif args.command == "show":
         if not show_window(target, runner, args.class_name):
             print("no matching window", file=sys.stderr)
