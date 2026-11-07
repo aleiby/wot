@@ -309,3 +309,12 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
   - Open for Task 5: the `{counter}` placeholder on rows countered by many
     things needs a selection rule (most-specific-first: the dedicated
     counter, then Reflect, then element shields).
+- 2026-11-06 — Task 0 build proof: a fresh clone of the public repository
+  built `WoTEditor` (Mac, Development) through the guarded wrapper on the
+  first try — vendor innoextract fetch resolved and matched its pin, build
+  `Result: Succeeded`. Funnel notes: (e) the suites and the 3.9/3.12 CI
+  matrix caught a real `Path.write_text(newline=)` 3.10-only call — the
+  documented Python floor is load-bearing; (f) a first build leaves three
+  untracked files under `Build/Mac/` (two `Sandbox.*.entitlements`, one
+  `*.PackageVersionCounter`) that a contributor's clean-tree expectations
+  trip over — candidates for the public `.gitignore`.
