@@ -1,0 +1,7 @@
+Name,Value,Note
+OuterZone,0.95,Deflection treated as full tilt
+MoveGain,4.7,Full movement input from about 21% past the dead zone (the original joystick at 60 fps)
+YawRate,220,Degrees per second at full tilt (FOV 90; sensitivity 1)
+PitchRate,150,Degrees per second at full tilt
+LookExponent,2.0,Response curve; above 1 gives finer aim near center
+DropHoldSeconds,0.5,FaceLeft: a tap drops; a hold this long drops tainted
