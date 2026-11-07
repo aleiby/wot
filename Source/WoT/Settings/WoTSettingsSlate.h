@@ -75,6 +75,7 @@ public:
 #if WITH_AUTOMATION_TESTS
 	/** The Mouse Sensitivity slider's eight steps (its labels are "%gx"). */
 	static TArray<float> SensitivityStepsForTesting();
+	static TArray<float> ControllerSensitivityStepsForTesting();
 	const FWoTGameSettings& DraftForTesting() const { return Draft; }
 	void SetDraftForTesting(const FWoTGameSettings& NewDraft) { Draft = NewDraft; }
 	void BeginCaptureForTesting(EWoTManagedBinding Action, EWoTBindingSlot Slot)

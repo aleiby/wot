@@ -470,11 +470,20 @@ bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
 	const TSharedPtr<SCheckBox> Invert = Screen->ControllerInvertCheckBoxForTesting();
 	if (!TestTrue(TEXT("both controller controls exist"), Slider.IsValid() && Invert.IsValid()))
 		return false;
-	// One step right on the shared sensitivity scale is 2x; the mouse is untouched.
-	TestTrue(TEXT("the slider takes Right"),
-		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right)).IsEventHandled());
-	TestEqual(TEXT("controller sensitivity steps to 2x"),
-		Screen->DraftForTesting().ControllerLookSensitivity, 2.0f);
+	// The controller's own scale tops out at 4x; one step right of 1x is 1.5x.
+	TestTrue(TEXT("the slider takes End"),
+		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::End)).IsEventHandled());
+	TestEqual(TEXT("the controller sensitivity tops out at 4x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 4.0f);
+	Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Home));
+	TestEqual(TEXT("the controller sensitivity starts at 0.25x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 0.25f);
+	for (int32 Step = 0; Step < 4; ++Step)
+	{
+		Slider->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	}
+	TestEqual(TEXT("one step right of 1x is 1.5x"),
+		Screen->DraftForTesting().ControllerLookSensitivity, 1.5f);
 	TestEqual(TEXT("mouse sensitivity is unchanged"),
 		Screen->DraftForTesting().MouseSensitivity, Fixture.Owner->GetGameSettings().MouseSensitivity);
 	Invert->ToggleCheckedState();
@@ -484,7 +493,7 @@ bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
 
 	TestTrue(TEXT("save handled"), Screen->SaveForTesting().IsEventHandled());
 	TestEqual(TEXT("owner persisted the controller sensitivity"),
-		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 2.0f);
+		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 1.5f);
 	TestTrue(TEXT("owner persisted the controller invert"),
 		Fixture.Owner->GetGameSettings().bControllerInvertY);
 	return !HasAnyErrors();

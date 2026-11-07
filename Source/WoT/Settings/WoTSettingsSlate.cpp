@@ -15,21 +15,24 @@
 namespace
 {
 // Eight retail slider cells cover the 0.1-10 sensitivity range; 1x is a cell.
-// SWoTSliderValueLabel::AllValueLabels lists these steps' labels too.
+// SWoTSliderValueLabel::AllValueLabels lists these steps' labels, and the
+// controller's below, too.
 constexpr float SensitivitySteps[8] = {0.25f, 0.5f, 0.75f, 1.0f, 2.0f, 4.0f, 7.0f, 10.0f};
+// The controller stick already turns at tuned rates, so its scale stops at 4x.
+constexpr float ControllerSensitivitySteps[8] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
 constexpr uint16 FrameRateSteps[] = {0, 30, 60, 90, 120, 144, 165, 240};
 constexpr uint16 CommonResolutions[][2] = {
 	{640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 800}, {1366, 768},
 	{1440, 900}, {1600, 900}, {1680, 1050}, {1920, 1080}, {1920, 1200},
 	{2560, 1440}, {3440, 1440}, {3840, 2160}};
 
-int32 SensitivityIndex(float Sensitivity)
+int32 SensitivityIndex(float Sensitivity, const float (&Steps)[8] = SensitivitySteps)
 {
 	int32 Best = 0;
-	for (int32 Index = 1; Index < UE_ARRAY_COUNT(SensitivitySteps); ++Index)
+	for (int32 Index = 1; Index < UE_ARRAY_COUNT(Steps); ++Index)
 	{
-		if (FMath::Abs(SensitivitySteps[Index] - Sensitivity)
-			< FMath::Abs(SensitivitySteps[Best] - Sensitivity))
+		if (FMath::Abs(Steps[Index] - Sensitivity)
+			< FMath::Abs(Steps[Best] - Sensitivity))
 		{
 			Best = Index;
 		}
@@ -474,11 +477,13 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			.StepSize(0.125f)
 			.Value_Lambda([this]()
 			{
-				return SensitivityIndex(Draft.ControllerLookSensitivity) / 7.0f;
+				return SensitivityIndex(Draft.ControllerLookSensitivity,
+					ControllerSensitivitySteps) / 7.0f;
 			})
 			.OnValueChanged_Lambda([this](float Value)
 			{
-				Draft.ControllerLookSensitivity = SensitivitySteps[CellIndexFromSliderValue(Value)];
+				Draft.ControllerLookSensitivity =
+					ControllerSensitivitySteps[CellIndexFromSliderValue(Value)];
 				SetError(FText::GetEmpty());
 			})
 		]
@@ -998,5 +1003,10 @@ void SWoTSettingsScreen::SetStatus(const FText& Text)
 TArray<float> SWoTSettingsScreen::SensitivityStepsForTesting()
 {
 	return TArray<float>(SensitivitySteps, UE_ARRAY_COUNT(SensitivitySteps));
+}
+
+TArray<float> SWoTSettingsScreen::ControllerSensitivityStepsForTesting()
+{
+	return TArray<float>(ControllerSensitivitySteps, UE_ARRAY_COUNT(ControllerSensitivitySteps));
 }
 #endif

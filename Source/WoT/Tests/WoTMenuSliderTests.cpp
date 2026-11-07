@@ -402,6 +402,11 @@ bool FWoTSliderValueLabelSpec::RunTest(const FString&)
 		TestTrue(*FString::Printf(TEXT("sensitivity %gx is a known label"), Step),
 			Labels.Contains(FString::Printf(TEXT("%gx"), Step)));
 	}
+	for (const float Step : SWoTSettingsScreen::ControllerSensitivityStepsForTesting())
+	{
+		TestTrue(*FString::Printf(TEXT("controller sensitivity %gx is a known label"), Step),
+			Labels.Contains(FString::Printf(TEXT("%gx"), Step)));
+	}
 
 	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 20);
 	const float Width = SWoTSliderValueLabel::SharedWidth(Font);
