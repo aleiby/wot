@@ -29,6 +29,9 @@ python3 Tools/deck/deck.py heartbeat <remote Data folder>
 python3 Tools/deck/deck.py show            # bring the game window forward
 python3 Tools/deck/deck.py stop [--unit wotdeck]
 python3 Tools/deck/deck.py probe <wot_path_probe.exe> --app-id <shortcut id> <probe args...>
+python3 Tools/deck/deck.py cells <remote folder> --app-id <shortcut id>
+python3 Tools/deck/deck.py lock-cell <remote folder> --app-id <shortcut id>
+python3 Tools/deck/deck.py update-cell <remote folder> <release zip on the Deck> --app-id <shortcut id>
 ```
 
 `probe` copies the probe into the shortcut's Proton prefix, runs it with the
@@ -39,10 +42,26 @@ prints one JSON line per check and exits with the probe's own status.
 Game Mode it runs off-screen until `show` brings its window forward, because
 gamescope only shows apps that Steam launched itself.
 
+### Cells
+
+Each cell runs the game under Proton, judges it by the game's own heartbeat or
+its update folder, prints `PASS` or `FAIL` with a reason, and always stops the
+game.
+
+- `cells` launches a fresh install and judges its first run: it reached the
+  main menu, found the original installer in Downloads without Browse, and
+  completed its update check.
+- `lock-cell` needs an install whose update check already staged an update.
+  It starts the game directly, runs the launcher a second time, and passes
+  only if the staged update was left untouched.
+- `update-cell` stages the game folder from a newer release zip of the same
+  build configuration (already copied to the Deck), launches, and passes when
+  that release runs and its trial is retired.
+
 ## Tests
 
 ```
-PYTHONPATH=Tools/deck python3 -m unittest Tools.deck.test_deck
+PYTHONPATH=Tools/deck python3 -m unittest Tools.deck.test_deck Tools.deck.test_cells
 ```
 
 The tests fake SSH and need no Deck.

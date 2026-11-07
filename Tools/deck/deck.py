@@ -116,6 +116,35 @@ def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
         raise DeckError("launch failed: " + result.stderr.decode(errors="replace"))
 
 
+def launch_game_direct(target: DeckTarget, runner, remote_dir: str, unit: str,
+                       app_id: int, proton: str = "Proton 11.0",
+                       runtime: str = "SteamLinuxRuntime_4"):
+    """Start the game executable itself, bypassing the launcher.
+
+    The game takes its shared session lock without the launcher handling any
+    staged update first, so a later launcher run meets a running game.
+    """
+    if not UNIT_NAME.match(unit):
+        raise DeckError(f"unit name must match {UNIT_NAME.pattern}: {unit!r}")
+    prefix = f"{STEAM}/steamapps/compatdata/{int(app_id)}"
+    script = (
+        f"cd {shlex.quote(remote_dir)}/Game && "
+        "exe=$(ls \"$PWD\"/WoT/Binaries/Win64/WoT-Win64-*.exe | head -1) && "
+        "[ -n \"$exe\" ] && "
+        f"systemd-run --user --unit={unit} --collect "
+        f"--setenv=STEAM_COMPAT_DATA_PATH={prefix} "
+        f"--setenv=STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
+        f"--setenv=SteamAppId={int(app_id)} --setenv=SteamGameId={int(app_id)} "
+        f"--setenv=DISPLAY=:0 -p WorkingDirectory=\"$PWD\" "
+        f"timeout --kill-after={KILL_AFTER_SECONDS} 3600 "
+        f"{_proton_command(runtime, proton)} \"$exe\""
+    )
+    result = ssh(target, runner, script)
+    if result.returncode != 0:
+        raise DeckError("direct game launch failed: "
+                        + result.stderr.decode(errors="replace"))
+
+
 def stop(target: DeckTarget, runner, unit: str):
     """Stop a launched unit; an already-stopped unit is not an error."""
     result = ssh(target, runner, f"systemctl --user stop {shlex.quote(unit)} || true")
@@ -279,6 +308,19 @@ def main(argv: List[str] = None) -> int:
     p.add_argument("--app-id", type=int, required=True)
     p.add_argument("--proton", default="Proton 11.0")
     p.add_argument("probe_args", nargs="+")
+    p = sub.add_parser("cells", help="run the first-run cells on a deployed install")
+    p.add_argument("remote_dir")
+    p.add_argument("--app-id", type=int, required=True)
+    p.add_argument("--timeout", type=float, default=900.0)
+    p = sub.add_parser("lock-cell",
+                       help="a second launcher must not touch a staged update while the game runs")
+    p.add_argument("remote_dir")
+    p.add_argument("--app-id", type=int, required=True)
+    p = sub.add_parser("update-cell",
+                       help="stage a newer release zip (on the Deck) and judge the next launch")
+    p.add_argument("remote_dir")
+    p.add_argument("candidate_zip")
+    p.add_argument("--app-id", type=int, required=True)
     args = parser.parse_args(argv)
 
     target, runner = load_target(args.local_json), SubprocessRunner()
@@ -297,6 +339,25 @@ def main(argv: List[str] = None) -> int:
         for row in result.rows:
             print(json.dumps(row))
         return result.exit_status
+    elif args.command == "cells":
+        import cells
+        verdicts = cells.run_first_run_cells(target, runner, args.remote_dir,
+                                             args.app_id, timeout=args.timeout)
+        for name, verdict in verdicts:
+            print(f"{'PASS' if verdict.ok else 'FAIL'} {name}: {verdict.reason}")
+        return 0 if all(v.ok for _, v in verdicts) else 1
+    elif args.command in ("lock-cell", "update-cell"):
+        import cells
+        if args.command == "lock-cell":
+            name = "launcher-skips-while-running"
+            verdict = cells.run_launcher_lock_cell(target, runner, args.remote_dir,
+                                                   args.app_id)
+        else:
+            name = "staged-update-applies"
+            verdict = cells.run_staged_update_cell(target, runner, args.remote_dir,
+                                                   args.app_id, args.candidate_zip)
+        print(f"{'PASS' if verdict.ok else 'FAIL'} {name}: {verdict.reason}")
+        return 0 if verdict.ok else 1
     elif args.command == "show":
         if not show_window(target, runner, args.class_name):
             print("no matching window", file=sys.stderr)
