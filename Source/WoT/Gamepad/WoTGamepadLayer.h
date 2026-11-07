@@ -71,6 +71,7 @@ private:
 	void OnScoreboardPressed();
 	void OnScoreboardReleased();
 	void OnWalkToggle();
+	void OnTurnAround();
 	void OnButton(EWoTGamepadAction Action);
 
 	TWeakObjectPtr<AWoTPlayerController> Controller;
@@ -84,6 +85,9 @@ private:
 	bool bScoreboardShownByHold = false;
 	TWeakObjectPtr<AWoTCharacter> CenterViewPawn;
 	TWeakObjectPtr<AWoTCharacter> WalkToggledPawn;
+	/** Degrees of the quick turn still to apply, and the pawn it turns. */
+	float TurnAroundRemaining = 0.0f;
+	TWeakObjectPtr<AWoTCharacter> TurnAroundPawn;
 #if WITH_AUTOMATION_TESTS
 	TOptional<FStickSettings> StickSettingsOverrideForTest;
 #endif

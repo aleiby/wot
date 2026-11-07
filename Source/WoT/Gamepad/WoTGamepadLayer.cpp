@@ -86,6 +86,7 @@ void UWoTGamepadLayer::BindButtons(UEnhancedInputComponent& Input)
 	Input.BindAction(Action(EWoTGamepadAction::Scoreboard), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnScoreboardPressed);
 	Input.BindAction(Action(EWoTGamepadAction::Scoreboard), ETriggerEvent::Completed, this, &UWoTGamepadLayer::OnScoreboardReleased);
 	Input.BindAction(Action(EWoTGamepadAction::WalkToggle), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnWalkToggle);
+	Input.BindAction(Action(EWoTGamepadAction::TurnAround), ETriggerEvent::Started, this, &UWoTGamepadLayer::OnTurnAround);
 	for (EWoTGamepadAction Id : {EWoTGamepadAction::EditCitadel, EWoTGamepadAction::Drop,
 		EWoTGamepadAction::DropTainted, EWoTGamepadAction::ItemInfo, EWoTGamepadAction::PrevItem,
 		EWoTGamepadAction::NextItem, EWoTGamepadAction::PrevHand, EWoTGamepadAction::NextHand,
@@ -124,12 +125,27 @@ const UInputMappingContext* UWoTGamepadLayer::GetContext(EWoTGamepadContext Cont
 	return Contexts.IsValidIndex(Index) ? Contexts[Index].Get() : nullptr;
 }
 
-void UWoTGamepadLayer::Tick(float)
+void UWoTGamepadLayer::Tick(float DeltaSeconds)
 {
 	const EWoTGamepadMode Desired = DesiredMode();
 	if (Desired != Mode)
 	{
 		ApplyMode(Desired);
+	}
+	// The quick turn spreads 180 degrees over TurnAroundSeconds through the same
+	// look path as the stick, so the last step lands exactly on 180.
+	AWoTCharacter* Pawn = TurnAroundPawn.Get();
+	const UWorld* World = Pawn ? Pawn->GetWorld() : nullptr;
+	if (TurnAroundRemaining > 0.0f && Pawn && World && !World->IsPaused())
+	{
+		const float Seconds = FMath::Max(WoTGamepadTuning().TurnAroundSeconds, UE_KINDA_SMALL_NUMBER);
+		const float Step = FMath::Min(TurnAroundRemaining, 180.0f * DeltaSeconds / Seconds);
+		Pawn->ApplyStickLook(Step, 0.0f);
+		TurnAroundRemaining -= Step;
+	}
+	else if (!Pawn)
+	{
+		TurnAroundRemaining = 0.0f;
 	}
 }
 
@@ -179,6 +195,8 @@ void UWoTGamepadLayer::ReleaseHeldEdges()
 void UWoTGamepadLayer::OnPawnChanged()
 {
 	ReleaseHeldEdges();
+	TurnAroundRemaining = 0.0f;
+	TurnAroundPawn.Reset();
 	if (AWoTCharacter* Walker = WalkToggledPawn.Get())
 	{
 		Walker->WalkingReleased();
@@ -254,6 +272,18 @@ void UWoTGamepadLayer::OnScoreboardReleased()
 		PC->ShowScores();
 	}
 	bScoreboardShownByHold = false;
+}
+
+void UWoTGamepadLayer::OnTurnAround()
+{
+	// A press during a turn is ignored; the turn in progress finishes.
+	AWoTCharacter* Pawn = Character();
+	if (!Pawn || TurnAroundRemaining > 0.0f)
+	{
+		return;
+	}
+	TurnAroundPawn = Pawn;
+	TurnAroundRemaining = 180.0f;
 }
 
 void UWoTGamepadLayer::OnWalkToggle()

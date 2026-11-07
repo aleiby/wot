@@ -45,6 +45,12 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("/*YawRate*/ 220.0f,", text)
         self.assertIn("/*MoveGain*/ 4.7f,", text)
 
+    def test_turn_around_is_a_known_action_with_its_tuning(self):
+        text = gen.render(LAYOUT, TUNING).decode()
+        self.assertIn("{EWoTGamepadContext::Gameplay, EWoTGamepadInput::LeftTrigger, "
+                      "EWoTGamepadAction::TurnAround, EWoTGamepadTrigger::Press},", text)
+        self.assertIn("/*TurnAroundSeconds*/ 0.15f,", text)
+
     def test_unknown_names_are_refused(self):
         for old, new in [("Gameplay,FaceTop,ItemInfo,", "Gameplay,FaceTip,ItemInfo,"),
                          ("Gameplay,FaceTop,ItemInfo,", "Gameplay,FaceTop,ItemInfos,"),
@@ -88,6 +94,7 @@ class GeneratorTests(unittest.TestCase):
                          ("MoveGain,4.7,", "MoveGain,0.5,"),
                          ("YawRate,220,", "YawRate,0,"),
                          ("LookExponent,2.0,", "LookExponent,nan,"),
+                         ("TurnAroundSeconds,0.15,", "TurnAroundSeconds,0,"),
                          ("DropHoldSeconds,0.5,FaceLeft: a tap drops; a hold this long drops tainted\n", "")]:
             with self.subTest(new=new), self.assertRaises(gen.LayoutError):
                 gen.render(LAYOUT, _replace(TUNING, old, new))

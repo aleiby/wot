@@ -518,4 +518,35 @@ bool FWoTGamepadPausedFirePressSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadTurnAroundSpec,
+	"WoT.Input.Gamepad.TurnAround", Gamepad_WorldFlags)
+
+bool FWoTGamepadTurnAroundSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	Fx.ResetPawn();
+	const double Start = Fx.Controller->GetControlRotation().Yaw;
+	auto Turned = [&Fx, Start]()
+	{
+		return FMath::Abs(FMath::FindDeltaAngleDegrees(Start, Fx.Controller->GetControlRotation().Yaw));
+	};
+	Fx.Send(EKeys::Gamepad_LeftTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(3);
+	TestTrue(FString::Printf(TEXT("LT turns gradually, not in one frame (%.1f deg after 0.05 s)"), Turned()),
+		Turned() > 10.0 && Turned() < 170.0);
+	Fx.Send(EKeys::Gamepad_LeftTrigger, IE_Released, 0.0f);
+	Fx.Frames(15);
+	TestEqual(TEXT("the turn ends facing the other way"), Turned(), 180.0, 0.5);
+	Fx.Frames(10);
+	TestEqual(TEXT("and stops there"), Turned(), 180.0, 0.5);
+	// A second press turns back.
+	Fx.Send(EKeys::Gamepad_LeftTrigger, IE_Pressed, 1.0f);
+	Fx.Frames(1);
+	Fx.Send(EKeys::Gamepad_LeftTrigger, IE_Released, 0.0f);
+	Fx.Frames(20);
+	TestEqual(TEXT("a second turn faces the start again"), Turned(), 0.0, 0.5);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS && WITH_EDITOR

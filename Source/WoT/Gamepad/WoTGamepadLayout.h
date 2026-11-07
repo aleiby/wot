@@ -22,7 +22,7 @@ enum class EWoTGamepadAction : uint8
 {
 	Move, Look, Fire, Jump, EditCitadel, Drop, DropTainted, ItemInfo,
 	PrevItem, NextItem, PrevHand, NextHand, ViewUp, ViewDown,
-	RandomTaunt, WalkToggle, CenterView, Scoreboard, Menu,
+	RandomTaunt, WalkToggle, CenterView, Scoreboard, Menu, TurnAround,
 	Count
 };
 
@@ -45,6 +45,7 @@ struct FWoTGamepadTuning
 	float PitchRate;       // degrees per second at full tilt
 	float LookExponent;    // look response curve
 	float DropHoldSeconds; // FaceLeft tap/hold split
+	float TurnAroundSeconds; // LeftTrigger quick 180-degree turn
 };
 
 /** Every row of ControllerLayout.csv, in file order. */
