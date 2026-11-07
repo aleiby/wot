@@ -614,6 +614,11 @@ bool WineVolumeBoundaryForAbsolutePath(HANDLE Handle, FStringView Path)
 	{
 		return false;
 	}
+	// The parent is opened by path after the child is held. That is enough
+	// here: it is consulted only under Wine and only for a reparse directory,
+	// and a junction object lives on its parent's volume, so only a genuine
+	// mount point differs. Swapping the parent in between needs a same-user
+	// process, which under Proton can already change the install directly.
 	const HANDLE ParentHandle = ::CreateFileW(*Parent, FILE_READ_ATTRIBUTES,
 		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
 		OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
