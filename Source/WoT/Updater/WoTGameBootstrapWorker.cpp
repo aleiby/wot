@@ -1527,10 +1527,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		switch (Reason)
 		{
 		case EWoTOriginalGameNeededReason::OnlineOnly:
-			return 5;
+			return 6;
 		case EWoTOriginalGameNeededReason::UnsupportedReparsePoint:
-			return 4;
+			return 5;
 		case EWoTOriginalGameNeededReason::PickedWrongFile:
+			return 4;
+		case EWoTOriginalGameNeededReason::HardLinked:
 			return 3;
 		case EWoTOriginalGameNeededReason::Downloading:
 			return 2;
@@ -1889,6 +1891,13 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				continue;
 			}
 			if (Observation.State
+				== EWoTPinnedAdjacentInstallerProbe::HardLinked)
+			{
+				Tracked->PreviousCandidateIdentity.Reset();
+				MergeReason(EWoTOriginalGameNeededReason::HardLinked);
+				continue;
+			}
+			if (Observation.State
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
@@ -1977,6 +1986,11 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			{
 				MergeReason(
 					EWoTOriginalGameNeededReason::UnsupportedReparsePoint);
+			}
+			else if (Result.State
+				== EWoTPinnedAdjacentInstallerProbe::HardLinked)
+			{
+				MergeReason(EWoTOriginalGameNeededReason::HardLinked);
 			}
 			Tracked->PreviousCandidateIdentity.Reset();
 		}

@@ -52,6 +52,8 @@ enum class EWoTPinnedAdjacentInstallerProbe : uint8
 	Downloading,
 	OnlineOnly,
 	UnsupportedReparsePoint,
+	/** The installer's size, but the file has more than one name. */
+	HardLinked,
 };
 
 /** A hash-free observation used to prove that a complete-looking copy is

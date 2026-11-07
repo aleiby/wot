@@ -1189,6 +1189,10 @@ bool FWoTBootstrapFlowSpec::RunTest(const FString&)
 		{EWoTOriginalGameNeededReason::UnsupportedReparsePoint,
 			TEXT("That installer is stored through an unsupported Windows reparse "
 				"point. Move or copy it to a normal local file, then click Browse.")},
+		{EWoTOriginalGameNeededReason::HardLinked,
+			TEXT("That installer is a hard link (one file with more than one name), "
+				"which WoT Reborn won't read. Copy it to an ordinary file instead of "
+				"linking it, then click Browse.")},
 	};
 	for (const TPair<EWoTOriginalGameNeededReason, FString>& Case : ReasonTexts)
 	{

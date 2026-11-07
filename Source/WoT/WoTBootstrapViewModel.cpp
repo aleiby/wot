@@ -16,6 +16,8 @@ const TCHAR* LexToString(EWoTOriginalGameNeededReason Reason)
 		return TEXT("online-only");
 	case EWoTOriginalGameNeededReason::UnsupportedReparsePoint:
 		return TEXT("unsupported-reparse-point");
+	case EWoTOriginalGameNeededReason::HardLinked:
+		return TEXT("hard-linked");
 	case EWoTOriginalGameNeededReason::Missing:
 	default:
 		return TEXT("missing");
