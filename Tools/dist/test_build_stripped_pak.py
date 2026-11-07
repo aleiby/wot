@@ -30,8 +30,10 @@ def write_fake_mac_zip(path, tag=b"synthetic-archive", extra=()):
     import zipfile
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("WoT.app/Contents/Info.plist", tag)
-        for name in extra:
-            archive.writestr(name, b"")
+        entries = extra.items() if isinstance(extra, dict) else (
+            (name, b"") for name in extra)
+        for name, contents in entries:
+            archive.writestr(name, contents)
 
 
 def write_fake_mac_dmg(_app, guarded_zip, output):
@@ -264,6 +266,12 @@ class SeedEntitlementsValidityTests(unittest.TestCase):
         resources.mkdir(parents=True, exist_ok=True)
         self.entitlements = resources / "Sandbox.Server.entitlements"
         self.entitlements.write_text("<dict/>")
+        version_path = (
+            self.iso / "Build" / "WoTRelease" / "release-version.json")
+        version_path.parent.mkdir(parents=True, exist_ok=True)
+        version_path.write_bytes(
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"","version":1}')
         bs._write_stamp(self.iso, "seed", {
             "copy_set": list(bs.SEED_COPY_SET),
             "import_generated_outputs": [
@@ -374,8 +382,9 @@ class SeedReleaseCommitTests(unittest.TestCase):
         path.write_text(json.dumps(authority, indent=2, sort_keys=True) + "\n")
         return rows
 
-    def test_seed_stamps_commit_into_config_and_stamp(self):
-        self.assertEqual(bs.stage_seed(self.iso, release_sequence=12), "ran")
+    def test_seed_stamps_commit_and_human_version_into_project_and_stamp(self):
+        self.assertEqual(bs.stage_seed(
+            self.iso, release_sequence=12, human_version="0.1.2"), "ran")
         self.assertTrue(
             (self.iso / "Config" / "DefaultGame.ini").read_text().endswith(
                 "\n[WoTNetVersion]\nReleaseCommit=abcdef123\n"))
@@ -384,16 +393,69 @@ class SeedReleaseCommitTests(unittest.TestCase):
         self.assertEqual(
             bs._read_stamp(self.iso, "seed")["release_sequence"], 12)
         self.assertEqual(
+            bs._read_stamp(self.iso, "seed")["human_version"], "0.1.2")
+        self.assertEqual(
             (self.iso / "Build" / "WoTRelease" / "release-identity.json")
             .read_bytes(),
             b'{"format":"wot-release-identity-v1",'
             b'"release_commit":"abcdef123","release_sequence":12,"version":1}')
+        self.assertEqual(
+            (self.iso / "Build" / "WoTRelease" / "release-version.json")
+            .read_bytes(),
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"0.1.2","version":1}')
 
     def test_release_sequence_change_invalidates_the_seed_and_downstream_steps(self):
         self.assertEqual(bs.stage_seed(self.iso, release_sequence=5), "ran")
         bs._write_stamp(self.iso, "import", {"success_marker": "complete"})
         self.assertEqual(bs.stage_seed(self.iso, release_sequence=5), "cached")
         self.assertEqual(bs.stage_seed(self.iso, release_sequence=6), "ran")
+        self.assertIsNone(bs._read_stamp(self.iso, "import"))
+
+    def test_legacy_empty_seed_without_release_version_is_reseeded(self):
+        self.assertEqual(bs.stage_seed(self.iso), "ran")
+        stamp = bs._read_stamp(self.iso, "seed")
+        del stamp["human_version"]
+        bs._write_stamp(self.iso, "seed", stamp)
+        version_path = (
+            self.iso / "Build" / "WoTRelease" / "release-version.json")
+        version_path.unlink()
+        bs._write_stamp(self.iso, "import", {"success_marker": "complete"})
+        self.assertEqual(bs.stage_seed(self.iso, human_version=""), "ran")
+        self.assertIsNone(bs._read_stamp(self.iso, "import"))
+        self.assertEqual(
+            version_path.read_bytes(),
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"","version":1}')
+
+    def test_stale_release_version_is_reseeded(self):
+        self.assertEqual(
+            bs.stage_seed(self.iso, human_version="0.1.2"), "ran")
+        version_path = (
+            self.iso / "Build" / "WoTRelease" / "release-version.json")
+        version_path.write_bytes(
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"0.2.0","version":1}')
+        bs._write_stamp(self.iso, "import", {"success_marker": "complete"})
+        self.assertEqual(
+            bs.stage_seed(self.iso, human_version="0.1.2"), "ran")
+        self.assertIsNone(bs._read_stamp(self.iso, "import"))
+        self.assertEqual(
+            version_path.read_bytes(),
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"0.1.2","version":1}')
+
+    def test_correct_release_version_is_cached(self):
+        self.assertEqual(
+            bs.stage_seed(self.iso, human_version="0.1.2"), "ran")
+        self.assertEqual(
+            bs.stage_seed(self.iso, human_version="0.1.2"), "cached")
+
+    def test_human_version_change_invalidates_seed_and_downstream_steps(self):
+        self.assertEqual(bs.stage_seed(self.iso), "ran")
+        bs._write_stamp(self.iso, "import", {"success_marker": "complete"})
+        self.assertEqual(
+            bs.stage_seed(self.iso, human_version="0.1.2"), "ran")
         self.assertIsNone(bs._read_stamp(self.iso, "import"))
 
     def test_release_sequence_argument_accepts_only_non_negative_int64(self):
@@ -405,6 +467,33 @@ class SeedReleaseCommitTests(unittest.TestCase):
                 bs.parser().parse_args([
                     "--cache", str(self.repo / "cache"),
                     "--release-sequence", value])
+
+    def test_human_version_argument_defaults_empty_and_validates_at_parse_time(self):
+        parsed = bs.parser().parse_args([
+            "--cache", str(self.repo / "cache")])
+        self.assertEqual(parsed.human_version, "")
+        parsed = bs.parser().parse_args([
+            "--cache", str(self.repo / "cache"),
+            "--human-version", "0.1.2"])
+        self.assertEqual(parsed.human_version, "0.1.2")
+        for value in ("v0.1.2", "1" + "a" * 32):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                bs.parser().parse_args([
+                    "--cache", str(self.repo / "cache"),
+                    "--human-version", value])
+
+    def test_guarded_summary_reports_requested_human_version(self):
+        args = SimpleNamespace(
+            guarded=True, configuration="Test", platform="Win64",
+            cache=self.repo / "cache", release_sequence=12,
+            human_version="0.1.2")
+        containers = {"container_count": 0, "total_bytes": 0}
+        with mock.patch.object(bs, "_container_summary", return_value=containers), \
+                mock.patch.object(bs, "_cache_summary", return_value={}):
+            path = bs.write_summary(args, self.iso, {})
+        self.assertEqual(
+            json.loads(path.read_text(encoding="utf-8"))["human_version"],
+            "0.1.2")
 
     def test_ignored_machine_files_never_enter_or_invalidate_guarded_seed(self):
         local = self.repo / "Tools" / "local.json"
@@ -1009,6 +1098,13 @@ class GuardedModeTests(unittest.TestCase):
         (iso / identity_relative).write_bytes(identity)
         (staged_app / "Contents" / "UE" / "WoT" /
          identity_relative).write_bytes(identity)
+        version_relative = Path(
+            "Build", "WoTRelease", "release-version.json")
+        version = (b'{"format":"wot-release-version-v1",'
+                   b'"human_version":"","version":1}')
+        (iso / version_relative).write_bytes(version)
+        (staged_app / "Contents" / "UE" / "WoT" /
+         version_relative).write_bytes(version)
 
     def guarded_evidence(self):
         iso = self.root / "iso"
@@ -2773,6 +2869,7 @@ class GuardedModeTests(unittest.TestCase):
                 mock.patch.object(bs, "_require_staged_production_descriptor"), \
                 mock.patch.object(bs, "_require_release_notes_absent"), \
                 mock.patch.object(bs, "_require_staged_release_identity"), \
+                mock.patch.object(bs, "_require_staged_release_version"), \
                 mock.patch.object(
                     bs.windows_launcher, "build_launcher",
                     side_effect=lambda destination, _game, _configuration:
@@ -4058,7 +4155,11 @@ class GuardedModeTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             self.assertEqual(command[0], "ditto")
             write_fake_mac_zip(
-                command[-1], b"synthetic-archive " + command[-2].encode("utf-8"))
+                command[-1],
+                b"synthetic-archive " + command[-2].encode("utf-8"),
+                {"WoT.app/Contents/UE/WoT/Build/WoTRelease/"
+                 "release-version.json":
+                 release_formats.release_version_bytes("")})
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with mock.patch.object(bs.absence_audit, "audit",
@@ -4072,6 +4173,9 @@ class GuardedModeTests(unittest.TestCase):
                 mock.patch.object(
                     bs, "_require_staged_release_identity",
                     wraps=bs._require_staged_release_identity) as require_identity, \
+                mock.patch.object(
+                    bs, "_require_staged_release_version",
+                    wraps=bs._require_staged_release_version) as require_version, \
                 mock.patch.object(bs.subprocess, "run", side_effect=fake_ditto):
             self.assertEqual(
                 bs.stage_shipping_audit(self.shipping_args(), iso), "ran")
@@ -4089,6 +4193,10 @@ class GuardedModeTests(unittest.TestCase):
                 mock.call(iso / "staged" / "Mac", iso),
                 mock.call(iso / "staged-shipping" / "Mac", iso),
             ])
+            self.assertEqual(require_version.call_args_list, [
+                mock.call(iso / "staged" / "Mac", iso),
+                mock.call(iso / "staged-shipping" / "Mac", iso),
+            ])
             self.assertEqual(
                 bs.stage_shipping_package(self.shipping_args(), iso), "cached")
             test_json = iso / "release" / "release.json"
@@ -4103,6 +4211,7 @@ class GuardedModeTests(unittest.TestCase):
             self.assertEqual(twin["release_json_sha256"],
                              bs._sha256_file(test_json))
             self.assertEqual(twin["release_sequence"], 0)
+            self.assertEqual(twin["human_version"], "")
             self.assertEqual(twin["asset"], "WoT-Mac-guarded-abc123456.zip")
             self.assertEqual(
                 manifest["zen_lifetime"]["receipt_sha256"],
@@ -4133,6 +4242,75 @@ class GuardedModeTests(unittest.TestCase):
             rebound = json.loads(shipping_json.read_text(encoding="utf-8"))
             self.assertEqual(rebound["test_twin"]["release_json_sha256"],
                              bs._sha256_file(test_json))
+
+    def test_test_twin_binding_reads_each_platform_game_tree_version(self):
+        import release_formats
+        import zipfile
+
+        commit = "abc123456"
+        source_snapshot = {"sha256": "s" * 64}
+        for platform_name in release_formats.PLATFORMS:
+            with self.subTest(platform=platform_name):
+                iso = self.root / f"test-twin-version-{platform_name}"
+                release_dir = iso / "release"
+                release_dir.mkdir(parents=True)
+                asset_name = release_formats.guarded_install_zip_asset(
+                    platform_name, commit, release_formats.TEST_CONFIGURATION)
+                asset = release_dir / asset_name
+                member = (
+                    release_formats.GUARDED_TREE_ROOTS[platform_name] + "/"
+                    + release_formats.release_version_relative(platform_name))
+                with zipfile.ZipFile(asset, "w") as archive:
+                    archive.writestr(
+                        member,
+                        release_formats.release_version_bytes("0.1.2"))
+                manifest = {
+                    "format": "wot-guarded-release-v1",
+                    "configuration": release_formats.TEST_CONFIGURATION,
+                    "platform": platform_name,
+                    "git_commit": commit,
+                    "release_sequence": 0,
+                    "source_snapshot": source_snapshot,
+                    "asset": asset_name,
+                    "sha256": bs._sha256_file(asset),
+                    "size": asset.stat().st_size,
+                    "zen_lifetime": {"receipt_sha256": "z" * 64},
+                    "cooked_container_inventory": {
+                        "receipt_sha256": "c" * 64},
+                    "audit": {"staged_tree_sha256": "t" * 64},
+                }
+                release_json = release_dir / "release.json"
+                bs._write_json(release_json, manifest)
+                bs._write_stamp(iso, "package", {
+                    "mode": "guarded",
+                    "manifest": str(release_json),
+                    "release_json_sha256": bs._sha256_file(release_json),
+                    "sha256": manifest["sha256"],
+                })
+                inventory = {
+                    "receipt_sha256": "c" * 64,
+                    "receipt": {},
+                }
+                comparison = {
+                    "project_package_census_sha256": "p" * 64,
+                    "container_bytes": {"identical": [], "differs": []},
+                }
+                with mock.patch.object(
+                        bs, "_guarded_cooked_inventory_binding",
+                        return_value=inventory), \
+                        mock.patch.object(
+                            bs, "_guarded_zen_binding", return_value={
+                                "receipt_sha256": "z" * 64}), \
+                        mock.patch.object(
+                            bs, "_validate_staged_tree_receipt", return_value={
+                                "tree_sha256": "t" * 64}), \
+                        mock.patch.object(
+                            bs, "_cooked_twin_comparison",
+                            return_value=comparison):
+                    twin = bs._test_twin_binding(
+                        iso, platform_name, commit, source_snapshot,
+                        {}, {}, 0)
+                self.assertEqual(twin["human_version"], "0.1.2")
 
     def test_shipping_package_refuses_a_tampered_test_twin(self):
         evidence = self.provision_shipping_iso()
@@ -4422,6 +4600,61 @@ class StagedReleaseIdentityTests(unittest.TestCase):
         self.stage(mac, b"loose staging twin is not shipped")
         self.assertEqual(
             bs._require_staged_release_identity(mac, self.iso), bundled)
+
+
+class StagedReleaseVersionTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.iso = Path(self._tmp.name) / "iso"
+        self.relative = Path("Build", "WoTRelease", "release-version.json")
+        self.version = (b'{"format":"wot-release-version-v1",'
+                        b'"human_version":"0.1.2","version":1}')
+        source = self.iso / self.relative
+        source.parent.mkdir(parents=True)
+        source.write_bytes(self.version)
+        bs._write_stamp(self.iso, "seed", {"human_version": "0.1.2"})
+
+    def stage(self, root: Path, data: bytes = None) -> Path:
+        path = root / "WoT" / self.relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(self.version if data is None else data)
+        return path
+
+    def test_missing_duplicate_mismatch_malformed_and_stamp_errors_fail(self):
+        win = self.iso / "staged-test" / "Windows"
+        with self.subTest("missing"):
+            with self.assertRaisesRegex(bs.BuildFailure, "found 0"):
+                bs._require_staged_release_version(win, self.iso)
+        with self.subTest("duplicate"):
+            self.stage(win)
+            self.stage(win / "Engine" / "Extra")
+            with self.assertRaisesRegex(bs.BuildFailure, "found 2"):
+                bs._require_staged_release_version(win, self.iso)
+            shutil.rmtree(win / "Engine")
+        with self.subTest("mismatched bytes"):
+            self.stage(win, b"{}")
+            with self.assertRaisesRegex(bs.BuildFailure, "not the ISO's"):
+                bs._require_staged_release_version(win, self.iso)
+        with self.subTest("malformed"):
+            (self.iso / self.relative).write_bytes(b"{")
+            self.stage(win, b"{")
+            with self.assertRaisesRegex(bs.BuildFailure, "release version"):
+                bs._require_staged_release_version(win, self.iso)
+        with self.subTest("stamp mismatch"):
+            (self.iso / self.relative).write_bytes(self.version)
+            self.stage(win)
+            bs._write_stamp(self.iso, "seed", {"human_version": "0.2.0"})
+            with self.assertRaisesRegex(bs.BuildFailure, "cooked seed"):
+                bs._require_staged_release_version(win, self.iso)
+
+    def test_mac_bundled_copy_wins_over_loose_twin(self):
+        mac = self.iso / "staged-test" / "Mac"
+        bundled = self.stage(mac / "WoT.app" / "Contents" / "UE")
+        self.stage(mac, b"loose staging twin is not shipped")
+        self.assertEqual(
+            bs._require_staged_release_version(mac, self.iso), bundled)
+
 
 class CompileCacheTests(unittest.TestCase):
     """The persistent build root: wiring, transfer and fail-closed seams."""

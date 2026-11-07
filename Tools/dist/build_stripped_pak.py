@@ -750,12 +750,14 @@ def _neutral_support_lifecycle_receipt(
 
 
 def _seed_valid(iso: Path, *, guarded: bool = False,
-                release_sequence: int = 0) -> bool:
+                release_sequence: int = 0,
+                human_version: str = "") -> bool:
     stamp = _read_stamp(iso, "seed")
     copy_set = GUARDED_SEED_COPY_SET if guarded else SEED_COPY_SET
     if not _seed_inputs_valid(
             iso, stamp, copy_set, require_generated_outputs=guarded,
-            release_sequence=release_sequence):
+            release_sequence=release_sequence,
+            human_version=human_version):
         return False
     # The release commit is cooked into DefaultGame.ini. A moved HEAD must
     # rebuild the isolated seed rather than reusing a differently pinned cook.
@@ -784,7 +786,15 @@ def _seed_valid(iso: Path, *, guarded: bool = False,
 def _seed_inputs_valid(iso: Path, stamp: dict | None,
                        copy_set: Sequence[str], *,
                        require_generated_outputs: bool = False,
-                       release_sequence: int = 0) -> bool:
+                       release_sequence: int = 0,
+                       human_version: str = "") -> bool:
+    version_path = iso / "Build" / "WoTRelease" / "release-version.json"
+    try:
+        version_matches = (
+            version_path.read_bytes()
+            == release_formats.release_version_bytes(human_version))
+    except OSError:
+        version_matches = False
     return bool(
         stamp
         and stamp.get("copy_set") == list(copy_set)
@@ -793,18 +803,22 @@ def _seed_inputs_valid(iso: Path, stamp: dict | None,
                  path.as_posix() for path in IMPORT_GENERATED_OUTPUTS])
         and all((iso / name).exists() for name in copy_set)
         and stamp.get("release_sequence") == release_sequence
+        and stamp.get("human_version", "") == human_version
+        and version_matches
         and stamp.get("release_commit") == _git_commit(REPO)
         and stamp.get("entitlements_sha256") == _entitlements_digests(REPO)
         and stamp.get("editor_module_mtime") == _editor_module_mtime(REPO))
 
 
 def _upgrade_legacy_seed_build_inputs(iso: Path,
-                                      release_sequence: int = 0) -> bool:
+                                      release_sequence: int = 0,
+                                      human_version: str = "") -> bool:
     """Add compile-only seed inputs without discarding completed imports."""
     stamp = _read_stamp(iso, "seed")
     if not _seed_inputs_valid(
             iso, stamp, SEED_COPY_SET, require_generated_outputs=True,
-            release_sequence=release_sequence):
+            release_sequence=release_sequence,
+            human_version=human_version):
         return False
     # A pre-snapshot seed cannot prove which dirty/untracked scripts produced
     # its imported outputs. It must be re-seeded instead of being "upgraded"
@@ -955,15 +969,18 @@ def _configure_guarded_cook(config: Path) -> None:
 
 
 def stage_seed(iso: Path, *, guarded: bool = False,
-               release_sequence: int = 0) -> str:
+               release_sequence: int = 0,
+               human_version: str = "") -> str:
     neutral_support_authority = (
         _neutral_support_asset_receipt(REPO) if guarded else None)
     copy_set = GUARDED_SEED_COPY_SET if guarded else SEED_COPY_SET
     if _seed_valid(iso, guarded=guarded,
-                   release_sequence=release_sequence):
+                   release_sequence=release_sequence,
+                   human_version=human_version):
         return "cached"
     if guarded and _upgrade_legacy_seed_build_inputs(
-            iso, release_sequence=release_sequence):
+            iso, release_sequence=release_sequence,
+            human_version=human_version):
         return "ran"
     source_snapshot = _source_snapshot(REPO) if guarded else None
     _invalidate_from(iso, "seed")
@@ -1035,6 +1052,8 @@ def stage_seed(iso: Path, *, guarded: bool = False,
         "release_sequence": release_sequence,
         "version": release_formats.RELEASE_IDENTITY_VERSION,
     }, "release identity"))
+    version_path = iso / "Build" / "WoTRelease" / "release-version.json"
+    version_path.write_bytes(release_formats.release_version_bytes(human_version))
     if guarded:
         isolated_neutral_support = _neutral_support_asset_receipt(iso)
         if isolated_neutral_support != neutral_support_authority:
@@ -1065,6 +1084,7 @@ def stage_seed(iso: Path, *, guarded: bool = False,
         "entitlements_sha256": _entitlements_digests(REPO),
         "release_commit": release_commit,
         "release_sequence": release_sequence,
+        "human_version": human_version,
         "copy_counts": counts,
     }
     if guarded:
@@ -4164,6 +4184,8 @@ RELEASE_NOTES_RELATIVE = PurePosixPath(
     "Build/WoTRelease/ReleaseNotes.txt")
 RELEASE_IDENTITY_RELATIVE = PurePosixPath(
     "Build/WoTRelease/release-identity.json")
+RELEASE_VERSION_RELATIVE = PurePosixPath(
+    "Build/WoTRelease/release-version.json")
 PRODUCTION_DESCRIPTOR_PIN_SOURCE = PurePosixPath(
     "Source/WoTRetailReader/Private/CacheBuilder.cpp")
 
@@ -4264,6 +4286,39 @@ def _require_staged_release_identity(staged_root: Path, iso: Path) -> Path:
             and identity.release_sequence != seed.get("release_sequence")):
         raise BuildFailure(
             "the staged release identity differs from the cooked seed sequence")
+    return staged
+
+
+def _require_staged_release_version(staged_root: Path, iso: Path) -> Path:
+    """Require the one shipped human version to equal the stamped ISO source."""
+    suffix = ("WoT",) + RELEASE_VERSION_RELATIVE.parts
+    matches = [path for path in staged_root.rglob(RELEASE_VERSION_RELATIVE.name)
+               if path.is_file() and path.parts[-len(suffix):] == suffix]
+    bundled = [path for path in matches
+               if any(part.casefold().endswith(".app")
+                      for part in path.relative_to(staged_root).parts[:-1])]
+    if bundled:
+        matches = bundled
+    if len(matches) != 1:
+        raise BuildFailure(
+            "the staged game must carry exactly one WoT/"
+            f"{RELEASE_VERSION_RELATIVE} (found {len(matches)})")
+    staged = matches[0]
+    source = iso / Path(*RELEASE_VERSION_RELATIVE.parts)
+    if not source.is_file() or staged.read_bytes() != source.read_bytes():
+        raise BuildFailure(
+            f"the staged release version {staged} is not the ISO's {source}")
+    try:
+        human_version = release_formats.parse_release_version(
+            staged.read_bytes(), str(staged))
+    except release_formats.FormatError as exc:
+        raise BuildFailure(f"invalid staged release version: {exc}") from exc
+    seed_human_version = (_read_stamp(iso, "seed") or {}).get(
+        "human_version", "")
+    if human_version != seed_human_version:
+        raise BuildFailure(
+            "the staged release version differs from the cooked seed "
+            "human_version")
     return staged
 
 
@@ -4690,6 +4745,13 @@ def _test_twin_binding(iso: Path, platform_name: str, commit: str,
         raise BuildFailure(
             "the Test release is not the intact same-commit guarded Test "
             "package of this ISO")
+    try:
+        human_version = release_formats.read_release_version_from_zip(
+            asset, platform_name,
+            release_formats.GUARDED_TREE_ROOTS[platform_name])
+    except release_formats.FormatError as exc:
+        raise BuildFailure(
+            f"the Test release has no valid release version: {exc}") from exc
     test_inventory = _guarded_cooked_inventory_binding(
         cook_stamp, platform_name)
     zen_binding = _guarded_zen_binding(cook_stamp, iso, platform_name)
@@ -4714,6 +4776,7 @@ def _test_twin_binding(iso: Path, platform_name: str, commit: str,
         "asset_size": test_manifest["size"],
         "release_json_sha256": release_json_sha256,
         "git_commit": commit,
+        "human_version": human_version,
         "release_sequence": release_sequence,
         "source_snapshot_sha256": source_snapshot["sha256"],
         "staged_tree_sha256": audit["staged_tree_sha256"],
@@ -4890,6 +4953,7 @@ def _stage_package(args, iso: Path, configuration: str) -> str:
     seed_stamp = _read_stamp(iso, "seed") or {}
     seed_commit = seed_stamp.get("release_commit")
     release_sequence = getattr(args, "release_sequence", 0)
+    human_version = getattr(args, "human_version", "")
     if seed_commit != commit:
         raise BuildFailure(
             "release commit differs from cooked seed: "
@@ -4899,6 +4963,11 @@ def _stage_package(args, iso: Path, configuration: str) -> str:
             "release sequence differs from cooked seed: "
             f"seed={seed_stamp.get('release_sequence', 'missing')}, "
             f"requested={release_sequence}")
+    if seed_stamp.get("human_version", "") != human_version:
+        raise BuildFailure(
+            "human version differs from cooked seed: "
+            f"seed={seed_stamp.get('human_version', '')!r}, "
+            f"requested={human_version!r}")
     if shipping:
         _shipping_stage_binding(build_stamp, iso, args.platform)
         test_twin = _test_twin_binding(
@@ -4917,6 +4986,7 @@ def _stage_package(args, iso: Path, configuration: str) -> str:
                   if stamp and dmg_name is not None else None)
     if (stamp and stamp.get("asset") == asset_name
             and stamp.get("release_sequence") == release_sequence
+            and stamp.get("human_version", "") == human_version
             and stamp.get("mode") == ("guarded" if guarded else None)
             and stamp.get("audit_cache_sha256")
                 == (audit_stamp or {}).get("cache_sha256")
@@ -4967,6 +5037,7 @@ def _stage_package(args, iso: Path, configuration: str) -> str:
         _require_staged_production_descriptor(guarded_staged_root, iso)
         _require_release_notes_absent(guarded_staged_root)
         _require_staged_release_identity(guarded_staged_root, iso)
+        _require_staged_release_version(guarded_staged_root, iso)
         before_zip_tree = _staged_tree_inventory(iso / staging)
         if before_zip_tree["tree_sha256"] != audited_tree["tree_sha256"]:
             raise BuildFailure("staged tree changed at zip-time preflight")
@@ -5069,6 +5140,7 @@ def _stage_package(args, iso: Path, configuration: str) -> str:
         "size": manifest["size"],
         "git_commit": commit,
         "release_sequence": release_sequence,
+        "human_version": human_version,
         "audit_cache_sha256": (audit_stamp or {}).get("cache_sha256"),
         "manifest": str(manifest_path),
         "release_json_sha256": _sha256_file(manifest_path),
@@ -5825,6 +5897,7 @@ def write_summary(args, iso: Path, statuses: dict[str, str]) -> Path:
     }
     if guarded:
         summary["release_sequence"] = getattr(args, "release_sequence", 0)
+        summary["human_version"] = getattr(args, "human_version", "")
         summary["release_commit"] = (_read_stamp(iso, "seed") or {}).get(
             "release_commit")
         summary["configuration"] = GUARDED_CONFIGURATION
@@ -5967,6 +6040,14 @@ def _release_sequence_argument(value: str) -> int:
     return sequence
 
 
+def _human_version_argument(value: str) -> str:
+    try:
+        return release_formats.validate_human_version(
+            value, "--human-version", allow_empty=True)
+    except release_formats.FormatError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--iso", type=Path, default=REPO / ".stripped-pak",
@@ -5996,6 +6077,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "--release-sequence", type=_release_sequence_argument, default=0,
         help="non-negative int64 stamped into the runnable release identity")
+    result.add_argument(
+        "--human-version", type=_human_version_argument, default="",
+        help="human version stamped into the runnable package (empty for development)")
     result.add_argument(
         "--configuration", choices=("Development", "Test", "Shipping"),
         help=("explicit client configuration. Guarded Test (default) builds "
@@ -6076,7 +6160,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         runners = {
             "seed": lambda: stage_seed(
                 iso, guarded=_mode_is_guarded(args),
-                release_sequence=args.release_sequence),
+                release_sequence=args.release_sequence,
+                human_version=args.human_version),
             "import": lambda: stage_import(args, iso),
             "marker": lambda: stage_marker(iso),
             "cook": lambda: stage_cook(args, iso),

@@ -215,6 +215,29 @@ class VerifyReleaseTests(unittest.TestCase):
                              lambda document: document.update(human_version="0.2.0"))
         self.assertFails(directory, "platforms disagree on manifest human_version")
 
+    def test_signed_set_refuses_equal_empty_manifest_and_archive_versions(self):
+        releases = {
+            platform: fixtures.write_guarded_release(
+                self.fixture.root / f"empty-version-{platform}", platform,
+                human_version="")
+            for platform in formats.PLATFORMS
+        }
+        funnels = {
+            platform: fixtures.write_funnel_receipt(
+                self.fixture.root / f"empty-version-{platform}-funnel.json",
+                release)
+            for platform, release in releases.items()
+        }
+        directory = self.fixture.root / "empty-version-set"
+        with mock.patch.object(
+                formats, "validate_human_version", return_value=""):
+            self.fixture.sign(
+                directory, release_jsons=releases,
+                funnel_receipts=funnels, human_version="")
+        self.assertFails(
+            directory, "human_version: must start with a digit",
+            releases=releases)
+
     def test_archive_and_tree_integrity(self):
         directory = self.copy()
         archive = directory / formats.update_archive_asset("Win64", 0, fixtures.COMMIT)
@@ -458,6 +481,110 @@ class VerifyReleaseTests(unittest.TestCase):
         self.assertFails(directory, "release identity sequence",
                          allow_staging_sequence=True)
         self.assertFails(directory, "release identity sequence", allow_test=True)
+
+    def _unstamped_set(self, sequence):
+        """A signed set at a sequence whose trees carry no release-version.json."""
+        releases = {}
+        for platform in formats.PLATFORMS:
+            files = fixtures.platform_files(platform, release_sequence=sequence)
+            files.pop(fixtures.release_version_relative(platform))
+            releases[platform] = fixtures.write_guarded_release(
+                self.fixture.root / f"unstamped-{sequence}-{platform}", platform,
+                files=files, release_sequence=sequence)
+        funnels = {
+            platform: fixtures.write_funnel_receipt(
+                self.fixture.root / f"unstamped-{sequence}-funnel" / platform
+                / "funnel-receipt.json", release, include_update_cells=True)
+            for platform, release in releases.items()}
+        output = self.fixture.root / f"unstamped-set-{sequence}"
+        with mock.patch.object(formats, "read_release_version_from_zip",
+                               return_value="0.1.0"):
+            self.fixture.sign(output, release_sequence=sequence,
+                              tag=f"v0.1.{sequence}-unstamped",
+                              release_jsons=releases, funnel_receipts=funnels)
+        return output, releases, funnels
+
+    def test_sets_signed_before_the_stamp_verify_without_it(self):
+        # v0.1.0 (sequence 0) and v0.1.1 (sequence 1) carry no stamp: the
+        # cache gate authenticates the previous set, and verify re-reads it.
+        for sequence in (0, 1):
+            with self.subTest(sequence=sequence):
+                output, releases, funnels = self._unstamped_set(sequence)
+                verify_release._verify_signing_output(
+                    output, trust=self.fixture.trust,
+                    compiled=self.fixture.compiled, releases=releases,
+                    funnel_receipts=funnels, allow_staging_sequence=False,
+                    allow_test=False, inspect_mac_dmg=False)
+                for platform in formats.PLATFORMS:
+                    verify_release.authenticate_platform(
+                        output, platform, trust=self.fixture.trust,
+                        compiled=self.fixture.compiled)
+
+    def test_refuses_a_missing_release_version_from_sequence_two(self):
+        self.assertEqual(formats.RELEASE_VERSION_FIRST_SEQUENCE, 2)
+        output, releases, funnels = self._unstamped_set(2)
+        failures = self.assertFails(
+            output, "missing release version", releases=releases,
+            funnel_receipts=funnels, allow_staging_sequence=True)
+        joined = "\n".join(failures)
+        # Both the signed update archive and the manual-install zip refuse it.
+        for platform in formats.PLATFORMS:
+            self.assertRegex(joined, rf"{platform}: \S*-update-r2-\S*\.zip "
+                             "release version: missing release version")
+            install = formats.guarded_install_zip_asset(
+                platform, fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
+            self.assertIn(f"{platform}: {install} release version: missing "
+                          "release version", joined)
+        with self.assertRaises(verify_release.VerifyError) as caught:
+            verify_release.authenticate_platform(
+                output, "Win64", trust=self.fixture.trust,
+                compiled=self.fixture.compiled)
+        self.assertIn("missing release version",
+                      "\n".join(caught.exception.failures))
+
+    def test_refuses_malformed_or_mismatched_release_version(self):
+        version_path = fixtures.release_version_relative("Win64")
+        cases = {
+            "malformed release version": b"{",
+            "release version '0.2.0'": fixtures.release_version_bytes("0.2.0"),
+        }
+        for index, (fragment, version) in enumerate(cases.items()):
+            with self.subTest(fragment=fragment):
+                files = fixtures.platform_files("Win64")
+                if version is None:
+                    files.pop(version_path)
+                else:
+                    _data, mode = files[version_path]
+                    files[version_path] = (version, mode)
+                win = fixtures.write_guarded_release(
+                    self.fixture.root / f"verify-bad-version-{index}",
+                    "Win64", files=files)
+                funnel = fixtures.write_funnel_receipt(
+                    self.fixture.root / f"verify-bad-version-{index}-funnel.json",
+                    win)
+                output = self.fixture.root / f"verify-bad-version-set-{index}"
+                with mock.patch.object(
+                        formats, "read_release_version_from_zip",
+                        return_value="0.1.0"):
+                    self.fixture.sign(
+                        output,
+                        release_jsons={"Win64": win,
+                                       "Mac": self.fixture.releases["Mac"]},
+                        include_install_zips=False,
+                        funnel_receipts={
+                            "Win64": funnel,
+                            "Mac": self.fixture.funnel_receipts["Mac"]})
+                self.assertFails(output, fragment)
+
+    def test_install_zip_version_is_checked_independently_of_update_archives(self):
+        directory = self.copy()
+        install = directory / formats.guarded_install_zip_asset(
+            "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
+        member = (formats.GUARDED_TREE_ROOTS["Win64"] + "/"
+                  + fixtures.release_version_relative("Win64"))
+        replace_zip_member(
+            install, member, fixtures.release_version_bytes("0.2.0"))
+        self.assertFails(directory, "release version '0.2.0'")
 
     def test_release_json_provenance(self):
         directory = self.copy()

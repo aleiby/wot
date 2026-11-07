@@ -5,6 +5,7 @@
 #include "../Online/WoTLocalNetworkAccess.h"
 #include "../Payload/WoTPayloadActivation.h"
 #include "../UI/WoTReleaseNotes.h"
+#include "../Updater/WoTReleaseIdentity.h"
 #include "../WoTFrontEndSlate.h"
 #include "../WoTGameInstance.h"
 #include "../WoTMenuStyle.h"
@@ -526,6 +527,37 @@ bool FWoTUpdateFailedFrontEndSpec::RunTest(const FString&)
 	}
 	TestTrue(TEXT("an unsequenced restore reads as the previous version"),
 		UnsequencedText.Contains(TEXT("The update to version 9 could not start on this computer, so you are back on the previous version.")));
+	UnsequencedFailure->ContinueUpdateFailedForTesting();
+
+	// A versioned running build names its own human version, the one the menu
+	// corner shows, rather than a sequence number for a release never run here.
+	const FString IdentityPath = Directory / TEXT("release-identity.json");
+	TestTrue(TEXT("the versioned running identity writes"), FFileHelper::SaveStringToFile(
+		TEXT("{\"format\":\"wot-release-identity-v1\",\"release_commit\":\"abc123456\",\"release_sequence\":5,\"version\":1}"),
+		*IdentityPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	TestTrue(TEXT("the running release version writes"), FFileHelper::SaveStringToFile(
+		TEXT("{\"format\":\"wot-release-version-v1\",\"human_version\":\"0.1.2\",\"version\":1}"),
+		*(Directory / TEXT("release-version.json")),
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	WoTReleaseIdentity::FScopedPathOverrideForTesting IdentityOverride(IdentityPath);
+	Recorded = RecordUpdateFailedNotice(NoticeRoot, 10, 5);
+	if (!TestFalse(TEXT("a versioned rollback records its notice"), Recorded.IsError()))
+	{
+		return false;
+	}
+	const TSharedRef<SWoTFrontEndRoot> VersionedFailure = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr)
+		.PresentationAuthorityForTesting(ReleaseNotesAuthority())
+		.PreferencesForTesting(Preferences);
+	TArray<FString> VersionedText;
+	if (VersionedFailure->UpdateFailedNoticeWidgetForTesting().IsValid())
+	{
+		CollectReleaseNotesText(
+			VersionedFailure->UpdateFailedNoticeWidgetForTesting().ToSharedRef(),
+			VersionedText);
+	}
+	TestTrue(TEXT("a versioned restore names its human version"),
+		VersionedText.Contains(TEXT("The update could not start on this computer, so you are back on version 0.1.2.")));
 	return !HasAnyErrors();
 }
 

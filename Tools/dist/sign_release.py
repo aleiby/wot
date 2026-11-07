@@ -317,6 +317,20 @@ def _require_release_identity(archive: Path, platform: str, tree_root: str,
     return identity
 
 
+def _require_release_version(archive: Path, platform: str, tree_root: str,
+                             human_version: str) -> str:
+    try:
+        stamped = formats.read_release_version_from_zip(
+            archive, platform, tree_root)
+    except FormatError as exc:
+        raise SignError(f"{platform}: {exc}") from exc
+    if stamped != human_version:
+        raise SignError(
+            f"{platform}: release version {stamped!r} does not match "
+            f"--human-version {human_version!r}")
+    return stamped
+
+
 def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
                  openssl: str, release_jsons: Dict[str, Path], key_ring: Path,
                  announcement_key_path: Path, release_key_path: Path,
@@ -337,8 +351,11 @@ def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
         raise SignError(str(exc)) from exc
     if not 0 <= release_sequence <= formats.INT64_MAX:
         raise SignError("--release-sequence must be a non-negative int64")
-    if not human_version or not human_version.isprintable():
-        raise SignError("--human-version must be a non-empty printable string")
+    try:
+        formats.validate_human_version(
+            human_version, "--human-version", allow_empty=False)
+    except FormatError as exc:
+        raise SignError(str(exc)) from exc
 
     ring_raw = Path(key_ring).read_bytes()
     ring_signature = Path(str(key_ring) + formats.SIGNATURE_SUFFIX).read_bytes()
@@ -374,9 +391,19 @@ def sign_release(*, trust: formats.Trust, compiled: formats.CompiledConstants,
             raise SignError(
                 f"{platform}: release.json release_sequence "
                 f"{release.release_sequence} does not match {release_sequence}")
+        if configuration == formats.SHIPPING_CONFIGURATION:
+            twin_human_version = release.test_twin["human_version"]
+            if twin_human_version != human_version:
+                raise SignError(
+                    f"{platform}: Test twin human_version "
+                    f"{twin_human_version!r} does not match "
+                    f"--human-version {human_version!r}")
         _require_release_identity(
             release.zip_path, platform, formats.GUARDED_TREE_ROOTS[platform],
             release_sequence, commit)
+        _require_release_version(
+            release.zip_path, platform, formats.GUARDED_TREE_ROOTS[platform],
+            human_version)
     funnels = _check_funnel_receipts(
         releases, dict(funnel_receipts or {}), allow_unproven_funnel,
         require_update_cells=(release_sequence > 0))
@@ -455,6 +482,9 @@ def _sign_into(output: Path, *, trust, compiled, openssl, releases, ring, ring_r
         _require_release_identity(
             output / archive_name, platform, formats.UPDATE_TREE_ROOTS[platform],
             sequence, commit)
+        _require_release_version(
+            output / archive_name, platform, formats.UPDATE_TREE_ROOTS[platform],
+            human_version)
         main = _component(repack.entries, release.main_relative,
                           release.products["WoT"], "main executable")
         archive_digest, archive_size = formats.sha256_file(output / archive_name)
@@ -607,6 +637,14 @@ def _sign_into(output: Path, *, trust, compiled, openssl, releases, ring, ring_r
 # CLI
 # ---------------------------------------------------------------------------
 
+def _human_version_argument(value: str) -> str:
+    try:
+        return formats.validate_human_version(
+            value, "--human-version", allow_empty=False)
+    except FormatError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = result.add_subparsers(dest="command", required=True)
@@ -637,7 +675,8 @@ def parser() -> argparse.ArgumentParser:
                       help="release private key PEM (path only)")
     sign.add_argument("--release-key-id", required=True)
     sign.add_argument("--release-sequence", type=int, required=True)
-    sign.add_argument("--human-version", required=True)
+    sign.add_argument(
+        "--human-version", type=_human_version_argument, required=True)
     sign.add_argument("--tag", required=True, help="GitHub release tag the URLs will name")
     sign.add_argument("--output", required=True, help="empty directory for the publish set")
     sign.add_argument("--cache-contract", default=str(formats.DEFAULT_CACHE_CONTRACT))

@@ -57,6 +57,7 @@ PUBLIC_RELEASE_FILES = frozenset({
     "Build/WoTRelease/release-identity.json",
     "Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json",
     "Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json.sig",
+    "Build/WoTRelease/release-version.json",
     "Build/WoTRelease/schemas/announcement-v1.schema.json",
     "Build/WoTRelease/schemas/component-identity-v1.schema.json",
     "Build/WoTRelease/schemas/full-package-v1.schema.json",

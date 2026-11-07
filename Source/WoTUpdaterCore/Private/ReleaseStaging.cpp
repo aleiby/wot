@@ -2271,6 +2271,13 @@ TWoTBootstrapResult<FWoTStagedRelease> StageRelease(
 	Cleanup.CreatedDirectories.Reset();
 	auto Moved = RenameNativeEntryAtNoFollow(Cleanup.Fresh, Safe.GetValue().RootName,
 		Published.GetValue(), Root.LiveLeaf, false);
+#if PLATFORM_WINDOWS
+	// Access denied here means another program still held a file inside the
+	// staged tree after the rename's own retries; the fallback below would only
+	// repeat that wait. (A taken destination reports a collision, not this.)
+	if (Moved.IsError() && Moved.GetError().NativeCode == 5u)
+		return Refuse(MoveTemp(Moved).GetError());
+#endif
 	if (Moved.IsError())
 	{
 		auto Ready = ReadWoTUpdateMarker(Root, TEXT("ready"));

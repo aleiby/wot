@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
@@ -422,6 +423,115 @@ class ReleaseIdentityTests(unittest.TestCase):
                     .encode("ascii"), "fixture")
 
 
+class ReleaseVersionTests(unittest.TestCase):
+    def document(self, **overrides):
+        document = {
+            "format": "wot-release-version-v1",
+            "human_version": "0.1.2",
+            "version": 1,
+        }
+        document.update(overrides)
+        return document
+
+    def test_writer_and_parser_accept_development_and_release_versions(self):
+        self.assertEqual(
+            formats.release_version_bytes("0.1.2"),
+            b'{"format":"wot-release-version-v1",'
+            b'"human_version":"0.1.2","version":1}')
+        for human_version in ("", "0.1.2", "1+build.7", "2-RC1"):
+            with self.subTest(human_version=human_version):
+                self.assertEqual(
+                    formats.parse_release_version(
+                        formats.release_version_bytes(human_version), "fixture"),
+                    human_version)
+
+    def test_human_version_validation_controls_empty_and_pattern(self):
+        self.assertEqual(
+            formats.validate_human_version("", "development", allow_empty=True),
+            "")
+        for value in ("", "v0.1.2", "release", "1_2", "1" + "a" * 32):
+            with self.subTest(value=value), self.assertRaises(FormatError):
+                formats.validate_human_version(
+                    value, "release version", allow_empty=False)
+        with self.assertRaises(FormatError):
+            formats.validate_human_version(1, "release version", allow_empty=True)
+
+    def test_parser_rejects_closed_schema_format_version_and_spelling_errors(self):
+        valid = self.document()
+        refused = {
+            "extra member": formats.canonical_bytes({**valid, "extra": True}),
+            "missing member": formats.canonical_bytes(
+                {key: value for key, value in valid.items()
+                 if key != "human_version"}),
+            "wrong format": formats.canonical_bytes(
+                {**valid, "format": "wot-release-version-v2"}),
+            "wrong version": formats.canonical_bytes({**valid, "version": 2}),
+            "leading v": formats.canonical_bytes(
+                {**valid, "human_version": "v0.1.2"}),
+            "too long": formats.canonical_bytes(
+                {**valid, "human_version": "1" + "a" * 32}),
+            "non-canonical": json.dumps(valid, indent=2).encode("ascii"),
+            "oversize": b" " * (4 * 1024 + 1),
+        }
+        for label, raw in refused.items():
+            with self.subTest(label=label), self.assertRaises(FormatError):
+                formats.parse_release_version(raw, "fixture")
+
+    def test_zip_reader_uses_platform_path_and_requires_one_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for platform, relative in (
+                    ("Win64", "WoT/Build/WoTRelease/release-version.json"),
+                    ("Mac", "Contents/UE/WoT/Build/WoTRelease/release-version.json")):
+                with self.subTest(platform=platform):
+                    archive_path = root / f"{platform}.zip"
+                    member = f"tree/{relative}"
+                    with zipfile.ZipFile(archive_path, "w") as archive:
+                        archive.writestr(member, formats.release_version_bytes("0.1.2"))
+                    self.assertEqual(
+                        formats.release_version_relative(platform), relative)
+                    self.assertEqual(
+                        formats.read_release_version_from_zip(
+                            archive_path, platform, "tree"),
+                        "0.1.2")
+
+            archive_path = root / "bad.zip"
+            member = "tree/WoT/Build/WoTRelease/release-version.json"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("unrelated", b"x")
+            with self.assertRaisesRegex(FormatError, "bad.zip.*missing"):
+                formats.read_release_version_from_zip(
+                    archive_path, "Win64", "tree")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(member + "/", b"")
+            with self.assertRaisesRegex(FormatError, "malformed release version"):
+                formats.read_release_version_from_zip(
+                    archive_path, "Win64", "tree")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                link = zipfile.ZipInfo(member)
+                link.create_system = 3
+                link.external_attr = 0o120777 << 16
+                archive.writestr(link, formats.release_version_bytes("0.1.2"))
+            with self.assertRaisesRegex(FormatError, "malformed release version"):
+                formats.read_release_version_from_zip(
+                    archive_path, "Win64", "tree")
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                with zipfile.ZipFile(archive_path, "w") as archive:
+                    archive.writestr(
+                        member, formats.release_version_bytes("0.1.2"))
+                    archive.writestr(
+                        member, formats.release_version_bytes("0.1.2"))
+            with self.assertRaisesRegex(FormatError, "malformed release version"):
+                formats.read_release_version_from_zip(
+                    archive_path, "Win64", "tree")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(member, b"x" * (4 * 1024 + 1))
+            with self.assertRaisesRegex(FormatError, "4096-byte limit"):
+                formats.read_release_version_from_zip(
+                    archive_path, "Win64", "tree")
+
+
 class UrlPolicyTests(unittest.TestCase):
     def test_initial_release_url_policy(self):
         allowed = ["https://github.com/aleiby/wot/releases/download/v1/a.json",
@@ -751,6 +861,8 @@ class GuardedReleaseConfigurationTests(unittest.TestCase):
             "same-commit Test release": lambda d: d["test_twin"].update(git_commit="1234567"),
             "test_twin release_sequence": lambda d: d["test_twin"].update(
                 release_sequence=1),
+            "test_twin.human_version": lambda d: d["test_twin"].update(
+                human_version="v0.1.0"),
             "is not a lower-case sha256": lambda d: d["test_twin"].update(
                 release_json_sha256="A" * 64),
         }

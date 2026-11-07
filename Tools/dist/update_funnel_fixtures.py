@@ -35,6 +35,11 @@ RELEASE_IDENTITY_RELATIVES = {
 }
 # Kept for callers/tests that use the historical Win64 constant.
 RELEASE_IDENTITY_RELATIVE = RELEASE_IDENTITY_RELATIVES["Win64"]
+RELEASE_VERSION_RELATIVES = {
+    platform: formats.release_version_relative(platform)
+    for platform in formats.PLATFORMS
+}
+RELEASE_VERSION_RELATIVE = RELEASE_VERSION_RELATIVES["Win64"]
 # The bad variant's fail-after-started marker, where WoT.cpp looks for it.
 # codesign refuses loose files at a Mac bundle root ("unsealed contents
 # present in the bundle root"), so the Mac marker lives in sealed Resources.
@@ -182,6 +187,12 @@ def _identity_bytes(sequence: int, commit: str) -> bytes:
     return formats.canonical_bytes(document, "release identity")
 
 
+def _fixture_human_version(sequence: int, label: str) -> str:
+    value = f"0.0.{sequence}-{label}"
+    return formats.validate_human_version(
+        value, "update funnel human_version", allow_empty=False)
+
+
 def _write_guarded_tree(source_tree: Path, destination: Path, platform: str,
                         ditto: str = "ditto") -> None:
     if platform == "Mac":
@@ -311,6 +322,10 @@ def _build_variant(*, label: str, source_tree: Path, output: Path,
     if (identity.release_sequence, identity.release_commit) != (
             sequence, base.document["git_commit"]):
         raise FixtureError(f"{label} archive carries the wrong release identity")
+    human_version = _fixture_human_version(sequence, label)
+    if formats.read_release_version_from_zip(
+            archive_path, platform, repack.root) != human_version:
+        raise FixtureError(f"{label} archive carries the wrong release version")
     main = _component(repack.entries, base.main_relative, "main executable")
 
     tag = f"wot-funnel-{platform.casefold()}-r{sequence}-{label}"
@@ -329,7 +344,7 @@ def _build_variant(*, label: str, source_tree: Path, output: Path,
         "cache_contract_version": contract_version,
         "format": formats.RELEASE_MANIFEST_FORMAT,
         "generated_utc": str(base.document["generated_utc"]),
-        "human_version": f"update-funnel-r{sequence}-{label}",
+        "human_version": human_version,
         "installed_tree_root": {
             "name": repack.root,
             "sha256": repack.tree_root,
@@ -457,9 +472,14 @@ def build_update_fixtures(release_json: Path, extracted_tree: Path,
                 stage = Path(stage_temp) / output.name
                 stage.mkdir()
                 identity_relative = RELEASE_IDENTITY_RELATIVES[platform]
+                version_relative = RELEASE_VERSION_RELATIVES[platform]
                 identity_mutation = {
                     "operation": "rewrite-release-identity",
                     "path": identity_relative,
+                }
+                version_mutation = {
+                    "operation": "rewrite-release-version",
+                    "path": version_relative,
                 }
 
                 def variant_source(label: str) -> Path:
@@ -473,6 +493,12 @@ def build_update_fixtures(release_json: Path, extracted_tree: Path,
                             f"base tree has no {identity_relative}")
                     identity_path.write_bytes(_identity_bytes(
                         next_sequence, base.document["git_commit"]))
+                    version_path = source / Path(version_relative)
+                    if not version_path.is_file():
+                        raise FixtureError(
+                            f"base tree has no {version_relative}")
+                    version_path.write_bytes(formats.release_version_bytes(
+                        _fixture_human_version(next_sequence, label)))
                     return source
 
                 good_source = variant_source("good")
@@ -481,7 +507,8 @@ def build_update_fixtures(release_json: Path, extracted_tree: Path,
                     if platform == "Mac" else None)
                 good = _build_variant(
                     label="good", source_tree=good_source, output=stage, base=base,
-                    sequence=next_sequence, mutations=[identity_mutation],
+                    sequence=next_sequence,
+                    mutations=[identity_mutation, version_mutation],
                     ring_raw=ring_raw, ring_signature=ring_signature, keys=keys,
                     public_keys=public_keys, openssl=openssl, compiled=compiled,
                     contract_id=contract_id, contract_version=contract_version,
@@ -500,7 +527,7 @@ def build_update_fixtures(release_json: Path, extracted_tree: Path,
                 bad = _build_variant(
                     label="bad", source_tree=bad_source, output=stage, base=base,
                     sequence=next_sequence,
-                    mutations=[identity_mutation, bad_mutation],
+                    mutations=[identity_mutation, version_mutation, bad_mutation],
                     ring_raw=ring_raw, ring_signature=ring_signature, keys=keys,
                     public_keys=public_keys, openssl=openssl, compiled=compiled,
                     contract_id=contract_id, contract_version=contract_version,

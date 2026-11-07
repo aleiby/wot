@@ -276,6 +276,16 @@ WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryWritableProbeErrorForTesting(
 /** Installs a hook called only by the mutation walker and only between entries. */
 WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryMutationWalkHookForTesting(
 	TFunction<FWoTBootstrapStatus()> Hook);
+
+/** Called on the renaming thread each time RenameNativeEntryAtNoFollow is about
+ * to wait and retry a directory rename refused because something below the
+ * directory is open. FailedAttempts is 1 on the first refusal. Empty removes it. */
+WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryRenameRetryObserverForTesting(
+	TFunction<void(int32 FailedAttempts)> Observer);
+
+/** Replaces the total wait budget of that retry; negative restores the default. */
+WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryRenameRetryBudgetForTesting(
+	double Seconds);
 #endif
 #endif
 
@@ -333,6 +343,12 @@ WOTBOOTSTRAPCORE_API FWoTBootstrapStatus SetNativeMode(
 WOTBOOTSTRAPCORE_API FWoTBootstrapStatus SetNativeMode(
 	const FWoTNativeDirectoryHandle& Directory, uint32 Mode);
 
+/**
+ * Renames one held-parent-relative entry without following links. On Windows a
+ * directory rename that is refused because another process holds something
+ * below the directory open is retried with backoff for about ten seconds,
+ * synchronously, before it fails; a failure's message carries the raw NTSTATUS.
+ */
 WOTBOOTSTRAPCORE_API FWoTBootstrapStatus RenameNativeEntryAtNoFollow(
 	const FWoTNativeDirectoryHandle& FromDirectory, FStringView FromLeaf,
 	const FWoTNativeDirectoryHandle& ToDirectory, FStringView ToLeaf,

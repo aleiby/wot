@@ -1,8 +1,8 @@
 {
-  "source_commit": "a125e5f3f8566f26f15820ac2e692250540c8fc4",
+  "source_commit": "11ccb84524f2c9eae9db393259c9c276b56770cf",
   "source_kind": "commit",
-  "source_tree": "a125e5f3f8566f26f15820ac2e692250540c8fc4",
-  "file_count": 1555,
+  "source_tree": "11ccb84524f2c9eae9db393259c9c276b56770cf",
+  "file_count": 1556,
   "paths": [
     ".gitattributes",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -21,6 +21,7 @@
     "Build/WoTRelease/release-identity.json",
     "Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json",
     "Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json.sig",
+    "Build/WoTRelease/release-version.json",
     "Build/WoTRelease/schemas/announcement-v1.schema.json",
     "Build/WoTRelease/schemas/component-identity-v1.schema.json",
     "Build/WoTRelease/schemas/full-package-v1.schema.json",
@@ -1626,7 +1627,7 @@
     {
       "mode": "100644",
       "path": "Build/WoTRelease/cache-v3-production-descriptor.json",
-      "sha256": "bb601c131a0f3a7a32932b4d28415bab552f5ce62e38dfe58208cc4e84fd05e4"
+      "sha256": "d0affffb73ba86e2ebac95571e1d75787918ecab467db67bef289efaa08e1df6"
     },
     {
       "mode": "100644",
@@ -1647,6 +1648,11 @@
       "mode": "100644",
       "path": "Build/WoTRelease/release-ring/WoT-root-key-ring-v1.json.sig",
       "sha256": "d16663632954c2403b6188908ad6f1191771988cc6d0d84542b5bee4b21914f0"
+    },
+    {
+      "mode": "100644",
+      "path": "Build/WoTRelease/release-version.json",
+      "sha256": "5faa4610203b537c10ed26aa529f48c7ed7472431d72c11151db7a82b2a25736"
     },
     {
       "mode": "100644",
@@ -1741,7 +1747,7 @@
     {
       "mode": "100644",
       "path": "PORT_NOTES.md",
-      "sha256": "d8c520931bd40f2552afe83bda20e7177ae0da4dbddf2f07f7e547678cb0b91e"
+      "sha256": "b4a7e24a00dda92393bee5c2e417ca2c61a0e61c508848d99eb069f5be9b40d4"
     },
     {
       "mode": "100644",
@@ -3466,7 +3472,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTCacheStoreTests.cpp",
-      "sha256": "a77b30e016d933378ca07ce7b60e19c56b9e6e26cbd562914a1446e29cc0570e"
+      "sha256": "a9b93896d112e25c768162513d6137912aec350d6d4e9387fff0e877f0c3f95c"
     },
     {
       "mode": "100644",
@@ -3721,7 +3727,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTGameBootstrapWorkerTests.cpp",
-      "sha256": "2bda4d62e75cc014e5651bdf9bbf5489dff927096c10ba99ef8ea7895b74ab30"
+      "sha256": "2edd89516409ea44349164ce5f7d999cc34bce99a9768bd5515eb5cadee41004"
     },
     {
       "mode": "100644",
@@ -4086,12 +4092,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTReleaseIdentityTests.cpp",
-      "sha256": "f7d29f00d7de0247a20556aa17a0dd16a8ec22e124bb60b90b69e2805ccf76aa"
+      "sha256": "c5cbb35cc3c8d7decdde32a5fa004c9b9ee28c24fd0ab4449885792ad76ae3f5"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTReleaseNotesTests.cpp",
-      "sha256": "0ce656f8501bc236fc54309c2acfd48d554071dbe826e52df64f54e61466d8e9"
+      "sha256": "c7d0304a007a5baa8becb0aca2e0ff9e72b97618835fe81599b8f8527b325614"
     },
     {
       "mode": "100644",
@@ -4196,7 +4202,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTSetupBackdropTests.cpp",
-      "sha256": "7f0d7b7a3c44b1bf0e5f8b533c510c357b691077f84b0c847a3b4ee320d095d3"
+      "sha256": "d2d9622d0136e6022a9accde831e5ce8b6c44ee0063718acd2db0feccdaf7c30"
     },
     {
       "mode": "100644",
@@ -4316,7 +4322,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Tests/WoTUpdateBannerTests.cpp",
-      "sha256": "5d8fb9b0dc1c6af854933c75d72bc3aafeca816399a01c3e52b21941630b26f6"
+      "sha256": "15b55b21bc020ae1b8009ffc7fa1db17e22bf2a3b9f5c7a94f24a84e24c185fe"
     },
     {
       "mode": "100644",
@@ -4501,12 +4507,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/UI/SWoTBootstrapScreen.cpp",
-      "sha256": "6e80ef81453e4fb628355ffefb0be89d8d7f2b88892a3cf3816b9bf819fabdec"
+      "sha256": "e29f69ddddc57a9d172c115aefd9367bc399735f55a710c209d89af492da6114"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/UI/SWoTBootstrapScreen.h",
-      "sha256": "f04391e160b3bf9a7a678dc314c9aafcb35ccb63c172e39e3980f60469d68756"
+      "sha256": "29baee653828744b02d64e36d8027fe1e27b9e16e9c522cfecf7b2a3baf4bf94"
     },
     {
       "mode": "100644",
@@ -4531,7 +4537,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/UI/WoTUpdateBanner.cpp",
-      "sha256": "574174221dd34bc22bb73acca568968a4716689758666d2f56117114eb7cd548"
+      "sha256": "8728f2dc396a7a94b8ee1da88c09ff5aea1c4d7fe01920bbf054e2fb53562c88"
     },
     {
       "mode": "100644",
@@ -4561,12 +4567,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTCacheBootstrapOperation.cpp",
-      "sha256": "8d13161c89549555321525eedcdbe8287354e43e43f469138b842cf678fb34d3"
+      "sha256": "cec8d53160bbb58b2bb4a4c9679ade106f1bdaed0efa861428eb5d4b8e36f146"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTCacheBootstrapOperation.h",
-      "sha256": "ed80ef605fa79c149bb0f876df269e86a7c43c45471af55a51fa27a33fa8d16b"
+      "sha256": "068066942b62732122aaabab4e2abf5d6eb6e8de152bd2ebc841cb2068732e39"
     },
     {
       "mode": "100644",
@@ -4576,7 +4582,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTGameBootstrapWorker.cpp",
-      "sha256": "4aec17daeb053df4b09c46eb342579924a06f1ee456345bb9669d5e097d6949e"
+      "sha256": "b5db9924db39422f09716ff263d00fd2f0bb196818a079e2c6aeffff73d09968"
     },
     {
       "mode": "100644",
@@ -4616,12 +4622,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTReleaseIdentity.cpp",
-      "sha256": "9575c3e9909995cad69f2ec43c15ac0aca020e28a13849e58d1bd811496dd314"
+      "sha256": "304260fa1b3f136871e0523d30bd3330fdc0a41a5b6773c681d6567b255969b7"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/Updater/WoTReleaseIdentity.h",
-      "sha256": "6fd453f9a2692ae49ddfbf4f220cdeac6370d0875e98e60e3e5c5b77e3cbedfe"
+      "sha256": "2f7da0d1bad91a6685b204b42ced3d23661eb41a3d85e358d72a626db10897bf"
     },
     {
       "mode": "100644",
@@ -4636,7 +4642,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoT.Build.cs",
-      "sha256": "e697d20a790b6051e5b5e8d1069b35957318b0d630d60d9751d54acc5367a8df"
+      "sha256": "07069aced5909bfbc03cd4024cb43515e14b3c84e9017c3c323b6f6a58a5918e"
     },
     {
       "mode": "100644",
@@ -4856,7 +4862,7 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTBootstrapViewModel.h",
-      "sha256": "4bc6c554f247d951d258f1fbb01573edb89ddc0aa91305109fd59b0070e40d0c"
+      "sha256": "e8177a071c95aab9bbb2f93e9932b9a65f981e8a2f72881ed90b830d493dd965"
     },
     {
       "mode": "100644",
@@ -5231,12 +5237,12 @@
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFrontEndSlate.cpp",
-      "sha256": "9fe714dcdd1c5da96e4dbfd3a80fbcc05d752035ec20ae49c3d243b84661c01c"
+      "sha256": "998fd855fe94c6dc5c1e69acae12a6c87473b881f7d034bb638d48bd3073de3d"
     },
     {
       "mode": "100644",
       "path": "Source/WoT/WoTFrontEndSlate.h",
-      "sha256": "f3d3c8621ab0410b2a7a81ad70ff0d1226c16a4940dd3895427b1dee0a846e23"
+      "sha256": "3e226c79c71ac422ca742accafdd4f97c584536caa7ed55e74f071746448ec27"
     },
     {
       "mode": "100644",
@@ -6216,7 +6222,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTBootstrapCore/Private/Windows/NativeHandlesWindows.cpp",
-      "sha256": "2cd0c3f048b0b67a37784cca1289013199c05c5332d1c83a06a4a72f667f002e"
+      "sha256": "bd9d8b12d7994d8e6e11f5cfa2ce173be7f239cdec6e4e4812594bebd6405237"
     },
     {
       "mode": "100644",
@@ -6281,7 +6287,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTBootstrapCore/Public/WoTBootstrapCore/NativeHandles.h",
-      "sha256": "b517a0927bcd50154144791a8650d1a1dd23873776b34142d63c79ae771729dd"
+      "sha256": "042b7d77af8ac18ca75151e26c02be5755b8c1ca40a603e2594b4dbab92ba83c"
     },
     {
       "mode": "100644",
@@ -6406,7 +6412,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Private/CacheBuilder.cpp",
-      "sha256": "df5a084b8126eee0a588955563f9b48f2bc5a0ac2e9949e1253cff1f95b729fc"
+      "sha256": "76d0ec5a7d4b3d6a75d916d8e06eb3c21e3f4bbfd0a89d6a5d2f51be778de141"
     },
     {
       "mode": "100644",
@@ -6456,7 +6462,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Private/Package.cpp",
-      "sha256": "14fe22e97ea648b489189f95dc4e6f986677a10d5d53a5dc3db311c6310096be"
+      "sha256": "49402a1ab59a840f733ebf396cd0c271466b06db524d25b241bdf36f5a4e11da"
     },
     {
       "mode": "100644",
@@ -6526,7 +6532,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Private/Tests/PackageTests.cpp",
-      "sha256": "2796cb8d02cf9964fb1285b8c95d818c60607636fdbcb0533ef27f78592b5e71"
+      "sha256": "87df15bb4d1e9d94805a8cf1646562430f61baa514a536133f58bdba09fe007c"
     },
     {
       "mode": "100644",
@@ -6646,7 +6652,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTRetailReader/Public/WoTRetailReader/Package.h",
-      "sha256": "cbae708c80d4712474441a8e140e820884215c9ae945e2a4d410224989ffbb16"
+      "sha256": "282d4c5d49dfae3f1b2bf3bc5d8b54b7d54390a43f2a28544142335af29e201c"
     },
     {
       "mode": "100644",
@@ -6771,7 +6777,7 @@
     {
       "mode": "100644",
       "path": "Source/WoTUpdaterCore/Private/ReleaseStaging.cpp",
-      "sha256": "6c4dbf4ac2f652ec019b6d8efb80f1b76bf767c12f076244ec226df1fcbdfc50"
+      "sha256": "db0ccd7e0f77024e85a83c1df04f3ebc62258e3d819126ee8c8bda0178771ffe"
     },
     {
       "mode": "100644",
@@ -7351,7 +7357,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/build_stripped_pak.py",
-      "sha256": "7059b423ce6ac19541bfc695af10abb8df5d7d987daf7621c55cec94baf635da"
+      "sha256": "c1b11b7593e1c271b76cabd09a5f0f380f9d032b8a43d11b5a5d76ee988d9514"
     },
     {
       "mode": "100644",
@@ -8061,12 +8067,12 @@
     {
       "mode": "100644",
       "path": "Tools/dist/release_formats.py",
-      "sha256": "23826c370dadaae7acce142ca307bb729373c856426af42805b429e49b25750f"
+      "sha256": "66fa5157ffa61826de3ffb234e44f6d3633745ee03a0a11ee95999d6bc7d8db9"
     },
     {
       "mode": "100644",
       "path": "Tools/dist/release_test_fixtures.py",
-      "sha256": "1c15ea49dc4ef078487691f6d9dd1337831526f7074f944ff0024162129b4df4"
+      "sha256": "6ef0d86e2d577cdd53b822b81867046e5971d68bd9d7591a26d45f5481f1e4e7"
     },
     {
       "mode": "100644",
@@ -8111,7 +8117,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/sign_release.py",
-      "sha256": "18672d690668ab2fc4631e8984f6ea828412536d6ba83acb4ed0a34ab70985f1"
+      "sha256": "78458d72c3512ac9f7ef9227ba04de17b4850d0ed68db825f55a8e72da144a8f"
     },
     {
       "mode": "100644",
@@ -8151,7 +8157,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_build_stripped_pak.py",
-      "sha256": "65b6154bd86cd578cc354d16a219dcb6dbec75c22d128280a44f3371fa7023c2"
+      "sha256": "688cd14794e3c695b1c9ed1081b77bd73ec89f4bff07cdb2c8594f9fc77c270f"
     },
     {
       "mode": "100644",
@@ -8266,7 +8272,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_release_formats.py",
-      "sha256": "c8eaf64d4f4d5055a4549415951e208279dbb414f247ba5327faaf65a4aad5e0"
+      "sha256": "afca3046c7a2db474c27bcd7e7772ebe617f3e1f3f568a9e915331fcb417590b"
     },
     {
       "mode": "100644",
@@ -8291,7 +8297,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_sign_release.py",
-      "sha256": "c15bf64b984453795e746e0840cbfca7fa7132fd4ded258a2191d2628428ee8f"
+      "sha256": "c5e4215d7c9e470b4815f1c5c46d67f96b3cd322bd54dbee3871d78770650f89"
     },
     {
       "mode": "100644",
@@ -8306,7 +8312,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_update_funnel_fixtures.py",
-      "sha256": "39d19569c38b8a0d3ab255d58c8c9cb4e59dda02a579b5b689f09d76003e00a1"
+      "sha256": "4452c5b0f1dddbb41bfdb826f9cb2574f423a742362e9e5f5162b92fecbd8bb0"
     },
     {
       "mode": "100644",
@@ -8321,7 +8327,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/test_verify_release.py",
-      "sha256": "ead20580a893a56b24396add19880a43d4dbc18f188ba02cf2471033e5a9acd8"
+      "sha256": "ff6872ad3e90c8e8e04f6bab9e2268e057ec3bb1f23b50015be43e3e9cad1a62"
     },
     {
       "mode": "100644",
@@ -8331,7 +8337,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/update_funnel_fixtures.py",
-      "sha256": "370b665f5041323950e3f39115a7d4251cb37895b7e2474f3dc4a478db0f59a1"
+      "sha256": "09ba60b00fc91f1c13a9dedaf2bc37509cfd86e07199654b5f8d1ca9e736aec4"
     },
     {
       "mode": "100644",
@@ -8346,7 +8352,7 @@
     {
       "mode": "100644",
       "path": "Tools/dist/verify_release.py",
-      "sha256": "888fae987bdafa1a9aec47e5b18f9d87db6f3674ce919455e064503829d65709"
+      "sha256": "32c14d2b046347cc75b283a3e14942d23a73ee4a8ebebcf6ab37bba2ab2c6b3e"
     },
     {
       "mode": "100644",
@@ -8816,7 +8822,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/export_public_tree.py",
-      "sha256": "ea63c1204398cd2847b097d292355780791b52f338dd991cd9f864e89a82cc6f"
+      "sha256": "1f99c5aa188901f768ef97c86b1f1da9af85c9a7c802f379df71cf871456f421"
     },
     {
       "mode": "100644",
@@ -8831,7 +8837,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/public-files.txt",
-      "sha256": "d7252bcb1169b89451149bf149846267a7044469ed3954ab2f832d500b9b78f5"
+      "sha256": "d823f575fb16f6d2aaae6ee423af7f8ba215880223c7fe31019ffecb3e6fb008"
     },
     {
       "mode": "100644",
@@ -8841,7 +8847,7 @@
     {
       "mode": "100644",
       "path": "Tools/public/test_export_public_tree.py",
-      "sha256": "f9c1f537db559c0b3cd6dc04c4dc9f36b1db7ba2aa77507d21f6dcf7c07bcd0c"
+      "sha256": "ab50a8fced1db82a88339e6bfe57ee4f6e6a31339142d5c1e21acb0bb5b03e8a"
     },
     {
       "mode": "100644",

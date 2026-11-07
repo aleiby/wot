@@ -3,6 +3,7 @@
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
 #include "WoTBootstrapCore/Hash.h"
+#include "WoTBootstrapCore/NativeHandles.h"
 
 namespace
 {
@@ -169,6 +170,14 @@ private:
 };
 }  // namespace
 
+#if WITH_AUTOMATION_TESTS
+namespace
+{
+FWoTRetailPackage::FAfterOpenReadForTesting GWoTRetailPackageAfterOpenRead = nullptr;
+void* GWoTRetailPackageAfterOpenReadContext = nullptr;
+}  // namespace
+#endif
+
 struct FWoTRetailPackage::FImpl
 {
 	explicit FImpl(FWoTHeldInstallerSnapshot&& InSnapshot)
@@ -180,6 +189,7 @@ struct FWoTRetailPackage::FImpl
 	FWoTSha256 FrozenDigest;
 	FWoTNativeFileIdentity FrozenIdentity;
 	uint64 FrozenSize = 0;
+	uint32 FrozenMode = 0;
 	FString FrozenAdapterDescription;
 	TUniquePtr<FWoTInnoExtractor> Extractor;
 	TArray<FWoTPackageEntry> Entries;
@@ -233,13 +243,30 @@ TWoTBootstrapResult<FWoTRetailPackage> FWoTRetailPackage::Open(
 			TEXT("the held installer cannot be represented by the bounded adapter")));
 	}
 
+	TWoTBootstrapResult<uint32> Mode = QueryNativeMode(Snapshot.Handle);
+	if (Mode.IsError())
+	{
+		return FResult::Error(MoveTemp(Mode).GetError());
+	}
+
+	// The OS writes metadata onto a file a person just picked or downloaded
+	// (macOS com.apple.macl and provenance xattrs, NTFS Zone.Identifier and
+	// SmartScreen streams), which moves only ChangeState, at any moment of its
+	// choosing. That drift is tolerated, but it is also what a same-length
+	// rewrite looks like: the live file is re-proved at the end before its
+	// identity becomes the baseline later checks reuse.
+	const FWoTNativeFileIdentity Recorded = Snapshot.Identity;
+	const auto IsRecordedObject = [&Recorded](const FWoTNativeFileIdentity& Current)
+	{
+		return Current == Recorded || Current.DiffersOnlyInChangeState(Recorded);
+	};
 	TWoTBootstrapResult<FWoTNativeFileIdentity> Before =
 		Snapshot.Handle.QueryCurrentIdentity();
 	if (Before.IsError())
 	{
 		return FResult::Error(MoveTemp(Before).GetError());
 	}
-	if (Before.GetValue() != Snapshot.Identity)
+	if (!IsRecordedObject(Before.GetValue()))
 	{
 		return FResult::Error(WoTRetailPackageChangedError(
 			TEXT("the held installer changed before package parsing")));
@@ -250,16 +277,31 @@ TWoTBootstrapResult<FWoTRetailPackage> FWoTRetailPackage::Open(
 	{
 		return FResult::Error(MoveTemp(Read).GetError());
 	}
+#if WITH_AUTOMATION_TESTS
+	if (GWoTRetailPackageAfterOpenRead != nullptr)
+	{
+		GWoTRetailPackageAfterOpenRead(GWoTRetailPackageAfterOpenReadContext);
+	}
+#endif
 	TWoTBootstrapResult<FWoTNativeFileIdentity> After =
 		Snapshot.Handle.QueryCurrentIdentity();
 	if (After.IsError())
 	{
 		return FResult::Error(MoveTemp(After).GetError());
 	}
-	if (After.GetValue() != Snapshot.Identity)
+	if (!IsRecordedObject(After.GetValue()))
 	{
 		return FResult::Error(WoTRetailPackageChangedError(
 			TEXT("the held installer changed while package bytes were read")));
+	}
+	// The adapter trusts the digest it is handed and parses only this buffer,
+	// so the buffer itself is proven. Identity continuity cannot do it: drift
+	// is tolerated above, and a coarse change clock (NTFS ticks ~15.6 ms) can
+	// hide a same-size rewrite inside the tick acquisition recorded.
+	if (Sha256(Read.GetValue()) != Snapshot.Sha256)
+	{
+		return FResult::Error(WoTRetailPackageChangedError(
+			TEXT("the held installer's bytes changed before package parsing")));
 	}
 
 	TUniquePtr<FImpl> NewImpl = MakeUnique<FImpl>(MoveTemp(Snapshot));
@@ -276,16 +318,30 @@ TWoTBootstrapResult<FWoTRetailPackage> FWoTRetailPackage::Open(
 	{
 		return FResult::Error(MoveTemp(ParsedIdentity).GetError());
 	}
-	if (ParsedIdentity.GetValue() != NewImpl->Snapshot.Identity)
+	if (!IsRecordedObject(ParsedIdentity.GetValue()))
 	{
 		return FResult::Error(WoTRetailPackageChangedError(
 			TEXT("the held installer changed while the adapter parsed it")));
 	}
+	FWoTNativeFileIdentity Baseline = ParsedIdentity.GetValue();
+	if (Baseline != Recorded)
+	{
+		TWoTBootstrapResult<FWoTNativeFileIdentity> Reproved =
+			WoTReverifyHeldFileAfterMetadataChurn(NewImpl->Snapshot.Handle, Recorded,
+				NewImpl->Snapshot.Size, NewImpl->Snapshot.Sha256, Mode.GetValue(),
+				TEXT("held-installer-snapshot"));
+		if (Reproved.IsError())
+		{
+			return FResult::Error(MoveTemp(Reproved).GetError());
+		}
+		Baseline = Reproved.GetValue();
+	}
 	NewImpl->FrozenDigest = NewImpl->Snapshot.Sha256;
-	NewImpl->FrozenIdentity = NewImpl->Snapshot.Identity;
+	NewImpl->FrozenIdentity = Recorded;
 	NewImpl->FrozenSize = NewImpl->Snapshot.Size;
+	NewImpl->FrozenMode = Mode.GetValue();
 	NewImpl->Extractor = MoveTemp(OpenedExtractor).GetValue();
-	NewImpl->LastVerifiedIdentity = ParsedIdentity.GetValue();
+	NewImpl->LastVerifiedIdentity = Baseline;
 	if (NewImpl->Extractor->CachedInputSha256() != NewImpl->FrozenDigest)
 	{
 		return FResult::Error(WoTRetailPackageChangedError(
@@ -457,6 +513,13 @@ uint64 FWoTRetailPackage::EntryBufferHighWaterBytes() const
 }
 
 #if WITH_AUTOMATION_TESTS
+void FWoTRetailPackage::SetAfterOpenReadForTesting(
+	FAfterOpenReadForTesting Callback, void* Context)
+{
+	GWoTRetailPackageAfterOpenRead = Callback;
+	GWoTRetailPackageAfterOpenReadContext = Context;
+}
+
 void FWoTRetailPackage::SetBeforeReverifyForTesting(
 	FBeforeReverifyForTesting Callback, void* Context)
 {
@@ -505,16 +568,39 @@ FWoTBootstrapStatus FWoTRetailPackage::ReverifyHeldSnapshotAfterExtraction() con
 		return FWoTBootstrapStatus::Error(WoTRetailPackageChangedError(
 			TEXT("the held installer identity, size, type, or link state changed")));
 	}
+	if (!Impl->LastVerifiedIdentity.IsSet()
+		|| Impl->Extractor->Description() != Impl->FrozenAdapterDescription)
+	{
+		return FWoTBootstrapStatus::Error(WoTRetailPackageChangedError(
+			TEXT("the held installer changed after its authenticated snapshot")));
+	}
 	// ChangeState is the OS change time (not a caller-settable modification
 	// timestamp) and strict identity also includes link count. Once acquisition
-	// authenticated this held object, only exact identity continuity may reuse
-	// that digest. A mutation fails closed instead of starting another full pass.
-	if (Impl->LastVerifiedIdentity.IsSet()
-		&& Before.GetValue() == Impl->LastVerifiedIdentity.GetValue()
-		&& Impl->Extractor->Description() == Impl->FrozenAdapterDescription)
+	// authenticated this held object, exact identity continuity reuses that
+	// digest.
+	const FWoTNativeFileIdentity& Verified = Impl->LastVerifiedIdentity.GetValue();
+	if (Before.GetValue() == Verified)
 	{
 		return FWoTBootstrapStatus::Success();
 	}
-	return FWoTBootstrapStatus::Error(WoTRetailPackageChangedError(
-		TEXT("the held installer changed after its authenticated snapshot")));
+	// Only ChangeState moving is what the OS's own metadata writes look like:
+	// the first Open-panel pick of a file in Downloads gets com.apple.macl
+	// moments later, mid-extraction. A same-length rewrite looks the same, so
+	// the held file is re-proved (every byte against the approved digest, and
+	// its mode) and only then becomes the new baseline. Anything wider fails.
+	if (!Before.GetValue().DiffersOnlyInChangeState(Verified))
+	{
+		return FWoTBootstrapStatus::Error(WoTRetailPackageChangedError(
+			TEXT("the held installer changed after its authenticated snapshot")));
+	}
+	TWoTBootstrapResult<FWoTNativeFileIdentity> Reproved =
+		WoTReverifyHeldFileAfterMetadataChurn(Impl->Snapshot.Handle, Verified,
+			Impl->FrozenSize, Impl->FrozenDigest, Impl->FrozenMode,
+			TEXT("held-installer-snapshot"));
+	if (Reproved.IsError())
+	{
+		return FWoTBootstrapStatus::Error(MoveTemp(Reproved).GetError());
+	}
+	Impl->LastVerifiedIdentity = Reproved.GetValue();
+	return FWoTBootstrapStatus::Success();
 }

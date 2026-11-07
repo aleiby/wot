@@ -2,11 +2,13 @@
 #include "Misc/AutomationTest.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 #include "../Payload/WoTCacheStore.h"
 #include "WoTBootstrapCore/Hash.h"
+#include "WoTBootstrapCore/NativeHandles.h"
 #include "WoTRetailReader/CacheManifest.h"
 
 #if WITH_AUTOMATION_TESTS
@@ -413,4 +415,156 @@ bool FWoTCacheTwoProcessLockSpec::RunTest(const FString&)
 	return TestFalse(TEXT("owner restores SHARED after mutation"),
 		Root.Session.RestoreShared().IsError());
 }
+
+#if PLATFORM_WINDOWS
+// Windows refuses to rename a directory while any handle is open on anything
+// below it, whatever that handle shares. Antivirus scanners, the search indexer,
+// sync clients and Explorer open freshly written files briefly, so publication
+// must outlast such a holder. The holder here shares read, write and delete like
+// the game's own readers, so only the rename itself can be what it blocks.
+namespace
+{
+bool BeginHeldBuild(FAutomationTestBase& Test, const FSpecRoot& Root,
+	FWoTCacheStore& Store, FWoTProfileSession& Session,
+	TConstArrayView<uint8> Bytes, FWoTNativeFileHandle& OutHeld)
+{
+	if (!TakeExclusive(Test, Session)) return false;
+	if (!Test.TestFalse(TEXT("build begins"), Store.BeginBuild(Session).IsError())) return false;
+	if (!Test.TestFalse(TEXT("object writes"), Store.WriteObject(
+		LogicalId, Schema, Bytes, Sha256(Bytes), 1024).IsError())) return false;
+	auto Held = OpenNativeFileReadNoFollow(BlobPath(Root));
+	if (!Test.TestFalse(TEXT("another holder opens a blob below building"), Held.IsError()))
+		return false;
+	OutHeld = MoveTemp(Held).GetValue();
+	return true;
+}
+
+struct FDirectoryRenameRetrySeam
+{
+	~FDirectoryRenameRetrySeam()
+	{
+		WoTSetNativeDirectoryRenameRetryObserverForTesting({});
+		WoTSetNativeDirectoryRenameRetryBudgetForTesting(-1.0);
+	}
+};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCacheTransientDescendantHolderSpec,
+	"WoT.Cache.Store.PublicationSurvivesTransientDescendantHolder", SpecFlags)
+bool FWoTCacheTransientDescendantHolderSpec::RunTest(const FString&)
+{
+	FSpecRoot Root;
+	auto Store = OpenFixture(Root);
+	if (!TestFalse(TEXT("fixture opens"), Store.IsError())) return false;
+	const TArray<uint8> Bytes = FixtureBytes();
+	FWoTNativeFileHandle Held;
+	if (!BeginHeldBuild(*this, Root, Store.GetValue(), Root.Session, Bytes, Held)) return false;
+	FDirectoryRenameRetrySeam Seam;
+	TArray<int32> Refusals;
+	// The holder lets go after the first refused attempt, as a scanner would.
+	WoTSetNativeDirectoryRenameRetryObserverForTesting(
+		[&Refusals, &Held](int32 FailedAttempts)
+	{
+		Refusals.Add(FailedAttempts);
+		Held = FWoTNativeFileHandle();
+	});
+	const FWoTBootstrapStatus Published = Store.GetValue().Publish(MakeBuild(Bytes));
+	WoTSetNativeDirectoryRenameRetryObserverForTesting({});
+	Held = FWoTNativeFileHandle();
+	if (Published.IsError())
+	{
+		AddError(Published.GetError().ToString());
+	}
+	// At least the held blob's refusal; a real scanner or indexer touching the
+	// fresh files can add more before the rename goes through.
+	TestTrue(TEXT("the held blob refused the first attempt"),
+		Refusals.Num() >= 1 && Refusals[0] == 1);
+	if (!TestFalse(TEXT("publication succeeds once the holder lets go"), Published.IsError()))
+		return false;
+	if (!TestFalse(TEXT("published owner returns to shared"),
+		Root.Session.RestoreShared().IsError())) return false;
+	TestTrue(TEXT("current manifest is published"), IFileManager::Get().FileExists(
+		*FPaths::Combine(Root.Cache, TEXT("current"), TEXT("manifest.json"))));
+	TestFalse(TEXT("building no longer exists"), IFileManager::Get().DirectoryExists(
+		*FPaths::Combine(Root.Cache, TEXT("building"))));
+	return IsCurrentPresent(*this, Store.GetValue());
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCachePersistentDescendantHolderSpec,
+	"WoT.Cache.Store.PublicationPastRetryBudgetFailsWithStatus", SpecFlags)
+bool FWoTCachePersistentDescendantHolderSpec::RunTest(const FString&)
+{
+	FSpecRoot Root;
+	auto Store = OpenFixture(Root);
+	if (!TestFalse(TEXT("fixture opens"), Store.IsError())) return false;
+	const TArray<uint8> Bytes = FixtureBytes();
+	FWoTNativeFileHandle Held;
+	if (!BeginHeldBuild(*this, Root, Store.GetValue(), Root.Session, Bytes, Held)) return false;
+	FDirectoryRenameRetrySeam Seam;
+	constexpr double BudgetSeconds = 0.3;
+	WoTSetNativeDirectoryRenameRetryBudgetForTesting(BudgetSeconds);
+	int32 Refusals = 0;
+	WoTSetNativeDirectoryRenameRetryObserverForTesting(
+		[&Refusals](int32) { ++Refusals; });
+	const double Started = FPlatformTime::Seconds();
+	const FWoTBootstrapStatus Published = Store.GetValue().Publish(MakeBuild(Bytes));
+	const double Elapsed = FPlatformTime::Seconds() - Started;
+	if (!TestTrue(TEXT("publication fails while the holder stays"), Published.IsError()))
+		return false;
+	const FWoTBootstrapError& Refused = Published.GetError();
+	AddInfo(Refused.ToString());
+	TestTrue(TEXT("the failure is Windows error 5"), Refused.NativeCode == 5u);
+	TestTrue(TEXT("the message carries the raw NTSTATUS"),
+		Refused.Message.Contains(TEXT("NTSTATUS 0xC0000022")));
+	TestTrue(TEXT("the message carries the retry count"), Refused.Message.Contains(
+		FString::Printf(TEXT("; %d retries over "), Refusals)));
+	TestTrue(TEXT("the refused rename was retried"), Refusals >= 2);
+	TestTrue(TEXT("the retry waited out its budget and no longer"),
+		Elapsed >= BudgetSeconds && Elapsed < 5.0);
+	Held = FWoTNativeFileHandle();
+	if (!TestFalse(TEXT("failed publication owner returns to shared"),
+		Root.Session.RestoreShared().IsError())) return false;
+	TestFalse(TEXT("no current after the refused rename"), IFileManager::Get().DirectoryExists(
+		*FPaths::Combine(Root.Cache, TEXT("current"))));
+	TestTrue(TEXT("building stays whole"), IFileManager::Get().FileExists(
+		*FPaths::Combine(Root.Cache, TEXT("building"), TEXT("manifest.json")))
+		&& IFileManager::Get().FileExists(*BlobPath(Root)));
+	if (!IsCurrentAbsent(*this, Store.GetValue())) return false;
+	// Relaunching rebuilds over the stranded building and publishes.
+	if (!BuildCurrent(*this, Store.GetValue(), Bytes, Root.Session)) return false;
+	return IsCurrentPresent(*this, Store.GetValue());
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCachePublicationCollisionSpec,
+	"WoT.Cache.Store.PublicationCollisionIsNotRetried", SpecFlags)
+bool FWoTCachePublicationCollisionSpec::RunTest(const FString&)
+{
+	FSpecRoot Root;
+	auto Store = OpenFixture(Root);
+	if (!TestFalse(TEXT("fixture opens"), Store.IsError())) return false;
+	const TArray<uint8> Bytes = FixtureBytes();
+	if (!TakeExclusive(*this, Root.Session)) return false;
+	if (!TestFalse(TEXT("build begins"), Store.GetValue().BeginBuild(Root.Session).IsError())) return false;
+	if (!TestFalse(TEXT("object writes"), Store.GetValue().WriteObject(
+		LogicalId, Schema, Bytes, Sha256(Bytes), 1024).IsError())) return false;
+	if (!TestTrue(TEXT("a directory already holds the current name"),
+		IFileManager::Get().MakeDirectory(*FPaths::Combine(Root.Cache, TEXT("current")), false)))
+		return false;
+	FDirectoryRenameRetrySeam Seam;
+	int32 Refusals = 0;
+	WoTSetNativeDirectoryRenameRetryObserverForTesting(
+		[&Refusals](int32) { ++Refusals; });
+	const FWoTBootstrapStatus Published = Store.GetValue().Publish(MakeBuild(Bytes));
+	if (!TestTrue(TEXT("publication refuses an existing destination"), Published.IsError()))
+		return false;
+	const FWoTBootstrapError& Refused = Published.GetError();
+	AddInfo(Refused.ToString());
+	TestTrue(TEXT("the failure is Windows error 183"), Refused.NativeCode == 183u);
+	TestTrue(TEXT("the message carries the raw NTSTATUS and no retries"),
+		Refused.Message.Contains(TEXT("NTSTATUS 0xC0000035; 0 retries over ")));
+	TestEqual(TEXT("an existing destination is never retried"), Refusals, 0);
+	return TestFalse(TEXT("failed publication owner returns to shared"),
+		Root.Session.RestoreShared().IsError());
+}
+#endif
 #endif

@@ -115,9 +115,12 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 		+ SVerticalBox::Slot().AutoHeight()
 			.Padding(0.0f, 0.0f, 0.0f, 18.0f * WoTBootstrapScale)
 		[
-			SNew(STextBlock)
+			// Wraps: at 48 pt a long step name ("Building textures, sounds,
+			// meshes, and maps failed") is wider than the column.
+			SAssignNew(TitleText, STextBlock)
 			.Text(this, &SWoTBootstrapScreen::PhaseText)
 			.Font(WoTBootstrapFont(TEXT("Bold"), WoTBootstrapTitleFontSize))
+			.AutoWrapText(true)
 			.AccessibleText(this, &SWoTBootstrapScreen::PhaseText)
 		]
 		+ SVerticalBox::Slot().AutoHeight()
@@ -572,6 +575,11 @@ TSharedPtr<SWidget> SWoTBootstrapScreen::InitialFocusWidget() const
 		return SkipButton;
 	}
 	return nullptr;
+}
+
+TSharedPtr<STextBlock> SWoTBootstrapScreen::TitleWidgetForTesting() const
+{
+	return TitleText;
 }
 
 TSharedPtr<SWidget> SWoTBootstrapScreen::ContinueWidgetForTesting() const

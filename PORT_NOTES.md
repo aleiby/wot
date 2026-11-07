@@ -869,6 +869,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Each packaged version shows a one-time release-notes notice.
 - **Why:** Informs players about updates.
 
+### Version label on the main menu
+- **Original:** The main menu showed no version number.
+- **Port:** The main menu shows the running version small in its bottom-right corner, for example `v0.1.2`; a development build shows `dev` and its commit. Update banners and the update-failed notice use the same version number when the release names one.
+- **Why:** Players and testers need to see which build they are running, and updates name versions the same way the menu does.
+
 ## Platform
 
 ### macOS Local Network notice

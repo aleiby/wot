@@ -193,6 +193,9 @@ public:
 	TSharedPtr<SButton> UpdateBannerButtonForTesting() const
 		{ return UpdateBannerButton; }
 	FReply ActivateUpdateBannerForTesting() { return ActivateUpdateBanner(); }
+	FString VersionLabelForTesting() const { return VersionLabel; }
+	TSharedPtr<SWidget> VersionLabelWidgetForTesting() const
+		{ return VersionLabelWidget; }
 #endif
 
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
@@ -430,6 +433,9 @@ private:
 	uint64 ActiveFailedReleaseSequence = 0;
 	uint64 ActiveRestoredReleaseSequence = 0;
 	FString ActiveUpdateFailedText;
+	/** The running release's human version ("" when unversioned) and its menu label. */
+	FString RunningHumanVersion;
+	FString VersionLabel;
 
 	FWoTFrontEndViewModel ViewModel;
 	TSharedPtr<SBox> ScreenHost;
@@ -450,6 +456,7 @@ private:
 	TSharedPtr<SWidget> UpdateFailedNoticeWidget;
 	TSharedPtr<SWidget> UpdateFailedContinueWidget;
 	TSharedPtr<SWidget> UpdateBannerWidget;
+	TSharedPtr<SWidget> VersionLabelWidget;
 	TSharedPtr<SButton> UpdateBannerButton;
 	TSharedPtr<SEditableTextBox> PlayerNameTextBox;
 	TSharedPtr<SWidget> PasswordPromptWidget;

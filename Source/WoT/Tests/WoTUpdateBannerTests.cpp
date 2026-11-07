@@ -4,6 +4,7 @@
 
 #include "../Payload/WoTPayloadActivation.h"
 #include "../UI/WoTUpdateBanner.h"
+#include "../Updater/WoTReleaseIdentity.h"
 #include "../WoTBootstrapHeartbeat.h"
 #include "../WoTBootstrapSubsystem.h"
 #include "../WoTFrontEndSlate.h"
@@ -185,42 +186,40 @@ bool FWoTUpdateBannerPresentationSpec::RunTest(const FString&)
 			TEXT(""), EWoTUpdateBannerAction::None, TEXT("")},
 		{EWoTUpdateStatus::Downloading, nullptr, nullptr, false, TEXT(""), TEXT(""),
 			TEXT(""), EWoTUpdateBannerAction::None, TEXT("")},
-#if PLATFORM_MAC
-		{EWoTUpdateStatus::Ready, nullptr, TEXT("https://example.invalid/release/12"), true,
-			TEXT("Version 12 is available."), TEXT("Download the new version from the release page."),
-			TEXT("Players on version 12 can't join you until you update."),
-			EWoTUpdateBannerAction::OpenReleasePage, TEXT("Open release page")},
-#else
 		{EWoTUpdateStatus::Ready, nullptr, nullptr, true,
 			TEXT("Update ready; restart to install"), TEXT("Open WoT Reborn again to finish installing."),
-			TEXT("Players on version 12 can't join you until you update."),
+			TEXT("Players on the new version can't join you until you update."),
 			EWoTUpdateBannerAction::Restart, TEXT("Quit to install")},
-#endif
+		// A release page never turns Ready back into a download prompt.
+		{EWoTUpdateStatus::Ready, nullptr, TEXT("https://example.invalid/release/12"), true,
+			TEXT("Update ready; restart to install"), TEXT("Open WoT Reborn again to finish installing."),
+			TEXT("Players on the new version can't join you until you update."),
+			EWoTUpdateBannerAction::Restart, TEXT("Quit to install")},
 		{EWoTUpdateStatus::Available, TEXT("install-root-not-writable"),
 			TEXT("https://example.invalid/release/12"), true,
-			TEXT("Version 12 is available."),
+			TEXT("A new version is available."),
 			TEXT("This folder can't be updated in place; download the new version from the release page."),
-			TEXT("Players on version 12 can't join you until you update."),
+			TEXT("Players on the new version can't join you until you update."),
 			EWoTUpdateBannerAction::OpenReleasePage, TEXT("Open release page")},
 		// A failed download or staging step tells the player instead of the
 		// Downloading banner silently disappearing.
 		{EWoTUpdateStatus::Available, TEXT("download-failed"),
 			TEXT("https://example.invalid/release/12"), true,
-			TEXT("Version 12 is available."),
+			TEXT("A new version is available."),
 			TEXT("The update couldn't be downloaded. Check your free disk space and connection; WoT Reborn will try again next time you start it."),
-			TEXT("Players on version 12 can't join you until you update."),
+			TEXT("Players on the new version can't join you until you update."),
 			EWoTUpdateBannerAction::OpenReleasePage, TEXT("Open release page")},
 		{EWoTUpdateStatus::Available, TEXT("translocated"),
 			TEXT("https://example.invalid/release/12"), true,
-			TEXT("Version 12 is available."),
+			TEXT("A new version is available."),
 			TEXT("Move WoT to your Applications folder (or any folder) to enable automatic updates."),
-			TEXT("Players on version 12 can't join you until you update."),
+			TEXT("Players on the new version can't join you until you update."),
 			EWoTUpdateBannerAction::OpenReleasePage, TEXT("Open release page")},
 		{EWoTUpdateStatus::Available, TEXT("reserved-live-leaf"),
 			TEXT("https://example.invalid/release/12"), true,
-			TEXT("Version 12 is available."),
+			TEXT("A new version is available."),
 			TEXT("This copy can't update itself; download the new version from the release page."),
-			TEXT("Players on version 12 can't join you until you update."),
+			TEXT("Players on the new version can't join you until you update."),
 			EWoTUpdateBannerAction::OpenReleasePage, TEXT("Open release page")},
 		{EWoTUpdateStatus::Available, TEXT("update-in-progress"),
 			TEXT("https://example.invalid/release/12"), false, TEXT(""), TEXT(""),
@@ -229,7 +228,7 @@ bool FWoTUpdateBannerPresentationSpec::RunTest(const FString&)
 			TEXT("https://example.invalid/release/12"), false, TEXT(""), TEXT(""),
 			TEXT(""), EWoTUpdateBannerAction::None, TEXT("")},
 		{EWoTUpdateStatus::KnownBad, nullptr, nullptr, true,
-			TEXT("Version 12 could not start on this computer; you'll get the next version."),
+			TEXT("The new version could not start on this computer; you'll get the next version."),
 			TEXT(""), TEXT(""), EWoTUpdateBannerAction::None, TEXT("")},
 	};
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Cases); ++Index)
@@ -295,6 +294,34 @@ bool FWoTUpdateBannerPresentationSpec::RunTest(const FString&)
 	TestTrue(TEXT("strict GitHub release URL is accepted"),
 		WoTIsHttpsReleasePageUrl(
 			TEXT("https://github.com/Open-WoT/wot/releases/tag/v13.2-rc_1")));
+
+	// A release that names a human version is called by it, as the main-menu
+	// corner calls the running one; a bare sequence is never shown.
+	FWoTUpdateState Named;
+	Named.Status = EWoTUpdateStatus::Available;
+	Named.ReleaseSequence = 12;
+	Named.HumanVersion = TEXT("0.1.2");
+	Named.Reason = TEXT("translocated");
+	const FWoTUpdateBannerPresentation NamedBanner =
+		WoTBuildUpdateBannerPresentation(Named);
+	TestEqual(TEXT("human version names the available release"),
+		NamedBanner.PrimaryLine, FString(TEXT("Version 0.1.2 is available.")));
+	TestEqual(TEXT("human version names the multiplayer gap"),
+		NamedBanner.MultiplayerLine,
+		FString(TEXT("Players on version 0.1.2 can't join you until you update.")));
+	Named.Status = EWoTUpdateStatus::Ready;
+	TestEqual(TEXT("Ready names the human version too"),
+		WoTBuildUpdateBannerPresentation(Named).MultiplayerLine,
+		FString(TEXT("Players on version 0.1.2 can't join you until you update.")));
+	Named.Status = EWoTUpdateStatus::KnownBad;
+	TestEqual(TEXT("KnownBad names the human version too"),
+		WoTBuildUpdateBannerPresentation(Named).PrimaryLine,
+		FString(TEXT("Version 0.1.2 could not start on this computer; you'll get the next version.")));
+	Named.Status = EWoTUpdateStatus::Available;
+	Named.HumanVersion = TEXT("v0.1.2 <b>");
+	TestEqual(TEXT("an undisplayable human version is never shown"),
+		WoTBuildUpdateBannerPresentation(Named).PrimaryLine,
+		FString(TEXT("A new version is available.")));
 	return !HasAnyErrors();
 }
 
@@ -334,6 +361,58 @@ bool FWoTUpdateBannerStructureSpec::RunTest(const FString&)
 			ESearchCase::CaseSensitive)
 		&& !BannerSource.Contains(TEXT("SNew(SWrapBox)"),
 			ESearchCase::CaseSensitive));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUpdateBannerVersionLabelSpec,
+	"WoT.FrontEnd.UpdateBanner.MainMenuVersionLabel", UpdateBannerSpecFlags)
+
+bool FWoTUpdateBannerVersionLabelSpec::RunTest(const FString&)
+{
+	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::Combine(
+		FPaths::AutomationTransientDir(), TEXT("UpdateBannerVersion-")
+		+ FGuid::NewGuid().ToString(EGuidFormats::Digits)));
+	IFileManager::Get().MakeDirectory(*Directory, true);
+	ON_SCOPE_EXIT
+	{
+		IFileManager::Get().DeleteDirectory(*Directory, false, true);
+	};
+	const FString IdentityPath = Directory / TEXT("release-identity.json");
+	TestTrue(TEXT("stamped identity writes"), FFileHelper::SaveStringToFile(
+		TEXT("{\"format\":\"wot-release-identity-v1\",\"release_commit\":\"abc123456def\",\"release_sequence\":5,\"version\":1}"),
+		*IdentityPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	WoTReleaseIdentity::FScopedPathOverrideForTesting Override(IdentityPath);
+	auto MakeRoot = []()
+	{
+		const TSharedRef<SWoTFrontEndRoot> Root = SNew(SWoTFrontEndRoot)
+			.PlayerController(nullptr)
+			.PresentationAuthorityForTesting(UpdateBannerAuthority())
+			.BootstrapForTesting(UpdateBannerBootstrap());
+		Root->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
+			FSlateLayoutTransform()), 0.0, 0.0f);
+		Root->SlatePrepass(1.0f);
+		return Root;
+	};
+	auto RenderedLabel = [](const TSharedRef<SWoTFrontEndRoot>& Root)
+	{
+		const TSharedPtr<SWidget> Widget = Root->VersionLabelWidgetForTesting();
+		return Widget.IsValid()
+			? StaticCastSharedPtr<STextBlock>(Widget)->GetText().ToString()
+			: FString();
+	};
+
+	const TSharedRef<SWoTFrontEndRoot> Unversioned = MakeRoot();
+	TestEqual(TEXT("an unversioned stamped package shows dev and its commit"),
+		Unversioned->VersionLabelForTesting(), FString(TEXT("dev abc123456")));
+	TestEqual(TEXT("the main menu renders the label"),
+		RenderedLabel(Unversioned), FString(TEXT("dev abc123456")));
+
+	TestTrue(TEXT("release version writes"), FFileHelper::SaveStringToFile(
+		TEXT("{\"format\":\"wot-release-version-v1\",\"human_version\":\"0.1.2\",\"version\":1}"),
+		*(Directory / TEXT("release-version.json")),
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	TestEqual(TEXT("a versioned package shows its human version"),
+		RenderedLabel(MakeRoot()), FString(TEXT("v0.1.2")));
 	return !HasAnyErrors();
 }
 
@@ -377,13 +456,9 @@ bool FWoTUpdateBannerLiveActionSpec::RunTest(const FString&)
 	TArray<FString> ReadyText;
 	CollectUpdateBannerText(
 		Root->UpdateBannerWidgetForTesting().ToSharedRef(), ReadyText);
-#if PLATFORM_MAC
-	TestTrue(TEXT("Mac ready offers the release page"), ReadyText.Contains(TEXT("Version 12 is available.")));
-#else
 	TestTrue(TEXT("live Ready renders the primary line"), ReadyText.Contains(TEXT("Update ready; restart to install")));
-#endif
 	TestTrue(TEXT("live Ready renders the multiplayer line"), ReadyText.Contains(
-		TEXT("Players on version 12 can't join you until you update.")));
+		TEXT("Players on the new version can't join you until you update.")));
 
 	const TSharedPtr<SButton> BannerButton =
 		Root->UpdateBannerButtonForTesting();
@@ -409,12 +484,6 @@ bool FWoTUpdateBannerLiveActionSpec::RunTest(const FString&)
 				&& Up->GetFocusRecipient(EUINavigation::Up).Pin() == LastMenu);
 	}
 
-#if PLATFORM_MAC
-	TestTrue(TEXT("Mac ready action opens the release page"), Root->ActivateUpdateBannerForTesting().IsEventHandled());
-	TestEqual(TEXT("Mac ready never quits"), Bootstrap->RestartRequestCountForTesting(), 0);
-	TestEqual(TEXT("Mac ready opens once"), Launches, 1);
-	Launches = 0;
-#else
 	TestTrue(TEXT("Quit click is handled"),
 		Root->ActivateUpdateBannerForTesting().IsEventHandled());
 	TestEqual(TEXT("Restart calls the subsystem exactly once"),
@@ -431,7 +500,7 @@ bool FWoTUpdateBannerLiveActionSpec::RunTest(const FString&)
 	TestTrue(TEXT("failed Restart renders the required error on the main menu"),
 		FailedRestartText.Contains(TEXT(
 			"WoT Reborn could not quit. Close it, then open it again to finish installing.")));
-#endif
+	TestEqual(TEXT("Quit never opens the release page"), Launches, 0);
 
 	PublishUpdateState(*Bootstrap, EWoTUpdateStatus::Available, 13,
 		TEXT("translocated"),

@@ -58,9 +58,18 @@ def release_identity_relative(platform: str) -> str:
             else "Contents/UE/WoT/Build/WoTRelease/release-identity.json")
 
 
+def release_version_bytes(human_version: str = "0.1.0") -> bytes:
+    return formats.release_version_bytes(human_version)
+
+
+def release_version_relative(platform: str) -> str:
+    return formats.release_version_relative(platform)
+
+
 def platform_files(platform: str, configuration: str = formats.SHIPPING_CONFIGURATION,
                    release_sequence: int = 0,
-                   release_commit: str = COMMIT) -> Dict[str, tuple]:
+                   release_commit: str = COMMIT,
+                   human_version: str = "0.1.0") -> Dict[str, tuple]:
     """The staged tree build_stripped_pak packages, per configuration."""
     if platform == "Win64":
         game = f"WoT/Binaries/Win64/WoT-Win64-{configuration}.exe"
@@ -69,6 +78,8 @@ def platform_files(platform: str, configuration: str = formats.SHIPPING_CONFIGUR
             "WoT/Content/Paks/pakchunk0-Windows.pak": (bytes(range(256)) * 64, 0o100666),
             release_identity_relative(platform): (
                 release_identity_bytes(release_sequence, release_commit), 0o100666),
+            release_version_relative(platform): (
+                release_version_bytes(human_version), 0o100666),
             "Engine/Binaries/ThirdParty/Ogg/Win64/libogg_64.dll": (b"dll" * 99, 0o100666),
             "Manifest_NonUFSFiles_Win64.txt": ((game + "\n").encode(), 0o100666),
         }
@@ -78,6 +89,8 @@ def platform_files(platform: str, configuration: str = formats.SHIPPING_CONFIGUR
         "Contents/Info.plist": (b"<plist><dict/></plist>\n", 0o100644),
         release_identity_relative(platform): (
             release_identity_bytes(release_sequence, release_commit), 0o100644),
+        release_version_relative(platform): (
+            release_version_bytes(human_version), 0o100644),
         "Contents/UE/WoT/Content/Paks/pakchunk0-Mac.pak": (bytes(range(256)) * 80, 0o100644),
         "Contents/_CodeSignature/CodeResources": (b"<plist/>\n", 0o100644),
     }
@@ -117,10 +130,12 @@ def write_guarded_zip(path: Path, platform: str,
                       extra: Optional[Dict[str, tuple]] = None,
                       configuration: str = formats.SHIPPING_CONFIGURATION,
                       release_sequence: int = 0,
-                      release_commit: str = COMMIT) -> None:
+                      release_commit: str = COMMIT,
+                      human_version: str = "0.1.0") -> None:
     """Imitate build_stripped_pak.py _stage_package for one platform."""
     files = dict(files or platform_files(
-        platform, configuration, release_sequence, release_commit))
+        platform, configuration, release_sequence, release_commit,
+        human_version))
     files.update(extra or {})
     root = formats.GUARDED_ZIP_ROOTS[platform]
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -145,7 +160,8 @@ def write_guarded_zip(path: Path, platform: str,
 
 
 def synthetic_test_twin(platform: str, commit: str, snapshot_sha256: str,
-                        release_sequence: int = 0) -> dict:
+                        release_sequence: int = 0,
+                        human_version: str = "0.1.0") -> dict:
     """The shape build_stripped_pak._test_twin_binding writes (digests synthetic)."""
     def digest(label: str) -> str:
         return hashlib.sha256(f"{label}-{platform}-{commit}".encode()).hexdigest()
@@ -159,6 +175,7 @@ def synthetic_test_twin(platform: str, commit: str, snapshot_sha256: str,
         "cooked_container_inventory_receipt_sha256": digest("cooked-inventory"),
         "format": formats.TEST_TWIN_FORMAT,
         "git_commit": commit,
+        "human_version": human_version,
         "project_package_census_sha256": digest("census"),
         "release_json_sha256": digest("test-release-json"),
         "release_sequence": release_sequence,
@@ -754,15 +771,16 @@ def write_guarded_release(directory: Path, platform: str, *,
                           release_sequence: int = 0,
                           configuration: str = formats.SHIPPING_CONFIGURATION,
                           test_twin: Optional[dict] = None,
-                          notarized: bool = True) -> Path:
+                          notarized: bool = True,
+                          human_version: str = "0.1.0") -> Path:
     """A release dir as stage_package leaves it: release.json + the zip."""
     directory.mkdir(parents=True, exist_ok=True)
     asset = formats.guarded_install_zip_asset(platform, commit, configuration)
     write_guarded_zip(directory / asset, platform, files, extra, configuration,
-                      release_sequence, commit)
+                      release_sequence, commit, human_version)
     digest, size = formats.sha256_file(directory / asset)
     source = dict(files or platform_files(
-        platform, configuration, release_sequence, commit))
+        platform, configuration, release_sequence, commit, human_version))
     stage_root, main_path = product_paths(platform, configuration)
     prefix = stage_root + "/" + ("WoT.app/" if platform == "Mac" else "")
 
@@ -813,7 +831,8 @@ def write_guarded_release(directory: Path, platform: str, *,
         document["test_twin"] = (test_twin if test_twin is not None
                                  else synthetic_test_twin(platform, commit,
                                                           snapshot["sha256"],
-                                                          release_sequence))
+                                                          release_sequence,
+                                                          human_version))
     if platform == "Mac":
         dmg_name = formats.guarded_install_dmg_asset(commit, configuration)
         dmg_path = directory / dmg_name

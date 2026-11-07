@@ -155,6 +155,37 @@ EWoTBootstrapDiagnosticCode WoTGameBootstrapWorkerDiagnostic(
 	}
 }
 
+/** True for a cache publication refused because another program holds a file
+ * in the cache. Windows refuses a directory rename with STATUS_ACCESS_DENIED
+ * while any other process has something below the directory open (a virus
+ * scanner, the search indexer, a sync client), and RenameNativeEntryAtNoFollow
+ * retries that refusal before failing with "(NTSTATUS 0xC0000022; N retries
+ * over M ms)". A refusal that was retried is that case; an access-denied
+ * create, write or file rename is not retried and stays a permission error. */
+bool WoTGameBootstrapWorkerHeldByAnotherProgram(const FWoTBootstrapError& Error)
+{
+#if PLATFORM_WINDOWS
+	static const TCHAR Marker[] = TEXT("(NTSTATUS 0xC0000022; ");
+	const int32 MarkerAt = Error.Message.Find(Marker, ESearchCase::IgnoreCase);
+	if (Error.NativeCode != 5 || MarkerAt == INDEX_NONE)
+	{
+		return false;
+	}
+	const int32 CountAt = MarkerAt + UE_ARRAY_COUNT(Marker) - 1;
+	int32 CountEnd = CountAt;
+	while (CountEnd < Error.Message.Len()
+		&& FChar::IsDigit(Error.Message[CountEnd]))
+	{
+		++CountEnd;
+	}
+	return CountEnd > CountAt
+		&& FCString::Atoi(*Error.Message.Mid(CountAt, CountEnd - CountAt)) > 0;
+#else
+	(void)Error;
+	return false;
+#endif
+}
+
 TWoTBootstrapResult<FWoTEd25519Signature>
 WoTGameBootstrapWorkerSignature(
 	TConstArrayView<uint8> Bytes, const TCHAR* What)
@@ -1323,6 +1354,10 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			{
 				Message = TEXT("There is not enough disk space for the content cache. Free space on this drive and relaunch WoT Reborn.");
 			}
+			else if (bAccessDenied && WoTGameBootstrapWorkerHeldByAnotherProgram(Error))
+			{
+				Message = TEXT("Another program, such as antivirus, a search indexer or a sync client, may be using WoT Reborn's files. Relaunch WoT Reborn to try again, or close that program and relaunch.");
+			}
 			else if (bAccessDenied)
 			{
 				Message = TEXT("WoT Reborn cannot access its content cache. Check that you have permission to read and write this folder, then relaunch.");
@@ -1337,10 +1372,34 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		return Result;
 	}
 
+	/** What the player is told when the original game's installer, not the
+	 * cache, stopped extraction or the content build: it changed, went away or
+	 * could not be read after it was checked. A fresh attempt usually works; a
+	 * Browse pick is only remembered once its build succeeds, so relaunching
+	 * may ask for it again. */
+	static const TCHAR* InstallerFailureMessage()
+	{
+		return TEXT("WoT Reborn could not read the original game's installer, or the installer no longer matched the one it checked. Relaunch WoT Reborn to try again. If it asks for the installer, choose it again with Browse.");
+	}
+
+	/** A content-build failure the original game's installer caused. The
+	 * diagnostic code and detail keep the form CacheFailure gives them. */
+	FWoTBootstrapWorkerCompletion InstallerFailure(
+		const FWork& Work, const FWoTBootstrapError& Error) const
+	{
+		FWoTBootstrapWorkerCompletion Result = Failure(Work, Error);
+		Result.FailureDetail += FString::Printf(TEXT(" native=%u"), Error.NativeCode);
+		Result.FailureMessage = InstallerFailureMessage();
+		return Result;
+	}
+
 	FWoTBootstrapWorkerCompletion InvalidInstallerFailure(
 		const FWork& Work) const
 	{
-		return Failure(Work, EWoTBootstrapDiagnosticCode::InstallerInvalid);
+		FWoTBootstrapWorkerCompletion Result =
+			Failure(Work, EWoTBootstrapDiagnosticCode::InstallerInvalid);
+		Result.FailureMessage = InstallerFailureMessage();
+		return Result;
 	}
 
 	TWoTBootstrapResult<FWoTAdjacentInstallerInspection>
@@ -2764,6 +2823,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			FWoTUpdateState Ready;
 			Ready.Status = EWoTUpdateStatus::Ready;
 			Ready.ReleaseSequence = ReadyMarker.GetValue()->Sequence;
+			Ready.HumanVersion = WoTReleaseIdentity::LoadStagedHumanVersion(
+				Root->StagedTreeDir);
 			Ready.ReleasePageUrl = WoTGameBootstrapWorkerReleasePageUrl(Deps.AnnouncementJsonUrl);
 			{
 				FScopeLock Lock(&UpdateLock);
@@ -2816,6 +2877,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Available.Status = NotifyOnlyReason == TEXT("known-bad")
 					? EWoTUpdateStatus::KnownBad : EWoTUpdateStatus::Available;
 				Available.ReleaseSequence = Announcement->ReleaseSequence;
+				Available.HumanVersion = Manifest.IsSet()
+					? Manifest->HumanVersion : FString();
 				Available.Reason = NotifyOnlyReason;
 				Available.ReleasePageUrl = WoTGameBootstrapWorkerReleasePageUrl(
 					Announcement->Manifest.Url);
@@ -2845,6 +2908,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		FWoTUpdateState Downloading;
 		Downloading.Status = EWoTUpdateStatus::Downloading;
 		Downloading.ReleaseSequence = Announcement->ReleaseSequence;
+		Downloading.HumanVersion = Manifest->HumanVersion;
 		Downloading.TotalBytes = Manifest->Archive.Size;
 		PublishUpdateState(Work, MoveTemp(Downloading));
 		double LastProgressHeartbeat = -1.0e30;
@@ -2855,6 +2919,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			Progress.Status = EWoTUpdateStatus::Downloading;
 			Progress.ReleaseSequence = Announcement.IsSet()
 				? Announcement->ReleaseSequence : 0;
+			Progress.HumanVersion = Manifest.IsSet()
+				? Manifest->HumanVersion : FString();
 			Progress.CompletedBytes = Event.CompletedBytes.Get(0);
 			Progress.TotalBytes = Event.TotalBytes.Get(0);
 			const double Now = Deps.NowSeconds();
@@ -2889,6 +2955,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			Failed.Status = EWoTUpdateStatus::Available;
 			Failed.ReleaseSequence = Announcement.IsSet()
 				? Announcement->ReleaseSequence : 0;
+			Failed.HumanVersion = Manifest.IsSet()
+				? Manifest->HumanVersion : FString();
 			Failed.Reason = TEXT("download-failed");
 			Failed.ReleasePageUrl = Announcement.IsSet()
 				? WoTGameBootstrapWorkerReleasePageUrl(Announcement->Manifest.Url)
@@ -2899,6 +2967,14 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		FWoTUpdateState Ready;
 		Ready.Status = EWoTUpdateStatus::Ready;
 		Ready.ReleaseSequence = Staged->ReleaseSequence;
+		// The staged tree's own stamp is what the player will run; the signed
+		// manifest names the same version when the stamp cannot be read.
+		Ready.HumanVersion = WoTReleaseIdentity::LoadStagedHumanVersion(
+			Staged->StagedTreeDir);
+		if (Ready.HumanVersion.IsEmpty() && Manifest.IsSet())
+		{
+			Ready.HumanVersion = Manifest->HumanVersion;
+		}
 		Ready.ReleasePageUrl = WoTGameBootstrapWorkerReleasePageUrl(Announcement->Manifest.Url);
 		const FString StagedDetail = FString::Printf(
 			TEXT("sequence=%llu"),
@@ -3244,6 +3320,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		TWoTBootstrapResult<FWoTPublishedCacheReceipt> Published =
 			ContentOperation->BuildAndPublish(
 				MoveTemp(*ContentPackage), *ContentCache, Progress);
+		const bool bInstallerFailed = Published.IsError()
+			&& ContentOperation->LastFailureCameFromInstaller();
 		ResetContentOperationState();
 		if (WoTGetProcessProfileSession() == nullptr)
 		{
@@ -3263,7 +3341,9 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		}
 		if (Published.IsError())
 		{
-			return CacheFailure(Work, MoveTemp(Published).GetError());
+			return bInstallerFailed
+				? InstallerFailure(Work, MoveTemp(Published).GetError())
+				: CacheFailure(Work, MoveTemp(Published).GetError());
 		}
 		PublishedCacheReceipt = MoveTemp(Published).GetValue();
 		if (!PickedPathToRemember.IsEmpty())

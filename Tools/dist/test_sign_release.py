@@ -269,6 +269,28 @@ class SignReleaseTests(unittest.TestCase):
             allow_unnotarized=True)
         self.assertTrue(receipt["allow_unnotarized"])
 
+    def test_shipping_refuses_a_mismatched_test_twin_human_version(self):
+        releases = {}
+        funnels = {}
+        for platform in formats.PLATFORMS:
+            baseline = formats.load_guarded_release(
+                self.fixture.releases[platform], platform)
+            twin = fixtures.synthetic_test_twin(
+                platform, fixtures.COMMIT,
+                baseline.document["source_snapshot"]["sha256"],
+                human_version=("0.2.0" if platform == "Win64" else "0.1.0"))
+            releases[platform] = fixtures.write_guarded_release(
+                self.fixture.root / f"mismatched-twin-version-{platform}",
+                platform, test_twin=twin)
+            funnels[platform] = fixtures.write_funnel_receipt(
+                self.fixture.root / f"mismatched-twin-version-{platform}.json",
+                releases[platform])
+        error = self.assertRefused(
+            release_jsons=releases, funnel_receipts=funnels)
+        self.assertIn(
+            "Test twin human_version '0.2.0' does not match "
+            "--human-version '0.1.0'", str(error))
+
     def assertRefused(self, **overrides):
         output = self.fixture.root / f"refused-{len(list(self.fixture.root.iterdir()))}"
         with self.assertRaises((sign_release.SignError, crypto.CryptoError,
@@ -497,6 +519,60 @@ class SignReleaseTests(unittest.TestCase):
                         self.assertIsInstance(flagged_error, sign_release.SignError)
                         self.assertIn(fragment, str(flagged_error))
 
+    def test_refuses_missing_malformed_or_mismatched_release_version(self):
+        version_path = fixtures.release_version_relative("Win64")
+        cases = {
+            "missing release version": None,
+            "malformed release version": b"{",
+            "0.2.0": fixtures.release_version_bytes("0.2.0"),
+        }
+        for index, (fragment, version) in enumerate(cases.items()):
+            with self.subTest(fragment=fragment):
+                files = fixtures.platform_files("Win64")
+                if version is None:
+                    files.pop(version_path)
+                else:
+                    _data, mode = files[version_path]
+                    files[version_path] = (version, mode)
+                release = fixtures.write_guarded_release(
+                    self.fixture.root / f"bad-version-{index}", "Win64",
+                    files=files)
+                funnel = fixtures.write_funnel_receipt(
+                    self.fixture.root / f"bad-version-{index}-funnel.json",
+                    release)
+                error = self.assertRefused(
+                    release_jsons={
+                        "Win64": release,
+                        "Mac": self.fixture.releases["Mac"],
+                    },
+                    funnel_receipts={
+                        "Win64": funnel,
+                        "Mac": self.fixture.funnel_receipts["Mac"],
+                    })
+                self.assertIn(fragment, str(error))
+                if fragment == "0.2.0":
+                    self.assertIn("Win64", str(error))
+                    self.assertIn("0.1.0", str(error))
+
+    def test_repacked_update_archive_version_is_checked_again(self):
+        real_reader = formats.read_release_version_from_zip
+        calls = 0
+
+        def changed_after_repack(archive, platform, tree_root):
+            nonlocal calls
+            calls += 1
+            if calls == 3:
+                return "0.2.0"
+            return real_reader(archive, platform, tree_root)
+
+        with mock.patch.object(
+                sign_release.formats, "read_release_version_from_zip",
+                side_effect=changed_after_repack):
+            error = self.assertRefused()
+        self.assertIn("Win64", str(error))
+        self.assertIn("0.2.0", str(error))
+        self.assertIn("0.1.0", str(error))
+
     def test_refuses_dirty_or_mismatched_builds(self):
         dirty = fixtures.write_guarded_release(self.fixture.root / "dirty", "Win64",
                                                dirty=True)
@@ -682,6 +758,18 @@ class SignRingTests(unittest.TestCase):
 
 
 class CommandLineTests(unittest.TestCase):
+    def test_sign_human_version_is_validated_by_argparse(self):
+        arguments = [
+            "sign", "--release", "Win64=release.json",
+            "--key-ring", "ring.json", "--announcement-key", "announcement.pem",
+            "--release-key", "release.pem", "--release-key-id", "release-v1",
+            "--release-sequence", "0", "--human-version", "v0.1.0",
+            "--tag", "v0.1.0", "--output", "out",
+            "--cache-gate", "Win64=gate.json",
+        ]
+        with self.assertRaises(SystemExit):
+            sign_release.parser().parse_args(arguments)
+
     def test_sign_then_verify_through_main(self):
         fixture = fixtures.ReleaseFixture()
         try:

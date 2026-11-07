@@ -6,6 +6,7 @@
 struct FSlateDynamicImageBrush;
 class SButton;
 class SProgressBar;
+class STextBlock;
 
 #ifndef WOT_BOOTSTRAP_TEST_IDENTITIES
 #define WOT_BOOTSTRAP_TEST_IDENTITIES 0
@@ -52,6 +53,8 @@ public:
 	bool CanExit() const;
 	TSharedPtr<SWidget> InitialFocusWidgetForTesting() const
 		{ return InitialFocusWidget(); }
+	/** The phase title, "<step> failed" on the failure screen. */
+	TSharedPtr<STextBlock> TitleWidgetForTesting() const;
 	TSharedPtr<SWidget> ContinueWidgetForTesting() const;
 	TSharedPtr<SWidget> SkipWidgetForTesting() const;
 	TSharedPtr<SWidget> ExitWidgetForTesting() const;
@@ -85,6 +88,7 @@ private:
 	TSharedPtr<SButton> ExitButton;
 	TSharedPtr<SButton> BrowseInstallerButton;
 	TSharedPtr<SButton> GetOriginalGameButton;
+	TSharedPtr<STextBlock> TitleText;
 	TSharedPtr<SProgressBar> ProgressBar;
 	// The backdrop behind everything: the saved blurred main-menu scene, else
 	// the shipped default, else the generated gradient (WoTSetupBackdrop).

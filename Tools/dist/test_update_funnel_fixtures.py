@@ -79,9 +79,13 @@ class UpdateFunnelFixtureTests(unittest.TestCase):
             {
                 "path": updates.RELEASE_IDENTITY_RELATIVE,
                 "operation": "rewrite-release-identity",
+            },
+            {
+                "path": updates.RELEASE_VERSION_RELATIVE,
+                "operation": "rewrite-release-version",
             }
         ])
-        self.assertEqual(bad["mutations"][1], {
+        self.assertEqual(bad["mutations"][2], {
             "path": "wot-test-fail-after-started",
             "operation": "fail-after-started",
         })
@@ -100,6 +104,13 @@ class UpdateFunnelFixtureTests(unittest.TestCase):
                 formats.load_compiled_constants().announcement_domain,
             )
             manifest = formats.parse_manifest(manifest_raw, announcement)
+            formats.validate_human_version(
+                manifest.document["human_version"],
+                "fixture manifest human_version", allow_empty=False)
+            self.assertEqual(
+                formats.read_release_version_from_zip(
+                    archive, "Win64", staged.root),
+                manifest.document["human_version"])
             entries = {entry.path: entry for entry in staged.entries}
             self.assertEqual(
                 manifest.main_executable.sha256,
@@ -196,10 +207,13 @@ class UpdateFunnelFixtureTests(unittest.TestCase):
             {"source": "good-source", "bad_marker": False},
             {"source": "bad-source", "bad_marker": True},
         ])
-        self.assertEqual(bad["mutations"][1], {
+        self.assertEqual(bad["mutations"][1:], [{
+            "path": "Contents/UE/WoT/Build/WoTRelease/release-version.json",
+            "operation": "rewrite-release-version",
+        }, {
             "path": "Contents/Resources/wot-test-fail-after-started",
             "operation": "fail-after-started",
-        })
+        }])
         for variant in (good, bad):
             archive = (receipt_path.parent / variant["directory"]
                        / variant["archive"]["name"])

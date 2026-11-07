@@ -57,6 +57,15 @@ TEST_TWIN_FORMAT = "wot-guarded-test-twin-v1"
 RELEASE_IDENTITY_FORMAT = "wot-release-identity-v1"
 RELEASE_IDENTITY_VERSION = 1
 RELEASE_IDENTITY_MAX_BYTES = 4 * 1024
+RELEASE_VERSION_FORMAT = "wot-release-version-v1"
+RELEASE_VERSION_VERSION = 1
+RELEASE_VERSION_MAX_BYTES = 4 * 1024
+# The first release sequence whose runnable trees carry release-version.json.
+# Sequences 0 and 1 (v0.1.0, v0.1.1) were packaged before the stamp existed, so
+# their signed sets stay verifiable without it; a stamp they do carry must
+# still match.
+RELEASE_VERSION_FIRST_SEQUENCE = 2
+_HUMAN_VERSION_PATTERN = re.compile(r"^[0-9][0-9A-Za-z.+-]{0,31}$")
 # The signed per-platform record of the cache a release builds (CacheLineageV1):
 # which content revision and label it stamps, and the manifest it produces from
 # the pinned installer and contract. The next release's cache gate compares its
@@ -479,6 +488,97 @@ def read_release_identity_from_zip(archive_path: Path, platform: str,
         return parse_release_identity(raw, what)
     except FormatError as exc:
         raise FormatError(f"malformed release identity: {exc}") from exc
+
+
+def validate_human_version(text: str, what: str, allow_empty: bool) -> str:
+    """Validate the human spelling shown after ``v`` in the game UI."""
+    if not isinstance(text, str):
+        raise FormatError(f"{what}: must be a string")
+    if text == "" and allow_empty:
+        return text
+    if not _HUMAN_VERSION_PATTERN.fullmatch(text):
+        empty = " or empty" if allow_empty else ""
+        raise FormatError(
+            f"{what}: must start with a digit, contain at most 32 characters "
+            f"from [0-9A-Za-z.+-]{empty}")
+    return text
+
+
+def release_version_bytes(human_version: str) -> bytes:
+    """Write the closed canonical version stamped into a runnable tree."""
+    validate_human_version(
+        human_version, "release version human_version", allow_empty=True)
+    return canonical_bytes({
+        "format": RELEASE_VERSION_FORMAT,
+        "human_version": human_version,
+        "version": RELEASE_VERSION_VERSION,
+    }, "release version")
+
+
+def parse_release_version(raw: bytes, what: str = "release version") -> str:
+    """Read the closed canonical human version stamped into a runnable tree."""
+    if len(raw) > RELEASE_VERSION_MAX_BYTES:
+        raise FormatError(
+            f"{what}: exceeds the {RELEASE_VERSION_MAX_BYTES}-byte limit")
+    document = parse_canonical(raw, what)
+    require_exact_members(
+        document, ("format", "human_version", "version"), what)
+    if read_string(document, "format", what) != RELEASE_VERSION_FORMAT:
+        raise FormatError(f"{what}.format is not {RELEASE_VERSION_FORMAT}")
+    if read_unsigned32(document, "version", what) != RELEASE_VERSION_VERSION:
+        raise FormatError(
+            f"{what}.version is not {RELEASE_VERSION_VERSION}")
+    human_version = read_string(document, "human_version", what)
+    return validate_human_version(
+        human_version, f"{what}.human_version", allow_empty=True)
+
+
+def release_version_relative(platform: str) -> str:
+    if platform == "Win64":
+        return "WoT/Build/WoTRelease/release-version.json"
+    if platform == "Mac":
+        return "Contents/UE/WoT/Build/WoTRelease/release-version.json"
+    raise FormatError(f"unknown platform {platform!r}")
+
+
+def read_release_version_from_zip(archive_path: Path, platform: str,
+                                  tree_root: str, *,
+                                  allow_missing: bool = False) -> Optional[str]:
+    """Read the one release-version member from an install or update ZIP.
+
+    With allow_missing, an archive without the member returns None (a release
+    packaged before RELEASE_VERSION_FIRST_SEQUENCE); a malformed one still fails.
+    """
+    member = f"{tree_root}/{release_version_relative(platform)}"
+    what = f"{Path(archive_path).name} release version"
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            matches = [info for info in archive.infolist()
+                       if info.filename.rstrip("/") == member]
+            if not matches:
+                if allow_missing:
+                    return None
+                raise FormatError(f"{what}: missing release version {member}")
+            mode = (matches[0].external_attr >> 16) & 0xFFFF
+            file_type = stat.S_IFMT(mode)
+            if (len(matches) != 1 or matches[0].is_dir()
+                    or file_type not in (0, stat.S_IFREG)):
+                raise FormatError(
+                    f"{what}: malformed release version member {member}")
+            info = matches[0]
+            if info.file_size > RELEASE_VERSION_MAX_BYTES:
+                raise FormatError(
+                    f"{what}: exceeds the {RELEASE_VERSION_MAX_BYTES}-byte limit")
+            with archive.open(info) as handle:
+                raw = handle.read(RELEASE_VERSION_MAX_BYTES + 1)
+    except FormatError:
+        raise
+    except (OSError, KeyError, zipfile.BadZipFile) as exc:
+        raise FormatError(f"{what}: cannot read release version: {exc}") from exc
+    try:
+        return parse_release_version(raw, what)
+    except FormatError as exc:
+        raise FormatError(f"malformed release version: {exc}") from exc
 
 
 # Closed-schema readers (CanonicalJson.h:157-199). Anything unknown, missing, or
@@ -2043,7 +2143,7 @@ class GuardedRelease:
 TEST_TWIN_FIELDS = (
     "asset", "asset_sha256", "asset_size", "configuration",
     "container_bytes", "cooked_container_inventory_receipt_sha256",
-    "format", "git_commit", "project_package_census_sha256",
+    "format", "git_commit", "human_version", "project_package_census_sha256",
     "release_json_sha256", "release_sequence", "source_snapshot_sha256",
     "staged_tree_sha256", "zen_lifetime_receipt_sha256")
 
@@ -2109,6 +2209,9 @@ def parse_test_twin(document: dict, what: str) -> dict:
             or twin.get("release_sequence") != document.get("release_sequence")):
         raise FormatError(
             f"{what} test_twin release_sequence does not bind this release")
+    validate_human_version(
+        twin.get("human_version"), f"{what} test_twin.human_version",
+        allow_empty=True)
     if (twin.get("format") != TEST_TWIN_FORMAT
             or twin.get("configuration") != TEST_CONFIGURATION
             or twin.get("git_commit") != document.get("git_commit")

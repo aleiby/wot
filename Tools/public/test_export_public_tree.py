@@ -121,6 +121,7 @@ class PublicTreeExportTests(unittest.TestCase):
             "release-identity.json",
             "release-ring/WoT-root-key-ring-v1.json",
             "release-ring/WoT-root-key-ring-v1.json.sig",
+            "release-version.json",
             "schemas/announcement-v1.schema.json",
             "schemas/component-identity-v1.schema.json",
             "schemas/full-package-v1.schema.json",

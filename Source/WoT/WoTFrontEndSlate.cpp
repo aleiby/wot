@@ -30,6 +30,7 @@
 #include "WoTPreferencesSubsystem.h"
 #include "WoTRetailText.h"
 #include "UI/WoTReleaseNotes.h"
+#include "Updater/WoTReleaseIdentity.h"
 #include "WoTSessionSubsystem.h"
 #include "Online/WoTLocalNetworkAccess.h"
 #include "Settings/WoTSettingsSlate.h"
@@ -214,6 +215,9 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 		PresentationAuthority = FWoTFrontEndPresentationAuthority::Create(
 			PlayerController.Get());
 	}
+	RunningHumanVersion = WoTReleaseIdentity::LoadRunningHumanVersion();
+	VersionLabel = WoTReleaseIdentity::DisplayLabel(
+		WoTReleaseIdentity::LoadRunning(), RunningHumanVersion);
 	if (PresentationAuthority.IsValid())
 	{
 		PresentationAuthority->BindWidget(AsShared());
@@ -686,6 +690,18 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 	}
 	return SNew(SOverlay)
 		+ SOverlay::Slot()[MainMenu]
+		// Which build is running, small in the corner (the original has no
+		// version label here; PORT_NOTES).
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(0.0f, 0.0f, 12.0f, 8.0f))
+		[
+			SAssignNew(VersionLabelWidget, STextBlock)
+			.Text(WoTFrontEndSlate_Text(VersionLabel))
+			.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+			.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.55f))
+		]
 		+ SOverlay::Slot()
 		.HAlign(HAlign_Center)
 		.VAlign(VAlign_Bottom)
@@ -3434,7 +3450,15 @@ void SWoTFrontEndRoot::ShowUpdateFailedIfNeeded()
 	}
 	ActiveFailedReleaseSequence = Failed;
 	ActiveRestoredReleaseSequence = Restored;
-	ActiveUpdateFailedText = Restored == 0
+	// The menu shows the running human version, so the notice names that one;
+	// the failed release's own version was never installed here.
+	const WoTReleaseIdentity::FIdentity Running = WoTReleaseIdentity::LoadRunning();
+	ActiveUpdateFailedText = !RunningHumanVersion.IsEmpty() && Restored != 0
+			&& Running.bStamped && Running.ReleaseSequence == Restored
+		? FString::Printf(
+			TEXT("The update could not start on this computer, so you are back on version %s."),
+			*RunningHumanVersion)
+		: Restored == 0
 		? FString::Printf(
 			TEXT("The update to version %llu could not start on this computer, so you are back on the previous version."),
 			Failed)

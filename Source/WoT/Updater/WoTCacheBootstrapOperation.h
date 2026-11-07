@@ -43,8 +43,19 @@ public:
 		FWoTRetailPackage&& Package, FWoTCacheStore& Store,
 		IWoTProgressSink& Progress);
 
+	/** True when the last BuildAndPublish failed because of the original game's
+	 * installer rather than the cache: it failed its held-identity check, the
+	 * reader reported it corrupt, or it no longer verifies after the failure.
+	 * Cache-store errors (CorruptInstallation included) and profile-session
+	 * errors never count, so the player is not sent to the wrong folder. */
+	bool LastFailureCameFromInstaller() const
+	{
+		return bLastFailureCameFromInstaller;
+	}
+
 private:
 #if WITH_AUTOMATION_TESTS
 	FBuildForTesting BuildForTesting;
 #endif
+	bool bLastFailureCameFromInstaller = false;
 };

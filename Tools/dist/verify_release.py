@@ -361,6 +361,27 @@ def _check_release_identity(archive_path: Path, platform: str, tree_root: str,
             f"{release_commit!r}")
 
 
+def _check_release_version(archive_path: Path, platform: str, tree_root: str,
+                           release_sequence: int, human_version: str,
+                           failures: List[str]) -> None:
+    # Releases signed before RELEASE_VERSION_FIRST_SEQUENCE were packaged before
+    # the stamp existed (the previous set a cache gate or verify reads).
+    try:
+        stamped = formats.read_release_version_from_zip(
+            archive_path, platform, tree_root,
+            allow_missing=(release_sequence
+                           < formats.RELEASE_VERSION_FIRST_SEQUENCE))
+    except FormatError as exc:
+        failures.append(f"{platform}: {exc}")
+        return
+    if stamped is None:
+        return
+    if stamped != human_version:
+        failures.append(
+            f"{platform}: release version {stamped!r} does not match signed "
+            f"manifest human_version {human_version!r}")
+
+
 def _verify_platform(directory: Path, platform: str, trust: formats.Trust,
                      compiled: formats.CompiledConstants, ring: formats.KeyRing,
                      ring_raw: bytes, openssl: Optional[str],
@@ -433,6 +454,12 @@ def _verify_platform(directory: Path, platform: str, trust: formats.Trust,
     except FormatError as exc:
         failures.extend(local + [f"{manifest_name}: {exc}"])
         return None
+    try:
+        formats.validate_human_version(
+            manifest.document["human_version"],
+            f"{manifest_name} human_version", allow_empty=False)
+    except FormatError as exc:
+        local.append(str(exc))
     if not formats.supports_manifest_protocols(manifest, compiled):
         local.append(f"{manifest_name}: requires protocols newer than this build "
                      "(ReleaseManifest.cpp:180-189)")
@@ -456,6 +483,10 @@ def _verify_platform(directory: Path, platform: str, trust: formats.Trust,
     _check_release_identity(
         archive_path, platform, formats.UPDATE_TREE_ROOTS[platform],
         announcement.release_sequence, manifest.document["build_commit"], local)
+    _check_release_version(
+        archive_path, platform, formats.UPDATE_TREE_ROOTS[platform],
+        announcement.release_sequence, manifest.document["human_version"],
+        local)
     try:
         staged = formats.stage_archive(archive_path, platform)
     except FormatError as exc:
@@ -546,6 +577,10 @@ def _check_install_zip(directory: Path, name: str, platform: str,
         directory / name, platform, formats.GUARDED_TREE_ROOTS[platform],
         result.announcement.release_sequence,
         result.manifest.document["build_commit"], failures)
+    _check_release_version(
+        directory / name, platform, formats.GUARDED_TREE_ROOTS[platform],
+        result.announcement.release_sequence,
+        result.manifest.document["human_version"], failures)
     signed = {entry.path: entry for entry in result.entries if entry.type == "file"}
     source_root = formats.GUARDED_TREE_ROOTS[platform]
     install_root = formats.GUARDED_ZIP_ROOTS[platform]

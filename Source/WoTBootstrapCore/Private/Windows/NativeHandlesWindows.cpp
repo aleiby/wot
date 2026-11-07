@@ -15,6 +15,7 @@
 #include "../CanonicalNativeDirectoryPlatform.h"
 
 #include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
 
@@ -187,6 +188,37 @@ constexpr ULONG WoTNtFileRenameInformationClass = 10;
 constexpr ULONG WoTNtFileRenameInformationExClass = 65;
 constexpr ULONG WoTNtRenameReplaceIfExists = 0x1;
 constexpr ULONG WoTNtRenamePosixSemantics = 0x2;
+
+// A directory rename is refused with STATUS_ACCESS_DENIED while any process
+// holds a handle on anything below that directory, whatever its sharing mode;
+// no rename flag avoids the check. Spelled out because ntstatus.h cannot be
+// included beside windows.h without redefinitions.
+constexpr NTSTATUS WoTStatusAccessDenied = static_cast<NTSTATUS>(0xC0000022L);
+// Backoff for that refusal: the first wait, the cap each wait doubles up to, and
+// the total time spent waiting before the rename fails as it did on the first try.
+constexpr double WoTDirectoryRenameFirstWaitSeconds = 0.05;
+constexpr double WoTDirectoryRenameMaxWaitSeconds = 1.0;
+constexpr double WoTDirectoryRenameRetryBudgetSeconds = 10.0;
+// The pre-existing retry of a replace-rename that hit a sharing violation.
+constexpr int32 WoTReplaceRenameSharingRetries = 19;
+constexpr float WoTReplaceRenameSharingWaitSeconds = 0.05f;
+
+#if WITH_AUTOMATION_TESTS
+TFunction<void(int32)> GWoTNativeDirectoryRenameRetryObserverForTesting;
+TAtomic<int64> GWoTNativeDirectoryRenameRetryBudgetMsForTesting(-1);
+#endif
+
+double WoTDirectoryRenameRetryBudget()
+{
+#if WITH_AUTOMATION_TESTS
+	const int64 OverrideMs = GWoTNativeDirectoryRenameRetryBudgetMsForTesting.Load();
+	if (OverrideMs >= 0)
+	{
+		return static_cast<double>(OverrideMs) / 1000.0;
+	}
+#endif
+	return WoTDirectoryRenameRetryBudgetSeconds;
+}
 
 FWoTNtCreateFile ResolveNtCreateFile()
 {
@@ -2182,6 +2214,18 @@ void WoTSetNativeDirectoryMutationWalkHookForTesting(
 {
 	GWoTNativeDirectoryMutationWalkHookForTesting = MoveTemp(Hook);
 }
+
+void WoTSetNativeDirectoryRenameRetryObserverForTesting(
+	TFunction<void(int32 FailedAttempts)> Observer)
+{
+	GWoTNativeDirectoryRenameRetryObserverForTesting = MoveTemp(Observer);
+}
+
+void WoTSetNativeDirectoryRenameRetryBudgetForTesting(double Seconds)
+{
+	GWoTNativeDirectoryRenameRetryBudgetMsForTesting.Store(Seconds < 0.0
+		? -1 : static_cast<int64>(Seconds * 1000.0));
+}
 #endif
 
 TWoTBootstrapResult<FWoTNativeFileHandle> OpenOrCreateNativeFileAtReadWriteNoFollow(
@@ -2624,12 +2668,25 @@ FWoTBootstrapStatus RenameNativeEntryAtNoFollow(
 	{
 		return Safe;
 	}
+	// FILE_READ_ATTRIBUTES only to tell a directory from a file below; an
+	// attribute-only access takes no part in share-mode checks.
 	TWoTBootstrapResult<HANDLE> Source = OpenOneRelative(
 		*FWoTNativeHandleAccess::State(FromDirectory), FromLeaf,
-		DELETE | SYNCHRONIZE, FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT);
+		DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_OPEN,
+		FILE_SYNCHRONOUS_IO_NONALERT);
 	if (Source.IsError())
 	{
 		return FWoTBootstrapStatus::Error(MoveTemp(Source).GetError());
+	}
+	// A failed query leaves the rename on the file path: no access-denied retry.
+	bool bSourceIsDirectory = false;
+	{
+		FILE_BASIC_INFO Basic = {};
+		if (::GetFileInformationByHandleEx(Source.GetValue(), FileBasicInfo,
+				&Basic, sizeof(Basic)))
+		{
+			bSourceIsDirectory = (Basic.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+		}
 	}
 	// NtSetInformationFile, not SetFileInformationByHandle: the Win32 layer
 	// rejects any FILE_RENAME_INFO whose RootDirectory is non-NULL with
@@ -2665,18 +2722,36 @@ FWoTBootstrapStatus RenameNativeEntryAtNoFollow(
 	Rename->RootDirectory = static_cast<HANDLE>(FWoTNativeHandleAccess::State(ToDirectory)->Handle);
 	Rename->FileNameLength = NameBytes;
 	FMemory::Memcpy(Rename->FileName, *ToString, NameBytes);
+	// Two transient refusals by other processes are retried; every other
+	// failure, including an existing destination, returns at once. POSIX needs
+	// neither because rename(2) does not consult other holders.
+	//
 	// A replace-rename can transiently collide with an external scanner
 	// (Defender/indexer) holding the freshly written target WITHOUT
 	// FILE_SHARE_DELETE - every handle this module opens shares DELETE, so a
 	// sharing violation here is outside interference, observed
 	// deterministically on the resume checkpoint's first replace (Windows
 	// error 32; Win64 funnel kill-resume-build, 2026-08-05). Retry briefly,
-	// then fail closed; POSIX needs no equivalent because rename(2) does not
-	// consult other holders.
+	// then fail closed.
+	//
+	// A directory rename is refused with STATUS_ACCESS_DENIED (Windows error 5)
+	// while any handle is open on anything below the directory, whatever its
+	// sharing mode. Callers close their own handles below a directory before
+	// publishing it, so the holder is another process: an antivirus scan, the
+	// search indexer, a sync client, an Explorer window or a tool walking the
+	// tree, each of which usually lets go moments after the files were written.
+	// Wait with doubling backoff, synchronously on the calling thread, until the
+	// budget is spent, then fail as the first attempt would have. A file has
+	// nothing below it, so a file rename never takes this retry.
+	const double StartSeconds = FPlatformTime::Seconds();
+	const double RetryBudgetSeconds = WoTDirectoryRenameRetryBudget();
+	double NextWaitSeconds = WoTDirectoryRenameFirstWaitSeconds;
+	int32 SharingRetries = 0;
+	int32 AccessDeniedRetries = 0;
 	NTSTATUS Status = 0;
 	uint32 RenameError = ERROR_SUCCESS;
 	bool bRenamed = false;
-	for (int32 Attempt = 0; Attempt < 20; ++Attempt)
+	for (;;)
 	{
 		IO_STATUS_BLOCK IoStatus = {};
 		Status = NtSetInformationFile(Source.GetValue(), &IoStatus,
@@ -2685,18 +2760,51 @@ FWoTBootstrapStatus RenameNativeEntryAtNoFollow(
 				: WoTNtFileRenameInformationClass);
 		bRenamed = Status >= 0;
 		RenameError = bRenamed ? ERROR_SUCCESS : NtStatusToWindowsError(Status);
-		if (bRenamed || !bReplaceExisting
-			|| RenameError != ERROR_SHARING_VIOLATION)
+		if (bRenamed)
 		{
 			break;
 		}
-		FPlatformProcess::Sleep(0.05f);
+		if (bReplaceExisting && RenameError == ERROR_SHARING_VIOLATION
+			&& SharingRetries < WoTReplaceRenameSharingRetries)
+		{
+			++SharingRetries;
+			FPlatformProcess::Sleep(WoTReplaceRenameSharingWaitSeconds);
+			continue;
+		}
+		if (bSourceIsDirectory && Status == WoTStatusAccessDenied)
+		{
+			const double RemainingSeconds =
+				RetryBudgetSeconds - (FPlatformTime::Seconds() - StartSeconds);
+			if (RemainingSeconds > 0.0)
+			{
+				++AccessDeniedRetries;
+#if WITH_AUTOMATION_TESTS
+				if (GWoTNativeDirectoryRenameRetryObserverForTesting)
+				{
+					GWoTNativeDirectoryRenameRetryObserverForTesting(AccessDeniedRetries);
+				}
+#endif
+				FPlatformProcess::Sleep(static_cast<float>(
+					FMath::Min(NextWaitSeconds, RemainingSeconds)));
+				NextWaitSeconds = FMath::Min(
+					NextWaitSeconds * 2.0, WoTDirectoryRenameMaxWaitSeconds);
+				continue;
+			}
+		}
+		break;
 	}
+	const double ElapsedSeconds = FPlatformTime::Seconds() - StartSeconds;
 	const bool bClosed = ::CloseHandle(Source.GetValue()) != 0;
 	if (!bRenamed)
 	{
-		return SystemStatus(TEXT("NtSetInformationFile(FileRenameInformation)"),
-			RenameError, FromLeaf);
+		// The raw status tells apart the NTSTATUS values that all map to one
+		// Windows error (access denied, delete pending, cannot delete, ...).
+		FWoTBootstrapError Error = SystemError(
+			TEXT("NtSetInformationFile(FileRenameInformation)"), RenameError, FromLeaf);
+		Error.Message += FString::Printf(TEXT(" (NTSTATUS 0x%08X; %d retries over %d ms)"),
+			static_cast<uint32>(Status), SharingRetries + AccessDeniedRetries,
+			static_cast<int32>(ElapsedSeconds * 1000.0 + 0.5));
+		return FWoTBootstrapStatus::Error(MoveTemp(Error));
 	}
 	if (!bClosed)
 	{

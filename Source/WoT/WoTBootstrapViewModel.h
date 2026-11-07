@@ -72,6 +72,8 @@ struct FWoTUpdateState
 	uint64 CompletedBytes = 0;
 	uint64 TotalBytes = 0;
 	uint64 ReleaseSequence = 0;
+	/** The release's human version (0.1.2) when known; banners fall back to the sequence. */
+	FString HumanVersion;
 	FString Reason;
 	FString ReleasePageUrl;
 };

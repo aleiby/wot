@@ -49,6 +49,9 @@ public:
 #if WITH_AUTOMATION_TESTS
 	using FBeforeReverifyForTesting = void (*)(void* Context);
 	void SetBeforeReverifyForTesting(FBeforeReverifyForTesting Callback, void* Context);
+	/** Runs inside every Open right after the installer bytes are read; null clears. */
+	using FAfterOpenReadForTesting = void (*)(void* Context);
+	static void SetAfterOpenReadForTesting(FAfterOpenReadForTesting Callback, void* Context);
 	uint64 EntryDecodeCountForTesting() const;
 #endif
 

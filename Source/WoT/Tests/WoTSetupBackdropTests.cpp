@@ -1,6 +1,6 @@
 // The setup (bootstrap) screen's backdrop: the blurred main-menu capture, the
 // compiled-in default, the generated gradient, the saved file, the order
-// Current() picks them in, and the 2x screen column.
+// Current() picks them in, the 2x screen column, and the title inside it.
 #if WITH_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
@@ -9,12 +9,22 @@
 #include "../UI/WoTSetupBackdrop.h"
 #include "../WoTPreferencesSubsystem.h"
 
+#include "Fonts/FontMeasure.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "ImageUtils.h"
+#include "Input/HittestGrid.h"
+#include "Layout/ArrangedChildren.h"
+#include "Misc/App.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
 #include "Misc/Paths.h"
 #include "Misc/ScopeExit.h"
+#include "Rendering/DrawElements.h"
+#include "Rendering/SlateRenderer.h"
+#include "Types/PaintArgs.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -25,6 +35,28 @@ FString WoTSetupBackdropSpecPath(const TCHAR* Leaf)
 {
 	return FPaths::Combine(FPaths::AutomationTransientDir(),
 		TEXT("WoTSetupBackdrop"), Leaf);
+}
+
+/** The geometry Slate arranges Target at below Widget, if it is visible. */
+bool WoTSetupBackdropSpecFindGeometry(const TSharedRef<SWidget>& Widget,
+	const FGeometry& Geometry, const SWidget& Target, FGeometry& OutGeometry)
+{
+	if (&Widget.Get() == &Target)
+	{
+		OutGeometry = Geometry;
+		return true;
+	}
+	FArrangedChildren Children(EVisibility::Visible);
+	Widget->ArrangeChildren(Geometry, Children);
+	for (const FArrangedWidget& Child : Children.GetInternalArray())
+	{
+		if (WoTSetupBackdropSpecFindGeometry(
+				Child.Widget, Child.Geometry, Target, OutGeometry))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 }
 
@@ -305,6 +337,130 @@ bool FWoTSetupBackdropScreenSpec::RunTest(const FString&)
 		Screen->ContentWidthForTesting(1440.0f), 1344.0f);
 	TestEqual(TEXT("a window narrower than its margins never goes negative"),
 		Screen->ContentWidthForTesting(50.0f), 0.0f);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSetupBackdropTitleWrapSpec,
+	"WoT.UI.SetupBackdrop.TitleWrapsInsideColumn", WoTSetupBackdropSpecFlags)
+
+bool FWoTSetupBackdropTitleWrapSpec::RunTest(const FString&)
+{
+	// The 48 pt title used to clip a long step to "Building textures, sounds,
+	// meshes, and maps faile". Lay the real screen out and paint it (wrapping
+	// uses the width of the previous paint) for every title it can show: each
+	// step while it runs and "<step> failed" after it. Slate scales the game
+	// window by its height, so these are 16:9, 16:10, 4:3 and 5:4 windows.
+	if (!TestTrue(TEXT("Slate is running"), FSlateApplication::IsInitialized()))
+	{
+		return false;
+	}
+	FSlateApplication& Slate = FSlateApplication::Get();
+	const TSharedRef<FSlateFontMeasure> Measure =
+		Slate.GetRenderer()->GetFontMeasureService();
+	const FVector2D WindowSizes[] = {
+		FVector2D(1920.0, 1080.0), FVector2D(1728.0, 1080.0),
+		FVector2D(1440.0, 1080.0), FVector2D(1350.0, 1080.0)};
+	int32 WrappedTitles = 0;
+	bool bReportedTitleWrapped = false;
+	for (const FVector2D& Size : WindowSizes)
+	{
+		const TSharedRef<FWoTBootstrapSnapshot> Shown =
+			MakeShared<FWoTBootstrapSnapshot>();
+		const TSharedRef<SWoTBootstrapScreen> Screen = SNew(SWoTBootstrapScreen)
+			.Snapshot_Lambda([Shown]() { return *Shown; });
+		const TSharedPtr<STextBlock> Title = Screen->TitleWidgetForTesting();
+		if (!TestTrue(TEXT("the screen exposes its title"), Title.IsValid()))
+		{
+			return false;
+		}
+		const TSharedRef<SWindow> Window = SNew(SWindow)
+			.ClientSize(Size)
+			.CreateTitleBar(false).SupportsMaximize(false).SupportsMinimize(false)
+			[Screen];
+		Slate.AddWindow(Window, false);
+		ON_SCOPE_EXIT { Slate.RequestDestroyWindow(Window); };
+		const FGeometry Geometry = FGeometry::MakeRoot(
+			Size, FSlateLayoutTransform(1.0f));
+		const float Column = Screen->ContentWidthForTesting(
+			static_cast<float>(Size.X));
+		for (int32 PhaseValue = 0;
+			PhaseValue <= static_cast<int32>(EWoTBootstrapPhase::Fatal); ++PhaseValue)
+		{
+			for (const bool bFailed : {false, true})
+			{
+				const EWoTBootstrapPhase Phase =
+					static_cast<EWoTBootstrapPhase>(PhaseValue);
+				if (bFailed && Phase == EWoTBootstrapPhase::Fatal)
+				{
+					continue;
+				}
+				*Shown = FWoTBootstrapSnapshot();
+				Shown->Phase = bFailed ? EWoTBootstrapPhase::Fatal : Phase;
+				if (bFailed)
+				{
+					Shown->FailedPhase = Phase;
+				}
+				for (int32 Pass = 0; Pass < 3; ++Pass)
+				{
+					Screen->Tick(Geometry, 0.0, 0.0f);
+					Screen->SlatePrepass(1.0f);
+					FHittestGrid Grid;
+					FSlateWindowElementList Elements(Window);
+					const FPaintArgs Args(&Window.Get(), Grid,
+						FVector2f::ZeroVector, FApp::GetCurrentTime(), 0.0f);
+					Screen->Paint(Args, Geometry, Geometry.GetLayoutBoundingRect(),
+						Elements, 0, FWidgetStyle(), true);
+				}
+				const FString Text = Title->GetText().ToString();
+				const FString Label = FString::Printf(TEXT("%gx%g \"%s\""),
+					Size.X, Size.Y, *Text);
+				TestEqual(Label + TEXT(": the title is the screen's phase text"),
+					Text, Screen->PhaseText().ToString());
+				FGeometry TitleGeometry;
+				if (!TestTrue(Label + TEXT(": the title is arranged"),
+					WoTSetupBackdropSpecFindGeometry(
+						Screen, Geometry, *Title, TitleGeometry)))
+				{
+					continue;
+				}
+				const FVector2D Arranged = TitleGeometry.GetLocalSize();
+				const FVector2D Desired = Title->GetDesiredSize();
+				const FVector2D OneLine = Measure->Measure(
+					Title->GetText(), Title->GetFont(), 1.0f);
+				TestTrue(FString::Printf(
+					TEXT("%s: the title spans the unchanged column (%g, expected %g)"),
+					*Label, Arranged.X, Column),
+					FMath::IsNearlyEqual(Arranged.X, static_cast<double>(Column), 0.5));
+				TestTrue(FString::Printf(
+					TEXT("%s: no title line is wider than the column (%g > %g)"),
+					*Label, Desired.X, Arranged.X), Desired.X <= Arranged.X + 0.5);
+				TestTrue(FString::Printf(
+					TEXT("%s: every title line gets its height (%g < %g)"),
+					*Label, Arranged.Y, Desired.Y), Arranged.Y + 0.5 >= Desired.Y);
+				if (OneLine.X > Arranged.X)
+				{
+					++WrappedTitles;
+					TestTrue(FString::Printf(
+						TEXT("%s: a title wider than the column wraps (%g tall, one line %g)"),
+						*Label, Desired.Y, OneLine.Y), Desired.Y >= 1.5 * OneLine.Y);
+					if (bFailed && Phase == EWoTBootstrapPhase::BuildingContent
+						&& FMath::IsNearlyEqual(Size.X, 1920.0, 0.5))
+					{
+						bReportedTitleWrapped = true;
+					}
+				}
+				else
+				{
+					TestTrue(FString::Printf(
+						TEXT("%s: a title that fits keeps one line (%g tall, one line %g)"),
+						*Label, Desired.Y, OneLine.Y), Desired.Y < 1.5 * OneLine.Y);
+				}
+			}
+		}
+	}
+	TestTrue(TEXT("the reported 16:9 build failure title is wider than its column and wraps"),
+		bReportedTitleWrapped);
+	AddInfo(FString::Printf(TEXT("%d titles needed a second line"), WrappedTitles));
 	return !HasAnyErrors();
 }
 

@@ -30,6 +30,12 @@ public class WoT : ModuleRules
 			RuntimeDependencies.Add(
 				"$(ProjectDir)/Build/WoTRelease/release-identity.json",
 				StagedFileType.NonUFS);
+			// The human version the main menu shows. A separate file: the
+			// Windows launcher outside Game/ matches release-identity.json
+			// byte-for-byte, so that file can never gain a member.
+			RuntimeDependencies.Add(
+				"$(ProjectDir)/Build/WoTRelease/release-version.json",
+				StagedFileType.NonUFS);
 		}
 
 		PublicDependencyModuleNames.AddRange(new string[]

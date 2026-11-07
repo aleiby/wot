@@ -459,6 +459,137 @@ bool FWoTRetailPackageIdentitySpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailPackageMetadataChurnSpec,
+	"WoT.RetailReader.Package.MetadataChurnReproved", WoTRetailPackageSpecFlags)
+
+bool FWoTRetailPackageMetadataChurnSpec::RunTest(const FString&)
+{
+	TArray<uint8> Fixture;
+	if (!WoTRetailPackageSpecLoadFixture(TEXT("standard"), Fixture)) return false;
+	FWoTRetailPackageSpecRoot Root;
+	TArray<uint8> Mutated = Fixture;
+	Mutated[0x20] ^= 0x7f;
+
+	// macOS labels a file picked in an Open panel (com.apple.macl) moments
+	// after the pick, while its package is already extracting (aleiby/wot#21).
+	const FString Installer = Root.Path / TEXT("picked.exe");
+	WoTNativeHandleTestFactory::WriteFile(Installer, Fixture);
+	TWoTBootstrapResult<FWoTHeldInstallerSnapshot> Snapshot =
+		WoTRetailPackageSpecSnapshot(Installer);
+	if (!TestFalse(TEXT("picked installer snapshot is held"), Snapshot.IsError()))
+	{
+		return false;
+	}
+	const FWoTNativeFileIdentity PickedIdentity = Snapshot.GetValue().Identity;
+	TWoTBootstrapResult<FWoTNativeFileHandle> Observer =
+		Snapshot.GetValue().Handle.DuplicateForRead();
+	TWoTBootstrapResult<FWoTRetailPackage> Opened = FWoTRetailPackage::Open(
+		MoveTemp(Snapshot).GetValue(), FWoTArchiveLimits());
+	if (!TestFalse(TEXT("picked installer opens"), Opened.IsError())
+		|| !TestFalse(TEXT("identity observer opens"), Observer.IsError()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("change clock passed the picked snapshot"),
+		WoTNativeHandleTestFactory::WaitPastChangeStateTick(PickedIdentity.ChangeState));
+	TestTrue(TEXT("metadata-only label is written"),
+		WoTNativeHandleTestFactory::ChangeMetadataOnly(Installer));
+	TWoTBootstrapResult<FWoTNativeFileIdentity> Labelled =
+		Observer.GetValue().QueryCurrentIdentity();
+	if (!TestTrue(TEXT("label moved only ChangeState"), !Labelled.IsError()
+		&& Labelled.GetValue().DiffersOnlyInChangeState(PickedIdentity)))
+	{
+		return false;
+	}
+	TestFalse(TEXT("metadata-only churn is re-proved, not refused"),
+		Opened.GetValue().ReverifyHeldSnapshotAfterExtraction().IsError());
+	TWoTBootstrapResult<FWoTPackageEntry> Entry =
+		Opened.GetValue().FindExact(TEXT("Data/Stored.txt"));
+	FWoTRetailPackageSpecCollectSink Sink;
+	TestFalse(TEXT("extraction continues after the re-proof"), Entry.IsError()
+		|| Opened.GetValue().StreamExact(Entry.GetValue(), Sink).IsError());
+	TestTrue(TEXT("re-proved entry streams its bytes"), Sink.Collected.Num() > 0);
+
+	// The re-proved identity is the new baseline, and a same-length rewrite
+	// after the label moves only ChangeState too: the re-hash refuses it.
+	TestTrue(TEXT("same-size rewrite after the label changes identity"),
+		WoTRetailPackageSpecMutateUntilIdentityChange(Installer, Mutated,
+			Observer.GetValue(), Labelled.GetValue()));
+	TestTrue(TEXT("rewrite after the label is still refused"),
+		Opened.GetValue().ReverifyHeldSnapshotAfterExtraction().IsError());
+
+	// A label that lands between acquisition and Open is re-proved as well...
+	const FString Early = Root.Path / TEXT("labelled-before-open.exe");
+	WoTNativeHandleTestFactory::WriteFile(Early, Fixture);
+	TWoTBootstrapResult<FWoTHeldInstallerSnapshot> EarlySnapshot =
+		WoTRetailPackageSpecSnapshot(Early);
+	if (!TestFalse(TEXT("early snapshot is held"), EarlySnapshot.IsError()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("change clock passed the early snapshot"),
+		WoTNativeHandleTestFactory::WaitPastChangeStateTick(
+			EarlySnapshot.GetValue().Identity.ChangeState));
+	TestTrue(TEXT("early label is written"),
+		WoTNativeHandleTestFactory::ChangeMetadataOnly(Early));
+	TWoTBootstrapResult<FWoTRetailPackage> EarlyOpened = FWoTRetailPackage::Open(
+		MoveTemp(EarlySnapshot).GetValue(), FWoTArchiveLimits());
+	TestFalse(TEXT("label before Open is re-proved, not refused"), EarlyOpened.IsError());
+	TestFalse(TEXT("re-proved Open baseline is reused"), EarlyOpened.IsError()
+		|| EarlyOpened.GetValue().ReverifyHeldSnapshotAfterExtraction().IsError());
+
+	// ...but different bytes before Open are not, even when the approved bytes
+	// are put back right after Open read the rewritten ones (so the live file
+	// would re-prove): the bytes Open holds are what it must prove.
+	const FString Rewritten = Root.Path / TEXT("rewritten-before-open.exe");
+	WoTNativeHandleTestFactory::WriteFile(Rewritten, Fixture);
+	TWoTBootstrapResult<FWoTHeldInstallerSnapshot> RewrittenSnapshot =
+		WoTRetailPackageSpecSnapshot(Rewritten);
+	if (!TestFalse(TEXT("rewritten snapshot is held"), RewrittenSnapshot.IsError()))
+	{
+		return false;
+	}
+	const FWoTNativeFileIdentity RewrittenIdentity = RewrittenSnapshot.GetValue().Identity;
+	TWoTBootstrapResult<FWoTNativeFileHandle> RewrittenObserver =
+		RewrittenSnapshot.GetValue().Handle.DuplicateForRead();
+	if (!TestFalse(TEXT("rewritten observer opens"), RewrittenObserver.IsError()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("change clock passed the rewritten snapshot"),
+		WoTNativeHandleTestFactory::WaitPastChangeStateTick(RewrittenIdentity.ChangeState));
+	// The tail is entry data, so the rewritten image still parses: Open must
+	// refuse it for its bytes, not because the adapter could not read it.
+	TArray<uint8> TailRewrite = Fixture;
+	TailRewrite.Last() ^= 0x5a;
+	TestTrue(TEXT("same-size rewrite before Open lands"),
+		WoTNativeHandleTestFactory::WriteFile(Rewritten, TailRewrite));
+	TWoTBootstrapResult<FWoTNativeFileIdentity> RewrittenNow =
+		RewrittenObserver.GetValue().QueryCurrentIdentity();
+	TestTrue(TEXT("rewrite before Open moved only ChangeState"), !RewrittenNow.IsError()
+		&& RewrittenNow.GetValue().DiffersOnlyInChangeState(RewrittenIdentity));
+	struct FRestore
+	{
+		static void Invoke(void* Context)
+		{
+			FRestore* const Self = static_cast<FRestore*>(Context);
+			Self->bRestored = WoTNativeHandleTestFactory::WriteFile(*Self->Path, *Self->Bytes);
+		}
+		const FString* Path = nullptr;
+		const TArray<uint8>* Bytes = nullptr;
+		bool bRestored = false;
+	} Restore{&Rewritten, &Fixture};
+	FWoTRetailPackage::SetAfterOpenReadForTesting(&FRestore::Invoke, &Restore);
+	TWoTBootstrapResult<FWoTRetailPackage> RewrittenOpened = FWoTRetailPackage::Open(
+		MoveTemp(RewrittenSnapshot).GetValue(), FWoTArchiveLimits());
+	FWoTRetailPackage::SetAfterOpenReadForTesting(nullptr, nullptr);
+	TestTrue(TEXT("approved bytes were put back after Open read the rewrite"),
+		Restore.bRestored);
+	TestTrue(TEXT("rewrite read before Open is refused although the file re-proves"),
+		RewrittenOpened.IsError());
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailPackageCachedBytesSpec,
 	"WoT.RetailReader.Package.ApprovedCachedBytesDigest", WoTRetailPackageSpecFlags)
 

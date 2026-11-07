@@ -9,7 +9,9 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "HAL/Event.h"
+#include "GenericPlatform/GenericPlatformFile.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
@@ -3024,6 +3026,309 @@ bool FWoTGameBootstrapWorkerSpecCacheFailures::RunTest(const FString&)
 		TestEqual(TEXT("a contended build never starts writing"), BuildAttempts, 0);
 		TestTrue(TEXT("a contended build tells the player to close other copies"),
 			Built.FailureMessage.Contains(TEXT("Close other copies of WoT Reborn")));
+	}
+	return !HasAnyErrors();
+}
+
+namespace
+{
+/** Changes the installer's last byte in place after the worker checked and
+ * holds it, through a handle that shares with that read handle, until a fresh
+ * open sees the file's change identity move. */
+bool WoTGameBootstrapWorkerSpecChangeHeldInstaller(
+	const FString& Path, TConstArrayView<uint8> Original)
+{
+	if (Original.Num() == 0)
+	{
+		return false;
+	}
+	FWoTNativeFileIdentity Checked;
+	{
+		TWoTBootstrapResult<FWoTNativeFileHandle> Before =
+			OpenNativeFileReadNoFollow(Path);
+		if (Before.IsError())
+		{
+			return false;
+		}
+		Checked = Before.GetValue().GetIdentity();
+	}
+	const uint8 Changed = Original[Original.Num() - 1] ^ 0x5a;
+	for (int32 Attempt = 0; Attempt < 100; ++Attempt)
+	{
+		// Step past the file-time granularity (<= 15.6 ms on Windows).
+		FPlatformProcess::Sleep(0.02f);
+		{
+			TUniquePtr<IFileHandle> Handle(FPlatformFileManager::Get()
+				.GetPlatformFile().OpenWrite(*Path, true, true));
+			if (!Handle.IsValid() || !Handle->Seek(Original.Num() - 1)
+				|| !Handle->Write(&Changed, 1))
+			{
+				return false;
+			}
+		}
+		TWoTBootstrapResult<FWoTNativeFileHandle> After =
+			OpenNativeFileReadNoFollow(Path);
+		if (!After.IsError() && After.GetValue().GetIdentity() != Checked)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecContentFailureMessages,
+	"WoT.Update.Worker.ContentFailureMessages",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecContentFailureMessages::RunTest(const FString&)
+{
+	// The fatal screen shows FailureMessage. An installer that stops matching
+	// is told apart from a cache problem by where the error came from, not by
+	// its code: the reader and the cache store both report CorruptInstallation.
+	// (Disk full, permission and lock contention: WoT.Update.Worker.CacheFailures.)
+	TArray<uint8> Installer;
+	if (!TestTrue(TEXT("Inno fixture loads"),
+		WoTGameBootstrapWorkerSpecLoadInnoInstaller(Installer))) return false;
+	const FWoTRetailContract Contract = WoTGameBootstrapWorkerSpecContentContract();
+	FWoTGameBootstrapWorkerSpecContractScope ContractScope(Contract);
+	const FWoTInstallerAcquisitionPins Pins =
+		WoTGameBootstrapWorkerSpecInnoPins(Installer);
+	const FString InstallerAdvice = TEXT(
+		"WoT Reborn could not read the original game's installer, or the installer "
+		"no longer matched the one it checked. Relaunch WoT Reborn to try again. "
+		"If it asks for the installer, choose it again with Browse.");
+	const FString CacheAdvice = TEXT("could not prepare its content cache");
+	using FBuildResult = TWoTBootstrapResult<FWoTCacheBuildResult>;
+
+	// One fresh install up to the end of BuildingContent, Build standing in for
+	// the retail reader (it gets the real held package and cache writer).
+	auto BuildWith = [this, &Pins](const FString& What,
+		const FWoTGameBootstrapWorkerSpecFixture& Fixture,
+		FWoTCacheBootstrapOperation::FBuildForTesting Build,
+		FWoTBootstrapWorkerCompletion& Built) -> bool
+	{
+		auto Hops = MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		auto Worker = WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops, {},
+			WoTGameBootstrapWorkerSpecAnnouncementUrl, Pins, MoveTemp(Build));
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker)) return false;
+		FWoTBootstrapWorkerCompletion Content, Extracted;
+		return WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Content)
+			&& TestTrue(What + TEXT(": the installer is found"), Content.bSucceeded
+				&& Content.NextPhase == EWoTBootstrapPhase::ExtractingOriginalGame)
+			&& WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::ExtractingOriginalGame, 3, Extracted)
+			&& TestTrue(What + TEXT(": the real package prepares a build"),
+				Extracted.bSucceeded
+				&& Extracted.NextPhase == EWoTBootstrapPhase::BuildingContent)
+			&& WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::BuildingContent, 4, Built)
+			&& TestFalse(What + TEXT(": the build fails"), Built.bSucceeded)
+			&& TestEqual(What + TEXT(": the failure is fatal"),
+				Built.NextPhase, EWoTBootstrapPhase::Fatal);
+	};
+
+	// The v0.1.1 report: the held installer changes while content builds, and
+	// the package's own held-snapshot check refuses it.
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		const FString InstallerPath =
+			WoTGameBootstrapWorkerSpecInstallerPath(Fixture.InstallRoot);
+		bool bChanged = false;
+		FWoTBootstrapWorkerCompletion Built;
+		if (!BuildWith(TEXT("changed installer"), Fixture,
+			[&](FWoTRetailPackage& Package, const FWoTRetailContract&,
+				IWoTObjectWriter&, IWoTProgressSink&)
+			{
+				bChanged = WoTGameBootstrapWorkerSpecChangeHeldInstaller(
+					InstallerPath, Installer);
+				FWoTBootstrapStatus Reverified =
+					Package.ReverifyHeldSnapshotAfterExtraction();
+				return Reverified.IsError()
+					? FBuildResult::Error(MoveTemp(Reverified).GetError())
+					: FBuildResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
+						TEXT("the changed installer still verified")));
+			}, Built)) return false;
+		TestTrue(TEXT("the held installer changed during the build"), bChanged);
+		TestTrue(TEXT("the package's held-snapshot check refused it"),
+			Built.FailureDetail.StartsWith(TEXT("CorruptInstallation:"))
+			&& Built.FailureDetail.Contains(TEXT("(held-installer-snapshot)")));
+		TestEqual(TEXT("a changed installer gets the installer advice"),
+			Built.FailureMessage, InstallerAdvice);
+		TestEqual(TEXT("the diagnostic code is unchanged"),
+			Built.DiagnosticCode, EWoTBootstrapDiagnosticCode::BootstrapFailure);
+		TestTrue(TEXT("the detail keeps its native suffix"),
+			Built.FailureDetail.EndsWith(TEXT(" native=0")));
+	}
+
+	// The reader can surface another error first (here a read error); the
+	// installer still takes the blame once it no longer verifies...
+	for (const bool bChangeInstaller : {true, false})
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		const FString InstallerPath =
+			WoTGameBootstrapWorkerSpecInstallerPath(Fixture.InstallRoot);
+		const FString What = bChangeInstaller
+			? TEXT("read error on a changed installer")
+			: TEXT("read error on an unchanged installer");
+		bool bChanged = false;
+		FWoTBootstrapWorkerCompletion Built;
+		if (!BuildWith(What, Fixture,
+			[&](FWoTRetailPackage&, const FWoTRetailContract&,
+				IWoTObjectWriter&, IWoTProgressSink&)
+			{
+				bChanged = bChangeInstaller
+					&& WoTGameBootstrapWorkerSpecChangeHeldInstaller(InstallerPath, Installer);
+				return FBuildResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
+					TEXT("an installer read stopped before any corruption check")));
+			}, Built)) return false;
+		TestEqual(What + TEXT(": the installer change happened as arranged"),
+			bChanged, bChangeInstaller);
+		if (bChangeInstaller)
+		{
+			TestEqual(What + TEXT(": gets the installer advice"),
+				Built.FailureMessage, InstallerAdvice);
+		}
+		else
+		{
+			// ...and an installer that still verifies is not blamed.
+			TestTrue(What + TEXT(": keeps the cache advice"),
+				Built.FailureMessage.Contains(CacheAdvice)
+				&& !Built.FailureMessage.Contains(TEXT("original game's installer")));
+		}
+	}
+
+	// The cache store refuses a write with CorruptInstallation: a cache problem,
+	// not an installer one, though the code is the reader's too.
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		FWoTBootstrapWorkerCompletion Built;
+		if (!BuildWith(TEXT("refused cache write"), Fixture,
+			[](FWoTRetailPackage&, const FWoTRetailContract& InContract,
+				IWoTObjectWriter& Writer, IWoTProgressSink&)
+			{
+				const FWoTRequiredFactOutput& Output = InContract.Facts[0].Outputs[0];
+				const TArray<uint8> Bytes =
+					WoTGameBootstrapWorkerSpecAscii(TEXT("worker-cache-object"));
+				const TArray<uint8> Other =
+					WoTGameBootstrapWorkerSpecAscii(TEXT("other-bytes"));
+				FWoTBootstrapStatus Written = Writer.WriteObject(Output.LogicalId,
+					Output.Schema, Bytes, Sha256(Other), Output.MaxDecodedSize);
+				return Written.IsError()
+					? FBuildResult::Error(MoveTemp(Written).GetError())
+					: FBuildResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
+						TEXT("the cache store accepted a wrong digest")));
+			}, Built)) return false;
+		TestTrue(TEXT("the cache store raised CorruptInstallation"),
+			Built.FailureDetail.StartsWith(TEXT("CorruptInstallation:"))
+			&& Built.FailureDetail.Contains(TEXT("invalid digest")));
+		TestTrue(TEXT("a refused cache write keeps the cache advice and folder"),
+			Built.FailureMessage.Contains(CacheAdvice)
+			&& Built.FailureMessage.Contains(FPaths::ConvertRelativePathToFull(
+				WoTGameBootstrapWorkerSpecCacheRoot(Fixture.InstallRoot))));
+		TestFalse(TEXT("a refused cache write never blames the installer"),
+			Built.FailureMessage.Contains(TEXT("original game's installer")));
+	}
+
+	// The cache store rejects the finished build at publication.
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		FWoTBootstrapWorkerCompletion Built;
+		if (!BuildWith(TEXT("rejected publication"), Fixture,
+			[](FWoTRetailPackage& Package, const FWoTRetailContract& InContract,
+				IWoTObjectWriter& Writer, IWoTProgressSink& Progress)
+			{
+				FBuildResult Build = WoTGameBootstrapWorkerSpecContentBuild(
+					Package, InContract, Writer, Progress);
+				if (Build.IsError()) return Build;
+				FWoTCacheBuildResult Result = MoveTemp(Build).GetValue();
+				Result.ManifestSha256 = FWoTSha256();
+				return FBuildResult::Success(MoveTemp(Result));
+			}, Built)) return false;
+		TestTrue(TEXT("publication raised CorruptInstallation"),
+			Built.FailureDetail.StartsWith(TEXT("CorruptInstallation:"))
+			&& Built.FailureDetail.Contains(TEXT("does not describe the completed build")));
+		TestTrue(TEXT("a rejected publication keeps the cache advice"),
+			Built.FailureMessage.Contains(CacheAdvice)
+			&& !Built.FailureMessage.Contains(TEXT("original game's installer")));
+	}
+
+#if PLATFORM_WINDOWS
+	// Another program keeps a folder below building/ open (a scanner or an
+	// Explorer window), so publishing building -> current is refused with
+	// access denied until the rename retry gives up: not a permission problem.
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		const FString Blobs = FPaths::Combine(
+			WoTGameBootstrapWorkerSpecCacheRoot(Fixture.InstallRoot),
+			TEXT("building"), TEXT("blobs"));
+		WoTSetNativeDirectoryRenameRetryBudgetForTesting(0.3);
+		ON_SCOPE_EXIT { WoTSetNativeDirectoryRenameRetryBudgetForTesting(-1.0); };
+		FWoTNativeDirectoryHandle Holder;
+		FWoTBootstrapWorkerCompletion Built;
+		if (!BuildWith(TEXT("publication held by another program"), Fixture,
+			[&Blobs, &Holder](FWoTRetailPackage& Package,
+				const FWoTRetailContract& InContract, IWoTObjectWriter& Writer,
+				IWoTProgressSink& Progress)
+			{
+				FBuildResult Build = WoTGameBootstrapWorkerSpecContentBuild(
+					Package, InContract, Writer, Progress);
+				TWoTBootstrapResult<FWoTNativeDirectoryHandle> Held =
+					OpenNativeDirectoryNoFollow(Blobs);
+				if (!Held.IsError())
+				{
+					Holder = MoveTemp(Held).GetValue();
+				}
+				return Build;
+			}, Built)) return false;
+		TestTrue(TEXT("another holder kept a folder below building open"),
+			Holder.IsValid());
+		Holder = FWoTNativeDirectoryHandle();
+		TestTrue(TEXT("the publish rename was refused after its retries"),
+			Built.FailureDetail.Contains(TEXT("NTSTATUS 0xC0000022"))
+			&& Built.FailureDetail.EndsWith(TEXT(" native=5")));
+		TestTrue(TEXT("a held publication says another program may be using the files"),
+			Built.FailureMessage.StartsWith(TEXT("Another program, "))
+			&& Built.FailureMessage.Contains(TEXT("may be using WoT Reborn's files")));
+		TestFalse(TEXT("a held publication is not called a permission problem"),
+			Built.FailureMessage.Contains(TEXT("permission")));
+	}
+#endif
+
+	// The installer changes after it was checked but before extraction opens
+	// it: the same advice, with the extraction diagnostic code unchanged.
+	{
+		FWoTGameBootstrapWorkerSpecFixture Fixture;
+		if (!Fixture.Initialize(*this) || !Fixture.WriteInstaller(Installer)) return false;
+		auto Hops = MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		auto Worker = WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops, {},
+			WoTGameBootstrapWorkerSpecAnnouncementUrl, Pins,
+			WoTGameBootstrapWorkerSpecContentBuild);
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker)) return false;
+		FWoTBootstrapWorkerCompletion Content, Extracted;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 2, Content)
+			|| !TestEqual(TEXT("the installer is found and held"),
+				Content.NextPhase, EWoTBootstrapPhase::ExtractingOriginalGame)
+			|| !TestTrue(TEXT("the held installer changes before extraction"),
+				WoTGameBootstrapWorkerSpecChangeHeldInstaller(
+					WoTGameBootstrapWorkerSpecInstallerPath(Fixture.InstallRoot),
+					Installer))
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::ExtractingOriginalGame, 3, Extracted)) return false;
+		TestEqual(TEXT("extraction of a changed installer is fatal"),
+			Extracted.NextPhase, EWoTBootstrapPhase::Fatal);
+		TestEqual(TEXT("extraction keeps its installer diagnostic code"),
+			Extracted.DiagnosticCode, EWoTBootstrapDiagnosticCode::InstallerInvalid);
+		TestEqual(TEXT("extraction of a changed installer gets the installer advice"),
+			Extracted.FailureMessage, InstallerAdvice);
 	}
 	return !HasAnyErrors();
 }

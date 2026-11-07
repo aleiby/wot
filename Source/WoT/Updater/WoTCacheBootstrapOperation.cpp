@@ -37,6 +37,34 @@ private:
 	const IWoTProgressSink& BuildProgress;
 };
 
+/** Passes the reader's writes to the cache store and remembers whether the
+ * store refused one. The store and the reader both report CorruptInstallation,
+ * so the code alone cannot say which side a failed build came from. */
+class FWoTCacheDestinationWriter final : public IWoTObjectWriter
+{
+public:
+	explicit FWoTCacheDestinationWriter(IWoTObjectWriter& InDestination)
+		: Destination(InDestination)
+	{
+	}
+
+	virtual FWoTBootstrapStatus WriteObject(FStringView LogicalId,
+		FStringView Schema, TConstArrayView<uint8> Bytes,
+		const FWoTSha256& Sha256Digest, uint64 MaximumBytes) override
+	{
+		FWoTBootstrapStatus Written = Destination.WriteObject(
+			LogicalId, Schema, Bytes, Sha256Digest, MaximumBytes);
+		bRefused = bRefused || Written.IsError();
+		return Written;
+	}
+
+	bool Refused() const { return bRefused; }
+
+private:
+	IWoTObjectWriter& Destination;
+	bool bRefused = false;
+};
+
 FWoTBootstrapStatus WoTRestoreCacheBuildProfileSession(
 	TUniquePtr<FWoTProfileSession>& Session)
 {
@@ -66,10 +94,12 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTVerifiedInstaller&& Installer,
 	FWoTCacheStore& Store, IWoTProgressSink& Progress)
 {
 	using FResult = TWoTBootstrapResult<FWoTPublishedCacheReceipt>;
+	bLastFailureCameFromInstaller = false;
 	TWoTBootstrapResult<FWoTRetailPackage> Package = FWoTRetailPackage::Open(
 		MoveTemp(Installer.Snapshot), FWoTArchiveLimits());
 	if (Package.IsError())
 	{
+		bLastFailureCameFromInstaller = true;
 		return FResult::Error(MoveTemp(Package).GetError());
 	}
 	return BuildAndPublish(MoveTemp(Package).GetValue(), Store, Progress);
@@ -80,10 +110,12 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 	FWoTCacheStore& Store, IWoTProgressSink& Progress)
 {
 	using FResult = TWoTBootstrapResult<FWoTPublishedCacheReceipt>;
+	bLastFailureCameFromInstaller = false;
 	FWoTBootstrapStatus InitialIdentity =
 		Package.ReverifyHeldSnapshotAfterExtraction();
 	if (InitialIdentity.IsError())
 	{
+		bLastFailureCameFromInstaller = true;
 		return FResult::Error(MoveTemp(InitialIdentity).GetError());
 	}
 	const FWoTSha256 InstallerSha256 = Package.CachedInputSha256();
@@ -109,13 +141,17 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 			TEXT("cache build requires the process profile session")));
 	}
 	auto FailAfterRestoringSession =
-		[&Session](FWoTBootstrapError Error) -> FResult
+		[this, &Session](FWoTBootstrapError Error,
+			bool bFromInstaller = false) -> FResult
 	{
 		FWoTBootstrapStatus Restored =
 			WoTRestoreCacheBuildProfileSession(Session);
-		return Restored.IsError()
-			? FResult::Error(MoveTemp(Restored).GetError())
-			: FResult::Error(MoveTemp(Error));
+		if (Restored.IsError())
+		{
+			return FResult::Error(MoveTemp(Restored).GetError());
+		}
+		bLastFailureCameFromInstaller = bFromInstaller;
+		return FResult::Error(MoveTemp(Error));
 	};
 	TWoTBootstrapResult<bool> Exclusive = Session->TryAcquireExclusive();
 	if (Exclusive.IsError() || !Exclusive.GetValue())
@@ -143,16 +179,29 @@ FWoTCacheBootstrapOperation::BuildAndPublish(FWoTRetailPackage&& Package,
 		return FailAfterRestoringSession(MoveTemp(Begun).GetError());
 	}
 	FWoTRetailReader Reader;
+	FWoTCacheDestinationWriter Destination(Store);
 #if WITH_AUTOMATION_TESTS
 	auto Build = BuildForTesting
-		? BuildForTesting(Package, Contract.GetValue(), Store, Progress)
-		: Reader.Build(Package, Contract.GetValue(), Store, Progress);
+		? BuildForTesting(Package, Contract.GetValue(), Destination, Progress)
+		: Reader.Build(Package, Contract.GetValue(), Destination, Progress);
 #else
-	auto Build = Reader.Build(Package, Contract.GetValue(), Store, Progress);
+	auto Build = Reader.Build(Package, Contract.GetValue(), Destination, Progress);
 #endif
 	if (Build.IsError())
 	{
-		return FailAfterRestoringSession(MoveTemp(Build).GetError());
+		// The reader reads the installer and writes through Destination. A
+		// refused write is the cache's. Otherwise the installer is to blame when
+		// its held snapshot failed the reader's check, or when it no longer
+		// verifies now. Other CorruptInstallation errors come from bytes already
+		// proven by hash, so they are release bugs that choosing the installer
+		// again would not fix. Skip the re-verify (a full re-read when only the
+		// change time moved) once the player has quit.
+		const bool bFromInstaller = !Destination.Refused()
+			&& (Build.GetError().Path == TEXT("held-installer-snapshot")
+				|| (!Progress.IsCancellationRequested()
+					&& Package.ReverifyHeldSnapshotAfterExtraction().IsError()));
+		return FailAfterRestoringSession(
+			MoveTemp(Build).GetError(), bFromInstaller);
 	}
 	auto Published = Store.Publish(Build.GetValue());
 	if (Published.IsError())

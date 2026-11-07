@@ -1,5 +1,7 @@
 #include "WoTUpdateBanner.h"
 
+#include "../Updater/WoTReleaseIdentity.h"
+
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -145,29 +147,28 @@ FWoTUpdateBannerPresentation WoTBuildUpdateBannerPresentation(
 	const FWoTUpdateState& State)
 {
 	FWoTUpdateBannerPresentation Banner;
-	const FString Sequence = FString::Printf(
-		TEXT("%llu"), static_cast<unsigned long long>(State.ReleaseSequence));
+	// Name a release only by the human version the main menu shows (0.1.2).
+	// Some states are decided before the signed manifest that carries it is
+	// read (a translocated or read-only copy, a known-bad release); a bare
+	// release sequence would never match the menu, so those say "new".
+	const bool bNamed = !State.HumanVersion.IsEmpty()
+		&& WoTReleaseIdentity::IsDisplayableHumanVersion(State.HumanVersion);
+	const FString NewVersion = bNamed
+		? FString::Printf(TEXT("version %s"), *State.HumanVersion)
+		: FString(TEXT("the new version"));
+	const FString MultiplayerLine = FString::Printf(
+		TEXT("Players on %s can't join you until you update."), *NewVersion);
 	switch (State.Status)
 	{
 	case EWoTUpdateStatus::Ready:
 		Banner.bVisible = true;
 		Banner.PrimaryLine = TEXT("Update ready; restart to install");
-		Banner.MultiplayerLine = FString::Printf(
-			TEXT("Players on version %s can't join you until you update."), *Sequence);
-#if PLATFORM_MAC
-		Banner.PrimaryLine = FString::Printf(TEXT("Version %s is available."), *Sequence);
-		Banner.ReasonLine = TEXT("Download the new version from the release page.");
-		if (WoTIsHttpsReleasePageUrl(State.ReleasePageUrl))
-		{
-			Banner.Action = EWoTUpdateBannerAction::OpenReleasePage;
-			Banner.ButtonLabel = TEXT("Open release page");
-			Banner.ReleasePageUrl = State.ReleasePageUrl;
-		}
-#else
+		Banner.MultiplayerLine = MultiplayerLine;
+		// Both platforms install a staged update when the game quits (the
+		// Windows launcher swap; the Mac quit-swap), so Ready is one banner.
 		Banner.Action = EWoTUpdateBannerAction::Restart;
 		Banner.ButtonLabel = TEXT("Quit to install");
 		Banner.ReasonLine = TEXT("Open WoT Reborn again to finish installing.");
-#endif
 		break;
 	case EWoTUpdateStatus::Available:
 		if (State.Reason == TEXT("update-in-progress")
@@ -176,8 +177,9 @@ FWoTUpdateBannerPresentation WoTBuildUpdateBannerPresentation(
 			break;
 		}
 		Banner.bVisible = true;
-		Banner.PrimaryLine = FString::Printf(
-			TEXT("Version %s is available."), *Sequence);
+		Banner.PrimaryLine = bNamed
+			? FString::Printf(TEXT("Version %s is available."), *State.HumanVersion)
+			: FString(TEXT("A new version is available."));
 		if (State.Reason == TEXT("install-root-not-writable"))
 		{
 			Banner.ReasonLine = TEXT(
@@ -198,9 +200,7 @@ FWoTUpdateBannerPresentation WoTBuildUpdateBannerPresentation(
 			Banner.ReasonLine = TEXT(
 				"This copy can't update itself; download the new version from the release page.");
 		}
-		Banner.MultiplayerLine = FString::Printf(
-			TEXT("Players on version %s can't join you until you update."),
-			*Sequence);
+		Banner.MultiplayerLine = MultiplayerLine;
 		if (WoTIsHttpsReleasePageUrl(State.ReleasePageUrl))
 		{
 			Banner.Action = EWoTUpdateBannerAction::OpenReleasePage;
@@ -210,9 +210,12 @@ FWoTUpdateBannerPresentation WoTBuildUpdateBannerPresentation(
 		break;
 	case EWoTUpdateStatus::KnownBad:
 		Banner.bVisible = true;
-		Banner.PrimaryLine = FString::Printf(TEXT(
-			"Version %s could not start on this computer; you'll get the next version."),
-			*Sequence);
+		Banner.PrimaryLine = bNamed
+			? FString::Printf(TEXT(
+				"Version %s could not start on this computer; you'll get the next version."),
+				*State.HumanVersion)
+			: FString(TEXT(
+				"The new version could not start on this computer; you'll get the next version."));
 		break;
 	case EWoTUpdateStatus::None:
 	case EWoTUpdateStatus::Checking:
@@ -261,9 +264,6 @@ bool WoTParseFakeUpdateState(FStringView Value, FWoTUpdateState& OutState)
 		&& Parts.Num() == 2)
 	{
 		Parsed.Status = EWoTUpdateStatus::Ready;
-#if PLATFORM_MAC
-		Parsed.ReleasePageUrl = TEXT("https://example.invalid/wot-release");
-#endif
 	}
 	else if (Parts[0].Equals(TEXT("knownbad"), ESearchCase::CaseSensitive)
 		&& Parts.Num() == 2)
