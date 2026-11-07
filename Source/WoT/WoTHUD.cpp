@@ -222,8 +222,9 @@ int32 AWoTHUD::BattleTeamCount() const
 
 bool AWoTHUD::IsChoosingTeam() const
 {
-	const APlayerController* Owner = GetOwningPlayerController();
-	const AWoTPlayerState* WoTState = Owner ? Owner->GetPlayerState<AWoTPlayerState>() : nullptr;
+	const APlayerController* OwningController = GetOwningPlayerController();
+	const AWoTPlayerState* WoTState = OwningController
+		? OwningController->GetPlayerState<AWoTPlayerState>() : nullptr;
 	return WoTState && WoTState->Team == 255 && BattleTeamCount() > 0;
 }
 
