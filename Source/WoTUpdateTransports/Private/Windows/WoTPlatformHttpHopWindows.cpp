@@ -354,9 +354,10 @@ public:
 		if (!bConnectRetriesBounded)
 		{
 			// Best effort: Wine's WinHttp (Proton) does not implement this option.
-			// The remaining-timeouts call below stays mandatory and still bounds
-			// every phase by the absolute deadline, so a refused option only
-			// lets WinHttp use its own connect retry count within that bound.
+			// The option exists because native WinHttp can repeat the connect
+			// timeout once per retry; Wine's WinHttp makes a single connect
+			// attempt, so under Proton the remaining-timeouts call below (still
+			// mandatory) keeps the hop inside its deadline.
 			if (!GWoTPlatformHttpHopConnectRetriesReported.Exchange(true))
 			{
 				UE_LOG(LogWoTPlatformHttpHop, Warning,
