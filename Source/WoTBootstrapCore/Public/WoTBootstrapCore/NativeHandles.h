@@ -293,6 +293,10 @@ WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryRenameRetryBudgetForTesting(
  * removes it. */
 WOTBOOTSTRAPCORE_API void WoTSetNativeReplaceRenameRetryObserverForTesting(
 	TFunction<void(int32 FailedAttempts)> Observer);
+
+/** Makes QueryNativeDirectoryAvailableBytes' volume-GUID path fail, as it does
+ * on Wine's Unix drive Z:. Restore with false. */
+WOTBOOTSTRAPCORE_API void WoTSetNativeVolumeGuidPathFailsForTesting(bool bFails);
 #endif
 #endif
 

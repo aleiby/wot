@@ -1617,19 +1617,18 @@ TWoTBootstrapResult<FString> QueryNativeDirectoryPath(
 		TEXT("the held directory path changed length repeatedly"), State.Path));
 }
 
-TWoTBootstrapResult<uint64> QueryNativeDirectoryAvailableBytes(
-	const FWoTNativeDirectoryHandle& Directory)
+namespace
 {
-	using FResult = TWoTBootstrapResult<uint64>;
-	if (!Directory.IsValid())
-	{
-		return FResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
-			TEXT("the directory handle is not open")));
-	}
-	const HANDLE Handle = static_cast<HANDLE>(
-		FWoTNativeHandleAccess::State(Directory)->Handle);
+#if WITH_AUTOMATION_TESTS
+TAtomic<bool> GWoTNativeVolumeGuidPathFailsForTesting{false};
+#endif
+
+/** "\\\\?\\Volume{...}\\" for the volume holding Handle. */
+TWoTBootstrapResult<FString> VolumeGuidRootOfHandle(HANDLE Handle)
+{
+	using FResult = TWoTBootstrapResult<FString>;
 	constexpr DWORD Flags = FILE_NAME_NORMALIZED | VOLUME_NAME_GUID;
-	DWORD Capacity = ::GetFinalPathNameByHandleW(Handle, nullptr, 0, Flags);
+	const DWORD Capacity = ::GetFinalPathNameByHandleW(Handle, nullptr, 0, Flags);
 	if (Capacity == 0)
 	{
 		return FResult::Error(SystemError(TEXT("GetFinalPathNameByHandleW(volume)"),
@@ -1655,11 +1654,87 @@ TWoTBootstrapResult<uint64> QueryNativeDirectoryAvailableBytes(
 			TEXT("the held directory has no volume-GUID path"), VolumePath));
 	}
 	VolumePath.LeftInline(GuidEnd + 2, EAllowShrinking::No);
+	return FResult::Success(MoveTemp(VolumePath));
+}
+
+/** The held directory's own DOS path with a trailing separator ("Z:\\home\\...\\"). */
+TWoTBootstrapResult<FString> DosDirectoryOfHandle(HANDLE Handle)
+{
+	using FResult = TWoTBootstrapResult<FString>;
+	constexpr DWORD Flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+	const DWORD Capacity = ::GetFinalPathNameByHandleW(Handle, nullptr, 0, Flags);
+	if (Capacity == 0)
+	{
+		return FResult::Error(SystemError(TEXT("GetFinalPathNameByHandleW(dos)"),
+			::GetLastError(), TEXT("held directory")));
+	}
+	TArray<WCHAR> Buffer;
+	Buffer.SetNumUninitialized(static_cast<int32>(Capacity) + 1);
+	const DWORD Length = ::GetFinalPathNameByHandleW(
+		Handle, Buffer.GetData(), static_cast<DWORD>(Buffer.Num()), Flags);
+	if (Length == 0 || Length >= static_cast<DWORD>(Buffer.Num()))
+	{
+		return FResult::Error(SystemError(TEXT("GetFinalPathNameByHandleW(dos)"),
+			::GetLastError(), TEXT("held directory")));
+	}
+	FString Path(static_cast<int32>(Length), Buffer.GetData());
+	if (Path.StartsWith(TEXT("\\\\?\\"), ESearchCase::CaseSensitive) && Path.Len() > 6
+		&& FChar::IsAlpha(Path[4]) && Path[5] == TEXT(':'))
+	{
+		Path.RightChopInline(4, EAllowShrinking::No);
+	}
+	if (!Path.EndsWith(TEXT("\\"), ESearchCase::CaseSensitive))
+	{
+		Path += TEXT("\\");
+	}
+	return FResult::Success(MoveTemp(Path));
+}
+}  // namespace
+
+TWoTBootstrapResult<uint64> QueryNativeDirectoryAvailableBytes(
+	const FWoTNativeDirectoryHandle& Directory)
+{
+	using FResult = TWoTBootstrapResult<uint64>;
+	if (!Directory.IsValid())
+	{
+		return FResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
+			TEXT("the directory handle is not open")));
+	}
+	const HANDLE Handle = static_cast<HANDLE>(
+		FWoTNativeHandleAccess::State(Directory)->Handle);
+	TWoTBootstrapResult<FString> Root = VolumeGuidRootOfHandle(Handle);
+#if WITH_AUTOMATION_TESTS
+	if (GWoTNativeVolumeGuidPathFailsForTesting.Load())
+	{
+		Root = TWoTBootstrapResult<FString>::Error(MakeWoTBootstrapError(
+			EWoTBootstrapError::UnsupportedProtocol,
+			TEXT("the held directory has no volume-GUID path (forced)")));
+	}
+#endif
+	if (Root.IsError())
+	{
+		// Under Wine (Proton) the Unix drive Z: has no volume GUID: the GUID
+		// query fails with error 4390 on every Z: handle, measured on a Steam
+		// Deck. Its DOS path answers GetDiskFreeSpaceExW with the real mount's
+		// free space, and this value only budgets a preflight, so the held
+		// directory's own DOS path is enough there. Native Windows keeps the
+		// GUID path and fails as before.
+		if (!WoTIsRunningUnderWine())
+		{
+			return FResult::Error(MoveTemp(Root).GetError());
+		}
+		TWoTBootstrapResult<FString> Dos = DosDirectoryOfHandle(Handle);
+		if (Dos.IsError())
+		{
+			return FResult::Error(MoveTemp(Root).GetError());
+		}
+		Root = MoveTemp(Dos);
+	}
 	ULARGE_INTEGER Available = {};
-	if (!::GetDiskFreeSpaceExW(*VolumePath, &Available, nullptr, nullptr))
+	if (!::GetDiskFreeSpaceExW(*Root.GetValue(), &Available, nullptr, nullptr))
 	{
 		return FResult::Error(SystemError(TEXT("GetDiskFreeSpaceExW"),
-			::GetLastError(), VolumePath));
+			::GetLastError(), Root.GetValue()));
 	}
 	return FResult::Success(static_cast<uint64>(Available.QuadPart));
 }
@@ -2382,6 +2457,11 @@ void WoTSetNativeDirectoryRenameRetryObserverForTesting(
 	TFunction<void(int32 FailedAttempts)> Observer)
 {
 	GWoTNativeDirectoryRenameRetryObserverForTesting = MoveTemp(Observer);
+}
+
+void WoTSetNativeVolumeGuidPathFailsForTesting(bool bFails)
+{
+	GWoTNativeVolumeGuidPathFailsForTesting.Store(bFails);
 }
 
 void WoTSetNativeReplaceRenameRetryObserverForTesting(
