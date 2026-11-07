@@ -131,4 +131,48 @@ bool FWoTNativeWineLinkStillRefusedSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTNativeWineFreeSpaceWithoutVolumeGuidSpec,
+	"WoT.BootstrapCore.Identity.WineFreeSpaceWithoutVolumeGuid", WoTWineWalkSpecFlags)
+
+bool FWoTNativeWineFreeSpaceWithoutVolumeGuidSpec::RunTest(const FString&)
+{
+	// Wine's Unix drive Z: has no volume GUID, and the data-folder free-space
+	// preflight used to fail the first run there (DISK-PROBE-FAILED).
+	const FString Root = WoTNativeHandleTestFactory::CreateTemporaryRoot();
+	ON_SCOPE_EXIT
+	{
+		WoTSetRunningUnderWineForTesting(TOptional<bool>());
+		WoTSetNativeVolumeGuidPathFailsForTesting(false);
+		WoTNativeHandleTestFactory::RemoveTree(Root);
+	};
+	TWoTBootstrapResult<FWoTNativeDirectoryHandle> Directory = OpenNativeDirectoryNoFollow(Root);
+	if (!TestFalse(TEXT("the temporary root opens"), Directory.IsError()))
+	{
+		AddError(Directory.GetError().ToString());
+		return false;
+	}
+
+	TWoTBootstrapResult<uint64> Native = QueryNativeDirectoryAvailableBytes(Directory.GetValue());
+	TestTrue(TEXT("natively the volume-GUID path answers"),
+		!Native.IsError() && Native.GetValue() > 0);
+
+	WoTSetNativeVolumeGuidPathFailsForTesting(true);
+	WoTSetRunningUnderWineForTesting(true);
+	TWoTBootstrapResult<uint64> Wine = QueryNativeDirectoryAvailableBytes(Directory.GetValue());
+	if (!TestFalse(TEXT("under Wine the held directory's DOS path answers instead"),
+		Wine.IsError()))
+	{
+		AddError(Wine.GetError().ToString());
+	}
+	else
+	{
+		TestTrue(TEXT("with real free space"), Wine.GetValue() > 0);
+	}
+
+	WoTSetRunningUnderWineForTesting(false);
+	TestTrue(TEXT("natively a missing volume-GUID path still fails"),
+		QueryNativeDirectoryAvailableBytes(Directory.GetValue()).IsError());
+	return !HasAnyErrors();
+}
+
 #endif
