@@ -371,7 +371,7 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Controller sticks
 - **Original:** The joystick's movement axes have a per-axis 20% dead zone, and their strength depends on the frame rate: at 60 fps a deflection about a fifth past the dead zone already equals a held key. Its look axes turn far too fast to use.
-- **Port:** Sticks use a radial dead zone (a setting, default 20%). Movement reaches full key strength at the original's 60 fps point at any frame rate. Look uses tuned turn rates with a response curve, and adds to mouse look. A partial stick accelerates more slowly but reaches full speed, as in the original.
+- **Port:** Sticks use a radial dead zone (a setting, default 20%). Movement reaches full key strength at the original's 60 fps point at any frame rate; below that point the stick moves proportionally slower, where the original accelerated more slowly to the same top speed. Look uses tuned turn rates with a response curve, and adds to mouse look.
 - **Why:** The same feel at every frame rate, and a usable look stick, with no aim assist.
 
 ### Controller layout

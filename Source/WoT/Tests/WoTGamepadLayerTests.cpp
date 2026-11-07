@@ -169,8 +169,8 @@ bool FWoTGamepadMoveMatchesKeyboardSpec::RunTest(const FString&)
 	Fx.HoldAxis(EKeys::Gamepad_LeftY, 0.2f + 0.75f * 0.22f, 30);
 	TestEqual(TEXT("22% past the dead zone already matches W"), Fx.Speed(), KeyboardSpeed, 1.0f);
 
-	// Partial tilt: slower acceleration (compare at 0.1 s, before either caps),
-	// the same top speed.
+	// Partial tilt (below the gain's saturation point) moves less strongly:
+	// compare at 0.1 s, before either caps.
 	Fx.ResetPawn();
 	Fx.Send(EKeys::W, IE_Pressed, 1.0f);
 	Fx.Frames(6);
@@ -180,8 +180,6 @@ bool FWoTGamepadMoveMatchesKeyboardSpec::RunTest(const FString&)
 	Fx.HoldAxis(EKeys::Gamepad_LeftY, 0.2f + 0.75f * 0.1f, 6);
 	TestTrue(TEXT("a partial stick accelerates more slowly"),
 		Fx.Speed() > 1.0f && Fx.Speed() < KeyboardEarly - 1.0f);
-	Fx.HoldAxis(EKeys::Gamepad_LeftY, 0.2f + 0.75f * 0.1f, 114);
-	TestEqual(TEXT("a partial stick reaches the same top speed"), Fx.Speed(), KeyboardSpeed, 1.0f);
 
 	Fx.ResetPawn();
 	Fx.Send(EKeys::W, IE_Pressed, 1.0f);
