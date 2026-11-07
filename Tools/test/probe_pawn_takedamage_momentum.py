@@ -231,10 +231,10 @@ def main():
     guard = [at for at in zerovecs if at < addvel[0]]
     if guard:
         print("\nVERDICT: GUARDED — a vect(0,0,0) compare precedes AddVelocity"
-              " (the devtree #if-NEW guard IS retail 333B)")
+              " (the zero-momentum guard is in retail 333B)")
     else:
         print("\nVERDICT: UNGUARDED — AddVelocity is unconditional in shipped"
-              " Engine.u (the devtree guard postdates retail)")
+              " Engine.u (the zero-momentum guard postdates retail)")
 
 
 if __name__ == "__main__":

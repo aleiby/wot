@@ -26,6 +26,7 @@ enum class EWoTOriginalGameNeededReason : uint8
 	PickedWrongFile,
 	OnlineOnly,
 	UnsupportedReparsePoint,
+	HardLinked,
 };
 
 WOT_API const TCHAR* LexToString(EWoTOriginalGameNeededReason Reason);

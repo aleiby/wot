@@ -92,7 +92,7 @@ def judge_rules(rules: dict, expectations: dict) -> dict:
                 "after_move_gap_last_uu": row.get("after_move_gap_last"),
                 "expected": "the owning client's own pawn follows an authority move while idle "
                             "(UE1 PlayerPawn sends ServerMove every tick and is corrected by "
-                            "ClientAdjustPosition: devtree Engine PlayerPawn.uc reference; "
+                            "ClientAdjustPosition; "
                             "SwapPlaces moves both pawns, AngrealSwapPlacesProjectile.uc)"}
     if "timelimit" in rules:
         t = rules["timelimit"]

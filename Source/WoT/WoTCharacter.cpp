@@ -4588,11 +4588,17 @@ void AWoTCharacter::PrevInventory()
 
 void AWoTCharacter::Drop()
 {
+#if WITH_AUTOMATION_TESTS
+	++DropRequestCountForTest;
+#endif
 	ServerDrop();
 }
 
 void AWoTCharacter::DropTainted()
 {
+#if WITH_AUTOMATION_TESTS
+	++DropTaintedRequestCountForTest;
+#endif
 	ServerDropTainted();
 }
 
@@ -4654,7 +4660,10 @@ void AWoTCharacter::NextItem()
 	CurrentHand->SelectNext();
 	if (CurrentHand->Selected <= PreviousSlot)
 	{
-		NextHand();
+		// Scrolling runs on across hands (PORT_NOTES "Item scrolling runs across
+		// hands"): this hand keeps its selection, the next starts at its first.
+		CurrentHand->Select(PreviousSlot);
+		EnterAdjacentHand(CurrentHandSet->GetNext(), /*bAtFirst*/ true);
 	}
 	else
 	{
@@ -4682,12 +4691,36 @@ void AWoTCharacter::PrevItem()
 	CurrentHand->SelectPrevious();
 	if (CurrentHand->Selected >= PreviousSlot)
 	{
-		PrevHand();
+		// Scrolling runs on across hands (PORT_NOTES "Item scrolling runs across
+		// hands"): this hand keeps its selection, the previous ends at its last.
+		CurrentHand->Select(PreviousSlot);
+		EnterAdjacentHand(CurrentHandSet->GetPrevious(), /*bAtFirst*/ false);
 	}
 	else
 	{
 		DriveHandSelection(/*bNewHand*/ false);
 	}
+}
+
+void AWoTCharacter::EnterAdjacentHand(int32 HandIndex, bool bAtFirst)
+{
+	UWoTHandInfo* Hand = CurrentHandSet ? CurrentHandSet->GetHand(HandIndex) : nullptr;
+	if (!Hand)
+	{
+		return;
+	}
+	if (bAtFirst) { Hand->SelectFirst(); }
+	else { Hand->SelectLast(); }
+	// SelectHand's own reconcile would re-sync this hand to the inventory's
+	// selection, so select it directly (the hands were reconciled on entry).
+	// With one occupied hand it is its own neighbour; re-selecting it would
+	// step past the slot just chosen (a repeated hand press cycles items).
+	const bool bNewHand = HandIndex != CurrentHandSet->Selected;
+	if (bNewHand)
+	{
+		CurrentHandSet->Select(HandIndex);
+	}
+	DriveHandSelection(bNewHand);
 }
 
 namespace
@@ -5251,21 +5284,35 @@ void AWoTCharacter::DropAllSeals(bool bIgnoreInteractionGuards)
 	}
 }
 
+bool AWoTCharacter::IsCitadelOrbitInput() const
+{
+	const AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController());
+	return IsValid(WoTController)
+		&& WoTController->GetCitadelEditCameraMode() == EWoTCitadelEditCameraMode::Orbit;
+}
+
 void AWoTCharacter::MoveForward(float Value)
 {
-	if (AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
+	// MoveForward runs every frame (an axis binding), so it also carries the
+	// held-Jump swim-up input. Orbit mode consumes movement before that.
+	if (!IsCitadelOrbitInput())
 	{
-		WoTController->AdjustCitadelOrbitDistance(
-			Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+		AddSwimVerticalInput();
+	}
+	ApplyForwardAxis(Value);
+}
+
+void AWoTCharacter::ApplyForwardAxis(float Value)
+{
+	if (IsCitadelOrbitInput())
+	{
+		if (AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController()))
+		{
+			WoTController->AdjustCitadelOrbitDistance(
+				Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+		}
 		return;
 	}
-	// MoveForward runs every frame (an axis binding), so it also carries the
-	// held-Jump swim-up input.
-	AddSwimVerticalInput();
 	if (bFreeLookHeld) { AddPitchInput(Value * 0.5f * RetailFOVScale(), true); }
 	else { AddForwardInput(Value); }
 }
@@ -5283,17 +5330,37 @@ void AWoTCharacter::CitadelOrbitZoom(float Value)
 
 void AWoTCharacter::MoveRight(float Value)
 {
-	if (const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
+	ApplyStrafeAxis(Value);
+}
+
+void AWoTCharacter::ApplyStrafeAxis(float Value)
+{
+	if (IsCitadelOrbitInput())
 	{
 		// CitadelOrbitMode consumes movement input: a strafe must not drag the ghosted
 		// body (the orbit camera is zone-driven, not pawn-driven — WOTPlayer.uc:5262).
 		return;
 	}
 	AddStrafeInput(Value);
+}
+
+void AWoTCharacter::ApplyStickLook(float YawDegrees, float PitchDegrees)
+{
+	// The same calls the mouse makes, so look-spring, center-view and the
+	// Impaled clamp apply unchanged. The controller multiplies them by its
+	// legacy input scales; divide those out so the stick turns exactly the
+	// degrees asked for.
+	const AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController());
+	const FVector2D Scale = WoTController
+		? WoTController->GetLegacyLookInputScale() : FVector2D(1.0, 1.0);
+	if (!FMath::IsNearlyZero(YawDegrees) && !FMath::IsNearlyZero(Scale.X))
+	{
+		AddControllerYawInput(YawDegrees / static_cast<float>(Scale.X));
+	}
+	if (!FMath::IsNearlyZero(Scale.Y))
+	{
+		AddPitchInput(PitchDegrees / static_cast<float>(Scale.Y), /*bFromLookDevice*/ true);
+	}
 }
 
 float AWoTCharacter::DecayCenterViewPitch(float PitchDegrees, float DeltaSeconds)
@@ -5420,6 +5487,9 @@ void AWoTCharacter::AddSwimVerticalInput()
 	// nothing in water). Retail binds no key to Duck (aUp < 0) by default.
 	if (bSwimUpHeld && !IsPlayerMovementConstrained() && IsSwimmingForInput())
 	{
+#if WITH_AUTOMATION_TESTS
+		++SwimVerticalInputCountForTest;
+#endif
 		AddMovementInput(FVector::UpVector,
 			RetailSwimSideAccel / GetCharacterMovement()->GetMaxAcceleration());
 	}

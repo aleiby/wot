@@ -45,8 +45,8 @@ def require_path(path: PathLike, description: str = "private reference input",
                resolved.is_file() if directory is False else resolved.exists())
     if not present:
         raise ConfigurationError(
-            "%s is missing at %s; set WOT_REFERENCE_ROOT to the private root "
-            "that contains original/, devtree/, and exports/"
+            "%s is missing at %s; set WOT_REFERENCE_ROOT to the reference root "
+            "that contains original/ and exports/ (docs/LOCAL-CONFIGURATION.md)"
             % (description, resolved))
     return resolved
 

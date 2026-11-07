@@ -1161,8 +1161,14 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		WorkEvent->Trigger();
 	}
 
+	/** Pause before the single announcement retry (a transient read). */
+	static constexpr double AnnouncementRetryDelaySeconds = 0.5;
+
 	virtual uint32 Run() override
 	{
+		// This thread probes player-chosen installer locations; an empty card
+		// reader must fail the probe, not pop a "No Disk" dialog each sweep.
+		WoTFailCriticalErrorsOnThisThread();
 		while (!bCancelled.Load())
 		{
 			WorkEvent->Wait();
@@ -1524,10 +1530,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		switch (Reason)
 		{
 		case EWoTOriginalGameNeededReason::OnlineOnly:
-			return 5;
+			return 6;
 		case EWoTOriginalGameNeededReason::UnsupportedReparsePoint:
-			return 4;
+			return 5;
 		case EWoTOriginalGameNeededReason::PickedWrongFile:
+			return 4;
+		case EWoTOriginalGameNeededReason::HardLinked:
 			return 3;
 		case EWoTOriginalGameNeededReason::Downloading:
 			return 2;
@@ -1886,6 +1894,13 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				continue;
 			}
 			if (Observation.State
+				== EWoTPinnedAdjacentInstallerProbe::HardLinked)
+			{
+				Tracked->PreviousCandidateIdentity.Reset();
+				MergeReason(EWoTOriginalGameNeededReason::HardLinked);
+				continue;
+			}
+			if (Observation.State
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
@@ -1974,6 +1989,11 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			{
 				MergeReason(
 					EWoTOriginalGameNeededReason::UnsupportedReparsePoint);
+			}
+			else if (Result.State
+				== EWoTPinnedAdjacentInstallerProbe::HardLinked)
+			{
+				MergeReason(EWoTOriginalGameNeededReason::HardLinked);
 			}
 			Tracked->PreviousCandidateIdentity.Reset();
 		}
@@ -2255,7 +2275,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		UpdateStateRecord.NewestAnnouncementSequence = FMath::Max(
 			UpdateStateRecord.NewestAnnouncementSequence,
 			ReadState.State.NewestAnnouncementSequence);
-		if (!ReadState.Diagnostic.IsEmpty())
+		if (!ReadState.Diagnostic.IsEmpty() && !ReadState.bMissing)
 		{
 			WoTRecordBootstrapHeartbeat(TEXT("update-state-defaulted"), Phase,
 				OperationEpoch, {}, {}, ReadState.Diagnostic.Left(1024));
@@ -2315,9 +2335,32 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		// authenticated bytes.
 		TArray<uint8> PrefetchedAnnouncement;
 		TArray<uint8> PrefetchedSignature;
-		if (FWoTBootstrapStatus Prefetched = Recording.FetchPair(
-				PrefetchedAnnouncement, PrefetchedSignature);
-			Prefetched.IsError())
+		FWoTBootstrapStatus Prefetched = Recording.FetchPair(
+			PrefetchedAnnouncement, PrefetchedSignature);
+		// One retry: a single failed read (seen on the Deck under Proton,
+		// "WinHttp body availability read failed", passing a moment later)
+		// shouldn't cost the player this launch's update check. It shares
+		// the same deadline, and a cancel is never retried.
+		if (Prefetched.IsError() && !bCancelled.Load()
+			&& Deps.NowSeconds() + AnnouncementRetryDelaySeconds
+				< AbsoluteDeadline)
+		{
+			WoTRecordBootstrapHeartbeat(TEXT("update-check-retry"),
+				EWoTBootstrapPhase::CheckingGameUpdates,
+				Work.Request.OperationEpoch, {}, {},
+				Prefetched.GetError().ToString().Left(1024));
+			for (double Waited = 0.0; Waited < AnnouncementRetryDelaySeconds
+				&& !bCancelled.Load(); Waited += 0.05)
+			{
+				FPlatformProcess::SleepNoStats(0.05f);
+			}
+			if (!bCancelled.Load())
+			{
+				Prefetched = Recording.FetchPair(
+					PrefetchedAnnouncement, PrefetchedSignature);
+			}
+		}
+		if (Prefetched.IsError())
 		{
 			return Failure(Work, MoveTemp(Prefetched).GetError());
 		}
@@ -2528,6 +2571,24 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 
 		FWoTGameBootstrapWorkerVerifiedMetadata Accepted =
 			MoveTemp(Verified).GetValue();
+		// A Test build is offered the published Shipping release, whose tree
+		// has no Test executable: the Test launcher discards it as torn and
+		// the next session downloads it again. Say a newer release exists
+		// instead of staging one this copy cannot run.
+		const FString& ReleaseConfiguration =
+			Accepted.Manifest.Attestation.Configuration;
+		if (!Deps.RunningConfiguration.IsEmpty()
+			&& !ReleaseConfiguration.Equals(Deps.RunningConfiguration,
+				ESearchCase::CaseSensitive))
+		{
+			NotifyOnlyReason = TEXT("release-configuration-differs");
+			NotifyOnlyDetail = FString::Printf(TEXT("running=%s release=%s"),
+				*Deps.RunningConfiguration, *ReleaseConfiguration.Left(64));
+			// Kept only so the banner can name the version; nothing stages it.
+			Manifest = Accepted.Manifest;
+			return CompleteGameUpdateCheck(
+				Work, false, &Announcement.GetValue());
+		}
 		Download->SetVerifiedArchiveSource(
 			Accepted.Manifest.Archive.Url,
 			Accepted.Manifest.Archive.Size);
@@ -3638,6 +3699,13 @@ TUniquePtr<IWoTBootstrapWorker> WoTCreateProductionBootstrapWorker(
 	Deps.AnnouncementJsonUrl =
 		WoT::Bootstrap::Trust::AnnouncementUrl;
 	Deps.RunningIdentity = WoTReleaseIdentity::LoadRunning();
+#if UE_BUILD_SHIPPING
+	Deps.RunningConfiguration = TEXT("Shipping");
+#elif UE_BUILD_TEST
+	Deps.RunningConfiguration = TEXT("Test");
+#else
+	Deps.RunningConfiguration = TEXT("Development");
+#endif
 	return MakeUnique<FWoTGameBootstrapWorker>(MoveTemp(Deps));
 }
 

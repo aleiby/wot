@@ -18,6 +18,12 @@ WOTUPDATETRANSPORTS_API void WoTPlatformHttpHopMacSetCancelStallForTesting(
 	bool bSuppressCompletion, double GraceSeconds);
 #endif
 
+#if PLATFORM_WINDOWS && WITH_AUTOMATION_TESTS
+/** Windows executor seam: make WINHTTP_OPTION_CONNECT_RETRIES fail as Wine's
+ * WinHttp does (ERROR_WINHTTP_INVALID_OPTION). Restore with false. */
+WOTUPDATETRANSPORTS_API void WoTPlatformHttpHopWindowsFailConnectRetriesForTesting(bool bFail);
+#endif
+
 #if WOT_BOOTSTRAP_TEST_ENDPOINTS
 /** Test-build-only inspection of the native release-base rewrite allowlist. */
 WOTUPDATETRANSPORTS_API bool WoTPlatformHttpHopRewriteReleaseUrlForTesting(

@@ -1952,26 +1952,29 @@ void UWoTPayloadSubsystem::HandleRuntimeIntegrityFailure(
 	}
 	bRuntimeIntegrityRecoveryHandled = true;
 
-	FString DisplayName = Failure.Path;
+	FString Identity = Failure.Path;
 	FString MapIdentity;
-	if (DisplayName.RemoveFromStart(TEXT("cache/world/"),
+	if (Identity.RemoveFromStart(TEXT("cache/world/"),
 		ESearchCase::CaseSensitive))
 	{
-		MapIdentity = DisplayName;
+		MapIdentity = Identity;
 	}
-	else if (DisplayName.RemoveFromStart(TEXT("cache/bsp/"),
+	else if (Identity.RemoveFromStart(TEXT("cache/bsp/"),
 		ESearchCase::CaseSensitive))
 	{
-		DisplayName.Split(TEXT("/"), &MapIdentity, nullptr,
+		Identity.Split(TEXT("/"), &MapIdentity, nullptr,
 			ESearchCase::CaseSensitive, ESearchDir::FromStart);
 	}
-	if (!MapIdentity.IsEmpty())
-	{
-		DisplayName = FWoTFrontEndMapCatalog::CachedRetailTitle(MapIdentity);
-	}
-	const FString Message = FString::Printf(
-		TEXT("Some of WoT Reborn's game data is damaged (%s). It will be rebuilt the next time you start the game."),
-		*DisplayName);
+	// A map is named by its title; any other output identity
+	// (cache/texture/...) means nothing to a player, so the message leaves it
+	// out and the log keeps it for bug reports.
+	UE_LOG(LogWoTPayload, Warning, TEXT("Runtime cache integrity failure: %s"),
+		*Failure.ToString());
+	const FString Message = MapIdentity.IsEmpty()
+		? FString(TEXT("Some of WoT Reborn's game data is damaged. It will be rebuilt the next time you start the game."))
+		: FString::Printf(
+			TEXT("Some of WoT Reborn's game data is damaged (%s). It will be rebuilt the next time you start the game."),
+			*FWoTFrontEndMapCatalog::CachedRetailTitle(MapIdentity));
 
 	UGameInstance* Instance = GetGameInstance();
 	UWoTSessionSubsystem* Sessions = Instance

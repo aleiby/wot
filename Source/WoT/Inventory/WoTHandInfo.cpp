@@ -108,6 +108,19 @@ void UWoTHandInfo::SelectFirst()
 	Select(Index);
 }
 
+void UWoTHandInfo::SelectLast()
+{
+	int32 Index = NumSlots - 1;
+	if (!IsEmpty())
+	{
+		while (Index > 0 && GetClassName(Index).IsNone())
+		{
+			--Index;
+		}
+	}
+	Select(Index);
+}
+
 void UWoTHandInfo::SelectNext()
 {
 	int32 Index = Selected;

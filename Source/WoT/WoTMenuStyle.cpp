@@ -2151,6 +2151,12 @@ void FWoTMenuStyle::SizeCheckBoxImages(FCheckBoxStyle& Style, float GlyphSize)
 	}
 }
 
+bool WoTIsMenuBackKey(const FKey& Key)
+{
+	return Key == EKeys::Escape || Key == EKeys::Gamepad_FaceButton_Right
+		|| Key == EKeys::Gamepad_Special_Left;
+}
+
 void SWoTMenuButton::Construct(const FArguments& InArgs)
 {
 	ExternalSelection = InArgs._IsSelected;
@@ -2528,7 +2534,8 @@ const TArray<FString>& SWoTSliderValueLabel::AllValueLabels()
 			Result.Add(FString::FromInt(Value));
 			Result.Add(FString::Printf(TEXT("%d%%"), Value));
 		}
-		for (const float Step : {0.25f, 0.5f, 0.75f, 1.0f, 2.0f, 4.0f, 7.0f, 10.0f})
+		// The mouse and controller sensitivity steps (WoTSettingsSlate.cpp).
+		for (const float Step : {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 7.0f, 10.0f})
 		{
 			Result.Add(FString::Printf(TEXT("%gx"), Step));
 		}

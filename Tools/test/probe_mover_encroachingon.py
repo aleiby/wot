@@ -79,7 +79,7 @@ def main():
 
     verdicts = []
     verdicts.append(("Seal exemption",
-                     "PRESENT (devtree #if-NEW IS retail 333B)"
+                     "PRESENT (the Seal exemption is in retail 333B)"
                      if "Seal" in names else
                      "ABSENT (older unexempted form shipped)"))
     verdicts.append(("group dispatch",

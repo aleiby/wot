@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Find text in the public-bound tree that was copied from the private reference corpora.
 
-The scan covers exactly the files ``Tools/public/export_public_tree.py`` would
-publish from committed HEAD (same allow and deny rules), or any directory tree
-given with ``--tree``. It compares them with the private reference root
+The scan covers every file committed at HEAD (this repository is the public
+tree), or any directory tree given with ``--tree``. It compares them with the private reference root
 (``Tools/wot_config.py``: CLI argument, then ``WOT_REFERENCE_ROOT``, then the
 repository root):
 
@@ -54,7 +53,6 @@ for _entry in (str(_HERE), str(_TOOLS)):
     if _entry not in sys.path:
         sys.path.insert(0, _entry)
 
-import export_public_tree  # noqa: E402  (Tools/public)
 import wot_config  # noqa: E402  (Tools)
 
 SCANNER_VERSION = 1
@@ -697,8 +695,9 @@ def _git(repo: Path, *arguments: str) -> str:
 
 
 def public_paths_from_head(repo: Path) -> List[str]:
-    """Paths of HEAD that the public exporter would publish, in tree order."""
-    return export_public_tree.public_manifest_paths(repo, "HEAD")
+    """Every file committed at HEAD, in tree order."""
+    listing = _git(repo, "ls-tree", "-r", "-z", "--name-only", "HEAD")
+    return [path for path in listing.split("\0") if path]
 
 
 def tree_paths(tree: Path) -> List[str]:

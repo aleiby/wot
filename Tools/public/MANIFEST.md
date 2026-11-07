@@ -1,32 +1,22 @@
-# Public export manifest
+# Public tree guards
 
-`public-files.txt` is the reviewed, exact source-path manifest for the public
-export. The exporter fails closed when the manifest is missing, malformed,
-admits a denied path or LFS object, or names a path that is absent from the
-selected Git tree.
+This repository is the canonical source tree; every change lands through a
+pull request. The `public-guard` workflow gates each one:
 
-To prepare a candidate update for review:
+- `leak_guard.py` fails on retail files and extensions, private reference
+  roots, LFS pointers, machine paths, private addresses, email addresses, key
+  material, unreviewed binaries and unpinned reference-snapshot terms;
+- gitleaks scans for secrets;
+- every pure-Python tool test runs on Python 3.9 and 3.12.
 
-```sh
-python3 Tools/public/export_public_tree.py propose --repo .
-```
-
-The proposal comes from a broad path policy. It never changes the manifest
-implicitly. Review its diff, update `public-files.txt`, and run the
-exporter and leak guard before accepting a new path.
-
-Every proposal candidate must be classified. `private-files.txt` is the
-maintainer's reviewed list of candidates that stay private (it is not
-exported), in the same format as the manifest (sorted, one path per line,
-naming itself). Export fails while a
-candidate is in neither list, is in both, or the private list names a path that
-is missing or that the deny policy already excludes. A new file therefore stops
-the export until someone decides which side it belongs on. To list the paths
-export would refuse:
+Run the guard locally before opening a pull request:
 
 ```sh
-python3 Tools/public/export_public_tree.py propose --repo . --unclassified
+python3 Tools/public/leak_guard.py --tree . --verbose
 ```
+
+`provenance_scan.py` is a maintainer audit: with the private reference data it
+reports any committed text copied from the reference corpora.
 
 ## Generated identity registries
 
@@ -77,3 +67,9 @@ published; the prebuilt libraries are not, and a checkout fetches or builds them
 `binary-allowlist.sha256` is a separate reviewed list for non-text content. Each
 entry is an exact SHA-256 and path; changing any listed file's bytes requires an
 explicit hash review.
+
+`reference-term-allowlist.txt` pins the public files that may name the
+maintainer-only development snapshot (only the tools that resolve or deny its
+directory) to an exact number of mentions. Public prose describes the original
+engine in its own words; the leak guard fails any other mention and any change
+to a pinned count.

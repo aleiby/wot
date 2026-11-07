@@ -817,7 +817,7 @@ FReply SWoTInGameMenuOverlay::OnKeyDown(
 	{
 		return ActivateHelp();
 	}
-	if (InKeyEvent.GetKey() == EKeys::Escape)
+	if (WoTIsMenuBackKey(InKeyEvent.GetKey()))
 	{
 		if (CanInteract())
 		{
@@ -837,15 +837,16 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 	{
 		return ActivateHelp();
 	}
-	if (!ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig
-		&& (InKeyEvent.GetKey() == EKeys::Up
-			|| InKeyEvent.GetKey() == EKeys::Down))
+	const FKey Key = InKeyEvent.GetKey();
+	if (IsShowingMainMenu()
+		&& (Key == EKeys::Up || Key == EKeys::Down
+			|| Key == EKeys::Gamepad_DPad_Up || Key == EKeys::Gamepad_DPad_Down))
 	{
-		const int32 Direction = InKeyEvent.GetKey() == EKeys::Up ? -1 : 1;
+		const int32 Direction = Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up ? -1 : 1;
 		return MoveMainMenuSelection(Direction)
 			? FReply::Handled() : FReply::Unhandled();
 	}
-	if (InKeyEvent.GetKey() == EKeys::Escape)
+	if (WoTIsMenuBackKey(Key))
 	{
 		if (ActiveSettingsScreen.IsValid())
 		{
@@ -861,6 +862,26 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 		return CanInteract() ? Resume() : FReply::Handled();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+}
+
+FNavigationReply SWoTInGameMenuOverlay::OnNavigation(
+	const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent)
+{
+	// The stick navigates by analog events rather than keys; it moves the same
+	// wrapping selection as the arrows and the D-pad.
+	const EUINavigation Direction = InNavigationEvent.GetNavigationType();
+	if (IsShowingMainMenu()
+		&& (Direction == EUINavigation::Up || Direction == EUINavigation::Down)
+		&& MoveMainMenuSelection(Direction == EUINavigation::Up ? -1 : 1))
+	{
+		return FNavigationReply::Stop();
+	}
+	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
+}
+
+bool SWoTInGameMenuOverlay::IsShowingMainMenu() const
+{
+	return !ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig;
 }
 
 FReply SWoTInGameMenuOverlay::Resume()
@@ -1465,7 +1486,7 @@ FReply SWoTHelpOverlay::OnKeyDown(const FGeometry& MyGeometry,
 	const FKeyEvent& InKeyEvent)
 {
 	const FKey Key = InKeyEvent.GetKey();
-	if (Key == EKeys::Escape || Key == EKeys::F1
+	if (WoTIsMenuBackKey(Key) || Key == EKeys::F1
 		|| (PrimaryCloseKey.IsValid() && Key == PrimaryCloseKey)
 		|| (SecondaryCloseKey.IsValid() && Key == SecondaryCloseKey))
 	{
@@ -1478,7 +1499,7 @@ FReply SWoTHelpOverlay::OnPreviewKeyDown(const FGeometry& MyGeometry,
 	const FKeyEvent& InKeyEvent)
 {
 	const FKey Key = InKeyEvent.GetKey();
-	if (Key == EKeys::Escape || Key == EKeys::F1
+	if (WoTIsMenuBackKey(Key) || Key == EKeys::F1
 		|| (PrimaryCloseKey.IsValid() && Key == PrimaryCloseKey)
 		|| (SecondaryCloseKey.IsValid() && Key == SecondaryCloseKey))
 	{

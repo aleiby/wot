@@ -364,6 +364,26 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Simplified versions of these checks. Setting the same chase target again changes nothing.
 - **Why:** Some supporting systems are not ported. Chase behavior is unchanged in practice.
 
+### Item scrolling runs across hands
+- **Original:** Scrolling past the last angreal of a hand (the mouse wheel's next or previous item) moves to the adjacent hand's last-used angreal.
+- **Port:** Scrolling past a hand's last angreal enters the next hand at its first; scrolling back past its first enters the previous hand at its last. The mouse wheel and the controller shoulder buttons behave the same.
+- **Why:** Scrolling reads as one continuous list, so the selection never jumps to an unexpected angreal.
+
+### The joystick option is on by default
+- **Original:** The Joystick Enabled option is off by default (`UseJoystick=False`).
+- **Port:** It is on by default, and settings saved before controller support are switched on once. It stays as an off switch.
+- **Why:** Controllers and the Steam Deck are supported; before this, a controller did nothing.
+
+### Controller sticks
+- **Original:** The joystick's movement axes have a per-axis 20% dead zone, and their strength depends on the frame rate: at 60 fps a deflection about a fifth past the dead zone already equals a held key. Its look axes turn far too fast to use.
+- **Port:** Sticks use a radial dead zone (a setting, default 20%). Movement reaches full key strength at the original's 60 fps point at any frame rate; below that point the stick moves proportionally slower, where the original accelerated more slowly to the same top speed. Look uses tuned turn rates with a response curve, has its own sensitivity and invert options, and adds to mouse look.
+- **Why:** The same feel at every frame rate, and a usable look stick, with no aim assist.
+
+### Controller layout
+- **Original:** The default joystick setup binds Fire, Jump and four hat directions only.
+- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. On a Battle map, a player without a team picks one with the D-pad (left, right, up and down for teams 1 to 4), and the team prompt names those buttons when the joystick is enabled. In the game menu and its windows the D-pad or stick moves the selection, A chooses and B backs out. Chat and the front-end menus by controller arrive with an on-screen keyboard and menu navigation.
+- **Why:** A match must be playable on a controller alone.
+
 ## Networking
 
 ### Mover clients sync from a server time stamp

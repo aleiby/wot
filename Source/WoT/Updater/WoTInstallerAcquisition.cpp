@@ -270,6 +270,15 @@ TWoTBootstrapResult<FWoTAdjacentInstallerInspection> InspectAtParent(
 	}
 	const FWoTNativeFileIdentity& Identity = Opened.GetValue().GetIdentity();
 	Result.Identity = Identity;
+	// The reader takes only one singly-linked file (a second name could change
+	// it after verification). A hard link of the right size is most likely the
+	// real installer, so say that instead of "not the installer".
+	if (Identity.Type == EWoTTreeEntryType::File && Identity.LinkCount > 1
+		&& Identity.Size == Pins.Size)
+	{
+		Result.State = EWoTPinnedAdjacentInstallerProbe::HardLinked;
+		return FResult::Success(MoveTemp(Result));
+	}
 	if (Identity.Type != EWoTTreeEntryType::File || Identity.LinkCount != 1
 		|| Identity.Size > Pins.Size)
 	{

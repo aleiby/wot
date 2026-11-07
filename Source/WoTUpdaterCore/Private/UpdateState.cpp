@@ -127,6 +127,7 @@ FWoTUpdateStateRecordReadResult ReadWoTUpdateState(const FWoTUpdaterStateRoot& R
 	if (!IFileManager::Get().DirectoryExists(*Root.StateDir))
 	{
 		Result.Diagnostic = TEXT("update state is missing");
+		Result.bMissing = true;
 		return Result;
 	}
 
@@ -149,6 +150,7 @@ FWoTUpdateStateRecordReadResult ReadWoTUpdateState(const FWoTUpdaterStateRoot& R
 	if (!Found.GetValue().IsSet())
 	{
 		Result.Diagnostic = TEXT("update state is missing");
+		Result.bMissing = true;
 		return Result;
 	}
 	if (Found.GetValue().GetValue() != EWoTTreeEntryType::File)
@@ -220,7 +222,9 @@ FWoTBootstrapStatus MergeAndWriteWoTUpdateState(
 	InOutState.NewestAnnouncementSequence = FMath::Max(
 		InOutState.NewestAnnouncementSequence,
 		Disk.State.NewestAnnouncementSequence);
-	if (!Disk.Diagnostic.IsEmpty())
+	// A record that does not exist yet is the normal first run, not a problem
+	// to report (callers log OutDiagnostic as a save failure).
+	if (!Disk.Diagnostic.IsEmpty() && !Disk.bMissing)
 	{
 		WoTSetUpdateStateDiagnostic(OutDiagnostic, Disk.Diagnostic);
 	}

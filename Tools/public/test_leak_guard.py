@@ -25,6 +25,8 @@ PRIVATE_UNC = r"\\%s\share\x" % "buildbox"
 PRIVATE_ADDRESS = "10." + "20.4.1"
 PRIVATE_V6 = "fd00" + "::1"
 PRIVATE_EMAIL = "person" + "@corp.test"
+SNAPSHOT = "dev" + "tree"
+SNAPSHOT_GAME = "U2" + "Radiosity"
 
 
 class LeakGuardTests(unittest.TestCase):
@@ -150,6 +152,55 @@ class LeakGuardTests(unittest.TestCase):
             leak_guard.email_hits("background@2x.png icon_512x512@2x.tiff\n"), [])
         address = "dev" + "@2x.org"
         self.assertEqual(leak_guard.email_hits(address + "\n"), [address])
+
+    def test_punctuation_only_local_part_is_markup_not_email(self):
+        # Markdown code spans put a backtick right before a decorator.
+        self.assertEqual(leak_guard.email_hits(
+            "pins (`@unittest.skipUnless(root_available(), ...)`)\n"), [])
+        address = "a`b" + "@corp.test"
+        self.assertEqual(leak_guard.email_hits(address + "\n"), [address])
+
+    def test_reference_terms_are_pinned_per_file(self):
+        self._write("Tools/resolver.py",
+                    "ROOTS = (%r,)\n# %s/%s\n" % (SNAPSHOT, SNAPSHOT, SNAPSHOT_GAME))
+        self._write("Tools/clean.py", "print('original and exports')\n")
+        rules, _ = self._rules(reference_term_allowlist={})
+        self.assertEqual(rules, [("reference-term", "Tools/resolver.py")])
+        self.assertEqual(self._rules(reference_term_allowlist={"Tools/resolver.py": 3}),
+                         ([], 2))
+        # The pin is exact: growth and shrinkage both need a reviewed update.
+        for pinned in (2, 4):
+            rules, _ = self._rules(reference_term_allowlist={"Tools/resolver.py": pinned})
+            self.assertEqual(rules, [("reference-term", "Tools/resolver.py")])
+        rules, _ = self._rules(reference_term_allowlist={
+            "Tools/resolver.py": 3, "Tools/gone.py": 1})
+        self.assertEqual(rules, [("stale-reference-term-allowlist", "Tools/gone.py")])
+        # Prose anywhere else fails, whatever the case.
+        self._write("docs/notes.md", "Ported from the %s snapshot.\n" % SNAPSHOT.upper())
+        rules, _ = self._rules(reference_term_allowlist={"Tools/resolver.py": 3})
+        self.assertEqual(rules, [("reference-term", "docs/notes.md")])
+
+    def test_reference_term_check_needs_an_allowlist(self):
+        self._write("Tools/resolver.py", "ROOT = %r\n" % SNAPSHOT)
+        self.assertEqual(self._rules(), ([], 1))
+
+    def test_reference_term_allowlist_format(self):
+        parse = leak_guard.parse_reference_term_allowlist
+        self.assertEqual(parse(b"# reviewed\n2  A/b.py\n1  C/d.py\n"),
+                         {"A/b.py": 2, "C/d.py": 1})
+        for bad in (b"1  C/d.py\n2  A/b.py\n", b"1  A/b.py\n2  A/b.py\n",
+                    b"0  A/b.py\n", b"x  A/b.py\n", b"1 A/b.py\n"):
+            with self.subTest(bad=bad), self.assertRaises(leak_guard.GuardError):
+                parse(bad)
+
+    def test_cli_reads_the_reference_term_allowlist_from_the_tree(self):
+        self._write("Tools/resolver.py", "ROOT = %r\n" % SNAPSHOT)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(leak_guard.run(["--tree", str(self.root)]), 1)
+            self._write(leak_guard.REFERENCE_TERM_ALLOWLIST_PATH, "1  Tools/resolver.py\n")
+            self.assertEqual(leak_guard.run(["--tree", str(self.root)]), 0)
+        self.assertIn("reference-term: Tools/resolver.py", out.getvalue())
 
     def test_player_is_a_placeholder_home(self):
         self._write("Tools/paths.txt",

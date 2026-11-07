@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 class FWoTFrontEndPresentationAuthority;
+class SCheckBox;
 class SScrollBox;
 class STextBlock;
 class UWoTPreferencesSubsystem;
@@ -74,6 +75,7 @@ public:
 #if WITH_AUTOMATION_TESTS
 	/** The Mouse Sensitivity slider's eight steps (its labels are "%gx"). */
 	static TArray<float> SensitivityStepsForTesting();
+	static TArray<float> ControllerSensitivityStepsForTesting();
 	const FWoTGameSettings& DraftForTesting() const { return Draft; }
 	void SetDraftForTesting(const FWoTGameSettings& NewDraft) { Draft = NewDraft; }
 	void BeginCaptureForTesting(EWoTManagedBinding Action, EWoTBindingSlot Slot)
@@ -99,6 +101,10 @@ public:
 		{ return WindowModeLabel; }
 	TSharedPtr<SWidget> WindowModeControlForTesting() const
 		{ return WindowModeControl; }
+	TSharedPtr<SWidget> ControllerSensitivitySliderForTesting() const
+		{ return ControllerSensitivitySlider; }
+	TSharedPtr<SCheckBox> ControllerInvertCheckBoxForTesting() const
+		{ return ControllerInvertCheckBox; }
 #endif
 
 private:
@@ -155,6 +161,8 @@ private:
 	TSharedPtr<SScrollBox> BodyScroll;
 	TSharedPtr<SWidget> WindowModeLabel;
 	TSharedPtr<SWidget> WindowModeControl;
+	TSharedPtr<SWidget> ControllerSensitivitySlider;
+	TSharedPtr<SCheckBox> ControllerInvertCheckBox;
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;

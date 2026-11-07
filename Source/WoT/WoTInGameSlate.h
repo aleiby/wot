@@ -74,6 +74,8 @@ public:
 		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual FReply OnPreviewKeyDown(
 		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
 
 #if WITH_AUTOMATION_TESTS
 	void OpenSettingsForTesting(EWoTSettingsPage Page);
@@ -124,6 +126,7 @@ private:
 	FReply ActivateCitadel();
 	FReply ActivateMainMenuEntryById(uint8 EntryId);
 	bool MoveMainMenuSelection(int32 Direction);
+	bool IsShowingMainMenu() const;
 	void SelectMainMenuEntry(int32 EntryIndex);
 	FReply LeaveToMenu();
 	bool CanInteract() const;

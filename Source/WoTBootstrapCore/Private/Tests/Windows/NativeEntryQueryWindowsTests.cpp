@@ -289,4 +289,25 @@ bool FWoTNativeEntryQueryWindowsSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+// Player builds run without -unattended, so UE never sets
+// SEM_FAILCRITICALERRORS; the bootstrap worker sets it on its own thread so
+// a probe of an empty card reader returns an error instead of a dialog.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFailCriticalErrorsOnThisThreadSpec,
+	"WoT.BootstrapCore.Windows.FailCriticalErrorsOnThisThread",
+	WoTEntryQueryWindowsSpecFlags)
+bool FWoTFailCriticalErrorsOnThisThreadSpec::RunTest(const FString&)
+{
+	const DWORD Before = ::GetThreadErrorMode();
+	::SetThreadErrorMode(Before & ~static_cast<DWORD>(SEM_FAILCRITICALERRORS), nullptr);
+	WoTFailCriticalErrorsOnThisThread();
+	const DWORD After = ::GetThreadErrorMode();
+	::SetThreadErrorMode(Before, nullptr);
+	TestTrue(TEXT("the critical-error dialog is suppressed on this thread"),
+		(After & SEM_FAILCRITICALERRORS) != 0);
+	TestEqual(TEXT("other error-mode bits are kept"),
+		After & ~static_cast<DWORD>(SEM_FAILCRITICALERRORS),
+		Before & ~static_cast<DWORD>(SEM_FAILCRITICALERRORS));
+	return !HasAnyErrors();
+}
+
 #endif  // WITH_AUTOMATION_TESTS

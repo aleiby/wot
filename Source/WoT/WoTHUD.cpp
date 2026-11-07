@@ -168,7 +168,7 @@ namespace
 }
 
 FString AWoTHUD::TeamSelectPrompt(uint8 PlayerTeam, int32 NumTeams,
-	int32 JoinTeamTimeout) const
+	int32 JoinTeamTimeout, bool bControllerHint) const
 {
 	if (PlayerTeam != 255 || NumTeams <= 0)
 	{
@@ -177,6 +177,16 @@ FString AWoTHUD::TeamSelectPrompt(uint8 PlayerTeam, int32 NumTeams,
 	FText Prompt = FText::Format(
 		LOCTEXT("TeamSelectBoundFormat", "{0} (1-{1})"),
 		SelectTeamStr, FText::AsNumber(NumTeams));
+	if (bControllerHint)
+	{
+		// The D-pad order of the controller's TeamSelect context: teams 1-4.
+		static const TCHAR* const Buttons[] = {
+			TEXT("Left"), TEXT("Left/Right"), TEXT("Left/Right/Up"), TEXT("Left/Right/Up/Down")};
+		Prompt = FText::Format(
+			LOCTEXT("TeamSelectControllerFormat", "{0} (1-{1} or D-pad {2})"),
+			SelectTeamStr, FText::AsNumber(NumTeams),
+			FText::FromString(Buttons[FMath::Clamp(NumTeams, 1, 4) - 1]));
+	}
 	if (JoinTeamTimeout > 0)
 	{
 		Prompt = FText::Format(
@@ -195,27 +205,37 @@ bool AWoTHUD::ShouldInterceptTeamDigit(uint8 PlayerTeam, int32 NumTeams,
 		TeamIndex < FMath::Min(NumTeams, 4);
 }
 
+int32 AWoTHUD::BattleTeamCount() const
+{
+	if (const UWorld* HUDWorld = GetWorld())
+	{
+		for (TActorIterator<AWoTBattleInfo> It(HUDWorld); It; ++It)
+		{
+			if (IsValid(*It))
+			{
+				return It->NumTeams;
+			}
+		}
+	}
+	return 0;
+}
+
+bool AWoTHUD::IsChoosingTeam() const
+{
+	const APlayerController* OwningController = GetOwningPlayerController();
+	const AWoTPlayerState* WoTState = OwningController
+		? OwningController->GetPlayerState<AWoTPlayerState>() : nullptr;
+	return WoTState && WoTState->Team == 255 && BattleTeamCount() > 0;
+}
+
 bool AWoTHUD::HandleTeamSelectDigit(int32 TeamIndex)
 {
 	AWoTPlayerController* WoTController =
 		Cast<AWoTPlayerController>(GetOwningPlayerController());
 	const AWoTPlayerState* WoTState = WoTController
 		? WoTController->GetPlayerState<AWoTPlayerState>() : nullptr;
-	const UWorld* HUDWorld = GetWorld();
-	int32 TeamCount = 0;
-	if (HUDWorld)
-	{
-		for (TActorIterator<AWoTBattleInfo> It(HUDWorld); It; ++It)
-		{
-			if (IsValid(*It))
-			{
-				TeamCount = It->NumTeams;
-				break;
-			}
-		}
-	}
 	if (!WoTController || !WoTState ||
-		!ShouldInterceptTeamDigit(WoTState->Team, TeamCount, TeamIndex))
+		!ShouldInterceptTeamDigit(WoTState->Team, BattleTeamCount(), TeamIndex))
 	{
 		return false;
 	}
@@ -2247,17 +2267,8 @@ void AWoTHUD::DrawTeamSelect(UCanvas* CanvasObject)
 		return;
 	}
 
-	int32 TeamCount = 0;
-	for (TActorIterator<AWoTBattleInfo> It(GetWorld()); It; ++It)
-	{
-		if (IsValid(*It))
-		{
-			TeamCount = It->NumTeams;
-			break;
-		}
-	}
-	const FString Prompt = TeamSelectPrompt(
-		WoTState->Team, TeamCount, WoTController->JoinTeamTimeout);
+	const FString Prompt = TeamSelectPrompt(WoTState->Team, BattleTeamCount(),
+		WoTController->JoinTeamTimeout, WoTController->IsJoystickInputEnabled());
 	UFont* PromptFont = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
 	if (Prompt.IsEmpty() || !PromptFont)
 	{

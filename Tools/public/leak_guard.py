@@ -36,6 +36,11 @@ LOCAL_CONFIG_FILES = frozenset({
     "claude.local.md",
 })
 BINARY_ALLOWLIST_PATH = "Tools/public/binary-allowlist.sha256"
+# Names of the maintainer-only development snapshot. Public prose describes the
+# original engine in its own words; only the tools that resolve or deny that
+# directory may name it, each pinned to an exact count in this reviewed list.
+REFERENCE_TERM_ALLOWLIST_PATH = "Tools/public/reference-term-allowlist.txt"
+_REFERENCE_TERM_RE = re.compile(r"devtree|u2radiosity", re.I)
 LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/"
 DEFAULT_MAX_BYTES = 4 * 1024 * 1024
 PLACEHOLDER_NAMES = frozenset({
@@ -305,7 +310,10 @@ def email_hits(text: str) -> List[str]:
     for match in _EMAIL_RE.finditer(text):
         address = match.group(0)
         local, domain = (part.casefold() for part in address.rsplit("@", 1))
-        if (_url_userinfo(text, match.start(), match.end())
+        # A local part made only of punctuation is markup, not an address
+        # (Markdown "`@decorator", "~@x.y").
+        if (not re.search(r"[a-z0-9]", local)
+                or _url_userinfo(text, match.start(), match.end())
                 or local in {"noreply", "no-reply"}
                 or domain in {"example.com", "example.org", "example.net"}
                 or domain.endswith(".invalid")
@@ -325,6 +333,12 @@ def _read_source(source: Union[Path, bytes]) -> bytes:
         raise GuardError("could not read %s: %s" % (source, exc)) from exc
 
 
+def reference_term_hits(text: str) -> List[int]:
+    """1-based line numbers of every reference-snapshot term occurrence."""
+    return [text.count("\n", 0, match.start()) + 1
+            for match in _REFERENCE_TERM_RE.finditer(text)]
+
+
 def check_file(
     relative: str,
     source: Union[Path, bytes],
@@ -333,6 +347,7 @@ def check_file(
     binary_allowlist: Optional[Dict[str, str]] = None,
     private_users: Sequence[str] = (),
     private_hosts: Sequence[str] = (),
+    reference_term_allowlist: Optional[Dict[str, int]] = None,
 ) -> List[Violation]:
     found: List[Violation] = []
     parts = relative.split("/")
@@ -386,6 +401,15 @@ def check_file(
     for marker in private_hosts:
         if marker.casefold() in folded:
             found.append(Violation("private-host", relative, marker))
+    if reference_term_allowlist is not None:
+        lines = reference_term_hits(text)
+        pinned = reference_term_allowlist.get(relative, 0)
+        if len(lines) != pinned:
+            found.append(Violation(
+                "reference-term", relative,
+                "%d mentions, %d pinned in %s (first on line %s)"
+                % (len(lines), pinned, REFERENCE_TERM_ALLOWLIST_PATH,
+                   lines[0] if lines else "-")))
     return found
 
 
@@ -410,6 +434,27 @@ def parse_binary_allowlist(data: bytes) -> Dict[str, str]:
     return dict(entries)
 
 
+def parse_reference_term_allowlist(data: bytes) -> Dict[str, int]:
+    """Parse "<count>  <path>" lines, sorted by path, one per pinned file."""
+    try:
+        lines = data.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise GuardError("reference term allowlist is not UTF-8: %s" % exc) from exc
+    entries: List[Tuple[str, int]] = []
+    for number, line in enumerate(lines, start=1):
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"([1-9][0-9]*)  (.+)", line)
+        if not match:
+            raise GuardError("malformed reference term allowlist line %d" % number)
+        entries.append((match.group(2), int(match.group(1))))
+    if entries != sorted(entries):
+        raise GuardError("reference term allowlist entries must be sorted by path")
+    if len(entries) != len({path for path, _ in entries}):
+        raise GuardError("reference term allowlist contains duplicate paths")
+    return dict(entries)
+
+
 def check(
     files: Iterable[Tuple[str, Union[Path, bytes]]],
     max_bytes: int = DEFAULT_MAX_BYTES,
@@ -418,6 +463,7 @@ def check(
     private_users: Sequence[str] = (),
     private_hosts: Sequence[str] = (),
     require_allowlist_paths: bool = True,
+    reference_term_allowlist: Optional[Dict[str, int]] = None,
 ) -> Tuple[List[Violation], int]:
     rules = [re.compile(pattern) for pattern in allow]
     violations: List[Violation] = []
@@ -428,11 +474,13 @@ def check(
         seen.add(relative)
         violations.extend(check_file(
             relative, source, max_bytes, rules, binary_allowlist,
-            private_users, private_hosts,
+            private_users, private_hosts, reference_term_allowlist,
         ))
     if require_allowlist_paths:
         for path in sorted(set(binary_allowlist or {}) - seen):
             violations.append(Violation("stale-binary-allowlist", path))
+        for path in sorted(set(reference_term_allowlist or {}) - seen):
+            violations.append(Violation("stale-reference-term-allowlist", path))
     return violations, count
 
 
@@ -466,9 +514,18 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
             allowlist_source = index_blob(repo, BINARY_ALLOWLIST_PATH)
         binary_allowlist = (parse_binary_allowlist(_read_source(allowlist_source))
                             if allowlist_source is not None else {})
+        # Staged mode scans only changed blobs, so per-file counts still apply;
+        # a tree without the list pins nothing (every mention fails).
+        term_source = by_path.get(REFERENCE_TERM_ALLOWLIST_PATH)
+        if args.staged and term_source is None:
+            term_source = index_blob(repo, REFERENCE_TERM_ALLOWLIST_PATH)
+        reference_term_allowlist = (
+            parse_reference_term_allowlist(_read_source(term_source))
+            if term_source is not None else {})
         violations, count = check(
             files, args.max_bytes, args.allow, binary_allowlist,
             args.private_user, args.private_host, not args.staged,
+            reference_term_allowlist,
         )
     except (GuardError, OSError, re.error) as exc:
         print("ERROR: %s" % exc, file=sys.stderr)

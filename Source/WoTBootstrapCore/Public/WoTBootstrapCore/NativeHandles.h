@@ -286,7 +286,36 @@ WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryRenameRetryObserverForTesting(
 /** Replaces the total wait budget of that retry; negative restores the default. */
 WOTBOOTSTRAPCORE_API void WoTSetNativeDirectoryRenameRetryBudgetForTesting(
 	double Seconds);
+
+/** Called on the renaming thread each time RenameNativeEntryAtNoFollow is about
+ * to retry a file replace that another holder refused (a sharing violation, or
+ * under Wine an access denial). FailedAttempts is 1 on the first refusal. Empty
+ * removes it. */
+WOTBOOTSTRAPCORE_API void WoTSetNativeReplaceRenameRetryObserverForTesting(
+	TFunction<void(int32 FailedAttempts)> Observer);
+
+/** Makes QueryNativeDirectoryAvailableBytes' volume-GUID path fail, as it does
+ * on Wine's Unix drive Z:. Restore with false. */
+WOTBOOTSTRAPCORE_API void WoTSetNativeVolumeGuidPathFailsForTesting(bool bFails);
 #endif
+#endif
+
+/** True when this Windows build runs under Wine (Proton): ntdll exports
+ * wine_get_version. Detected once and cached; always false on macOS. Callers
+ * use it only to accept a measured Wine behaviour, never to relax a check. */
+WOTBOOTSTRAPCORE_API bool WoTIsRunningUnderWine();
+
+/** Windows: makes the system return a "no disk in the drive"-class error to
+ * the caller on THIS thread instead of showing the critical-error dialog. UE
+ * sets that only under -unattended, so a player's game would otherwise show
+ * the dialog when a probe touches an empty card reader or optical drive (a
+ * remembered installer location, retried every sweep). Call it on threads
+ * that probe player-chosen paths. No-op on other platforms. */
+WOTBOOTSTRAPCORE_API void WoTFailCriticalErrorsOnThisThread();
+
+#if WITH_AUTOMATION_TESTS
+/** Forces WoTIsRunningUnderWine; an unset value restores detection. */
+WOTBOOTSTRAPCORE_API void WoTSetRunningUnderWineForTesting(TOptional<bool> bRunningUnderWine);
 #endif
 
 WOTBOOTSTRAPCORE_API TWoTBootstrapResult<FWoTNativeFileHandle>
