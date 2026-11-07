@@ -1163,6 +1163,9 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 
 	virtual uint32 Run() override
 	{
+		// This thread probes player-chosen installer locations; an empty card
+		// reader must fail the probe, not pop a "No Disk" dialog each sweep.
+		WoTFailCriticalErrorsOnThisThread();
 		while (!bCancelled.Load())
 		{
 			WorkEvent->Wait();
