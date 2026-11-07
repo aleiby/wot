@@ -1,0 +1,20 @@
+HintKey,Template
+AirBurst,{title} - a close-range gust; {counter} turns air weaves aside.
+Balefire,{title} - no shield stops it and walls do not block it; spread out and strike first.
+Dart,{title} - {counter} stops the dart stream.
+Decay,{title} - {counter} wards off its draining seeker.
+EarthTremor,{title} - {counter} holds firm against the tremor.
+Fireball,{title} - {counter} absorbs fire weaves.
+Lightning,{title} - {counter} turns the bolt aside.
+Seeker,{title} - {counter} sends it hunting its own caster.
+SoulBarb,{title} - {counter} wards spirit weaves.
+Taint,{title} - {counter} lifts the curse from your angreal.
+Target,{title} - {counter} breaks the caster's mark on you.
+Whirlwind,{title} - {counter} keeps the winds off you.
+Alarm,{title} - {counter} reveals it before it gives you away.
+FireWall,{title} - {counter} reveals the flames before you cross.
+Pit,{title} - {counter} reveals the drop before you step in.
+Portcullis,{title} - {counter} reveals the gate before it falls.
+Spear,{title} - {counter} reveals it before it springs.
+Staircase,{title} - {counter} reveals conjured stonework ahead.
+Wall,{title} - {counter} reveals conjured walls ahead.
