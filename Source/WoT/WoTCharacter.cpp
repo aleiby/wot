@@ -4660,7 +4660,10 @@ void AWoTCharacter::NextItem()
 	CurrentHand->SelectNext();
 	if (CurrentHand->Selected <= PreviousSlot)
 	{
-		NextHand();
+		// Scrolling runs on across hands (PORT_NOTES "Item scrolling runs across
+		// hands"): this hand keeps its selection, the next starts at its first.
+		CurrentHand->Select(PreviousSlot);
+		EnterAdjacentHand(CurrentHandSet->GetNext(), /*bAtFirst*/ true);
 	}
 	else
 	{
@@ -4688,12 +4691,31 @@ void AWoTCharacter::PrevItem()
 	CurrentHand->SelectPrevious();
 	if (CurrentHand->Selected >= PreviousSlot)
 	{
-		PrevHand();
+		// Scrolling runs on across hands (PORT_NOTES "Item scrolling runs across
+		// hands"): this hand keeps its selection, the previous ends at its last.
+		CurrentHand->Select(PreviousSlot);
+		EnterAdjacentHand(CurrentHandSet->GetPrevious(), /*bAtFirst*/ false);
 	}
 	else
 	{
 		DriveHandSelection(/*bNewHand*/ false);
 	}
+}
+
+void AWoTCharacter::EnterAdjacentHand(int32 HandIndex, bool bAtFirst)
+{
+	UWoTHandInfo* Hand = CurrentHandSet ? CurrentHandSet->GetHand(HandIndex) : nullptr;
+	if (!Hand)
+	{
+		return;
+	}
+	if (bAtFirst) { Hand->SelectFirst(); }
+	else { Hand->SelectLast(); }
+	// SelectHand's own reconcile would re-sync this hand to the inventory's
+	// selection, so select it directly (the hands were reconciled on entry).
+	const bool bNewHand = HandIndex != CurrentHandSet->Selected;
+	CurrentHandSet->Select(HandIndex);
+	DriveHandSelection(bNewHand);
 }
 
 namespace

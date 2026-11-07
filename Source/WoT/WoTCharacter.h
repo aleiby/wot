@@ -919,6 +919,8 @@ public:
 	UFUNCTION(Exec) void PrevHand();
 	UFUNCTION(Exec) void NextItem();
 	UFUNCTION(Exec) void PrevItem();
+	/** Selects an adjacent hand, entering it at its first or last held angreal. */
+	void EnterAdjacentHand(int32 HandIndex, bool bAtFirst);
 	UFUNCTION(Exec) void Drop();
 	UFUNCTION(Exec) void DropTainted();
 	UFUNCTION(Exec) void DropSeals();

@@ -364,6 +364,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Simplified versions of these checks. Setting the same chase target again changes nothing.
 - **Why:** Some supporting systems are not ported. Chase behavior is unchanged in practice.
 
+### Item scrolling runs across hands
+- **Original:** Scrolling past the last angreal of a hand (the mouse wheel's next or previous item) moves to the adjacent hand's last-used angreal.
+- **Port:** Scrolling past a hand's last angreal enters the next hand at its first; scrolling back past its first enters the previous hand at its last. The mouse wheel and the controller shoulder buttons behave the same.
+- **Why:** Scrolling reads as one continuous list, so the selection never jumps to an unexpected angreal.
+
 ### The joystick option is on by default
 - **Original:** The Joystick Enabled option is off by default (`UseJoystick=False`).
 - **Port:** It is on by default, and settings saved before controller support are switched on once. It stays as an off switch.
