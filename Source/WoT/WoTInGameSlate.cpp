@@ -31,6 +31,8 @@
 #include "WoTFactionCharacters.h"
 #include "WoTRetailText.h"
 #include "Settings/WoTSettingsSlate.h"
+#include "UI/WoTBackStack.h"
+#include "UI/WoTControllerUIInput.h"
 #include "GameFramework/PlayerState.h"
 
 namespace
@@ -311,6 +313,11 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 	{
 		PresentationAuthority->BindWidget(AsShared());
 	}
+	// A modal surface: the controller hides the pointer while it is up, and
+	// B/View back out one page at a time like Escape.
+	CursorLease = FWoTControllerUIInput::AcquireCursorLease();
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
+		[this]() { return BackOneLevel(); });
 
 	ChildSlot
 	[
@@ -706,8 +713,14 @@ FReply SWoTInGameMenuOverlay::OpenSettings(EWoTSettingsPage Page)
 		ContentHost->SetContent(BuildSettingsPage(Page));
 		if (FSlateApplication::IsInitialized() && ActiveSettingsScreen.IsValid())
 		{
+			// Controller mode starts on the page's first control (spec r3
+			// section 1a); the pointer keeps today's focus on the page.
+			const TSharedPtr<SWidget> InitialFocus =
+				FWoTControllerUIInput::IsControllerMode()
+					? ActiveSettingsScreen->InitialControllerFocusWidget()
+					: StaticCastSharedPtr<SWidget>(ActiveSettingsScreen);
 			FSlateApplication::Get().SetKeyboardFocus(
-				ActiveSettingsScreen, EFocusCause::SetDirectly);
+				InitialFocus, EFocusCause::SetDirectly);
 		}
 		Invalidate(EInvalidateWidgetReason::Layout);
 	}
@@ -817,7 +830,8 @@ FReply SWoTInGameMenuOverlay::OnKeyDown(
 	{
 		return ActivateHelp();
 	}
-	if (WoTIsMenuBackKey(InKeyEvent.GetKey()))
+	// Escape keeps its own path; B and View arrive through the back stack.
+	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
 		if (CanInteract())
 		{
@@ -846,22 +860,32 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 		return MoveMainMenuSelection(Direction)
 			? FReply::Handled() : FReply::Unhandled();
 	}
-	if (WoTIsMenuBackKey(Key))
+	if (Key == EKeys::Escape)
 	{
-		if (ActiveSettingsScreen.IsValid())
-		{
-			const TSharedPtr<SWoTSettingsScreen> Screen = ActiveSettingsScreen;
-			Screen->HandleBack();
-			return FReply::Handled();
-		}
-		if (bShowingPlayerConfig)
-		{
-			ReturnToMainMenu();
-			return FReply::Handled();
-		}
-		return CanInteract() ? Resume() : FReply::Handled();
+		BackOneLevel();
+		return FReply::Handled();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+}
+
+bool SWoTInGameMenuOverlay::BackOneLevel()
+{
+	if (ActiveSettingsScreen.IsValid())
+	{
+		const TSharedPtr<SWoTSettingsScreen> Screen = ActiveSettingsScreen;
+		Screen->HandleBack();
+		return true;
+	}
+	if (bShowingPlayerConfig)
+	{
+		ReturnToMainMenu();
+		return true;
+	}
+	if (CanInteract())
+	{
+		Resume();
+	}
+	return true;
 }
 
 FNavigationReply SWoTInGameMenuOverlay::OnNavigation(
@@ -1325,6 +1349,9 @@ void SWoTHelpOverlay::Construct(const FArguments& InArgs)
 	{
 		RequiredFonts->BindWidget(AsShared());
 	}
+	// B and View close Help through the back stack (held B closes it once).
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
+		[this]() { Close(); return true; });
 
 	TFunction<FVector2D(const FString&, int32)> Measure =
 		[this](const FString& Text, int32 Index)

@@ -32,6 +32,7 @@
 #include "Payload/WoTFrontEndFontOwner.h"
 #include "Payload/WoTRuntimeLocalizationDefaults.h"
 #include "Payload/WoTRuntimeRegistry.h"
+#include "UI/WoTControllerUIInput.h"
 #include "World/WoTRuntimeClassDefaults.h"
 #include "World/WoTRuntimeWorldProperties.h"
 #include "World/WoTWorldMaterializer.h"
@@ -2188,7 +2189,9 @@ void SWoTMenuButton::OnMouseEnter(
 	const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SButton::OnMouseEnter(MyGeometry, MouseEvent);
-	if (bUsesExternalSelection)
+	// In Controller mode the pointer never selects: the D-pad owns the one
+	// highlight, and a hidden cursor must not steal it (spec r3 section 1).
+	if (bUsesExternalSelection && !FWoTControllerUIInput::IsControllerMode())
 	{
 		OnSelected.ExecuteIfBound();
 		// Hover is a real retail selection change. Keep Slate's navigation origin
@@ -2207,9 +2210,12 @@ void SWoTMenuButton::Tick(
 	const float InDeltaTime)
 {
 	SButton::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// Hover draws the highlight only for the pointer; keyboard focus always
+	// does (the existing keyboard cue, spec r3 [N3]).
+	const bool bHoverLook = IsHovered() && !FWoTControllerUIInput::IsControllerMode();
 	const bool bSelected = bUsesExternalSelection
 		? ExternalSelection.Get(false)
-		: IsHovered() || HasKeyboardFocus();
+		: bHoverLook || HasKeyboardFocus();
 	SetForegroundColor(IsEnabled()
 		? FWoTMenuStyle::MenuColor(bSelected)
 		: FSlateColor(FWoTMenuStyle::DisabledColor()));

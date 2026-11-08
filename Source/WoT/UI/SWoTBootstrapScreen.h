@@ -4,6 +4,8 @@
 #include "../WoTBootstrapViewModel.h"
 
 struct FSlateDynamicImageBrush;
+class FWoTBackStackEntryHandle;
+class FWoTCursorLease;
 class SButton;
 class SProgressBar;
 class STextBlock;
@@ -93,6 +95,9 @@ private:
 	// The backdrop behind everything: the saved blurred main-menu scene, else
 	// the shipped default, else the generated gradient (WoTSetupBackdrop).
 	TSharedPtr<FSlateDynamicImageBrush> BackdropBrush;
+	/** B and View do nothing here (spec r3 [M2]): never quit the game. */
+	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
+	TSharedPtr<FWoTCursorLease> CursorLease;
 	float ArrangedWidth = 0.0f;
 	bool bReadyAnnounced = false;
 	bool bShowGogSteps = false;

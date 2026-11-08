@@ -28,6 +28,8 @@ struct FWoTReleaseNotesResult;
 class FWoTFrontEndMenuSelection;
 class FWoTFrontEndPresentationAuthority;
 class FWoTFrontEndBackInputProcessor;
+class FWoTBackStackEntryHandle;
+class FWoTCursorLease;
 
 enum class EWoTFrontEndMainMenuAction : uint8
 {
@@ -196,6 +198,21 @@ public:
 	FString VersionLabelForTesting() const { return VersionLabel; }
 	TSharedPtr<SWidget> VersionLabelWidgetForTesting() const
 		{ return VersionLabelWidget; }
+	/** True while a Play overlay covers the panels (they are disabled). */
+	bool IsPlayOverlayVisibleForTesting() const { return IsPlayOverlayVisible(); }
+	TSharedPtr<SWidget> PlayerConfigSaveButtonForTesting() const
+		{ return PlayerConfigSaveButton; }
+	TSharedPtr<SWidget> PlayBackButtonForTesting() const { return PlayBackButton; }
+	TSharedPtr<SWidget> OnlineDisclosureCancelWidgetForTesting() const
+		{ return OnlineDisclosureCancelWidget; }
+	TSharedPtr<SWidget> OnlineDisclosurePrimaryWidgetForTesting() const
+		{ return OnlineDisclosurePrimaryWidget; }
+	TSharedPtr<SWidget> PasswordTextBoxForTesting() const { return PasswordTextBox; }
+	/** The Play focus graph's columns, as last built. */
+	const TArray<TArray<TSharedPtr<SWidget>>>& HostNavigationRowsForTesting() const
+		{ return HostNavigationRows; }
+	const TArray<TArray<TSharedPtr<SWidget>>>& JoinNavigationRowsForTesting() const
+		{ return JoinNavigationRows; }
 #endif
 
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
@@ -307,8 +324,11 @@ private:
 	void AutoFetchSessions();
 	/** Drops a running search so Host or Direct Connect can go ahead. */
 	void CutSearchShort();
-	TSharedRef<SWidget> BuildNetworkModeRow(bool bBrowser);
-	TSharedRef<SWidget> BuildInternetOptions(bool bBrowser);
+	/** The LAN/Internet radios; their two check boxes join OutNavigationRow. */
+	TSharedRef<SWidget> BuildNetworkModeRow(bool bBrowser,
+		TArray<TSharedPtr<SWidget>>* OutNavigationRow = nullptr);
+	TSharedRef<SWidget> BuildInternetOptions(bool bBrowser,
+		TArray<TSharedPtr<SWidget>>* OutNavigationRow = nullptr);
 	TSharedRef<SWidget> BuildOnlineDisclosure();
 	ECheckBoxState InternetCheckState() const;
 	ECheckBoxState AlwaysUseEpicRelayState() const;
@@ -388,6 +408,18 @@ private:
 	FText RetailText(const TCHAR* Key) const;
 	FText RetailText(FName Key) const;
 	FReply HandleBackInput();
+	/** B/View on the screen itself (spec r3 section 1a). Overlays and
+	 * notices register their own entries above it. */
+	bool HandleControllerBack();
+	void RegisterBackStackEntries();
+	/** A Play overlay is up: the panels and the footer behind it are disabled. */
+	bool IsPlayOverlayVisible() const;
+	bool IsPasswordPromptVisible() const;
+	/** The top visible Play overlay's first control, or null. */
+	TSharedPtr<SWidget> PlayOverlayFocusTarget() const;
+	/** Moves focus into an overlay that just appeared, and back out of one
+	 * that just closed (Controller mode), since no event fires for either. */
+	void SyncPlayOverlayFocus();
 	EActiveTimerReturnType RestoreFocusAfterBack(
 		double CurrentTime, float DeltaTime);
 
@@ -462,6 +494,17 @@ private:
 	TSharedPtr<SWidget> PasswordPromptWidget;
 	TSharedPtr<SEditableTextBox> PasswordTextBox;
 	TSharedPtr<SWidget> FirstFocusableWidget;
+	/** Initial focus in Controller mode where spec r3 section 1a differs from
+	 * today's (Pointer keeps FirstFocusableWidget). */
+	TSharedPtr<SWidget> ControllerFocusWidget;
+	TSharedPtr<SWidget> PlayBackButton;
+	TSharedPtr<SWidget> PlayerConfigSaveButton;
+	TSharedPtr<SWidget> OnlineDisclosureCancelWidget;
+	TWeakPtr<SWidget> LastPlayOverlayFocus;
+	TArray<TArray<TSharedPtr<SWidget>>> HostNavigationRows;
+	TArray<TArray<TSharedPtr<SWidget>>> JoinNavigationRows;
+	TArray<TSharedPtr<FWoTBackStackEntryHandle>> BackStackEntries;
+	TSharedPtr<FWoTCursorLease> CursorLease;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> PresentationAuthority;
 	TSharedPtr<FWoTFrontEndBackInputProcessor> BackInputProcessor;
 	TUniquePtr<FWoTFrontEndMenuSelection> MainMenuSelection;

@@ -12,6 +12,9 @@
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
+#include "../UI/WoTBackStack.h"
+#include "../UI/WoTControllerUIInput.h"
+#include "../UI/WoTMenuNavigation.h"
 
 namespace
 {
@@ -93,16 +96,17 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 		.Font(this, &SWoTSettingsScreen::Heading)
 		.ColorAndOpacity(FWoTRetailBrowserStyle::GameTextColor())
 	];
+	// One scroll-box slot per row (the host panel's pattern): D-pad focus can
+	// reach every row, onboarding rows included, and each row scrolls into
+	// view as it takes focus (spec r3 [I5]).
 	Panel->AddSlot().FillHeight(1.0f)
 	[
 		SAssignNew(BodyScroll, SScrollBox)
 		.Style(Style.ScrollBoxStyle())
 		.ScrollBarStyle(Style.ScrollBarStyle())
-		+ SScrollBox::Slot()
-		[
-			BuildBody()
-		]
+		.ScrollWhenFocusChanges(EScrollWhenFocusChanges::InstantScroll)
 	];
+	BuildBody();
 	// Video confirmation strip: visible only while a preview awaits Keep.
 	Panel->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
 	[
@@ -127,7 +131,7 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 		]
 		+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f)
 		[
-			SNew(SWoTMenuButton)
+			SAssignNew(KeepButton, SWoTMenuButton)
 			.ContentPadding(FMargin(18.0f, 8.0f))
 			.OnClicked(this, &SWoTSettingsScreen::KeepVideo)
 			[
@@ -138,7 +142,7 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 		]
 		+ SHorizontalBox::Slot().AutoWidth()
 		[
-			SNew(SWoTMenuButton)
+			SAssignNew(RevertButton, SWoTMenuButton)
 			.ContentPadding(FMargin(18.0f, 8.0f))
 			.OnClicked(this, &SWoTSettingsScreen::RevertVideo)
 			[
@@ -210,6 +214,48 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 			]
 		]
 	];
+
+	// The page's focus graph: every body row in order, then Save and Back,
+	// wrapping top to bottom (spec r3 section 1a, Controls / Hardware).
+	NavigationRows.Add({SaveButton, BackButton});
+	WoTWrapGridNavigation(NavigationRows);
+	// The video confirmation strip keeps focus until Keep or Revert.
+	const TArray<TSharedPtr<SWidget>> StripButtons = {KeepButton, RevertButton};
+	WoTWrapHorizontalNavigation(StripButtons, /*bHoldVertical*/ true);
+	// Registered above the host window's entry: B cancels a live key capture
+	// first, and on the video strip B reverts and returns focus to Save.
+	CaptureBackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return IsCapturingBinding(); },
+		[this]() { CancelCapture(); return true; });
+	VideoStripBackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return VideoConfirmDeadline > 0.0; },
+		[this]()
+		{
+			RevertVideo();
+			FocusSaveAfterStrip(/*bAlways*/ true);
+			return true;
+		});
+}
+
+TSharedPtr<SWidget> SWoTSettingsScreen::InitialControllerFocusWidget() const
+{
+	return !NavigationRows.IsEmpty() && !NavigationRows[0].IsEmpty()
+		? NavigationRows[0][0] : SaveButton;
+}
+
+void SWoTSettingsScreen::FocusSaveAfterStrip(bool bAlways)
+{
+	if (!FSlateApplication::IsInitialized() || !SaveButton.IsValid())
+	{
+		return;
+	}
+	FSlateApplication& SlateApp = FSlateApplication::Get();
+	const TSharedPtr<SWidget> Focused = SlateApp.GetKeyboardFocusedWidget();
+	if (bAlways || (Focused.IsValid()
+		&& (Focused == KeepButton || Focused == RevertButton)))
+	{
+		SlateApp.SetKeyboardFocus(SaveButton, EFocusCause::SetDirectly);
+	}
 }
 
 SWoTSettingsScreen::~SWoTSettingsScreen()
@@ -344,16 +390,27 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildChoiceRow(
 		];
 }
 
-TSharedRef<SWidget> SWoTSettingsScreen::BuildBody()
+void SWoTSettingsScreen::BuildBody()
 {
 	if (!Preferences.IsValid())
 	{
-		return SNew(STextBlock)
+		BodyScroll->AddSlot()
+		[
+			SNew(STextBlock)
 			.Text(Literal(TEXT("Settings are unavailable until the game has finished loading.")))
 			.Font(this, &SWoTSettingsScreen::Body)
-			.AutoWrapText(true);
+			.AutoWrapText(true)
+		];
+		return;
 	}
-	return Page == EWoTSettingsPage::Controls ? BuildControlsBody() : BuildHardwareBody();
+	if (Page == EWoTSettingsPage::Controls)
+	{
+		BuildControlsBody();
+	}
+	else
+	{
+		BuildHardwareBody();
+	}
 }
 
 TSharedRef<SWidget> SWoTSettingsScreen::BuildBindingButton(
@@ -378,6 +435,11 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildBindingButton(
 
 TSharedRef<SWidget> SWoTSettingsScreen::BuildBindingRow(EWoTManagedBinding Action)
 {
+	const TSharedRef<SWidget> PrimaryButton =
+		BuildBindingButton(Action, EWoTBindingSlot::Primary);
+	const TSharedRef<SWidget> SecondaryButton =
+		BuildBindingButton(Action, EWoTBindingSlot::Secondary);
+	NavigationRows.Add({PrimaryButton, SecondaryButton});
 	return SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(0.44f).VAlign(VAlign_Center)
 		[
@@ -385,26 +447,26 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildBindingRow(EWoTManagedBinding Actio
 		]
 		+ SHorizontalBox::Slot().FillWidth(0.28f).Padding(4.0f, 0.0f)
 		[
-			BuildBindingButton(Action, EWoTBindingSlot::Primary)
+			PrimaryButton
 		]
 		+ SHorizontalBox::Slot().FillWidth(0.28f).Padding(4.0f, 0.0f)
 		[
-			BuildBindingButton(Action, EWoTBindingSlot::Secondary)
+			SecondaryButton
 		];
 }
 
-TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
+void SWoTSettingsScreen::BuildControlsBody()
 {
-	const FWoTMenuStyle& Style = FWoTMenuStyle::Get();
-	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+	const TSharedRef<SScrollBox> Rows = BodyScroll.ToSharedRef();
+	TSharedPtr<SWidget> MouseSensitivitySlider;
 	// Mouse sensitivity: retail slider over eight authored steps.
-	Rows->AddSlot().AutoHeight()[BuildLabel(Retail(TEXT("menuOptions.MenuList[3]")))];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 22.0f)
+	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[3]")))];
+	Rows->AddSlot().Padding(0.0f, 8.0f, 0.0f, 22.0f)
 	[
 		SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f)
 		[
-			SNew(SWoTRetailSlider)
+			SAssignNew(MouseSensitivitySlider, SWoTRetailSlider)
 			.MinValue(0.0f)
 			.StepSize(0.125f)
 			.Value_Lambda([this]()
@@ -427,9 +489,11 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			})
 		]
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 22.0f)
+	NavigationRows.Add({MouseSensitivitySlider});
+	TSharedPtr<SWidget> InvertMouseCheckBox;
+	Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 22.0f)
 	[
-		SNew(SCheckBox)
+		SAssignNew(InvertMouseCheckBox, SCheckBox)
 		.Style(&BodyCheckBoxStyle)
 		.IsChecked_Lambda([this]()
 		{
@@ -443,13 +507,15 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			BuildLabel(Retail(TEXT("menuOptions.MenuList[2]")))
 		]
 	];
+	NavigationRows.Add({InvertMouseCheckBox});
 	auto AddFlag = [this, &Rows](const TCHAR* RetailKey,
 		bool FWoTGameSettings::* Field,
 		bool FWoTGameSettings::* Exclusive = nullptr)
 	{
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 12.0f)
+		TSharedPtr<SWidget> FlagCheckBox;
+		Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 12.0f)
 		[
-			SNew(SCheckBox).Style(&BodyCheckBoxStyle)
+			SAssignNew(FlagCheckBox, SCheckBox).Style(&BodyCheckBoxStyle)
 			.IsChecked_Lambda([this, Field]() { return Draft.*Field
 				? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
 			.OnCheckStateChanged_Lambda([this, Field, Exclusive](ECheckBoxState State)
@@ -459,6 +525,7 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			})
 			[ BuildLabel(Retail(RetailKey)) ]
 		];
+		NavigationRows.Add({FlagCheckBox});
 	};
 	AddFlag(TEXT("menuOptions.MenuList[4]"), &FWoTGameSettings::bAlwaysMouseLook,
 		&FWoTGameSettings::bAutoSlopeLook);
@@ -467,8 +534,8 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 	AddFlag(TEXT("menuOptions.MenuList[6]"), &FWoTGameSettings::bLookSpring);
 	AddFlag(TEXT("menuOptions.MenuList[9]"), &FWoTGameSettings::bJoystickEnabled);
 	// Controller look: the mouse's sensitivity steps and its own invert.
-	Rows->AddSlot().AutoHeight()[BuildLabel(Literal(TEXT("Controller Sensitivity")))];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 22.0f)
+	Rows->AddSlot()[BuildLabel(Literal(TEXT("Controller Sensitivity")))];
+	Rows->AddSlot().Padding(0.0f, 8.0f, 0.0f, 22.0f)
 	[
 		SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f)
@@ -498,7 +565,8 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			})
 		]
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 12.0f)
+	NavigationRows.Add({ControllerSensitivitySlider});
+	Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 12.0f)
 	[
 		SAssignNew(ControllerInvertCheckBox, SCheckBox)
 		.Style(&BodyCheckBoxStyle)
@@ -514,42 +582,50 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			BuildLabel(Literal(TEXT("Invert Controller Look")))
 		]
 	];
-	Rows->AddSlot().AutoHeight()[BuildLabel(Retail(TEXT("menuOptions.MenuList[8]")))];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 16.0f)
+	NavigationRows.Add({ControllerInvertCheckBox});
+	TSharedPtr<SWidget> ViewBobSlider;
+	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[8]")))];
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f)
 	[
-		SNew(SWoTRetailSlider).MinValue(0.0f).StepSize(0.125f)
+		SAssignNew(ViewBobSlider, SWoTRetailSlider).MinValue(0.0f).StepSize(0.125f)
 		.Value_Lambda([this]() { return Draft.ViewBob / 0.032f; })
 		.OnValueChanged_Lambda([this](float Value)
 			{ Draft.ViewBob = FMath::RoundToFloat(Value * 8.0f) * 0.004f; })
 	];
-	Rows->AddSlot().AutoHeight()[BuildLabel(Retail(TEXT("menuOptions.MenuList[7]")))];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 16.0f)
+	NavigationRows.Add({ViewBobSlider});
+	TSharedPtr<SWidget> CrosshairSlider;
+	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[7]")))];
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f)
 	[
-		SNew(SWoTRetailSlider).MinValue(0.0f).StepSize(0.05f)
+		SAssignNew(CrosshairSlider, SWoTRetailSlider).MinValue(0.0f).StepSize(0.05f)
 		.Value_Lambda([this]() { return Draft.Crosshair / 20.0f; })
 		.OnValueChanged_Lambda([this](float Value)
 			{ Draft.Crosshair = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 20.0f), 0, 20)); })
 	];
-	Rows->AddSlot().AutoHeight()[BuildLabel(Retail(TEXT("menuOptions.MenuList[10]")))];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 18.0f)
+	NavigationRows.Add({CrosshairSlider});
+	TSharedPtr<SWidget> GoreSlider;
+	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[10]")))];
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 18.0f)
 	[
-		SNew(SWoTRetailSlider).MinValue(0.0f).StepSize(1.0f / 3.0f)
+		SAssignNew(GoreSlider, SWoTRetailSlider).MinValue(0.0f).StepSize(1.0f / 3.0f)
 		.Value_Lambda([this]() { return Draft.GoreDetailLevel / 3.0f; })
 		.OnValueChanged_Lambda([this](float Value)
 			{ Draft.GoreDetailLevel = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 3.0f), 0, 3)); })
 	];
+	NavigationRows.Add({GoreSlider});
 	AddFlag(TEXT("menuOptions.MenuList[11]"), &FWoTGameSettings::bPlayerIDEnabled);
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+	Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 8.0f)
 	[
 		BuildLabel(Retail(TEXT("menuOptions.MenuList[1]")))
 	];
 	for (const EWoTManagedBinding Action : FWoTGameSettings::ManagedActions())
 	{
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 3.0f)[BuildBindingRow(Action)];
+		Rows->AddSlot().Padding(0.0f, 3.0f)[BuildBindingRow(Action)];
 	}
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
+	TSharedPtr<SWidget> ResetBindingsButton;
+	Rows->AddSlot().Padding(0.0f, 14.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
 	[
-		SNew(SWoTMenuButton)
+		SAssignNew(ResetBindingsButton, SWoTMenuButton)
 		.ContentPadding(FMargin(18.0f, 8.0f))
 		.OnClicked(this, &SWoTSettingsScreen::ResetBindings)
 		[
@@ -559,6 +635,7 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			.ColorAndOpacity(FSlateColor::UseForeground())
 		]
 	];
+	NavigationRows.Add({ResetBindingsButton});
 	// Extension rows from the onboarding seam registry (the optional plugin's
 	// settings toggles). Registered rows render as one appended group; an
 	// empty registry appends nothing, so a build without the plugin renders
@@ -569,15 +646,16 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 		FWoTOnboardingSeams::Get().SettingsRows;
 	if (!ExtensionRows.IsEmpty())
 	{
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 8.0f)
+		Rows->AddSlot().Padding(0.0f, 22.0f, 0.0f, 8.0f)
 		[
 			BuildLabel(Literal(TEXT("ONBOARDING")))
 		];
 		for (const FWoTOnboardingRow& Row : ExtensionRows)
 		{
-			Rows->AddSlot().AutoHeight().Padding(0.0f, 3.0f).HAlign(HAlign_Left)
+			TSharedPtr<SWidget> ExtensionButton;
+			Rows->AddSlot().Padding(0.0f, 3.0f).HAlign(HAlign_Left)
 			[
-				SNew(SWoTMenuButton)
+				SAssignNew(ExtensionButton, SWoTMenuButton)
 				.ContentPadding(FMargin(10.0f, 4.0f))
 				.OnClicked_Lambda([Invoke = Row.Invoke]()
 				{
@@ -598,12 +676,12 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 					})
 				]
 			];
+			NavigationRows.Add({ExtensionButton});
 		}
 	}
-	return Rows;
 }
 
-TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
+void SWoTSettingsScreen::BuildHardwareBody()
 {
 	const FWoTMenuStyle& Style = FWoTMenuStyle::Get();
 	const FWoTEarlyUILimits Limits = FWoTEarlyUILimits::Production();
@@ -673,25 +751,30 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
 			];
 	};
 
-	TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+	const TSharedRef<SScrollBox> Rows = BodyScroll.ToSharedRef();
+	auto Navigable = [this](const TSharedRef<SWidget>& Control) -> TSharedRef<SWidget>
+	{
+		NavigationRows.Add({Control});
+		return Control;
+	};
+	Rows->AddSlot().Padding(0.0f, 4.0f)
 	[
 		BuildChoiceRow(Retail(TEXT("menuConfiguration.MenuList[1]")),
-			MakeCombo(&BrightnessItems,
+			Navigable(MakeCombo(&BrightnessItems,
 				[this]() { return FMath::Clamp(FMath::RoundToInt(Draft.Brightness * 10.0f), 0, 9); },
 				[this](int32 Index)
 				{
 					Draft.Brightness = static_cast<float>(Index) / 10.0f;
 					FWoTGameSettingsAdapter::ApplyBrightness(Draft.Brightness);
-				}))
+				})))
 	];
 	WindowModeControl = MakeCombo(&WindowModeItems,
 		[this]() { return static_cast<int32>(Draft.WindowMode); },
 		[this](int32 Index) { Draft.WindowMode = static_cast<EWoTWindowMode>(Index); });
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+	Rows->AddSlot().Padding(0.0f, 4.0f)
 	[
 		BuildChoiceRow(Retail(TEXT("menuConfiguration.MenuList[3]")),
-			MakeCombo(&ResolutionItems,
+			Navigable(MakeCombo(&ResolutionItems,
 				[this]()
 				{
 					const FString Current = ResolutionLabel(Draft.Width, Draft.Height);
@@ -706,16 +789,17 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
 						Draft.Width = static_cast<uint16>(FCString::Atoi(*Width));
 						Draft.Height = static_cast<uint16>(FCString::Atoi(*Height));
 					}
-				}))
+				})))
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+	Rows->AddSlot().Padding(0.0f, 4.0f)
 	[
 		BuildChoiceRow(Retail(TEXT("menuConfiguration.MenuList[2]")),
-			WindowModeControl.ToSharedRef(), &WindowModeLabel)
+			Navigable(WindowModeControl.ToSharedRef()), &WindowModeLabel)
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f)
+	TSharedPtr<SWidget> VSyncCheckBox;
+	Rows->AddSlot().Padding(0.0f, 8.0f)
 	[
-		SNew(SCheckBox)
+		SAssignNew(VSyncCheckBox, SCheckBox)
 		.Style(&BodyCheckBoxStyle)
 		.IsChecked_Lambda([this]()
 		{
@@ -729,35 +813,37 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
 			BuildLabel(Retail(TEXT("menuConfiguration.MenuList[5]")))
 		]
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+	NavigationRows.Add({VSyncCheckBox});
+	Rows->AddSlot().Padding(0.0f, 4.0f)
 	[
 		BuildChoiceRow(Retail(TEXT("menuConfiguration.MenuList[6]")),
-			MakeCombo(&QualityItems,
+			Navigable(MakeCombo(&QualityItems,
 				[this]() { return static_cast<int32>(Draft.GraphicsQuality); },
-				[this](int32 Index) { Draft.GraphicsQuality = static_cast<EWoTGraphicsQuality>(Index); }))
+				[this](int32 Index) { Draft.GraphicsQuality = static_cast<EWoTGraphicsQuality>(Index); })))
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+	Rows->AddSlot().Padding(0.0f, 4.0f)
 	[
 		BuildChoiceRow(Literal(TEXT("Frame Rate Limit")),
-			MakeCombo(&FrameRateItems,
+			Navigable(MakeCombo(&FrameRateItems,
 				[this]()
 				{
 					for (int32 Index = 0; Index < UE_ARRAY_COUNT(FrameRateSteps); ++Index)
 						if (FrameRateSteps[Index] == Draft.FrameRateLimit) return Index;
 					return 0;
 				},
-				[this](int32 Index) { Draft.FrameRateLimit = FrameRateSteps[Index]; }))
+				[this](int32 Index) { Draft.FrameRateLimit = FrameRateSteps[Index]; })))
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
+	Rows->AddSlot().Padding(0.0f, 14.0f, 0.0f, 0.0f)
 	[
 		BuildLabel(Retail(TEXT("menuConfiguration.MenuList[15]")))
 	];
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 12.0f)
+	TSharedPtr<SWidget> VolumeSlider;
+	Rows->AddSlot().Padding(0.0f, 8.0f, 0.0f, 12.0f)
 	[
 		SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().FillWidth(1.0f)
 		[
-			SNew(SWoTRetailSlider)
+			SAssignNew(VolumeSlider, SWoTRetailSlider)
 			.MinValue(0.0f)
 			.StepSize(0.125f)
 			.Value_Lambda([this]() { return Draft.MasterVolume; })
@@ -779,7 +865,7 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
 			})
 		]
 	];
-	return Rows;
+	NavigationRows.Add({VolumeSlider});
 }
 
 void SWoTSettingsScreen::BeginCapture(EWoTManagedBinding Action, EWoTBindingSlot Slot)
@@ -897,6 +983,12 @@ FReply SWoTSettingsScreen::Save()
 		bVideoPreviewLive = true;
 		VideoConfirmDeadline = LastTickTime + VideoConfirmationSeconds;
 		SetError(FText::GetEmpty());
+		// The strip appears: a controller player lands on Keep.
+		if (FWoTControllerUIInput::IsControllerMode() && KeepButton.IsValid()
+			&& FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().SetKeyboardFocus(KeepButton, EFocusCause::SetDirectly);
+		}
 		return FReply::Handled();
 	}
 	if (CommitDraft())
@@ -920,6 +1012,7 @@ FReply SWoTSettingsScreen::KeepVideo()
 	FWoTGameSettingsAdapter::RevertVideo(Confirmed);
 	bVideoPreviewLive = false;
 	RevertDraftVideoToConfirmed();
+	FocusSaveAfterStrip(/*bAlways*/ false);
 	return FReply::Handled();
 }
 
@@ -931,6 +1024,8 @@ FReply SWoTSettingsScreen::RevertVideo()
 	bVideoPreviewLive = false;
 	RevertDraftVideoToConfirmed();
 	SetStatus(Literal(TEXT("Display settings reverted.")));
+	// The strip collapses; focus inside it moves to Save.
+	FocusSaveAfterStrip(/*bAlways*/ false);
 	return FReply::Handled();
 }
 
@@ -995,6 +1090,17 @@ FReply SWoTSettingsScreen::OnKeyDown(
 		return FReply::Handled();
 	}
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+FNavigationReply SWoTSettingsScreen::OnNavigation(
+	const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent)
+{
+	// A live key capture holds focus: a held D-pad's repeat cannot wander off.
+	if (IsCapturingBinding())
+	{
+		return FNavigationReply::Stop();
+	}
+	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
 }
 
 FReply SWoTSettingsScreen::OnPreviewMouseButtonDown(
