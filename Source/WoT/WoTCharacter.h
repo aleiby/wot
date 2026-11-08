@@ -1021,7 +1021,6 @@ private:
 	void AddPitchInput(float Value, bool bFromLookDevice);
 	float RetailFOVScale() const;
 	bool IsLookActive() const { return bLookHeld || bLookToggled; }
-	void CitadelOrbitZoom(float Value);
 	// The shared collision/movement half of the orbit ghost — applied on the authority
 	// from SetCitadelOrbitGhost and re-applied locally from OnRep_CitadelOrbitGhosted.
 	void ApplyCitadelOrbitGhost();

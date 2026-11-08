@@ -86,6 +86,9 @@ namespace
 	// these stay below AccelRate and set the acceleration magnitude.
 	constexpr float RetailSwimForwardAccel = 0.2f * RetailHeldKeyAxis;   // 1200
 	constexpr float RetailSwimSideAccel = 0.1f * RetailHeldKeyAxis;      // 600
+	// WOTPlayer.PlayerTickEdit decelerates aForward and aStrafe x0.1 before the
+	// orbit camera reads them.
+	constexpr float RetailOrbitAxis = 0.1f * RetailHeldKeyAxis;          // 600
 
 	FName WoTStatusIconTextureName(const TSoftObjectPtr<UTexture2D>& Texture)
 	{
@@ -4405,7 +4408,6 @@ void AWoTCharacter::SetupPlayerInputComponent(UInputComponent* Input)
 	// is installed on this pawn.
 	Input->BindAxis("MoveForward", this, &AWoTCharacter::MoveForward);
 	Input->BindAxis("MoveRight", this, &AWoTCharacter::MoveRight);
-	Input->BindAxis("CitadelOrbitZoom", this, &AWoTCharacter::CitadelOrbitZoom);
 	Input->BindAxis("Turn", this, &AWoTCharacter::TurnInput);
 	Input->BindAxis("LookUp", this, &AWoTCharacter::KeyboardLookInput);
 	Input->BindAxis("MouseX", this, &AWoTCharacter::MouseXInput);
@@ -4641,15 +4643,6 @@ void AWoTCharacter::PrevHand()
 
 void AWoTCharacter::NextItem()
 {
-	if (const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
-	{
-		// Mouse wheel is the orbit distance axis in this mode; do not also move the palette.
-		return;
-	}
 	EnsureAngrealHands();
 	if (!CurrentHandSet)
 	{
@@ -4673,14 +4666,6 @@ void AWoTCharacter::NextItem()
 
 void AWoTCharacter::PrevItem()
 {
-	if (const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-		IsValid(WoTController)
-		&& WoTController->GetCitadelEditCameraMode()
-			== EWoTCitadelEditCameraMode::Orbit)
-	{
-		return;
-	}
 	EnsureAngrealHands();
 	if (!CurrentHandSet)
 	{
@@ -5308,24 +5293,13 @@ void AWoTCharacter::ApplyForwardAxis(float Value)
 	{
 		if (AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController()))
 		{
-			WoTController->AdjustCitadelOrbitDistance(
-				Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+			WoTController->AdjustCitadelOrbitDistance(Value * RetailOrbitAxis,
+				GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
 		}
 		return;
 	}
 	if (bFreeLookHeld) { AddPitchInput(Value * 0.5f * RetailFOVScale(), true); }
 	else { AddForwardInput(Value); }
-}
-
-void AWoTCharacter::CitadelOrbitZoom(float Value)
-{
-	AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetController());
-	if (IsValid(WoTController))
-	{
-		WoTController->AdjustCitadelOrbitDistance(
-			Value, GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
-	}
 }
 
 void AWoTCharacter::MoveRight(float Value)
@@ -5337,8 +5311,13 @@ void AWoTCharacter::ApplyStrafeAxis(float Value)
 {
 	if (IsCitadelOrbitInput())
 	{
-		// CitadelOrbitMode consumes movement input: a strafe must not drag the ghosted
+		// CitadelOrbitMode turns strafe into orbit yaw and never drags the ghosted
 		// body (the orbit camera is zone-driven, not pawn-driven — WOTPlayer.uc:5262).
+		if (AWoTPlayerController* WoTController = Cast<AWoTPlayerController>(GetController()))
+		{
+			WoTController->RotateCitadelOrbit(Value * RetailOrbitAxis,
+				GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f);
+		}
 		return;
 	}
 	AddStrafeInput(Value);
