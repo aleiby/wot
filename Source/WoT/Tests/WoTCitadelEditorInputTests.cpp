@@ -356,4 +356,40 @@ bool FWoTCitadelEditorInputPaletteNavigationSpec::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCitadelEditorInputOrbitWheelSpec,
+	"WoT.Citadel.EditorInput.OrbitWheelCyclesPalette",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTCitadelEditorInputOrbitWheelSpec::RunTest(const FString&)
+{
+	// The original binds the wheel to Next/PrevInventory in every mode, orbit
+	// included: it cycles the palette there too, and only movement keys zoom.
+	FEditorInputSpecFixture Fixture = EditorInputSpecCreateFixture(1, 1);
+	Fixture.Controller->CitadelEndEdit();
+	Fixture.Controller->CitadelBeginEdit(1);
+	if (!TestEqual(TEXT("orbit editing"),
+			static_cast<int32>(Fixture.Controller->GetCitadelEditCameraMode()),
+			static_cast<int32>(EWoTCitadelEditCameraMode::Orbit))
+		|| !Fixture.Character->CitadelEditorHandSet)
+	{
+		WoTTest::DestroySpecWorld(Fixture.World);
+		return false;
+	}
+	const float Distance = Fixture.Zone->EditViewDistance;
+	Fixture.Character->SelectHand(3);
+	Fixture.Character->NextItem();
+	TestEqual(TEXT("wheel-next in orbit moves the palette"),
+		Fixture.Controller->GetCitadelPaletteSelection(), FName(TEXT("SpearInventory")));
+	Fixture.Character->PrevItem();
+	TestEqual(TEXT("wheel-previous in orbit moves the palette back"),
+		Fixture.Controller->GetCitadelPaletteSelection(), FName(TEXT("AlarmInventory")));
+	TestEqual(TEXT("the wheel does not zoom the orbit camera"),
+		Fixture.Zone->EditViewDistance, Distance);
+
+	Fixture.Controller->CitadelEndEdit();
+	WoTTest::TickWorld(Fixture.World, 1);
+	WoTTest::DestroySpecWorld(Fixture.World);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS

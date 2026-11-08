@@ -100,6 +100,9 @@ public:
 		EWoTCitadelEditCameraMode::Inactive;
 	UPROPERTY(ReplicatedUsing = OnRep_CitadelEditCamera)
 	TObjectPtr<class AWoTZoneVolume> CitadelEditZone = nullptr;
+	// WOTPlayer.ViewOffset: look input's offset from the zone's authored orbit view.
+	// Local only; cleared whenever a zone is selected (SetZoneNumber) or editing ends.
+	FRotator CitadelOrbitViewOffset = FRotator::ZeroRotator;
 
 	FWoTCitadelEditSessionChanged OnCitadelEditSessionChanged;
 
@@ -128,14 +131,21 @@ public:
 	FVector GetCitadelEditStartLocation() const { return EditStartLoc; }
 	FRotator GetCitadelEditStartRotation() const { return EditStartRot; }
 	AWoTZoneVolume* GetCitadelEditZone() const { return CitadelEditZone.Get(); }
+	/** The look offset from the zone's authored orbit view (WOTPlayer ViewOffset). */
+	FRotator GetCitadelOrbitViewOffset() const { return CitadelOrbitViewOffset; }
 	static float ClampCitadelEditViewDistanceFeet(float DistanceFeet);
 	static float CitadelEditViewDistanceFeetToUU(float DistanceFeet);
 	static float AdjustCitadelEditViewDistanceFeet(float CurrentFeet,
 		float AForward, float DeltaTime);
 	static void CalculateCitadelOrbitView(const FVector& ZoneLocation,
 		const FRotator& EditViewAngle, float EditViewDistanceFeet,
-		FVector& OutLocation, FRotator& OutRotation);
+		FVector& OutLocation, FRotator& OutRotation,
+		const FRotator& ViewOffset = FRotator::ZeroRotator);
 	void AdjustCitadelOrbitDistance(float AForward, float DeltaTime);
+	/** EditViewAngle after a decelerated UE1 aStrafe for DeltaTime (PlayerTickEdit). */
+	static FRotator AdjustCitadelEditViewAngle(const FRotator& EditViewAngle,
+		float AStrafe, float DeltaTime);
+	void RotateCitadelOrbit(float AStrafe, float DeltaTime);
 	static constexpr float TRACE_DISTANCE = 3200.0f;
 	// WOTPlayer.EditorTrace + EditorHUD cursor start/direction: one canonical visible
 	// world/actor trace from the current view. Preview-owned child actors are ignored too.
