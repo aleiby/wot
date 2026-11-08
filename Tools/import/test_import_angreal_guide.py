@@ -591,6 +591,130 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
             self.assertIn(message, str(caught.exception))
 
 
+class AssetPayloadTests(unittest.TestCase):
+    """The editor half's pure layer: CSV read-back, hints onto rows, pins."""
+
+    @staticmethod
+    def synthetic_rows():
+        make = import_angreal_guide.GuideRow
+        return [
+            make(class_name="CinderWard", cpp_class="FxCinderWard",
+                 elements=[], rarity="Rare", roles=["Combat", "Defensive"],
+                 max_initial_charges="3", max_charges="5",
+                 counters=["EmberLob"], hint_key=""),
+            make(class_name="EmberLob", cpp_class="FxEmberLob",
+                 elements=["Fire"], rarity="Common",
+                 roles=["Combat", "Offensive"], max_initial_charges="4",
+                 max_charges="9", counters=[], hint_key="EmberLob"),
+            make(class_name="SnareInventory", cpp_class="FxSnareInventory",
+                 elements=[], rarity="", roles=[], max_initial_charges="",
+                 max_charges="", counters=[], hint_key="Snare"),
+        ]
+
+    HINTS = {"EmberLob": "{title} - {counter} quenches it.",
+             "Snare": "{title} - watch the floor."}
+
+    def write(self, name, text):
+        tree = tempfile.TemporaryDirectory()
+        self.addCleanup(tree.cleanup)
+        path = Path(tree.name) / name
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+        return path
+
+    def test_facts_csv_round_trips_through_the_loader(self):
+        rows = self.synthetic_rows()
+        path = self.write("facts.csv",
+                          import_angreal_guide.render_facts_csv(rows))
+        self.assertEqual(import_angreal_guide.load_facts_csv(path), rows)
+
+    def test_loader_rejects_duplicate_and_empty_classes(self):
+        header = ",".join(import_angreal_guide.FACTS_COLUMNS)
+        duplicate = self.write("d.csv", header + "\n"
+                               + "A,FxA,,,,,,,\n" + "A,FxA,,,,,,,\n")
+        with self.assertRaises(GenerationError) as caught:
+            import_angreal_guide.load_facts_csv(duplicate)
+        self.assertIn("duplicate", str(caught.exception))
+        empty = self.write("e.csv", header + "\n" + ",FxA,,,,,,,\n")
+        with self.assertRaises(GenerationError) as caught:
+            import_angreal_guide.load_facts_csv(empty)
+        self.assertIn("empty Class", str(caught.exception))
+
+    def test_asset_rows_resolve_hints_and_charges(self):
+        payload = import_angreal_guide.asset_rows(self.synthetic_rows(),
+                                                  dict(self.HINTS))
+        by_class = {row["class_name"]: row for row in payload}
+        self.assertEqual(by_class["EmberLob"]["hint_text"],
+                         self.HINTS["EmberLob"])
+        self.assertEqual(by_class["CinderWard"]["hint_text"], "")
+        self.assertEqual(by_class["SnareInventory"]["hint_text"],
+                         self.HINTS["Snare"])
+        self.assertEqual(by_class["EmberLob"]["max_initial_charges"], 4)
+        self.assertEqual(by_class["EmberLob"]["max_charges"], 9)
+        self.assertEqual(by_class["SnareInventory"]["max_initial_charges"], 0)
+        self.assertEqual(by_class["SnareInventory"]["max_charges"], 0)
+        self.assertEqual(by_class["CinderWard"]["counters"], ["EmberLob"])
+
+    def test_asset_rows_reject_unknown_hints_and_bad_charges(self):
+        with self.assertRaises(GenerationError) as caught:
+            import_angreal_guide.asset_rows(self.synthetic_rows(), {})
+        self.assertIn("hints CSV", str(caught.exception))
+        broken = self.synthetic_rows()
+        broken[1].max_charges = "many"
+        with self.assertRaises(GenerationError) as caught:
+            import_angreal_guide.asset_rows(broken, dict(self.HINTS))
+        self.assertIn("not an integer", str(caught.exception))
+
+    def test_payload_json_round_trips(self):
+        payload = [{
+            "class_name": "FixtureLob", "cpp_class": "FxFixtureLob",
+            "elements": ["Fire"], "rarity": "", "roles": [],
+            "max_initial_charges": 0, "max_charges": 9,
+            "counters": ["FixtureWard"], "hint_text": "{title} - x.",
+        }]
+        text = import_angreal_guide.payload_json(payload)
+        self.assertEqual(import_angreal_guide.payload_from_json(text), payload)
+
+    def test_payload_from_json_requires_a_rows_array(self):
+        for bad in ("{}", "[]", '{"rows": 7}'):
+            with self.assertRaises(import_angreal_guide.GenerationError):
+                import_angreal_guide.payload_from_json(bad)
+
+    def test_verify_pins_the_fireball_row_and_the_roster_floor(self):
+        payload = import_angreal_guide.asset_rows(
+            import_angreal_guide.load_facts_csv(),
+            import_angreal_guide.load_hints_csv())
+        ok, pins, counts = import_angreal_guide.verify_asset_payload(
+            payload, payload)
+        self.assertTrue(ok, pins)
+        self.assertTrue(all(pins.values()), pins)
+        self.assertGreaterEqual(counts["rows"],
+                                import_angreal_guide.MIN_ASSET_ROWS)
+        self.assertEqual(counts["rows"], counts["unique_classes"])
+
+    def test_verify_fails_on_drift_tamper_and_shortfall(self):
+        payload = import_angreal_guide.asset_rows(
+            import_angreal_guide.load_facts_csv(),
+            import_angreal_guide.load_hints_csv())
+        drifted = json.loads(json.dumps(payload))
+        drifted[0]["cpp_class"] = "FxTampered"
+        ok, _, _ = import_angreal_guide.verify_asset_payload(drifted, payload)
+        self.assertFalse(ok)
+        tampered = json.loads(json.dumps(payload))
+        for row in tampered:
+            if row["class_name"] == import_angreal_guide.FIREBALL_CLASS:
+                row["rarity"] = "Rare"
+        ok, pins, _ = import_angreal_guide.verify_asset_payload(
+            tampered, tampered)
+        self.assertFalse(ok)
+        self.assertFalse(pins["fireball_rarity"])
+        short = payload[:3]
+        ok, pins, _ = import_angreal_guide.verify_asset_payload(short, short)
+        self.assertFalse(ok)
+        self.assertFalse(pins["row_count_at_least_%d"
+                              % import_angreal_guide.MIN_ASSET_ROWS])
+
+
 class InTreeGuideDataTests(unittest.TestCase):
     """The checked-in CSVs stay complete against the in-tree expectations."""
 

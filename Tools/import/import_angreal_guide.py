@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
-"""Parse the exported script tree and derive the angreal field-guide facts.
+"""Derive the angreal field-guide facts and build the guide data asset.
 
-Parse and derivation halves of the guide importer
-(docs/plans/2026-11-06-onboarding-aids.md, Tasks 1-2). Walks the private
+Parse, derivation and editor halves of the guide importer
+(docs/plans/2026-11-06-onboarding-aids.md, Tasks 1-3). Walks the private
 reference export `exports/script/<Package>/*.uc`, records each class header
 (`class X expands Y`) with its defaultproperties scalars and `Name(index)=`
 arrays, and resolves inherited values through the parent chain the way the
 original property system did. On top of the parse, `build_guide_rows` derives
 the counter matrix and facts rows the plan specifies, `render_facts_csv`
 renders them deterministically, and `--facts-only` regenerates the checked-in
-`Tools/import/data/angreal_guide_facts.csv`. A later task adds the editor
-half that builds the guide data asset from the CSVs.
+`Tools/import/data/angreal_guide_facts.csv` and stops (pure python).
+
+Without the flag the editor half then builds, from the facts CSV plus the
+hint templates resolved onto rows as HintText:
+  /Game/WoT/UI/Guide/DA_WoTAngrealGuide
+
+UnrealEditor-Cmd WoT.uproject -run=pythonscript
+  -script=".../Tools/import/import_angreal_guide.py" -unattended -nullrhi
+
+Completion is recorded in Saved/import_angreal_guide_result.json because
+commandlet stdout is not a reliable completion signal on the parent hosts.
 
 The angreal census (Tools/test/angreal/angreal_census.py) walks the same tree
 with the same conventions (latin-1 reads, `class X expands|extends Y`
@@ -18,9 +27,6 @@ headers, lowercase class keys), but its parsing is census-specific — it
 resolves the reference root at import time and only extracts spawn-pool
 properties — so this module carries the standalone parser the plan specifies
 instead of importing it.
-
-Standalone smoke run (no Unreal):
-  WOT_REFERENCE_ROOT=... python3 Tools/import/import_angreal_guide.py
 """
 from __future__ import annotations
 
@@ -697,29 +703,239 @@ def generate_rows() -> List[GuideRow]:
                             load_hints_csv())
 
 
+# --- Task 3: guide data asset (editor half) ----------------------------------
+
+RESULT_FILE = REPO / "Saved" / "import_angreal_guide_result.json"
+GUIDE_DESTINATION = "/Game/WoT/UI/Guide"
+GUIDE_ASSET_NAME = "DA_WoTAngrealGuide"
+GUIDE_ASSET_PATH = "%s/%s" % (GUIDE_DESTINATION, GUIDE_ASSET_NAME)
+# The asset class lives in the WoTOnboarding plugin, not the game module.
+GUIDE_CLASS_PATH = "/Script/WoTOnboarding.WoTAngrealGuide"
+
+# Result-file pins: the roster can only grow, and the Fireball facts are the
+# plan's representative row (identifiers and derived numbers, no retail
+# prose). The hint text is our own wording, pinned by its placeholders rather
+# than its sentence so the template stays tunable.
+MIN_ASSET_ROWS = 25
+FIREBALL_CLASS = "AngrealInvFireball"
+FIREBALL_FACTS = {
+    "cpp_class": "WoTAngrealInvFireball",
+    "elements": ["Fire"],
+    "rarity": "Common",
+    "roles": ["Combat", "Offensive"],
+    "max_initial_charges": 20,
+    "max_charges": 35,
+    "counters": [],
+}
+
+
+def _split_multi(value: str) -> List[str]:
+    """A `;`-joined CSV cell back to its list; the empty cell is no entries."""
+    return value.split(";") if value else []
+
+
+def _charges_int(value: str, where: str) -> int:
+    """A charge cell as the asset's int32: empty (no charge envelope) is 0."""
+    if not value:
+        return 0
+    try:
+        return int(value)
+    except ValueError:
+        raise GenerationError("%s: charge value %r is not an integer"
+                              % (where, value))
+
+
+def load_facts_csv(path: Optional[PathLike] = None) -> List[GuideRow]:
+    """The checked-in facts CSV back as GuideRows, shape-validated."""
+    source = Path(path) if path is not None else FACTS_CSV_PATH
+    rows: List[GuideRow] = []
+    seen = set()
+    for number, cells in _read_csv_rows(source, FACTS_COLUMNS):
+        (class_name, cpp_class, elements, rarity, roles,
+         max_initial_charges, max_charges, counters, hint_key) = cells
+        where = "%s:%d" % (source.name, number)
+        if not class_name:
+            raise GenerationError("%s: empty Class" % where)
+        if class_name in seen:
+            raise GenerationError("%s: duplicate Class %s"
+                                  % (where, class_name))
+        seen.add(class_name)
+        rows.append(GuideRow(
+            class_name=class_name, cpp_class=cpp_class,
+            elements=_split_multi(elements), rarity=rarity,
+            roles=_split_multi(roles),
+            max_initial_charges=max_initial_charges,
+            max_charges=max_charges, counters=_split_multi(counters),
+            hint_key=hint_key))
+    return rows
+
+
+def asset_rows(rows: List[GuideRow], hints: Dict[str, str]) -> List[dict]:
+    """The plain asset-row payload: facts plus HintText resolved per HintKey.
+
+    One dict per facts row, keyed by the asset's property names; `{title}` and
+    `{counter}` stay literal in HintText (they resolve at runtime). The
+    payload is the single shape the importer sets, extracts and verifies, so
+    the independent re-verification compares like with like.
+    """
+    payload = []
+    for row in rows:
+        if row.hint_key and row.hint_key not in hints:
+            raise GenerationError("%s: HintKey %s is not in the hints CSV"
+                                  % (row.class_name, row.hint_key))
+        payload.append({
+            "class_name": row.class_name,
+            "cpp_class": row.cpp_class,
+            "elements": list(row.elements),
+            "rarity": row.rarity,
+            "roles": list(row.roles),
+            "max_initial_charges": _charges_int(
+                row.max_initial_charges, row.class_name),
+            "max_charges": _charges_int(row.max_charges, row.class_name),
+            "counters": list(row.counters),
+            "hint_text": hints[row.hint_key] if row.hint_key else "",
+        })
+    return payload
+
+
+def verify_asset_payload(actual: List[dict], desired: List[dict]):
+    """(ok, pins, counts) for the re-loaded asset against the desired payload."""
+    by_class = {row["class_name"]: row for row in actual}
+    fireball = by_class.get(FIREBALL_CLASS, {})
+    pins = {
+        "row_count_at_least_%d" % MIN_ASSET_ROWS:
+            len(actual) >= MIN_ASSET_ROWS,
+        "fireball_present": FIREBALL_CLASS in by_class,
+    }
+    for key, expected in sorted(FIREBALL_FACTS.items()):
+        pins["fireball_%s" % key] = fireball.get(key) == expected
+    hint_text = fireball.get("hint_text") or ""
+    pins["fireball_hint_has_placeholders"] = (
+        "{title}" in hint_text and "{counter}" in hint_text)
+    counts = {"rows": len(actual), "unique_classes": len(by_class)}
+    ok = actual == desired and all(pins.values())
+    return ok, pins, counts
+
+
+def write_result(result: dict) -> None:
+    RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RESULT_FILE.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def payload_json(payload: List[dict]) -> str:
+    """The {"rows": [...]} document UWoTAngrealGuide.ImportRowsFromJson eats."""
+    return json.dumps({"rows": payload}, sort_keys=True)
+
+
+def payload_from_json(text: str) -> List[dict]:
+    """ExportRowsAsJson back to the payload shape (row order preserved)."""
+    document = json.loads(text)
+    if not isinstance(document, dict) or not isinstance(
+            document.get("rows"), list):
+        raise GenerationError("asset export carries no rows array")
+    return document["rows"]
+
+
+def import_asset(payload: List[dict]):
+    import unreal
+
+    eal = unreal.EditorAssetLibrary
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    asset_class = unreal.load_class(None, GUIDE_CLASS_PATH)
+    if not asset_class:
+        raise RuntimeError(
+            "UWoTAngrealGuide is not loaded; build the editor with the "
+            "WoTOnboarding plugin enabled first")
+
+    if not eal.does_directory_exist(GUIDE_DESTINATION):
+        eal.make_directory(GUIDE_DESTINATION)
+    created = not eal.does_asset_exist(GUIDE_ASSET_PATH)
+    if created:
+        factory = unreal.DataAssetFactory()
+        factory.set_editor_property("data_asset_class", asset_class)
+        asset = tools.create_asset(
+            GUIDE_ASSET_NAME, GUIDE_DESTINATION, asset_class, factory)
+    else:
+        asset = unreal.load_asset(GUIDE_ASSET_PATH)
+    if not asset:
+        raise RuntimeError("failed to create or load %s" % GUIDE_ASSET_PATH)
+
+    # Rows cross the seam as JSON through reflection-callable methods on the
+    # asset itself: the editor's python glue generates no wrapper types for a
+    # plugin module loaded after it (unreal.WoTAngrealGuideRow does not
+    # exist), while call_method needs only the reflection registry.
+    changed = created
+    if payload_from_json(str(asset.call_method("ExportRowsAsJson"))) != payload:
+        error = str(asset.call_method(
+            "ImportRowsFromJson", args=(payload_json(payload),)))
+        if error:
+            raise RuntimeError("row import failed: %s" % error)
+        changed = True
+    if not eal.save_asset(GUIDE_ASSET_PATH):
+        raise RuntimeError("save failed for %s" % GUIDE_ASSET_PATH)
+
+    package = asset.get_outermost()
+    reloaded, reload_error = unreal.EditorLoadingAndSavingUtils.reload_packages(
+        [package], unreal.ReloadPackagesInteractionMode.ASSUME_NEGATIVE)
+    if not reloaded:
+        raise RuntimeError("post-save reload failed for %s: %s"
+                           % (GUIDE_ASSET_PATH, reload_error))
+
+    # Result-file verification reads the reloaded package, including the
+    # roster and Fireball pins, rather than trusting the live edited object.
+    verified = unreal.load_asset(GUIDE_ASSET_PATH)
+    if not verified:
+        raise RuntimeError("post-save load failed for %s" % GUIDE_ASSET_PATH)
+    ok, pins, counts = verify_asset_payload(
+        payload_from_json(str(verified.call_method("ExportRowsAsJson"))),
+        payload)
+    if not ok:
+        raise RuntimeError(
+            "post-save verification failed for %s: pins=%s, counts=%s"
+            % (GUIDE_ASSET_PATH, pins, counts))
+    return changed, pins, counts
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="parse the exported script tree and report what it holds")
-    parser.add_argument("--script-root",
-                        help="exported script root (default: exports/script "
-                             "under the configured reference root)")
+        description="derive the guide facts CSV and build the guide data "
+                    "asset (--facts-only stops after the CSV, no Unreal)")
     parser.add_argument("--facts-only", action="store_true",
                         help="regenerate %s from the exported script and the "
                              "authored data CSVs, then stop"
                              % FACTS_CSV_PATH.relative_to(REPO))
     args = parser.parse_args(argv)
+    rows = generate_rows()
+    csv_changed = write_if_changed(FACTS_CSV_PATH, render_facts_csv(rows))
+    print("facts CSV %s: %d rows, %s"
+          % (FACTS_CSV_PATH.relative_to(REPO), len(rows),
+             "updated" if csv_changed else "no change"))
     if args.facts_only:
-        rows = generate_rows()
-        changed = write_if_changed(FACTS_CSV_PATH, render_facts_csv(rows))
-        print("facts CSV %s: %d rows, %s"
-              % (FACTS_CSV_PATH.relative_to(REPO), len(rows),
-                 "updated" if changed else "no change"))
         return 0
-    root = Path(args.script_root) if args.script_root else default_script_root()
-    classes = parse_script_classes(root)
-    packages = sorted({cls.package for cls in classes.values()})
-    print("parsed %d classes across %d packages from %s"
-          % (len(classes), len(packages), root))
+    result = {
+        "asset": GUIDE_ASSET_PATH,
+        "csv": str(FACTS_CSV_PATH),
+        "csv_changed": csv_changed,
+        "status": "running",
+    }
+    write_result(result)
+    try:
+        payload = asset_rows(load_facts_csv(), load_hints_csv())
+        result["rows"] = len(payload)
+        changed, pins, imported_counts = import_asset(payload)
+        result.update({
+            "asset_changed": changed,
+            "imported_counts": imported_counts,
+            "pins": pins,
+            "status": "ok",
+        })
+    except Exception as exc:
+        result["status"] = "failed"
+        result["error"] = str(exc)
+        write_result(result)
+        raise
+    write_result(result)
     return 0
 
 

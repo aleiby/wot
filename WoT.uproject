@@ -54,6 +54,10 @@
 				"Game",
 				"Editor"
 			]
+		},
+		{
+			"Name": "WoTOnboarding",
+			"Enabled": true
 		}
 	]
 }

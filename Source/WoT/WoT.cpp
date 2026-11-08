@@ -9,7 +9,9 @@
 #include "WoTBootstrapHeartbeat.h"
 #include "WoTNetVersion.h"
 #include "WoTMacUninstall.h"
+#include "WoTOnboardingSeams.h"
 #include "WoTRandom.h"
+#include "WoTRetailText.h"
 #include "Testing/WoTStereoNonRealtimeAudio.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/MessageDialog.h"
@@ -50,6 +52,19 @@ public:
 		FDefaultGameModuleImpl::StartupModule();
 		WoTRandom::InitializeFromTime();
 		WoTNetVersion::Bind();
+		// Onboarding seam: the plugin asks for retail display text by
+		// (file, section, property) without linking any game class. The
+		// wrapped mechanism resolves the owning file from the section, so the
+		// file argument is address documentation. Behavior-neutral: nothing
+		// in the game module reads through this slot.
+		FWoTOnboardingSeams::Get().ResolveRetailText =
+			[](const FString&, const FString& Section, const FString& Property)
+			{
+				FWoTRetailText::EnsureLoaded();
+				const FString* Value =
+					FWoTRetailText::FindSectionValue(Section, Property);
+				return Value ? *Value : FString();
+			};
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
 		WoTStereoNonRealtimeAudio::Register();
 #endif
