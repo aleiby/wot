@@ -4137,6 +4137,19 @@ void AWoTPlayerController::SetupInputComponent()
 			this, &AWoTPlayerController::ServerEditCitadelInput);
 		InputComponent->BindAction(TEXT("ShowHelp"), IE_Pressed,
 			this, &AWoTPlayerController::ShowHelp);
+		{
+			// ShowGuide (onboarding seam): a broadcast only, inert when nothing
+			// is bound — the retail help action above stays exactly as ported.
+			// A weak lambda, so the controller's surface gains no handler for
+			// an improvement-only action.
+			FInputActionBinding Binding(FName(TEXT("ShowGuide")), IE_Pressed);
+			Binding.ActionDelegate.GetDelegateForManualSet().BindWeakLambda(
+				this, []()
+				{
+					FWoTOnboardingSeams::Get().ShowGuideRequested.Broadcast();
+				});
+			InputComponent->AddActionBinding(MoveTemp(Binding));
+		}
 		for (int32 TauntIndex = 1; TauntIndex <= 6; ++TauntIndex)
 		{
 			FInputActionBinding Binding(FName(*FString::Printf(

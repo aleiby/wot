@@ -323,3 +323,21 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
   repository hygiene follow-up and are no longer carried by this plan;
   Task 7's CONTRIBUTING delta now covers only the optional-improvements
   (enhancements) policy lane.
+- 2026-11-07 — Task 4 implemented (verification pending: both-platform builds
+  with the plugin enabled and disabled, plus the new specs). Decisions:
+  - Guide key is **F3**: the plan's F1 and G are retail-bound (ShowHelp,
+    PlayTaunt1), and F2 carries ShowInventoryInfo; F3 is the first function
+    key unbound in `DefaultInput.ini`. Managed-rebind integration for
+    ShowGuide stays deferred, as above.
+  - `FWoTOnboardingRow` gains an `Owner` tag so a module can remove exactly
+    its rows on shutdown; registration is restart-safe (re-register never
+    doubles rows).
+  - The plugin's three settings rows (master + two aids, own
+    `GameUserSettings` section, all default on) register unconditionally —
+    the rows are the only in-game way to turn the aids back on, so the
+    master switch gates aid behavior only, never the rows.
+  - The seam's settings rows render as an appended ONBOARDING group on the
+    Controls page (the gameplay-options page, reachable from the front-end
+    and the in-game menu); an empty registry renders today's screen exactly.
+  - `ShowGuideRequested` stays unbound until Task 5; the F3 press is a
+    seam broadcast with no other behavior.
