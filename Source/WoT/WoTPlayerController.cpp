@@ -581,12 +581,23 @@ float AWoTPlayerController::AdjustCitadelEditViewDistanceFeet(
 
 void AWoTPlayerController::CalculateCitadelOrbitView(const FVector& ZoneLocation,
 	const FRotator& EditViewAngle, float EditViewDistanceFeet,
-	FVector& OutLocation, FRotator& OutRotation)
+	FVector& OutLocation, FRotator& OutRotation, const FRotator& ViewOffset)
 {
-	OutRotation = EditViewAngle.GetNormalized();
-	OutLocation = ZoneLocation - OutRotation.Vector()
+	// The camera sits on the authored angle; ViewOffset only turns the view.
+	const FRotator Orbit = EditViewAngle.GetNormalized();
+	OutRotation = (Orbit + ViewOffset).GetNormalized();
+	OutLocation = ZoneLocation - Orbit.Vector()
 		* CitadelEditViewDistanceFeetToUU(
 			ClampCitadelEditViewDistanceFeet(EditViewDistanceFeet));
+}
+
+FRotator AWoTPlayerController::AdjustCitadelEditViewAngle(
+	const FRotator& EditViewAngle, float AStrafe, float DeltaTime)
+{
+	// PlayerTickEdit: EditViewAngle.Yaw -= 24 * aStrafe * DeltaTime, in UE1 rotation units.
+	FRotator Result = EditViewAngle;
+	Result.Yaw -= 24.0f * AStrafe * DeltaTime * 360.0f / 65536.0f;
+	return Result.GetNormalized();
 }
 
 int32 AWoTPlayerController::GetOwnerCitadelBudgetCount(FName AdapterName) const
@@ -771,6 +782,7 @@ void AWoTPlayerController::ClearLocalCitadelEditStateForTeardown()
 	RestoreCitadelEditStart();
 	CitadelEditCameraMode = EWoTCitadelEditCameraMode::Inactive;
 	CitadelEditZone = nullptr;
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	OwnerEditBudget.Reset();
 	OwnerEditSessionTeam = 255;
 	OnRep_CitadelEditCamera();
@@ -780,6 +792,7 @@ void AWoTPlayerController::ClearLocalCitadelEditStateForTeardown()
 
 void AWoTPlayerController::OnRep_CitadelEditCamera()
 {
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	ApplyCitadelEditCameraState();
 }
 
@@ -794,6 +807,18 @@ void AWoTPlayerController::AdjustCitadelOrbitDistance(
 	}
 	CitadelEditZone->EditViewDistance = AdjustCitadelEditViewDistanceFeet(
 		CitadelEditZone->EditViewDistance, AForward, DeltaTime);
+}
+
+void AWoTPlayerController::RotateCitadelOrbit(float AStrafe, float DeltaTime)
+{
+	if (!IsLocalController()
+		|| CitadelEditCameraMode != EWoTCitadelEditCameraMode::Orbit
+		|| !IsValid(CitadelEditZone.Get()) || AStrafe == 0.0f)
+	{
+		return;
+	}
+	CitadelEditZone->EditViewAngle = AdjustCitadelEditViewAngle(
+		CitadelEditZone->EditViewAngle, AStrafe, DeltaTime);
 }
 
 void AWoTPlayerController::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult)
@@ -818,7 +843,7 @@ void AWoTPlayerController::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResu
 	{
 		CalculateCitadelOrbitView(CitadelEditZone->GetActorLocation(),
 			CitadelEditZone->EditViewAngle, CitadelEditZone->EditViewDistance,
-			OutResult.Location, OutResult.Rotation);
+			OutResult.Location, OutResult.Rotation, CitadelOrbitViewOffset);
 		OutResult.Location.Z += UE1ShakeVert;
 		ApplyViewFlash();
 		return;
@@ -1638,6 +1663,14 @@ void AWoTPlayerController::Jump()
 
 void AWoTPlayerController::UpdateRotation(float DeltaTime)
 {
+	if (CitadelEditCameraMode == EWoTCitadelEditCameraMode::Orbit
+		&& IsValid(CitadelEditZone.Get()))
+	{
+		// PlayerTickEdit replaces the view update: look input (aTurn/aLookUp,
+		// decelerated x0.3) turns ViewOffset instead of the ghosted body.
+		CitadelOrbitViewOffset = (CitadelOrbitViewOffset + RotationInput * 0.3f).GetNormalized();
+		RotationInput = FRotator::ZeroRotator;
+	}
 	// Capture the real, scaled input before the base applies it to ControlRotation.
 	// Impaled.UpdateRotation chooses its 3000/8000 boundary from this sign.
 	const float AppliedPitchInput = RotationInput.Pitch;
@@ -2128,6 +2161,7 @@ void AWoTPlayerController::CitadelBeginEdit(int32 Mode)
 	EditSessionBudget = Budget;
 	CitadelEditCameraMode = RequestedCameraMode;
 	CitadelEditZone = EntryZone;
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	// CitadelOrbitMode.BeginState (WOTPlayer.uc:5262-5272): orbiting ghosts the body —
 	// hidden, non-colliding, PHYS_None — so it cannot wander or be seen while the
 	// player edits from the zone camera. Roam keeps the walking body (retail roam
@@ -2286,6 +2320,7 @@ void AWoTPlayerController::EndEditSession()
 	RestoreCitadelEditStart();
 	CitadelEditCameraMode = EWoTCitadelEditCameraMode::Inactive;
 	CitadelEditZone = nullptr;
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	OnRep_CitadelEditCamera();
 	EditSessionTeam = 255;
 	EditSessionBudget = nullptr;
@@ -3732,6 +3767,7 @@ void AWoTPlayerController::NextView()
 	int32 Current = Zones.IndexOfByKey(CitadelEditZone.Get());
 	Current = Current == INDEX_NONE ? 0 : (Current + 1) % Zones.Num();
 	CitadelEditZone = Zones[Current];
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	ApplyCitadelEditCameraState();
 	ClientPlayUISound(FName(TEXT("WOT/Editor/EditSelect")), 1.0f);
 }
@@ -3749,6 +3785,7 @@ void AWoTPlayerController::PrevView()
 	Current = Current == INDEX_NONE ? Zones.Num() - 1
 		: (Current + Zones.Num() - 1) % Zones.Num();
 	CitadelEditZone = Zones[Current];
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	ApplyCitadelEditCameraState();
 	ClientPlayUISound(FName(TEXT("WOT/Editor/EditSelect")), 1.0f);
 }
@@ -3763,6 +3800,7 @@ void AWoTPlayerController::SwitchView(int32 Index)
 	const TArray<AWoTZoneVolume*> Zones = CitadelVisibleOrbitZones(this);
 	if (!Zones.IsValidIndex(Index)) return;
 	CitadelEditZone = Zones[Index];
+	CitadelOrbitViewOffset = FRotator::ZeroRotator;
 	ApplyCitadelEditCameraState();
 	ClientPlayUISound(FName(TEXT("WOT/Editor/EditSelect")), 1.0f);
 }

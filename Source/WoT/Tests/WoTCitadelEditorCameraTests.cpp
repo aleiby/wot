@@ -497,6 +497,90 @@ bool FWoTCitadelEditorCameraOrbitInputSpec::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCitadelEditorCameraOrbitRatesSpec,
+	"WoT.Citadel.EditorCamera.OrbitRates",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTCitadelEditorCameraOrbitRatesSpec::RunTest(const FString&)
+{
+	// WOTPlayer.PlayerTickEdit (WOTPlayer.uc:5344-5388): a held key (axis 6000,
+	// decelerated x0.1) zooms 600/16 = 37.5 ft/s and orbits 24*600 rotation units/s;
+	// look input turns ViewOffset at 0.3x the normal look rate.
+	FEditorCameraSpecFixture Fixture = EditorCameraSpecCreateFixture(1);
+	AWoTPlayerController* PC = Fixture.Controller;
+	AWoTCharacter* Body = Fixture.Character;
+	PC->PlayerInput = NewObject<UPlayerInput>(PC);
+	PC->SetupInputComponent();
+	UInputComponent* PawnInput = NewObject<UInputComponent>(Body);
+	Body->SetupPlayerInputComponent(PawnInput);
+	if (!TestNotNull(TEXT("controller input component created"), PC->InputComponent.Get()))
+	{
+		WoTTest::DestroySpecWorld(Fixture.World);
+		return false;
+	}
+	constexpr float Step = 1.0f / 60.0f;
+	auto ProcessFrame = [&]()
+	{
+		Fixture.World->DeltaTimeSeconds = Step;
+		TArray<UInputComponent*> Stack;
+		Stack.Push(PawnInput);
+		Stack.Push(PC->InputComponent);
+		PC->PlayerInput->ProcessInputStack(Stack, Step, false);
+	};
+	auto HoldKey = [&](const FKey& Key, int32 Frames)
+	{
+		PC->PlayerInput->InputKey(FInputKeyEventArgs::CreateSimulated(Key, IE_Pressed, 1.0f));
+		for (int32 Frame = 0; Frame < Frames; ++Frame) { ProcessFrame(); }
+		PC->PlayerInput->InputKey(FInputKeyEventArgs::CreateSimulated(Key, IE_Released, 0.0f));
+		ProcessFrame();
+	};
+
+	Fixture.Zone->EditViewDistance = 80.0f;
+	Fixture.Zone->EditViewAngle = FRotator(-45.0f, 90.0f, 0.0f);
+	HoldKey(EKeys::W, 60);
+	TestEqual(TEXT("a held forward key zooms in 37.5 ft in a second"),
+		Fixture.Zone->EditViewDistance, 42.5f, 0.1f);
+	HoldKey(EKeys::S, 60);
+	TestEqual(TEXT("a held back key zooms out at the same rate"),
+		Fixture.Zone->EditViewDistance, 80.0f, 0.1f);
+	HoldKey(EKeys::D, 60);
+	const double OrbitDegrees = 24.0 * 600.0 * 360.0 / 65536.0;   // ~79.1
+	TestEqual(TEXT("a held right strafe orbits the yaw down ~79 degrees in a second"),
+		Fixture.Zone->EditViewAngle.Yaw, 90.0 - OrbitDegrees, 0.05);
+	TestEqual(TEXT("orbiting keeps the authored pitch"),
+		Fixture.Zone->EditViewAngle.Pitch, -45.0, 0.001);
+
+	// Look input becomes the view offset, at 0.3x, and never turns the body.
+	const FRotator ControlBefore = PC->GetControlRotation();
+	PC->RotationInput = FRotator(4.0f, 10.0f, 0.0f);
+	PC->UpdateRotation(Step);
+	TestTrue(TEXT("look input offsets the orbit view at 0.3x"),
+		PC->GetCitadelOrbitViewOffset().Equals(FRotator(1.2f, 3.0f, 0.0f), 0.001f));
+	TestTrue(TEXT("look input does not turn the ghosted body"),
+		PC->GetControlRotation().Equals(ControlBefore, 0.001f));
+	FMinimalViewInfo View;
+	PC->CalcCamera(Step, View);
+	TestTrue(TEXT("the camera faces the zone angle plus the offset"),
+		View.Rotation.Equals((Fixture.Zone->EditViewAngle + FRotator(1.2f, 3.0f, 0.0f)).GetNormalized(), 0.01f));
+	FVector OrbitLocation;
+	FRotator OrbitRotation;
+	AWoTPlayerController::CalculateCitadelOrbitView(Fixture.Zone->GetActorLocation(),
+		Fixture.Zone->EditViewAngle, Fixture.Zone->EditViewDistance, OrbitLocation, OrbitRotation);
+	TestTrue(TEXT("the offset turns the view, not the orbit position"),
+		View.Location.Equals(OrbitLocation, 0.01f));
+	// NextView cycles the zones this team may view; make the fixture zone one of them.
+	Fixture.Zone->ProjectedZoneIndex = 1;
+	Fixture.Zone->EditTeam = 255;
+	PC->NextView();
+	TestTrue(TEXT("selecting a zone resets the offset"),
+		PC->GetCitadelOrbitViewOffset().IsNearlyZero(0.001f));
+
+	PC->CitadelEndEdit();
+	WoTTest::TickWorld(Fixture.World, 1);
+	WoTTest::DestroySpecWorld(Fixture.World);
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTCitadelEditorCameraMathSpec,
 	"WoT.Citadel.EditorCamera.DistanceMathAndCurrentZone",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
