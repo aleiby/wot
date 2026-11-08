@@ -204,6 +204,12 @@ bool FWoTFrontEndFeedbackContract::ShouldPlay(
 		&& AppVolumeMultiplier > 0.0f;
 }
 
+void FWoTFrontEndMenuSelection::SetEntryCount(int32 NewEntryCount)
+{
+	EntryCount = FMath::Max(NewEntryCount, 1);
+	SelectedIndex = FMath::Clamp(SelectedIndex, 0, EntryCount - 1);
+}
+
 bool FWoTFrontEndMenuSelection::MoveTo(int32 NewIndex)
 {
 	if (NewIndex < 0 || NewIndex >= EntryCount || NewIndex == SelectedIndex)

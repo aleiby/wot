@@ -384,6 +384,27 @@ void SWoTFrontEndRoot::Tick(
 	{
 		FWoTMenuStyle::SizeCheckBoxImages(PlayCheckBoxStyle, PlayCheckGlyphSize);
 	}
+	// A seam menu-row registration or removal while the main screen shows
+	// (the onboarding guide row follows its live master toggle) rebuilds the
+	// screen from the current registry; an unchanged registry rebuilds
+	// nothing. Owner-and-count identity is enough: rows register and remove
+	// as owner-tagged units.
+	if (ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+	{
+		const TArray<FWoTOnboardingRow>& LiveRows =
+			FWoTOnboardingSeams::Get().MenuRows;
+		bool bRowsMatch = LiveRows.Num() == MainMenuExtensionRows.Num();
+		for (int32 RowIndex = 0;
+			bRowsMatch && RowIndex < LiveRows.Num(); ++RowIndex)
+		{
+			bRowsMatch = LiveRows[RowIndex].Owner
+				== MainMenuExtensionRows[RowIndex].Owner;
+		}
+		if (!bRowsMatch)
+		{
+			RebuildScreen();
+		}
+	}
 	TArray<FVector2D, TInlineAllocator<4>> Measurements;
 	bool bHasMeasuredFace = true;
 	for (const FWoTFrontEndMainMenuEntry& Entry : RetailMainEntries())
@@ -393,6 +414,15 @@ void SWoTFrontEndRoot::Tick(
 		bHasMeasuredFace = bHasMeasuredFace
 			&& Measurement.X > 0.0f && Measurement.Y > 0.0f;
 		Measurements.Add(Measurement);
+	}
+	// Extension rows take part in the retail layout so the list makes room
+	// for them, but they never veto the measured-face gate above (their
+	// labels are the module's own text, not the authenticated retail face).
+	for (const FWoTOnboardingRow& Row : MainMenuExtensionRows)
+	{
+		Measurements.Add(FWoTMenuLayout::MeasureText(
+			FText::FromString(Row.Label ? Row.Label() : FString()),
+			MenuFonts().Title));
 	}
 	if (!bHasMeasuredFace)
 	{
@@ -592,12 +622,27 @@ void SWoTFrontEndRoot::RebuildScreen()
 TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 {
 	TSharedRef<SVerticalBox> Entries = SNew(SVerticalBox);
-	MainMenuButtons.Reserve(RetailMainEntries().Num());
-	for (int32 EntryIndex = 0;
-		EntryIndex < RetailMainEntries().Num(); ++EntryIndex)
+	// Seam extension rows append after the retail entries (an empty registry
+	// renders exactly the retail screen). Captured here so the buttons invoke
+	// the rows they render; Tick rebuilds the screen when the registry drifts.
+	MainMenuExtensionRows = FWoTOnboardingSeams::Get().MenuRows;
+	if (MainMenuSelection.IsValid())
 	{
-		const FWoTFrontEndMainMenuEntry Entry = RetailMainEntries()[EntryIndex];
-		const FText Label = RetailText(Entry.LocalizationId);
+		MainMenuSelection->SetEntryCount(MainMenuTotalEntryCount());
+	}
+	MainMenuButtons.Reserve(MainMenuTotalEntryCount());
+	for (int32 EntryIndex = 0;
+		EntryIndex < MainMenuTotalEntryCount(); ++EntryIndex)
+	{
+		const bool bExtension = EntryIndex >= RetailMainEntries().Num();
+		const FText Label = bExtension
+			? FText::FromString([this, EntryIndex]()
+				{
+					const FWoTOnboardingRow& Row = MainMenuExtensionRows[
+						EntryIndex - RetailMainEntries().Num()];
+					return Row.Label ? Row.Label() : FString();
+				}())
+			: RetailText(RetailMainEntries()[EntryIndex].LocalizationId);
 		TSharedPtr<SWoTMenuButton> Button;
 		Entries->AddSlot()
 		.AutoHeight()
@@ -2444,13 +2489,34 @@ void SWoTFrontEndRoot::SelectMainMenuEntry(int32 EntryIndex)
 	}
 }
 
+int32 SWoTFrontEndRoot::MainMenuTotalEntryCount() const
+{
+	return RetailMainEntries().Num() + MainMenuExtensionRows.Num();
+}
+
 FReply SWoTFrontEndRoot::ActivateMainMenuEntry(int32 EntryIndex)
 {
 	if (bShowReleaseNotesNotice || bShowUpdateFailedNotice
 		|| !IsPresentationReady() || !MainMenuSelection.IsValid()
-		|| !RetailMainEntries().IsValidIndex(EntryIndex))
+		|| EntryIndex < 0 || EntryIndex >= MainMenuTotalEntryCount())
 	{
 		return FReply::Unhandled();
+	}
+	if (EntryIndex >= RetailMainEntries().Num())
+	{
+		// A seam extension row: run the invoke captured with the rendered
+		// button, through the same selection/feedback path as retail entries.
+		const FWoTOnboardingRow Row =
+			MainMenuExtensionRows[EntryIndex - RetailMainEntries().Num()];
+		const bool bExtensionActivated = MainMenuSelection->Activate(
+			EntryIndex, [this, &Row]()
+			{
+				if (IsPresentationReady() && Row.Invoke)
+				{
+					Row.Invoke();
+				}
+			});
+		return bExtensionActivated ? FReply::Handled() : FReply::Unhandled();
 	}
 	const EWoTFrontEndMainMenuAction Action =
 		RetailMainEntries()[EntryIndex].Action;
@@ -4018,7 +4084,7 @@ FMargin SWoTFrontEndRoot::MainMenuEntryPadding(int32 EntryIndex) const
 		0.0f,
 		EntryIndex == 0 ? 0.0f : HalfSpacing,
 		0.0f,
-		EntryIndex == 3 ? 0.0f : HalfSpacing);
+		EntryIndex == MainMenuTotalEntryCount() - 1 ? 0.0f : HalfSpacing);
 }
 
 void SWoTFrontEndRoot::HandleHostComplete(bool bSucceeded)

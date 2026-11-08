@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Settings/WoTGameSettings.h"
 #include "WoTFrontEnd.h"
+#include "WoTOnboardingSeams.h"
 #include "Styling/SlateBrush.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -124,6 +125,7 @@ private:
 	FReply ActivateScoreboard();
 	FReply ActivateHelp();
 	FReply ActivateCitadel();
+	FReply ActivateExtensionEntry(int32 RowIndex);
 	FReply ActivateMainMenuEntryById(uint8 EntryId);
 	bool MoveMainMenuSelection(int32 Direction);
 	bool IsShowingMainMenu() const;
@@ -144,6 +146,10 @@ private:
 	TArray<TSharedPtr<SWoTMenuButton>> MainMenuButtons;
 	TArray<uint8> MainMenuEntryIds;
 	TArray<FString> MainMenuLabels;
+	/** The seam menu rows as captured when the list was last built; extension
+	    activation reads these, never the live registry (which may have changed
+	    under the open menu — Tick's snapshot comparison rebuilds on drift). */
+	TArray<FWoTOnboardingRow> ExtensionMenuRows;
 	TSharedPtr<SBox> ContentHost;
 	TSharedPtr<SWoTSettingsScreen> ActiveSettingsScreen;
 	TSharedPtr<SEditableText> PlayerNameInput;

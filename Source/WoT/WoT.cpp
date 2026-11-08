@@ -9,6 +9,7 @@
 #include "WoTBootstrapHeartbeat.h"
 #include "WoTNetVersion.h"
 #include "WoTMacUninstall.h"
+#include "WoTMenuStyle.h"
 #include "WoTOnboardingSeams.h"
 #include "WoTRandom.h"
 #include "WoTRetailText.h"
@@ -64,6 +65,37 @@ public:
 				const FString* Value =
 					FWoTRetailText::FindSectionValue(Section, Property);
 				return Value ? *Value : FString();
+			};
+		// Onboarding seam: the retail menu chrome, resolved lazily per call so
+		// nothing here touches fonts or payloads at startup. Unset while the
+		// guarded faces are unavailable or revoked — a consumer then draws
+		// with its own fallback, exactly like the in-game menu does.
+		FWoTOnboardingSeams::Get().ResolveMenuChrome =
+			[]() -> TOptional<FWoTOnboardingMenuChrome>
+			{
+				const TOptional<FWoTRequiredMenuFonts> Fonts =
+					FWoTMenuStyle::Get().ResolveRequiredFonts();
+				if (!Fonts.IsSet())
+				{
+					return TOptional<FWoTOnboardingMenuChrome>();
+				}
+				FWoTOnboardingMenuChrome Chrome;
+				Chrome.TitleFont = Fonts->Title;
+				Chrome.BodyFont = Fonts->List;
+				Chrome.ItalicFont = FWoTMenuStyle::Get().ItalicFont();
+				Chrome.SmallFont = FWoTMenuStyle::Get().SmallFont();
+				Chrome.Background = FWoTMenuStyle::Get().Background();
+				Chrome.Frame = FWoTMenuStyle::Get().Frame();
+				Chrome.Blackout = FWoTMenuStyle::Get().Blackout();
+				Chrome.Separator = FWoTMenuStyle::Get().Separator();
+				Chrome.Foreground = FWoTMenuStyle::MenuColor(false);
+				Chrome.Accent = FWoTMenuStyle::SelectedColor();
+				Chrome.BindWidget =
+					[Captured = Fonts.GetValue()](const TSharedRef<SWidget>& Widget)
+					{
+						Captured.BindWidget(Widget);
+					};
+				return Chrome;
 			};
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
 		WoTStereoNonRealtimeAudio::Register();

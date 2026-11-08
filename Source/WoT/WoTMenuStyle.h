@@ -129,10 +129,14 @@ public:
 	int32 GetSelectedIndex() const { return SelectedIndex; }
 	bool MoveTo(int32 NewIndex);
 	bool Activate(int32 Index, TFunctionRef<void()> Action);
+	/** The retail main menu has four entries; seam extension rows appended to
+	    the list raise the count (and an empty registry keeps it at four). A
+	    shrinking count clamps the selection back into range. */
+	void SetEntryCount(int32 NewEntryCount);
 
 private:
-	static constexpr int32 EntryCount = 4;
 	TSharedRef<IWoTFrontEndFeedbackSink> Feedback;
+	int32 EntryCount = 4;
 	int32 SelectedIndex = 0;
 };
 

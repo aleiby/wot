@@ -729,6 +729,9 @@ private:
 	TSharedPtr<SWoTItemInfoOverlay> ItemInfoWidget;
 	TWeakObjectPtr<UGameViewportClient> ItemInfoViewport;
 	bool bItemInfoOpen = false;
+	/** Onboarding window seam: a foreign exclusive window opening closes the
+	    retail windows (bound on the local controller's BeginPlay). */
+	FDelegateHandle OnboardingCloseWindowsHandle;
 
 	UPROPERTY(Transient)
 	FString ProgressMessage[8];

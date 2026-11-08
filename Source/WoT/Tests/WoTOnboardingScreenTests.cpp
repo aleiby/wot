@@ -4,7 +4,9 @@
 
 #include "../Settings/WoTGameSettings.h"
 #include "../Settings/WoTSettingsSlate.h"
+#include "../WoTFrontEndSlate.h"
 #include "../WoTGameInstance.h"
+#include "../WoTInGameSlate.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
@@ -54,6 +56,24 @@ TSharedRef<FWoTFrontEndPresentationAuthority> MakeWoTOnboardingScreenAuthority()
 	// No injected labels: the extension group and the literal-labeled rows the
 	// specs assert on never resolve retail text.
 	TMap<FName, FString> Labels;
+	return FWoTFrontEndPresentationAuthority::CreateForTesting(
+		TEXT("generation-input"),
+		FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30),
+		FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14),
+		MoveTemp(Labels), MakeShared<FWoTOnboardingScreenFeedbackSink>());
+}
+
+TSharedRef<FWoTFrontEndPresentationAuthority>
+MakeWoTOnboardingScreenMenuAuthority()
+{
+	// The front-end root hides its main menu until every retail entry label
+	// measures, so the main-menu specs inject the four bounded fixture
+	// labels (invented text, as the settings-screen specs inject theirs).
+	TMap<FName, FString> Labels;
+	Labels.Add(FName(TEXT("menuMain.MenuList[2]")), TEXT("FIXTUREPLAY"));
+	Labels.Add(FName(TEXT("menuMain.MenuList[3]")), TEXT("FIXTURECONTROL"));
+	Labels.Add(FName(TEXT("menuMain.MenuList[4]")), TEXT("FIXTUREHARDWARE"));
+	Labels.Add(FName(TEXT("menuMain.MenuList[7]")), TEXT("FIXTUREQUIT"));
 	return FWoTFrontEndPresentationAuthority::CreateForTesting(
 		TEXT("generation-input"),
 		FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30),
@@ -170,6 +190,35 @@ struct FWoTOnboardingScreenRowsGuard
 	}
 };
 
+/** Empties the live seam MENU registry for the spec; restores on exit. */
+struct FWoTOnboardingScreenMenuRowsGuard
+{
+	TArray<FWoTOnboardingRow> Saved;
+
+	FWoTOnboardingScreenMenuRowsGuard()
+	{
+		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
+		FWoTOnboardingSeams::Get().MenuRows.Reset();
+	}
+
+	~FWoTOnboardingScreenMenuRowsGuard()
+	{
+		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+	}
+};
+
+/** The injected fonts the in-game menu overlay specs construct with. */
+TSharedRef<FWoTRequiredMenuFonts> MakeWoTOnboardingScreenFonts(
+	const TSharedRef<FWoTRequiredMenuFontGeneration>& Generation)
+{
+	TSharedRef<FWoTRequiredMenuFonts> Fonts =
+		MakeShared<FWoTRequiredMenuFonts>();
+	Fonts->Title = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30);
+	Fonts->List = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+	Fonts->Generation = Generation;
+	return Fonts;
+}
+
 TSharedRef<SWoTSettingsScreen> MakeWoTOnboardingScreen(
 	UWoTPreferencesSubsystem* Owner,
 	const TSharedRef<FWoTFrontEndPresentationAuthority>& Authority)
@@ -274,6 +323,105 @@ bool FWoTOnboardingScreenExtensionRowsSpec::RunTest(const FString&)
 		WoTOnboardingScreenHasText(Texts, TEXT("Fixture Aid Gamma: On")));
 	TestFalse(TEXT("the stale label is gone"),
 		WoTOnboardingScreenHasText(Texts, TEXT("Fixture Aid Gamma: Off")));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingInGameMenuExtensionSpec,
+	"WoT.Onboarding.InGameMenuExtension", WoTOnboardingScreenFlags)
+
+bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
+{
+	FWoTOnboardingScreenMenuRowsGuard RegistryGuard;
+	const TSharedRef<FWoTRequiredMenuFontGeneration> Generation =
+		FWoTRequiredMenuFontGeneration::CreateForTesting();
+	const TSharedRef<FWoTRequiredMenuFonts> Fonts =
+		MakeWoTOnboardingScreenFonts(Generation);
+
+	// Empty registry: the overlay renders exactly today's entry list.
+	const TSharedRef<SWoTInGameMenuOverlay> Baseline =
+		SNew(SWoTInGameMenuOverlay)
+		.PlayerController(nullptr)
+		.RequiredFontsForTesting(Fonts);
+	const TArray<FString> BaselineLabels = Baseline->MenuLabelsForTesting();
+	TestTrue(TEXT("the overlay built the retail entry list"),
+		BaselineLabels.Contains(TEXT("Resume"))
+		&& BaselineLabels.Contains(TEXT("Quit to Main Menu")));
+	TestFalse(TEXT("an empty registry appends no extension entry"),
+		BaselineLabels.Contains(TEXT("Fixture Guide Row")));
+
+	// One registered row appends exactly one entry at the end, and its
+	// activation runs the row's invoke.
+	int32 Invocations = 0;
+	FWoTOnboardingSeams::Get().MenuRows.Add({
+		[]() { return FString(TEXT("Fixture Guide Row")); },
+		[&Invocations]() { ++Invocations; },
+		FName(TEXT("FixtureOwner"))});
+	const TSharedRef<SWoTInGameMenuOverlay> Extended =
+		SNew(SWoTInGameMenuOverlay)
+		.PlayerController(nullptr)
+		.RequiredFontsForTesting(Fonts);
+	TArray<FString> ExpectedLabels = BaselineLabels;
+	ExpectedLabels.Add(TEXT("Fixture Guide Row"));
+	TestTrue(TEXT("the registered row appends after today's entries"),
+		Extended->MenuLabelsForTesting() == ExpectedLabels);
+	Extended->ActivateVisibleMainMenuEntryForTesting(BaselineLabels.Num());
+	TestEqual(TEXT("activating the appended entry fires its invoke"),
+		Invocations, 1);
+
+	// The live/snapshot comparison rebuilds the open menu when the registry
+	// drifts (the guide row follows the master toggle live).
+	FWoTOnboardingSeams::Get().MenuRows.Reset();
+	Extended->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
+		FSlateLayoutTransform()), 0.0, 0.0f);
+	TestTrue(TEXT("an unregistered row leaves the open menu on the next tick"),
+		Extended->MenuLabelsForTesting() == BaselineLabels);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingFrontEndMenuExtensionSpec,
+	"WoT.Onboarding.FrontEndMenuExtension", WoTOnboardingScreenFlags)
+
+bool FWoTOnboardingFrontEndMenuExtensionSpec::RunTest(const FString&)
+{
+	FWoTOnboardingScreenMenuRowsGuard RegistryGuard;
+	const FGeometry Geometry = FGeometry::MakeRoot(
+		FVector2D(1920.0f, 1080.0f), FSlateLayoutTransform());
+
+	// Empty registry: exactly the four retail entries.
+	const TSharedRef<SWoTFrontEndRoot> Baseline = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr)
+		.PresentationAuthorityForTesting(MakeWoTOnboardingScreenMenuAuthority());
+	Baseline->Tick(Geometry, 0.0, 0.0f);
+	TestTrue(TEXT("the retail main menu renders its four entries"),
+		Baseline->MainMenuButtonForTesting(3).IsValid());
+	TestFalse(TEXT("an empty registry appends no fifth entry"),
+		Baseline->MainMenuButtonForTesting(4).IsValid());
+
+	int32 Invocations = 0;
+	FWoTOnboardingSeams::Get().MenuRows.Add({
+		[]() { return FString(TEXT("Fixture Guide Row")); },
+		[&Invocations]() { ++Invocations; },
+		FName(TEXT("FixtureOwner"))});
+	const TSharedRef<SWoTFrontEndRoot> Extended = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr)
+		.PresentationAuthorityForTesting(MakeWoTOnboardingScreenMenuAuthority());
+	Extended->Tick(Geometry, 0.0, 0.0f);
+	TestTrue(TEXT("the registered row renders as a fifth entry"),
+		Extended->MainMenuButtonForTesting(4).IsValid());
+	TArray<TSharedRef<STextBlock>> Texts;
+	WoTOnboardingScreenCollectText(Extended, Texts);
+	TestTrue(TEXT("the appended entry carries the row's label"),
+		WoTOnboardingScreenHasText(Texts, TEXT("Fixture Guide Row")));
+	TestTrue(TEXT("activating the appended entry is handled"),
+		Extended->ActivateMainMenuEntryForTesting(4).IsEventHandled());
+	TestEqual(TEXT("activation fired the row's invoke"), Invocations, 1);
+
+	// Registry drift while the main screen shows rebuilds it from the live
+	// rows on the next tick.
+	FWoTOnboardingSeams::Get().MenuRows.Reset();
+	Extended->Tick(Geometry, 0.0, 0.0f);
+	TestFalse(TEXT("an unregistered row leaves the main screen on the next tick"),
+		Extended->MainMenuButtonForTesting(4).IsValid());
 	return !HasAnyErrors();
 }
 
