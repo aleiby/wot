@@ -10,6 +10,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "../WoTMenuStyle.h"
+#include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 
 namespace
@@ -558,6 +559,47 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			.ColorAndOpacity(FSlateColor::UseForeground())
 		]
 	];
+	// Extension rows from the onboarding seam registry (the optional plugin's
+	// settings toggles). Registered rows render as one appended group; an
+	// empty registry appends nothing, so a build without the plugin renders
+	// exactly the rows above. Labels resolve lazily — a row's text follows
+	// its live setting — and the callbacks are copied at build time so the
+	// screen never reads a registry that changed under it.
+	const TArray<FWoTOnboardingRow>& ExtensionRows =
+		FWoTOnboardingSeams::Get().SettingsRows;
+	if (!ExtensionRows.IsEmpty())
+	{
+		Rows->AddSlot().AutoHeight().Padding(0.0f, 22.0f, 0.0f, 8.0f)
+		[
+			BuildLabel(Literal(TEXT("ONBOARDING")))
+		];
+		for (const FWoTOnboardingRow& Row : ExtensionRows)
+		{
+			Rows->AddSlot().AutoHeight().Padding(0.0f, 3.0f).HAlign(HAlign_Left)
+			[
+				SNew(SWoTMenuButton)
+				.ContentPadding(FMargin(10.0f, 4.0f))
+				.OnClicked_Lambda([Invoke = Row.Invoke]()
+				{
+					if (Invoke)
+					{
+						Invoke();
+					}
+					return FReply::Handled();
+				})
+				[
+					SNew(STextBlock)
+					.Font(this, &SWoTSettingsScreen::Body)
+					.ColorAndOpacity(FSlateColor::UseForeground())
+					.Text_Lambda([Label = Row.Label]()
+					{
+						return Label ? FText::FromString(Label())
+						             : FText::GetEmpty();
+					})
+				]
+			];
+		}
+	}
 	return Rows;
 }
 

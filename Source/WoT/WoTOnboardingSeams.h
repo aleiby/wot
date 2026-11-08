@@ -29,6 +29,9 @@ struct FWoTOnboardingRow
 {
 	TFunction<FString()> Label;
 	TFunction<void()> Invoke;
+	/** Registrar identity: a module tags the rows it adds so its shutdown can
+	    remove exactly those, keeping registration restart-safe. */
+	FName Owner;
 };
 
 struct WOT_API FWoTOnboardingSeams

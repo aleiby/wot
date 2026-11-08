@@ -7,9 +7,10 @@ public class WoTOnboarding : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		// Deliberately minimal. The plugin consumes the game module's
-		// onboarding seams — plain delegates and TFunctions — and links no
-		// Source/WoT class, so disabling or omitting the plugin costs the
-		// game nothing and the parity lanes can run without it.
+		// onboarding seams (WoTOnboardingSeams.h: plain delegates, TFunction
+		// rows, the row registries) and links no other game surface, so
+		// disabling or omitting the plugin costs the game nothing and the
+		// parity lanes can run without it.
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
@@ -18,7 +19,12 @@ public class WoTOnboarding : ModuleRules
 		});
 
 		// The editor-only import/export seam speaks JSON so the content
-		// importer can drive it through reflection alone.
-		PrivateDependencyModuleNames.Add("Json");
+		// importer can drive it through reflection alone. "WoT" is the seam
+		// header's home and the one game-module dependency.
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Json",
+			"WoT"
+		});
 	}
 }
