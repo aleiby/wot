@@ -501,6 +501,9 @@ private:
 	TSharedPtr<SWidget> PlayerConfigSaveButton;
 	TSharedPtr<SWidget> OnlineDisclosureCancelWidget;
 	TWeakPtr<SWidget> LastPlayOverlayFocus;
+	/** What had keyboard focus when the first Play overlay opened; Pointer
+	 * mode returns focus there when the overlays close. */
+	TWeakPtr<SWidget> PrePlayOverlayFocus;
 	TArray<TArray<TSharedPtr<SWidget>>> HostNavigationRows;
 	TArray<TArray<TSharedPtr<SWidget>>> JoinNavigationRows;
 	TArray<TSharedPtr<FWoTBackStackEntryHandle>> BackStackEntries;

@@ -1147,6 +1147,42 @@ bool FWoTUIBackStackPlayOverlaySpec::RunTest(const FString&)
 	Root->SetKeychainAccessForTesting({});
 	TestTrue(TEXT("a second B backs Play"), FrontEnd.Press(EKeys::Gamepad_FaceButton_Right));
 	TestTrue(TEXT("to Main"), Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
+
+	{
+		// Keyboard and mouse: when an overlay closes, focus returns to where it
+		// was before the overlay took it, never left on the collapsed overlay.
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+		const TSharedRef<FWoTFrontEndPresentationAuthority> PointerAuthority =
+			WoTUITest_Authority();
+		FWoTUITest_FrontEnd PointerFrontEnd(PointerAuthority,
+			WoTUITest_MakeRoot(PointerAuthority), FVector2D(1280.0f, 720.0f));
+		const TSharedRef<SWoTFrontEndRoot>& PointerRoot = PointerFrontEnd.Root;
+		PointerRoot->ActivateMainMenuEntryForTesting(0);
+		PointerFrontEnd.Settle();
+		const TSharedPtr<SWidget> Back = PointerRoot->PlayBackButtonForTesting();
+		if (TestTrue(TEXT("Play is open with a Back button"), Back.IsValid()
+			&& PointerRoot->CurrentScreenForTesting() == EWoTFrontEndScreen::Play))
+		{
+			Slate.SetKeyboardFocus(Back, EFocusCause::SetDirectly);
+			PointerRoot->SetKeychainAccessForTesting(EWoTKeychainAccess::WillPrompt);
+			PointerRoot->SetInternetModeForTesting();
+			PointerRoot->RefreshSessionsForTesting();
+			PointerFrontEnd.Settle();
+			if (TestTrue(TEXT("the keychain heads-up shows for a keyboard player"),
+				PointerRoot->IsKeychainHeadsUpVisibleForTesting()))
+			{
+				TestTrue(TEXT("focus moved into the heads-up"),
+					Slate.GetKeyboardFocusedWidget() != Back);
+				PointerRoot->CancelKeychainHeadsUpForTesting();
+				PointerFrontEnd.Settle();
+				TestFalse(TEXT("the heads-up closed"),
+					PointerRoot->IsKeychainHeadsUpVisibleForTesting());
+				TestTrue(TEXT("a keyboard player's focus is back on Back"),
+					Slate.GetKeyboardFocusedWidget() == Back);
+			}
+			PointerRoot->SetKeychainAccessForTesting({});
+		}
+	}
 	return !HasAnyErrors();
 }
 

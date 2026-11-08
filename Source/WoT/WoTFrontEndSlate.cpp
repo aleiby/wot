@@ -453,6 +453,7 @@ void SWoTFrontEndRoot::SyncPlayOverlayFocus()
 		|| !FSlateApplication::IsInitialized())
 	{
 		LastPlayOverlayFocus.Reset();
+		PrePlayOverlayFocus.Reset();
 		return;
 	}
 	const TSharedPtr<SWidget> OverlayFocus = PlayOverlayFocusTarget();
@@ -467,20 +468,36 @@ void SWoTFrontEndRoot::SyncPlayOverlayFocus()
 	{
 		// The panels behind it are disabled, so focus moves into the overlay.
 		const TSharedPtr<SWidget> Focused = SlateApp.GetKeyboardFocusedWidget();
+		if (!Previous.IsValid())
+		{
+			PrePlayOverlayFocus = Focused;
+		}
 		if (Focused != OverlayFocus)
 		{
 			SlateApp.SetKeyboardFocus(OverlayFocus, EFocusCause::SetDirectly);
 		}
 	}
-	else if (Previous.IsValid() && FWoTControllerUIInput::IsControllerMode())
+	else if (Previous.IsValid())
 	{
-		// The overlay closed: a controller needs focus back on the panels,
-		// where Controller mode starts (spec r3 section 1a, Play).
-		const TSharedPtr<SWidget> PanelFocus = MapComboBox.IsValid()
-			? StaticCastSharedPtr<SWidget>(MapComboBox) : PlayBackButton;
-		if (PanelFocus.IsValid())
+		const TSharedPtr<SWidget> Restore = PrePlayOverlayFocus.Pin();
+		PrePlayOverlayFocus.Reset();
+		if (FWoTControllerUIInput::IsControllerMode())
 		{
-			SlateApp.SetKeyboardFocus(PanelFocus, EFocusCause::SetDirectly);
+			// The overlay closed: a controller needs focus back on the panels,
+			// where Controller mode starts (spec r3 section 1a, Play).
+			const TSharedPtr<SWidget> PanelFocus = MapComboBox.IsValid()
+				? StaticCastSharedPtr<SWidget>(MapComboBox) : PlayBackButton;
+			if (PanelFocus.IsValid())
+			{
+				SlateApp.SetKeyboardFocus(PanelFocus, EFocusCause::SetDirectly);
+			}
+		}
+		else if (Restore.IsValid() && Restore->GetVisibility().IsVisible()
+			&& Restore->IsEnabled())
+		{
+			// Keyboard and mouse get focus back where it was before the
+			// overlay took it, never left on the collapsed overlay.
+			SlateApp.SetKeyboardFocus(Restore, EFocusCause::SetDirectly);
 		}
 	}
 }
