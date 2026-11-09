@@ -291,16 +291,36 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 		.VAlign(VAlign_Bottom)
 		.Padding(FMargin(0.0f, 0.0f, 16.0f, 8.0f))
 		[
-			// The keyboard's prompts while it is open over chat.
+			// The keyboard's prompts while it is open over chat; on the bare
+			// line, A types and B closes chat.
 			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
 			.Prompts_Lambda([this]()
 			{
 				return FWoTTextEntry::IsActiveWithin(AsShared())
-					? FWoTTextEntry::ControllerPrompts() : TArray<FWoTButtonPrompt>();
+					? FWoTTextEntry::ControllerPrompts() : FWoTButtonPromptSets::Password();
 			})
 			.Font(LineFont)
 		]
 	];
+	RegisterControllerBack();
+}
+
+void SWoTChatInputOverlay::RegisterControllerBack()
+{
+	// A controller backs out of chat one level per press, as Escape does from
+	// the keyboard: the on-screen keyboard closes first (its own session entry
+	// sits above this one), then B or View on the bare line closes chat
+	// without sending anything.
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return !FWoTTextEntry::IsActiveWithin(AsShared()); },
+		[WeakController = PlayerController]()
+		{
+			if (AWoTPlayerController* Controller = WeakController.Get())
+			{
+				Controller->CancelChatInput();
+			}
+			return true;
+		});
 }
 
 FText SWoTChatInputOverlay::GetLabel() const

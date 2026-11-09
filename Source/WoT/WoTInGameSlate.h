@@ -66,12 +66,15 @@ private:
 	/** The typed text after the label's prefix. */
 	FString TypedText() const;
 	FWoTTextEntryRequest MakeEntryRequest();
+	void RegisterControllerBack();
 	TWeakObjectPtr<AWoTPlayerController> PlayerController;
 	TSharedPtr<SEditableText> Input;
 	TSharedPtr<SWoTTextFieldActivator> Activator;
 	TSharedPtr<SWoTTextEntryLayer> EntryLayer;
 	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	TSharedPtr<const FWoTRequiredMenuFonts> RequiredFonts;
+	/** B/View on the bare chat line close chat (the keyboard closes first). */
+	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
 	/** "Say ", "TeamSay " or empty: shown as the label, sent with the line. */
 	FString Prefix;
 };

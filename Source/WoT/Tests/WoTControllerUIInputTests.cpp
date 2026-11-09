@@ -4548,7 +4548,31 @@ bool FWoTChatControllerInGameMenuSpec::RunTest(const FString&)
 	Fixture.Press(EKeys::Gamepad_Special_Left);
 	TestFalse(TEXT("View cancels the panel"), FWoTTextEntry::IsActive());
 	TestTrue(TEXT("and chat stays open"), Controller->IsChatTyping());
-	Controller->CancelChatInput();
+	// On the bare line the prompts say how to type or leave.
+	if (const TSharedPtr<SWoTChatInputOverlay> Bare = Controller->GetChatInputWidget())
+	{
+		TestEqual(TEXT("the bare chat line prompts A Type and B Cancel"),
+			Bare->ButtonPromptsForTesting().IsValid()
+				? FWoTButtonPrompt::Describe(Bare->ButtonPromptsForTesting()->GetShownPrompts())
+				: FString(),
+			FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Password()));
+	}
+	// A second View (or B) closes chat without sending anything.
+	Controller->ResetChatCaptureForTesting();
+	Fixture.Press(EKeys::Gamepad_Special_Left);
+	TestFalse(TEXT("a second View closes chat"), Controller->IsChatTyping());
+	TestTrue(TEXT("and sends nothing"), Controller->GetLastSubmittedChatLineForTesting().IsEmpty());
+
+	// B does the same after a D-pad-style open: the panel first, then chat.
+	Controller->ChatByController(/*bTeam*/ false);
+	Fixture.Settle();
+	TestTrue(TEXT("chat reopens with the panel"),
+		Controller->IsChatTyping() && FWoTTextEntry::IsActive());
+	Fixture.Press(EKeys::Gamepad_Special_Left);
+	TestFalse(TEXT("View closes the panel"), FWoTTextEntry::IsActive());
+	Fixture.Press(EKeys::Gamepad_FaceButton_Right);
+	TestFalse(TEXT("then B closes chat"), Controller->IsChatTyping());
+	TestTrue(TEXT("still nothing sent"), Controller->GetLastSubmittedChatLineForTesting().IsEmpty());
 	return !HasAnyErrors();
 }
 #endif

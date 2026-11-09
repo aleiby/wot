@@ -3164,6 +3164,10 @@ void AWoTPlayerController::TauntFromInGameMenu(int32 TauntIndex)
 	{
 		return;   // leaving for the front end: the menu stays
 	}
+	if (IsPaused())
+	{
+		return;   // the taunt keys don't play while paused either
+	}
 	PlayTaunt(TauntIndex);
 }
 

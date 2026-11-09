@@ -384,6 +384,7 @@ public:
 	/** The line the last SubmitChatInput received, as typed or sent. */
 	const FString& GetLastSubmittedChatLineForTesting() const
 		{ return LastSubmittedChatLineForTesting; }
+	void ResetChatCaptureForTesting() { LastSubmittedChatLineForTesting.Reset(); }
 #endif
 
 	// Engine.PlayerPawn SShot/ToggleFullscreen direct features plus
