@@ -1660,8 +1660,9 @@ FName FWoTHelpContent::FaceFor(int32 FontIndex, int32 PixelScale)
 	{
 		// Steam Deck legibility: the 8-pixel face at a 1x strike is under the
 		// 9-pixel floor, and a fractional strike would blur it. F_WOTReg14 is
-		// the next face of the family, and its advances are within a pixel of
-		// F_WOTReg08's, so a line wraps almost exactly where it did.
+		// the next face of the family; its letters are about a tenth wider and
+		// its lines 6 px taller, which only matters for help text that selects
+		// fonts 0/1 (the shipped English help never does).
 		const FName SmallFace(TEXT("F_WOTReg08"));
 		return RetailLineHeight(SmallFace) * FMath::Max(PixelScale, 1)
 				< FWoTMenuStyle::MinimumLegiblePixels

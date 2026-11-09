@@ -325,7 +325,7 @@ public:
 		/** The viewport the window opens in, in pixels, and its UI DPI scale, so
 		 * the first frame already draws at the whole-number scale (Tick keeps it
 		 * current across resizes). Zero size: 1x until the first Tick. */
-		SLATE_ARGUMENT(FVector2D, InitialPhysicalSize)
+		SLATE_ARGUMENT_DEFAULT(FVector2D, InitialPhysicalSize) = FVector2D::ZeroVector;
 		SLATE_ARGUMENT_DEFAULT(float, InitialDpiScale) = 1.0f;
 		SLATE_ARGUMENT(TSharedPtr<FWoTFrontEndPresentationAuthority>,
 			PresentationAuthority)
@@ -411,7 +411,7 @@ public:
 		/** The viewport the overlay opens in, in pixels, so the first frame
 		 * already sizes the element gems for its DPI scale (Tick keeps it
 		 * current across resizes). Zero size: 1080p sizes until the first Tick. */
-		SLATE_ARGUMENT(FVector2D, InitialPhysicalSize)
+		SLATE_ARGUMENT_DEFAULT(FVector2D, InitialPhysicalSize) = FVector2D::ZeroVector;
 #if WITH_AUTOMATION_TESTS
 		SLATE_ARGUMENT(TSharedPtr<const FWoTRequiredMenuFonts>, RequiredFontsForTesting)
 #endif
