@@ -7,6 +7,9 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "../UI/SWoTBootstrapScreen.h"
+#include "../UI/SWoTButtonPrompts.h"
+#include "../UI/SWoTFocusOutline.h"
+#include "../UI/SWoTListCombo.h"
 #include "../UI/WoTBackStack.h"
 #include "../UI/WoTControllerUIInput.h"
 #include "../UI/WoTMenuNavigation.h"
@@ -41,11 +44,15 @@
 #include "Types/NavigationMetaData.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Views/STableRow.h"
+#include "Framework/Application/SlateUser.h"
 
 namespace
 {
@@ -1727,6 +1734,1058 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 	FrontEnd.Press(EKeys::Gamepad_DPad_Down);
 	TestEqual(TEXT("Down from the footer wraps to the first row"),
 		RowOf(Slate.GetKeyboardFocusedWidget()), 0);
+	return !HasAnyErrors();
+}
+
+// ---------------------------------------------------------------------------
+// Controller sub-project 3, PR 2: the slider, the touch-friendly dropdown,
+// focus outlines and the button prompt strip (spec r3 sections 1a, 2 and 5).
+
+namespace
+{
+/** A key press and release routed through Slate, then a settle. */
+bool WoTWidgetTest_Press(FWoTUITest_Window& Shown, FKey Key, bool bRepeat = false)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	const bool bHandled = Slate.ProcessKeyDownEvent(WoTUITest_Key(Key, bRepeat));
+	Slate.ProcessKeyUpEvent(WoTUITest_Key(Key));
+	Shown.Settle();
+	return bHandled;
+}
+
+/** Controller-genesis navigation through the reply path, as the held-D-pad
+ * repeat sends it (spec r3 [I1]). */
+void WoTWidgetTest_ControllerNavigate(FWoTUITest_Window& Shown, EUINavigation Direction)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	if (const TSharedPtr<FSlateUser> User = Slate.GetUser(0))
+	{
+		const FWidgetPath FocusPath = User->GetWeakFocusPath().ToWidgetPath();
+		if (FocusPath.IsValid())
+		{
+			Slate.ProcessExternalReply(FocusPath,
+				FReply::Handled().SetNavigation(Direction, ENavigationGenesis::Controller), 0);
+		}
+	}
+	Shown.Settle();
+}
+
+FPointerEvent WoTWidgetTest_MouseUp(const FVector2D& Position)
+{
+	return FPointerEvent(0, FSlateApplication::CursorPointerIndex, Position, Position,
+		TSet<FKey>(), EKeys::LeftMouseButton, 0.0f, FModifierKeysState());
+}
+
+/** A mouse move with the left button held. */
+FPointerEvent WoTWidgetTest_MouseDrag(const FVector2D& Position, const FVector2D& Last)
+{
+	TSet<FKey> Down;
+	Down.Add(EKeys::LeftMouseButton);
+	return FPointerEvent(0, FSlateApplication::CursorPointerIndex, Position, Last,
+		Down, EKeys::Invalid, 0.0f, FModifierKeysState());
+}
+
+FPointerEvent WoTWidgetTest_Wheel(const FVector2D& Position, float Delta)
+{
+	return FPointerEvent(0, FSlateApplication::CursorPointerIndex, Position, Position,
+		TSet<FKey>(), EKeys::MouseWheelAxis, Delta, FModifierKeysState());
+}
+
+FPointerEvent WoTWidgetTest_TouchEnd(const FVector2D& Position)
+{
+	return FPointerEvent(0u, 0u, Position, Position, 0.0f, false);
+}
+
+/** The caller side of a dropdown: its committed item and every pick. */
+struct FWoTWidgetTest_ComboState
+{
+	int32 Selected = 0;
+	TArray<int32> Picks;
+	TArray<ESelectInfo::Type> PickInfos;
+};
+
+TSharedRef<SWoTListCombo> WoTWidgetTest_MakeCombo(
+	const TSharedRef<FWoTWidgetTest_ComboState>& State, int32 Count)
+{
+	return SNew(SWoTListCombo)
+		.NumItems(Count)
+		.SelectedIndex_Lambda([State]() { return State->Selected; })
+		.OnGenerateItem_Lambda([](int32 Index) -> TSharedRef<SWidget>
+		{
+			return SNew(STextBlock).Text(FText::FromString(FString::Printf(TEXT("Item %d"), Index)));
+		})
+		.OnPicked_Lambda([State](int32 Index, ESelectInfo::Type SelectInfo)
+		{
+			State->Picks.Add(Index);
+			State->PickInfos.Add(SelectInfo);
+			State->Selected = Index;
+		})
+		[
+			SNew(STextBlock).Text_Lambda([State]()
+			{
+				return FText::FromString(FString::Printf(TEXT("Item %d"), State->Selected));
+			})
+		];
+}
+
+/** Several paints: the popup is placed, then its list generates rows. */
+void WoTWidgetTest_SettlePopup(FWoTUITest_Window& Shown)
+{
+	for (int32 Pass = 0; Pass < 3; ++Pass)
+	{
+		Shown.Settle();
+	}
+}
+
+/** A row the open list has on screen, past the first (which may be clipped),
+ * other than Exclude. */
+int32 WoTWidgetTest_VisibleRow(const TSharedRef<SWoTListCombo>& Combo, int32 Count,
+	int32 Exclude = INDEX_NONE)
+{
+	int32 Seen = 0;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const TSharedPtr<SWidget> Row = Combo->GetRowWidget(Index);
+		if (Row.IsValid() && Row->GetCachedGeometry().GetLocalSize().Y > 0.0f
+			&& ++Seen >= 2 && Index != Exclude)
+		{
+			return Index;
+		}
+	}
+	return INDEX_NONE;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsSliderSpec,
+	"WoT.UI.Widgets.Slider", WoTUITest_Flags)
+
+bool FWoTUIWidgetsSliderSpec::RunTest(const FString&)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	float Value = 0.5f;
+	TSharedPtr<SWoTRetailSlider> Slider;
+	TSharedPtr<SButton> Below;
+	TSharedPtr<SButton> OtherColumn;
+	FWoTUITest_Window Shown(SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox).WidthOverride(320.0f).HeightOverride(40.0f)
+				[
+					// Eleven stops: each stop is a tenth.
+					SAssignNew(Slider, SWoTRetailSlider)
+					.Positions(11)
+					.Value_Lambda([&Value]() { return Value; })
+					.OnValueChanged_Lambda([&Value](float NewValue) { Value = NewValue; })
+				]
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SBox).WidthOverride(200.0f).HeightOverride(40.0f)[SAssignNew(Below, SButton)]
+			]
+		]
+		+ SHorizontalBox::Slot().AutoWidth()
+		[
+			SNew(SBox).WidthOverride(200.0f).HeightOverride(40.0f)[SAssignNew(OtherColumn, SButton)]
+		]);
+	// Play's layout: Left/Right on a control switch columns (PR 1).
+	const TSharedPtr<SWidget> SliderWidget = Slider;
+	const TSharedPtr<SWidget> BelowWidget = Below;
+	const TSharedPtr<SWidget> OtherWidget = OtherColumn;
+	TArray<FWoTNavRow> LeftRows;
+	LeftRows.Add(FWoTNavRow{SliderWidget});
+	LeftRows.Add(FWoTNavRow{BelowWidget});
+	TArray<FWoTNavRow> RightRows;
+	RightRows.Add(FWoTNavRow{OtherWidget});
+	WoTTwoColumnNavigation(LeftRows, RightRows, FWoTNavRow());
+	FWoTUITest_InputScope Scope(Shown.Window);
+	Shown.Settle();
+	TestTrue(TEXT("the graph would switch columns on Right"),
+		WoTUITest_Navigate(SliderWidget, EUINavigation::Right) == OtherWidget);
+	auto Stop = [&Value]() { return FMath::RoundToInt(Value * 10.0f); };
+	auto Focused = [&Slate]() { return Slate.GetKeyboardFocusedWidget(); };
+	Slate.SetKeyboardFocus(Slider, EFocusCause::SetDirectly);
+
+	// The D-pad steps the slider; it no longer switches columns.
+	TestTrue(TEXT("D-pad Right is handled"), WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Right));
+	TestEqual(TEXT("D-pad Right steps one stop"), Stop(), 6);
+	TestTrue(TEXT("and focus stays on the slider"), Focused() == SliderWidget);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Left);
+	TestEqual(TEXT("D-pad Left steps back one stop each"), Stop(), 4);
+	TestTrue(TEXT("D-pad Left never leaves the slider"), Focused() == SliderWidget);
+
+	// Controller-genesis Left/Right (held-D-pad repeats, the stick) step too.
+	WoTWidgetTest_ControllerNavigate(Shown, EUINavigation::Right);
+	TestEqual(TEXT("a Controller-genesis Right steps"), Stop(), 5);
+	WoTWidgetTest_ControllerNavigate(Shown, EUINavigation::Left);
+	TestEqual(TEXT("a Controller-genesis Left steps"), Stop(), 4);
+	TestTrue(TEXT("repeats keep focus on the slider"), Focused() == SliderWidget);
+	Slate.ProcessAnalogInputEvent(WoTUITest_Analog(EKeys::Gamepad_LeftX, 0.9f));
+	Shown.Settle();
+	Slate.ProcessAnalogInputEvent(WoTUITest_Analog(EKeys::Gamepad_LeftX, 0.0f));
+	TestEqual(TEXT("the stick steps it"), Stop(), 5);
+	TestTrue(TEXT("and keeps focus on it"), Focused() == SliderWidget);
+
+	// The keyboard is unchanged: all four arrows, Home and End.
+	WoTWidgetTest_Press(Shown, EKeys::Right);
+	TestEqual(TEXT("Right arrow steps up"), Stop(), 6);
+	WoTWidgetTest_Press(Shown, EKeys::Up);
+	TestEqual(TEXT("Up arrow steps up"), Stop(), 7);
+	WoTWidgetTest_Press(Shown, EKeys::Down);
+	TestEqual(TEXT("Down arrow steps down"), Stop(), 6);
+	WoTWidgetTest_Press(Shown, EKeys::Left);
+	TestEqual(TEXT("Left arrow steps down"), Stop(), 5);
+	WoTWidgetTest_Press(Shown, EKeys::Home);
+	TestEqual(TEXT("Home goes to the first stop"), Stop(), 0);
+	WoTWidgetTest_Press(Shown, EKeys::End);
+	TestEqual(TEXT("End goes to the last stop"), Stop(), 10);
+	TestTrue(TEXT("the keys keep focus on the slider"), Focused() == SliderWidget);
+
+	// D-pad Up and Down move focus.
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("D-pad Down moves focus to the next row"), Focused() == BelowWidget);
+	TestEqual(TEXT("without changing the value"), Stop(), 10);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("D-pad Up moves focus back"), Focused() == SliderWidget);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsPlaySliderSpec,
+	"WoT.FrontEnd.ControllerFocus.PlaySlider", WoTUITest_Flags)
+
+bool FWoTUIWidgetsPlaySliderSpec::RunTest(const FString&)
+{
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(),
+		WoTUITest_MakeRoot(WoTUITest_Authority()), FVector2D(1280.0f, 720.0f));
+	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
+	Root->ActivateMainMenuEntryForTesting(0);
+	FrontEnd.Settle();
+	FSlateApplication& Slate = FSlateApplication::Get();
+	TSharedPtr<SWidget> KillSlider;
+	for (const FWoTNavRow& Row : Root->HostNavigationRowsForTesting())
+	{
+		if (!Row.IsEmpty() && Row[0].IsValid()
+			&& Row[0]->GetType() == FName(TEXT("SWoTRetailSlider")))
+		{
+			KillSlider = Row[0];
+			break;
+		}
+	}
+	if (!TestTrue(TEXT("the host column has a slider (the kill limit)"), KillSlider.IsValid()))
+	{
+		return false;
+	}
+	auto Kills = [&Root]() { return Root->ViewModelForTesting().GetHostRequest().FragLimit; };
+	Slate.SetKeyboardFocus(KillSlider, EFocusCause::SetDirectly);
+	const int32 Before = Kills();
+	FrontEnd.Press(EKeys::Gamepad_DPad_Right);
+	TestEqual(TEXT("D-pad Right on Play's slider steps it"), Kills(), FMath::Min(Before + 1, 100));
+	TestTrue(TEXT("instead of switching to the join column"),
+		Slate.GetKeyboardFocusedWidget() == KillSlider);
+	FrontEnd.Press(EKeys::Gamepad_DPad_Left);
+	TestEqual(TEXT("D-pad Left steps it back"), Kills(), Before);
+	TestTrue(TEXT("and stays on it"), Slate.GetKeyboardFocusedWidget() == KillSlider);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsListComboKeysSpec,
+	"WoT.UI.Widgets.ListComboKeys", WoTUITest_Flags)
+
+bool FWoTUIWidgetsListComboKeysSpec::RunTest(const FString&)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	const TSharedRef<FWoTWidgetTest_ComboState> State = MakeShared<FWoTWidgetTest_ComboState>();
+	State->Selected = 3;
+	const TSharedRef<SWoTListCombo> Combo = WoTWidgetTest_MakeCombo(State, 12);
+	TSharedPtr<SButton> Above;
+	TSharedPtr<SButton> Below;
+	FWoTUITest_Window Shown(SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).WidthOverride(300.0f).HeightOverride(40.0f)[SAssignNew(Above, SButton)]
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).WidthOverride(300.0f)[Combo]
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).WidthOverride(300.0f).HeightOverride(40.0f)[SAssignNew(Below, SButton)]
+		]);
+	const TSharedPtr<SWidget> ComboWidget = Combo;
+	const TArray<TSharedPtr<SWidget>> Column = {Above, ComboWidget, Below};
+	WoTWrapVerticalNavigation(Column);
+	FWoTUITest_InputScope Scope(Shown.Window);
+	Shown.Settle();
+	const int32 Baseline = FWoTBackStack::Get().NumEntries();
+	auto Focused = [&Slate]() { return Slate.GetKeyboardFocusedWidget(); };
+	auto Press = [&Shown](FKey Key, bool bRepeat = false)
+	{
+		const bool bHandled = WoTWidgetTest_Press(Shown, Key, bRepeat);
+		WoTWidgetTest_SettlePopup(Shown);
+		return bHandled;
+	};
+	Slate.SetKeyboardFocus(Combo, EFocusCause::SetDirectly);
+
+	// Closed, the D-pad moves focus and never the value (PR 1's release gate).
+	Press(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("closed: D-pad Down moves focus off the list"), Focused() == Below);
+	TestEqual(TEXT("closed: D-pad Down never changes the value"), State->Selected, 3);
+	Press(EKeys::Gamepad_DPad_Up);
+	Press(EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("closed: D-pad Up moves focus off it too"), Focused() == Above);
+	Press(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("and back onto it"), Focused() == ComboWidget);
+	TestTrue(TEXT("closed: nothing was picked"), State->Picks.IsEmpty() && !Combo->IsOpen());
+
+	// A opens it with the committed row highlighted and a back-stack entry.
+	TestTrue(TEXT("A is handled"), Press(EKeys::Gamepad_FaceButton_Bottom));
+	if (!TestTrue(TEXT("A opens the list"), Combo->IsOpen()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the open list takes focus"), Focused() == Combo->GetPopupWidget());
+	TestEqual(TEXT("the committed row is highlighted"), Combo->GetHighlightedIndex(), 3);
+	TestEqual(TEXT("an open list registers a back-stack entry"),
+		FWoTBackStack::Get().NumEntries(), Baseline + 1);
+
+	// Navigation moves the highlight, wraps, and commits nothing.
+	Press(EKeys::Gamepad_DPad_Down);
+	Press(EKeys::Gamepad_DPad_Down);
+	TestEqual(TEXT("D-pad Down moves the highlight"), Combo->GetHighlightedIndex(), 5);
+	for (int32 Step = 0; Step < 6; ++Step)
+	{
+		Press(EKeys::Gamepad_DPad_Up);
+	}
+	TestEqual(TEXT("D-pad Up wraps from the first row to the last"),
+		Combo->GetHighlightedIndex(), 11);
+	Press(EKeys::Gamepad_DPad_Down);
+	TestEqual(TEXT("D-pad Down wraps from the last row to the first"),
+		Combo->GetHighlightedIndex(), 0);
+	Press(EKeys::Down);
+	TestEqual(TEXT("the Down arrow moves it too"), Combo->GetHighlightedIndex(), 1);
+	Press(EKeys::Up);
+	Press(EKeys::Up);
+	TestEqual(TEXT("the Up arrow wraps too"), Combo->GetHighlightedIndex(), 11);
+	WoTWidgetTest_ControllerNavigate(Shown, EUINavigation::Up);
+	TestEqual(TEXT("a held D-pad's repeat moves it"), Combo->GetHighlightedIndex(), 10);
+	Press(EKeys::Gamepad_DPad_Left);
+	TestTrue(TEXT("Left keeps focus in the open list"),
+		Combo->IsOpen() && Focused() == Combo->GetPopupWidget());
+	TestTrue(TEXT("navigation commits nothing"), State->Picks.IsEmpty() && State->Selected == 3);
+
+	// A picks the highlighted row and closes.
+	TestTrue(TEXT("A in the list is handled"), Press(EKeys::Gamepad_FaceButton_Bottom));
+	TestFalse(TEXT("A closes the list"), Combo->IsOpen());
+	TestEqual(TEXT("A picks the highlighted row"), State->Picks, TArray<int32>{10});
+	TestTrue(TEXT("as a key press"), State->PickInfos.Num() == 1
+		&& State->PickInfos[0] == ESelectInfo::OnKeyPress);
+	TestTrue(TEXT("focus returns to the control"), Focused() == ComboWidget);
+	TestEqual(TEXT("its back-stack entry is gone"), FWoTBackStack::Get().NumEntries(), Baseline);
+
+	// A held A never reopens it; Enter opens and picks like A.
+	Press(EKeys::Gamepad_FaceButton_Bottom, /*bRepeat*/ true);
+	TestFalse(TEXT("a held A's native repeat does not reopen the list"), Combo->IsOpen());
+	Press(EKeys::Enter);
+	TestTrue(TEXT("Enter opens the list"), Combo->IsOpen());
+	TestEqual(TEXT("on the new committed row"), Combo->GetHighlightedIndex(), 10);
+	Press(EKeys::Gamepad_DPad_Down);
+	Press(EKeys::Enter);
+	TestEqual(TEXT("Enter picks"), State->Picks, (TArray<int32>{10, 11}));
+
+	// B and View close without a change; the press is consumed.
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	Press(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("B on the open list is handled"), Press(EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B closes the list"), Combo->IsOpen());
+	TestEqual(TEXT("B changes nothing"), State->Selected, 11);
+	TestEqual(TEXT("B picks nothing"), State->Picks.Num(), 2);
+	TestTrue(TEXT("B returns focus to the control"), Focused() == ComboWidget);
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("View on the open list is handled"), Press(EKeys::Gamepad_Special_Left));
+	TestFalse(TEXT("View closes it too"), Combo->IsOpen());
+
+	// Escape closes only the list.
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	Press(EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("Escape on the open list is handled"), Press(EKeys::Escape));
+	TestFalse(TEXT("Escape closes the list"), Combo->IsOpen());
+	TestEqual(TEXT("Escape changes nothing"), State->Selected, 11);
+	TestTrue(TEXT("Escape returns focus to the control"), Focused() == ComboWidget);
+	TestEqual(TEXT("no entry is left behind"), FWoTBackStack::Get().NumEntries(), Baseline);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsListComboPointerSpec,
+	"WoT.UI.Widgets.ListComboPointer", WoTUITest_Flags)
+
+bool FWoTUIWidgetsListComboPointerSpec::RunTest(const FString&)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	FWoTUITest_ModeGuard ModeGuard;
+	constexpr int32 Count = 12;
+	const TSharedRef<FWoTWidgetTest_ComboState> State = MakeShared<FWoTWidgetTest_ComboState>();
+	const TSharedRef<SWoTListCombo> Combo = WoTWidgetTest_MakeCombo(State, Count);
+	FWoTUITest_Window Shown(SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left)
+		[
+			SNew(SBox).WidthOverride(300.0f)[Combo]
+		]);
+	auto Open = [&Slate, &Shown, &Combo]()
+	{
+		const FVector2D At = Shown.ScreenCenter(Combo);
+		Slate.ProcessMouseButtonDownEvent(nullptr, WoTUITest_MouseDown(At));
+		Slate.ProcessMouseButtonUpEvent(WoTWidgetTest_MouseUp(At));
+		WoTWidgetTest_SettlePopup(Shown);
+	};
+	Open();
+	if (!TestTrue(TEXT("a click opens the list"), Combo->IsOpen()))
+	{
+		return false;
+	}
+	const TSharedPtr<SWidget> Popup = Combo->GetPopupWidget();
+	const TSharedPtr<SWidget> Row = Combo->GetRowWidget(1);
+	if (!TestTrue(TEXT("the open list has rows on screen"), Row.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("rows are at least 48 px tall"),
+		Row->GetCachedGeometry().GetAbsoluteSize().Y >= 47.5f);
+	AddInfo(FString::Printf(TEXT("row height %.1f px"),
+		Row->GetCachedGeometry().GetAbsoluteSize().Y));
+
+	// A press only arms the row; a release within 8 px picks it.
+	const FVector2D RowAt = Shown.ScreenCenter(Row);
+	Slate.ProcessMouseButtonDownEvent(nullptr, WoTUITest_MouseDown(RowAt));
+	TestTrue(TEXT("a press picks nothing"), State->Picks.IsEmpty());
+	TestEqual(TEXT("a press moves no highlight"), Combo->GetHighlightedIndex(), 0);
+	TestFalse(TEXT("a press captures nothing"),
+		Row->HasMouseCapture() || Popup->HasMouseCapture());
+	const FVector2D Near = RowAt + FVector2D(0.0, 3.0);
+	Slate.ProcessMouseMoveEvent(WoTWidgetTest_MouseDrag(Near, RowAt));
+	Slate.ProcessMouseButtonUpEvent(WoTWidgetTest_MouseUp(Near));
+	Shown.Settle();
+	TestEqual(TEXT("a release within 8 px picks the pressed row"), State->Picks,
+		TArray<int32>{1});
+	TestTrue(TEXT("as a click"), State->PickInfos.Num() == 1
+		&& State->PickInfos[0] == ESelectInfo::OnMouseClick);
+	TestFalse(TEXT("and closes the list"), Combo->IsOpen());
+
+	// Past 8 px the press drags the list instead and picks nothing.
+	Open();
+	if (!TestTrue(TEXT("the list reopens"), Combo->IsOpen()))
+	{
+		return false;
+	}
+	const int32 DragRow = WoTWidgetTest_VisibleRow(Combo, Count);
+	if (!TestTrue(TEXT("a row to drag from"), DragRow != INDEX_NONE))
+	{
+		return false;
+	}
+	const float OffsetBefore = Combo->GetScrollOffset();
+	const FVector2D DragFrom = Shown.ScreenCenter(Combo->GetRowWidget(DragRow));
+	Slate.ProcessMouseButtonDownEvent(nullptr, WoTUITest_MouseDown(DragFrom));
+	const FVector2D Small = DragFrom - FVector2D(0.0, 5.0);
+	Slate.ProcessMouseMoveEvent(WoTWidgetTest_MouseDrag(Small, DragFrom));
+	TestFalse(TEXT("under 8 px nothing is captured yet"), Popup->HasMouseCapture());
+	const FVector2D Far = DragFrom - FVector2D(0.0, 60.0);
+	Slate.ProcessMouseMoveEvent(WoTWidgetTest_MouseDrag(Far, Small));
+	TestTrue(TEXT("past 8 px the list takes the drag"), Popup->HasMouseCapture());
+	TestTrue(TEXT("and scrolls with the pointer"), Combo->GetScrollOffset() > OffsetBefore + 0.5f);
+	Slate.ProcessMouseButtonUpEvent(WoTWidgetTest_MouseUp(Far));
+	WoTWidgetTest_SettlePopup(Shown);
+	TestEqual(TEXT("a drag picks nothing"), State->Picks.Num(), 1);
+	TestTrue(TEXT("the list stays open after a drag"), Combo->IsOpen());
+	TestFalse(TEXT("the drag's capture ends with it"), Popup->HasMouseCapture());
+
+	// The wheel scrolls.
+	const float BeforeWheel = Combo->GetScrollOffset();
+	Combo->Close();
+	Open();
+	const float Reopened = Combo->GetScrollOffset();
+	Slate.ProcessMouseWheelOrGestureEvent(
+		WoTWidgetTest_Wheel(Shown.ScreenCenter(Popup), -1.0f), nullptr);
+	WoTWidgetTest_SettlePopup(Shown);
+	AddInfo(FString::Printf(TEXT("offsets: before wheel %.2f, reopened %.2f, after %.2f"),
+		BeforeWheel, Reopened, Combo->GetScrollOffset()));
+	TestTrue(TEXT("the wheel scrolls the list"), Combo->GetScrollOffset() > Reopened);
+	TestTrue(TEXT("the wheel picks nothing and keeps it open"),
+		State->Picks.Num() == 1 && Combo->IsOpen());
+
+	// Touch: a tap picks the row.
+	const int32 TapRow = WoTWidgetTest_VisibleRow(Combo, Count);
+	if (TestTrue(TEXT("a row to tap"), TapRow != INDEX_NONE))
+	{
+		const FVector2D TapAt = Shown.ScreenCenter(Combo->GetRowWidget(TapRow));
+		Slate.ProcessTouchStartedEvent(nullptr, WoTUITest_Touch(TapAt));
+		TestEqual(TEXT("a touch press picks nothing"), State->Picks.Num(), 1);
+		Slate.ProcessTouchEndedEvent(WoTWidgetTest_TouchEnd(TapAt));
+		Shown.Settle();
+		TestTrue(TEXT("a tap picks the tapped row"),
+			State->Picks.Num() == 2 && State->Picks.Last() == TapRow);
+		TestFalse(TEXT("and closes the list"), Combo->IsOpen());
+	}
+
+	// Hover: the pointer draws it, a controller never does.
+	Open();
+	const FTableRowStyle& RowStyle =
+		FCoreStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.Row");
+	const int32 HoverRow =
+		WoTWidgetTest_VisibleRow(Combo, Count, Combo->GetHighlightedIndex());
+	if (TestTrue(TEXT("a row to hover"), HoverRow != INDEX_NONE
+		&& HoverRow != Combo->GetHighlightedIndex()))
+	{
+		const FVector2D Over = Shown.ScreenCenter(Combo->GetRowWidget(HoverRow));
+		// Checked before Slate ticks: a tick's synthetic move would hover
+		// whatever lies under the real OS cursor instead.
+		Slate.ProcessMouseMoveEvent(WoTUITest_MouseMove(Over, Over));
+		TestTrue(TEXT("Pointer mode: the row under the pointer draws hover"),
+			Combo->GetRowBrush(HoverRow) == &RowStyle.EvenRowBackgroundHoveredBrush);
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+		TestTrue(TEXT("Controller mode: no row draws hover"),
+			Combo->GetRowBrush(HoverRow) == &RowStyle.EvenRowBackgroundBrush);
+		TestTrue(TEXT("the highlighted row still draws its highlight"),
+			Combo->GetRowBrush(Combo->GetHighlightedIndex()) == &RowStyle.ActiveHoveredBrush);
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	}
+	Combo->Close();
+	TestFalse(TEXT("Close closes it"), Combo->IsOpen());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsSettingsDropdownSpec,
+	"WoT.FrontEnd.ControllerBack.SettingsDropdown", WoTUITest_Flags)
+
+bool FWoTUIWidgetsSettingsDropdownSpec::RunTest(const FString&)
+{
+	FWoTUITest_Preferences Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady))
+	{
+		return false;
+	}
+	TArray<float> Applied;
+	FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting(
+		[&Applied](float Brightness) { Applied.Add(Brightness); });
+	ON_SCOPE_EXIT { FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+	FWoTUITest_FrontEnd FrontEnd(Authority,
+		WoTUITest_MakeRoot(Authority, nullptr, false, Fixture.Owner), FVector2D(1280.0f, 720.0f));
+	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
+	FSlateApplication& Slate = FSlateApplication::Get();
+	auto OpenHardware = [&Root, &FrontEnd]() -> TSharedPtr<SWoTSettingsScreen>
+	{
+		Root->ActivateMainMenuEntryForTesting(2);
+		FrontEnd.Settle();
+		return Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Hardware
+			? Root->SettingsScreenForTesting() : nullptr;
+	};
+	auto Press = [&FrontEnd](FKey Key)
+	{
+		const bool bHandled = FrontEnd.Press(Key);
+		FrontEnd.Settle();
+		return bHandled;
+	};
+	TSharedPtr<SWoTSettingsScreen> Screen = OpenHardware();
+	if (!TestTrue(TEXT("Hardware is open"), Screen.IsValid()))
+	{
+		return false;
+	}
+	const TArray<FWoTNavRow>& Rows = Screen->NavigationRowsForTesting();
+	if (!TestTrue(TEXT("Hardware's first row is the brightness dropdown"), Rows.Num() > 2
+		&& Rows[0][0].IsValid() && Rows[0][0]->GetType() == FName(TEXT("SWoTListCombo"))))
+	{
+		return false;
+	}
+	TSharedPtr<SWoTListCombo> Brightness = StaticCastSharedPtr<SWoTListCombo>(Rows[0][0]);
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Slate.SetKeyboardFocus(Brightness, EFocusCause::SetDirectly);
+	const float Before = Screen->DraftForTesting().Brightness;
+
+	// Closed: the D-pad passes over it without applying a brightness change.
+	Press(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("D-pad Down moves to the next setting"),
+		Slate.GetKeyboardFocusedWidget() == Rows[1][0]);
+	Press(EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("and Up comes back"), Slate.GetKeyboardFocusedWidget() == Rows[0][0]);
+	TestTrue(TEXT("passing over the closed dropdown applies nothing"),
+		Applied.IsEmpty() && Screen->DraftForTesting().Brightness == Before);
+
+	// B on the open dropdown closes only the dropdown.
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("A opens it"), Brightness->IsOpen());
+	TestEqual(TEXT("the prompt strip shows the dropdown's set"),
+		FWoTButtonPrompt::Describe(Root->ControllerPromptsForTesting()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Dropdown()));
+	Press(EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("moving the highlight applies nothing"), Applied.IsEmpty());
+	TestTrue(TEXT("B is handled"), Press(EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B closes the dropdown"), Brightness->IsOpen());
+	TestTrue(TEXT("and stays on Hardware"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Hardware);
+	TestTrue(TEXT("with nothing applied"), Applied.IsEmpty());
+
+	// Escape on the open dropdown closes only the dropdown; a second backs.
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("reopened"), Brightness->IsOpen());
+	TestTrue(TEXT("Escape is handled"), Press(EKeys::Escape));
+	TestFalse(TEXT("Escape closes the dropdown"), Brightness->IsOpen());
+	TestTrue(TEXT("Escape on an open dropdown keeps the page"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Hardware);
+	TestTrue(TEXT("focus is back on the dropdown"),
+		Slate.GetKeyboardFocusedWidget() == Rows[0][0]);
+	Press(EKeys::Escape);
+	TestTrue(TEXT("a second Escape backs the page"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
+
+	// A picks: the data model and callback are the ones the old list used.
+	Screen = OpenHardware();
+	if (!TestTrue(TEXT("Hardware reopens"), Screen.IsValid()))
+	{
+		return false;
+	}
+	Brightness = StaticCastSharedPtr<SWoTListCombo>(Screen->NavigationRowsForTesting()[0][0]);
+	Slate.SetKeyboardFocus(Brightness, EFocusCause::SetDirectly);
+	const int32 Committed = Brightness->GetHighlightedIndex();
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	const int32 Highlight = Brightness->GetHighlightedIndex();
+	Press(EKeys::Gamepad_DPad_Down);
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	const int32 Expected = (Highlight + 1) % 10;
+	AddInfo(FString::Printf(TEXT("committed %d, highlight %d"), Committed, Highlight));
+	TestEqual(TEXT("A previews the picked brightness"), Applied.Num(), 1);
+	TestTrue(TEXT("the draft takes the picked step"), FMath::IsNearlyEqual(
+		Screen->DraftForTesting().Brightness, static_cast<float>(Expected) / 10.0f));
+	Press(EKeys::Gamepad_FaceButton_Right);
+	TestTrue(TEXT("B on the closed dropdown backs the page"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsVideoKeepSpec,
+	"WoT.FrontEnd.ControllerFocus.VideoStripKeep", WoTUITest_Flags)
+
+bool FWoTUIWidgetsVideoKeepSpec::RunTest(const FString&)
+{
+	FWoTUITest_Preferences Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady))
+	{
+		return false;
+	}
+	FWoTGameSettingsAdapter::SetDisplayProjectionForTesting(
+		[](const FWoTGameSettings&, bool, bool) {});
+	ON_SCOPE_EXIT { FWoTGameSettingsAdapter::SetDisplayProjectionForTesting({}); };
+	FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting([](float) {});
+	ON_SCOPE_EXIT { FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting({}); };
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+	Authority->PrepareBrowserResources();
+	const TSharedRef<SWoTSettingsScreen> Screen = SNew(SWoTSettingsScreen)
+		.Page(EWoTSettingsPage::Hardware)
+		.Preferences(Fixture.Owner)
+		.PresentationAuthority(Authority)
+		.HeadingFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30))
+		.BodyFont(FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 20));
+	FWoTUITest_Window Shown(Screen, FVector2D(1280.0f, 720.0f));
+	FWoTUITest_InputScope Scope(Shown.Window);
+	FSlateApplication& Slate = FSlateApplication::Get();
+	auto Focused = [&Slate]() { return Slate.GetKeyboardFocusedWidget(); };
+	Slate.SetKeyboardFocus(Screen->SaveButtonForTesting(), EFocusCause::SetDirectly);
+	Shown.Settle();
+
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	FWoTGameSettings Draft = Screen->DraftForTesting();
+	Draft.Width = static_cast<uint16>(Draft.Width == 1920 ? 1280 : 1920);
+	Draft.Height = static_cast<uint16>(Draft.Height == 1080 ? 720 : 1080);
+	Screen->SetDraftForTesting(Draft);
+	Screen->SaveForTesting();
+	Shown.Settle();
+	if (!TestTrue(TEXT("Save waits for Keep"), Screen->IsAwaitingVideoConfirmationForTesting()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the strip appears with focus on Keep"), Focused() == Screen->KeepButtonForTesting());
+	TestEqual(TEXT("its prompts are Keep and Revert"),
+		FWoTButtonPrompt::Describe(Screen->ControllerPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::KeepRevert()));
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Right);
+	TestTrue(TEXT("Right moves to Revert"), Focused() == Screen->RevertButtonForTesting());
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("Up cannot leave the strip"), Focused() == Screen->RevertButtonForTesting());
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Left);
+	TestTrue(TEXT("Left returns to Keep"), Focused() == Screen->KeepButtonForTesting());
+
+	// A on Keep keeps the settings and focus is restored to Save.
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestFalse(TEXT("A on Keep closes the strip"), Screen->IsAwaitingVideoConfirmationForTesting());
+	TestEqual(TEXT("the kept width is saved"),
+		static_cast<int32>(Fixture.Owner->GetGameSettings().Width), static_cast<int32>(Draft.Width));
+	TestTrue(TEXT("focus is restored to Save"), Focused() == Screen->SaveButtonForTesting());
+	TestEqual(TEXT("the prompts return to the page's set"),
+		FWoTButtonPrompt::Describe(Screen->ControllerPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Settings()));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsFocusOutlineSpec,
+	"WoT.UI.Widgets.FocusOutline", WoTUITest_Flags)
+
+bool FWoTUIWidgetsFocusOutlineSpec::RunTest(const FString&)
+{
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
+	FSlateApplication& Slate = FSlateApplication::Get();
+	FWoTUITest_ModeGuard ModeGuard;
+	float SliderValue = 0.5f;
+	const TSharedRef<FWoTWidgetTest_ComboState> State = MakeShared<FWoTWidgetTest_ComboState>();
+	const TSharedRef<SWoTListCombo> Combo = WoTWidgetTest_MakeCombo(State, 4);
+	TArray<TSharedPtr<int32>> ListItems = {MakeShared<int32>(0), MakeShared<int32>(1)};
+	TSharedPtr<SWoTMenuButton> MenuButton;
+	TSharedPtr<SButton> Button;
+	TSharedPtr<SCheckBox> Check;
+	TSharedPtr<SEditableTextBox> TextBox;
+	TSharedPtr<SWoTRetailSlider> Slider;
+	TSharedPtr<SListView<TSharedPtr<int32>>> List;
+	TSharedPtr<SWoTFocusOutlineLayer> Layer;
+	auto Row = [](const TSharedRef<SWidget>& Control)
+	{
+		return SNew(SBox).WidthOverride(300.0f).HeightOverride(40.0f)[Control];
+	};
+	FWoTUITest_Window Shown(SAssignNew(Layer, SWoTFocusOutlineLayer)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)
+				[Row(SAssignNew(MenuButton, SWoTMenuButton)[SNew(STextBlock).Text(FText::FromString(TEXT("Menu")))])]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)[Row(SAssignNew(Button, SButton))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)[Row(SAssignNew(Check, SCheckBox))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)[Row(SAssignNew(TextBox, SEditableTextBox))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)
+				[Row(SAssignNew(Slider, SWoTRetailSlider)
+					.Value_Lambda([&SliderValue]() { return SliderValue; }))]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)[Row(Combo)]
+			+ SVerticalBox::Slot().AutoHeight().Padding(8.0f)
+				[Row(SAssignNew(List, SListView<TSharedPtr<int32>>)
+					.ListItemsSource(&ListItems)
+					.OnGenerateRow_Lambda([](TSharedPtr<int32> Item,
+						const TSharedRef<STableViewBase>& OwnerTable) -> TSharedRef<ITableRow>
+					{
+						return SNew(STableRow<TSharedPtr<int32>>, OwnerTable)
+							[SNew(STextBlock).Text(FText::AsNumber(Item.IsValid() ? *Item : 0))];
+					}))]
+		]);
+	struct FCase
+	{
+		const TCHAR* Type;
+		TSharedPtr<SWidget> Control;
+	};
+	const TArray<FCase> Cases = {
+		{TEXT("menu button"), MenuButton},
+		{TEXT("button"), Button},
+		{TEXT("check box"), Check},
+		{TEXT("text box"), TextBox},
+		{TEXT("slider"), Slider},
+		{TEXT("dropdown"), StaticCastSharedRef<SWidget>(Combo)},
+		{TEXT("list"), List},
+	};
+	for (const FCase& Case : Cases)
+	{
+		Slate.SetKeyboardFocus(Case.Control, EFocusCause::Navigation);
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+		Shown.Settle();
+		TestFalse(FString::Printf(TEXT("Pointer mode: no outline on the %s"), Case.Type),
+			Layer->GetOutlinedWidget().IsValid());
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+		Shown.Settle();
+		TestTrue(FString::Printf(TEXT("Controller mode: the %s wears the outline"), Case.Type),
+			Layer->GetOutlinedWidget() == Case.Control);
+	}
+	Slate.SetKeyboardFocus(TextBox, EFocusCause::Navigation);
+	const TSharedPtr<SWidget> TextFocus = Slate.GetKeyboardFocusedWidget();
+	AddInfo(FString::Printf(TEXT("text box focus lands on %s"),
+		TextFocus.IsValid() ? *TextFocus->GetType().ToString() : TEXT("<none>")));
+	TestTrue(TEXT("a text box's outline surrounds the box, not its inner text"),
+		Layer->FindOutlineTarget(TextFocus) == TextBox);
+	TestTrue(TEXT("Controller mode replaces Slate's own dashed focus rectangle"),
+		Layer->OnQueryShowFocus(EFocusCause::Navigation) == TOptional<bool>(false));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	TestFalse(TEXT("Pointer mode leaves Slate's focus look as it was"),
+		Layer->OnQueryShowFocus(EFocusCause::Navigation).IsSet());
+
+	// The open dropdown draws its own focus state on the highlighted row.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Slate.SetKeyboardFocus(Combo, EFocusCause::Navigation);
+	Combo->Open();
+	WoTWidgetTest_SettlePopup(Shown);
+	TestTrue(TEXT("the open list holds focus"),
+		Combo->IsOpen() && Slate.GetKeyboardFocusedWidget() == Combo->GetPopupWidget());
+	TestFalse(TEXT("the layer draws no outline around the open list"),
+		Layer->GetOutlinedWidget().IsValid());
+	Combo->Close();
+	Shown.Settle();
+	TestTrue(TEXT("closing it outlines the dropdown again"), Layer->GetOutlinedWidget() == Combo);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsPromptStripSpec,
+	"WoT.UI.ButtonPrompts.Strip", WoTUITest_Flags)
+
+bool FWoTUIWidgetsPromptStripSpec::RunTest(const FString&)
+{
+	FWoTUITest_ModeGuard ModeGuard;
+	TArray<FWoTButtonPrompt> Bound = FWoTButtonPromptSets::Settings();
+	TSharedPtr<SWoTButtonPrompts> Strip;
+	FWoTUITest_Window Shown(SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SAssignNew(Strip, SWoTButtonPrompts)
+			.Prompts_Lambda([&Bound]() { return Bound; })
+		]);
+	TestTrue(TEXT("Pointer mode shows no prompts"), Strip->GetShownPrompts().IsEmpty());
+	TestFalse(TEXT("Pointer mode collapses the strip"), Strip->GetVisibility().IsVisible());
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Shown.Settle();
+	TestEqual(TEXT("Controller mode shows the bound set"),
+		FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+		FString(TEXT("A Select | B Back | D-pad Left/Right Adjust")));
+	TestTrue(TEXT("visible, and never in the pointer's way"),
+		Strip->GetVisibility() == EVisibility::HitTestInvisible);
+	TestTrue(TEXT("it takes room"), Strip->GetCachedGeometry().GetLocalSize().Y > 0.0f);
+	Bound = FWoTButtonPromptSets::Dropdown();
+	Shown.Settle();
+	TestEqual(TEXT("it follows the window's set"),
+		FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Dropdown()));
+	// Every glyph draws (they are Slate shapes, not textures).
+	Bound = {
+		{EWoTPromptButton::A, FText::FromString(TEXT("a"))},
+		{EWoTPromptButton::B, FText::FromString(TEXT("b"))},
+		{EWoTPromptButton::X, FText::FromString(TEXT("x"))},
+		{EWoTPromptButton::Y, FText::FromString(TEXT("y"))},
+		{EWoTPromptButton::View, FText::FromString(TEXT("view"))},
+		{EWoTPromptButton::Menu, FText::FromString(TEXT("menu"))},
+		{EWoTPromptButton::DPadLeftRight, FText::FromString(TEXT("pad"))},
+		{EWoTPromptButton::DPadUp, FText::FromString(TEXT("up"))}};
+	Shown.Settle();
+	TestEqual(TEXT("at most six prompts show"), Strip->GetShownPrompts().Num(),
+		SWoTButtonPrompts::MaxPrompts);
+	Bound = {{EWoTPromptButton::DPadUp, FText::FromString(TEXT("up"))},
+		{EWoTPromptButton::Menu, FText::FromString(TEXT("menu"))}};
+	Shown.Settle();
+	TestEqual(TEXT("the other glyphs draw too"), Strip->GetShownPrompts().Num(), 2);
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	Shown.Settle();
+	TestTrue(TEXT("back in Pointer mode the strip is gone"),
+		Strip->GetShownPrompts().IsEmpty() && !Strip->GetVisibility().IsVisible());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsPromptWindowsSpec,
+	"WoT.FrontEnd.ButtonPrompts.Windows", WoTUITest_Flags)
+
+bool FWoTUIWidgetsPromptWindowsSpec::RunTest(const FString&)
+{
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+	FWoTUITest_FrontEnd FrontEnd(Authority,
+		WoTUITest_MakeRoot(Authority, nullptr, /*bShowDisclosure*/ true),
+		FVector2D(1280.0f, 720.0f));
+	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
+	const TSharedPtr<SWoTButtonPrompts> Strip = Root->ButtonPromptsForTesting();
+	if (!TestTrue(TEXT("the front end has a prompt strip"), Strip.IsValid()))
+	{
+		return false;
+	}
+	auto Expect = [this, &FrontEnd, &Strip](const TCHAR* Window,
+		const TArray<FWoTButtonPrompt>& Set)
+	{
+		FrontEnd.Settle();
+		TestEqual(FString::Printf(TEXT("%s: its prompts"), Window),
+			FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+			FWoTButtonPrompt::Describe(Set));
+		TestTrue(FString::Printf(TEXT("%s: the strip shows"), Window),
+			Strip->GetVisibility().IsVisible());
+	};
+	auto ExpectHidden = [this, &FrontEnd, &Strip](const TCHAR* Window)
+	{
+		FrontEnd.Settle();
+		TestTrue(FString::Printf(TEXT("%s, Pointer mode: no strip"), Window),
+			Strip->GetShownPrompts().IsEmpty() && !Strip->GetVisibility().IsVisible());
+	};
+
+	ExpectHidden(TEXT("Main"));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Expect(TEXT("Main"), FWoTButtonPromptSets::Select());
+	Root->ShowUpdateFailedNoticeForFocusTesting();
+	Expect(TEXT("the update-failed notice"), FWoTButtonPromptSets::Notice());
+	Root->ContinueUpdateFailedForTesting();
+	FrontEnd.Settle();
+
+	Root->ActivateMainMenuEntryForTesting(0);
+	Expect(TEXT("the online disclosure"),
+		FWoTButtonPromptSets::Overlay(FText::FromString(TEXT("Cancel"))));
+	Root->CancelOnlineDisclosureForTesting();
+	Expect(TEXT("Play"), FWoTButtonPromptSets::SelectBack());
+	if (const TSharedPtr<SWoTListCombo> MapList = Root->MapListComboForTesting())
+	{
+		MapList->Open();
+		FrontEnd.Settle();
+		Expect(TEXT("the open map list"), FWoTButtonPromptSets::Dropdown());
+		MapList->Close();
+	}
+	Root->SetKeychainAccessForTesting(EWoTKeychainAccess::WillPrompt);
+	Root->SetInternetModeForTesting();
+	Root->RefreshSessionsForTesting();
+	FrontEnd.Settle();
+	if (Root->IsKeychainHeadsUpVisibleForTesting())
+	{
+		Expect(TEXT("the keychain heads-up"),
+			FWoTButtonPromptSets::Overlay(FText::FromString(TEXT("Not Now"))));
+		Root->CancelKeychainHeadsUpForTesting();
+	}
+	Root->SetKeychainAccessForTesting({});
+	Root->OpenPlayerConfigForTesting();
+	Expect(TEXT("Player"), FWoTButtonPromptSets::SelectBack());
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	ExpectHidden(TEXT("Player"));
+
+	FrontEnd.Press(EKeys::Escape);
+	FrontEnd.Press(EKeys::Escape);
+	Root->ActivateMainMenuEntryForTesting(1);
+	FrontEnd.Settle();
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Expect(TEXT("Controls"), FWoTButtonPromptSets::Settings());
+	if (const TSharedPtr<SWoTSettingsScreen> Controls = Root->SettingsScreenForTesting())
+	{
+		Controls->BeginCaptureForTesting(EWoTManagedBinding::Jump, EWoTBindingSlot::Primary);
+		Expect(TEXT("a key capture"), FWoTButtonPromptSets::Capture());
+		FrontEnd.Press(EKeys::Gamepad_FaceButton_Right);
+	}
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	ExpectHidden(TEXT("Controls"));
+
+	{
+		// Help: B Close.
+		FWoTHelpContent Content;
+		Content.Title = TEXT("Help");
+		const TSharedRef<SWoTHelpOverlay> Help = SNew(SWoTHelpOverlay)
+			.Content(Content)
+			.RequiredFontsForTesting(WoTUITest_Fonts());
+		FWoTUITest_Window Shown(Help);
+		TestTrue(TEXT("Help, Pointer mode: no strip"),
+			Help->ButtonPromptsForTesting()->GetShownPrompts().IsEmpty());
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+		Shown.Settle();
+		TestEqual(TEXT("Help: its prompts"),
+			FWoTButtonPrompt::Describe(Help->ButtonPromptsForTesting()->GetShownPrompts()),
+			FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Close()));
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	}
+	{
+		// The bootstrap screen: A Select.
+		const TSharedRef<SWoTBootstrapScreen> Bootstrap = SNew(SWoTBootstrapScreen)
+			.Snapshot(FWoTBootstrapSnapshot());
+		FWoTUITest_Window Shown(Bootstrap);
+		TestTrue(TEXT("Bootstrap, Pointer mode: no strip"),
+			Bootstrap->ButtonPromptsForTesting()->GetShownPrompts().IsEmpty());
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+		Shown.Settle();
+		TestEqual(TEXT("Bootstrap: its prompts"),
+			FWoTButtonPrompt::Describe(Bootstrap->ButtonPromptsForTesting()->GetShownPrompts()),
+			FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Select()));
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsInGamePromptsSpec,
+	"WoT.UI.ButtonPrompts.InGameMenu", WoTUITest_Flags)
+
+bool FWoTUIWidgetsInGamePromptsSpec::RunTest(const FString&)
+{
+	FWoTUITest_ModeGuard ModeGuard;
+	UWorld* World = WoTUITest_CreateWorld();
+	if (!TestNotNull(TEXT("world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTUITest_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	// Real settings, so the Hardware page has its dropdowns.
+	FWoTUITest_Preferences Fixture;
+	const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+		.PlayerController(Controller)
+		.Preferences(Fixture.bReady ? Fixture.Owner : nullptr)
+		.RequiredFontsForTesting(WoTUITest_Fonts());
+	FWoTUITest_Window Shown(Overlay);
+	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1024.0f, 768.0f), FSlateLayoutTransform()),
+		0.0, 0.0f);
+	Shown.Settle();
+	const TSharedPtr<SWoTButtonPrompts> Strip = Overlay->ButtonPromptsForTesting();
+	if (!TestTrue(TEXT("the game menu has a prompt strip"), Strip.IsValid()))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Pointer mode: no strip"), Strip->GetShownPrompts().IsEmpty());
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Shown.Settle();
+	TestEqual(TEXT("the game menu: A Select, B Back"),
+		FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::SelectBack()));
+	Overlay->OpenSettingsForTesting(EWoTSettingsPage::Controls);
+	Shown.Settle();
+	TestEqual(TEXT("its settings page: the settings set"),
+		FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Settings()));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	Shown.Settle();
+	TestTrue(TEXT("back in Pointer mode: no strip"), Strip->GetShownPrompts().IsEmpty());
+
+	// Escape on an open dropdown in the game menu closes only the dropdown;
+	// a second Escape leaves the page as before (spec r3 [N1]).
+	FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting([](float) {});
+	ON_SCOPE_EXIT { FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting({}); };
+	Overlay->OpenSettingsForTesting(EWoTSettingsPage::Hardware);
+	Shown.Settle();
+	const TSharedPtr<SWoTSettingsScreen> Hardware = Overlay->SettingsScreenForTesting();
+	const TSharedPtr<SWidget> First = Hardware.IsValid()
+		&& !Hardware->NavigationRowsForTesting().IsEmpty()
+		? Hardware->NavigationRowsForTesting()[0][0] : nullptr;
+	if (!TestTrue(TEXT("the game menu's Hardware page starts with its brightness dropdown"),
+		First.IsValid() && First->GetType() == FName(TEXT("SWoTListCombo"))))
+	{
+		return false;
+	}
+	const TSharedRef<SWoTListCombo> Dropdown = StaticCastSharedRef<SWoTListCombo>(First.ToSharedRef());
+	FSlateApplication& Slate = FSlateApplication::Get();
+	Slate.SetKeyboardFocus(Dropdown, EFocusCause::SetDirectly);
+	Dropdown->Open();
+	WoTWidgetTest_SettlePopup(Shown);
+	TestTrue(TEXT("the game menu's dropdown opens"), Dropdown->IsOpen());
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	TestEqual(TEXT("the game menu's strip shows the dropdown's set"),
+		FWoTButtonPrompt::Describe(Strip->GetShownPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::Dropdown()));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	TestTrue(TEXT("Escape is handled"), WoTWidgetTest_Press(Shown, EKeys::Escape));
+	TestFalse(TEXT("Escape closes the dropdown"), Dropdown->IsOpen());
+	TestTrue(TEXT("and stays on the page"), Overlay->SettingsScreenForTesting().IsValid());
+	WoTWidgetTest_Press(Shown, EKeys::Escape);
+	TestTrue(TEXT("a second Escape leaves the page"), Overlay->IsShowingMainMenuForTesting());
 	return !HasAnyErrors();
 }
 

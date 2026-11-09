@@ -602,8 +602,14 @@ public:
 	// The knob's left edge for the current value: flush with the left cap at
 	// the first stop and flush with the right cap at the last.
 	float KnobLeft(float AllottedWidth) const;
+	// All four arrows, Home and End step it for the keyboard; D-pad Left and
+	// Right step it too, and D-pad Up/Down move focus (spec r3 section 2).
 	virtual FReply OnKeyDown(
 		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	// Left/Right navigation from a controller (the stick, held-D-pad repeats)
+	// steps the slider instead of moving focus.
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
 	virtual FReply OnMouseButtonDown(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(

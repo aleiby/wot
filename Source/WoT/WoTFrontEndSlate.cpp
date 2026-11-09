@@ -15,6 +15,7 @@
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SWrapBox.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/SOverlay.h"
@@ -34,12 +35,16 @@
 #include "WoTSessionSubsystem.h"
 #include "Online/WoTLocalNetworkAccess.h"
 #include "Settings/WoTSettingsSlate.h"
+#include "UI/SWoTFocusOutline.h"
+#include "UI/SWoTListCombo.h"
 #include "UI/WoTBackStack.h"
 #include "UI/WoTControllerUIInput.h"
 #include "UI/WoTMenuNavigation.h"
 
 // Escape's per-window back path. B and View go through the back stack
-// (FWoTBackStack) since controller sub-project 3; Escape keeps this path.
+// (FWoTBackStack) since controller sub-project 3; Escape keeps this path,
+// except that with a dropdown open it closes only the dropdown (owner ruling
+// 2026-11-08, spec r3 [N1]).
 class FWoTFrontEndBackInputProcessor final : public IInputProcessor
 {
 public:
@@ -85,6 +90,11 @@ public:
 		}
 		if (!bInsideRootWindowFamily) return false;
 
+		// An open dropdown closes first; a second Escape backs the screen.
+		if (SWoTListCombo::CloseOpenWithin(PinnedRoot.ToSharedRef()))
+		{
+			return true;
+		}
 		SlateApp.DismissAllMenus();
 		return PinnedRoot->HandleBackInput().IsEventHandled();
 	}
@@ -257,11 +267,31 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 		}
 	}
 
+	// The focus outline layer draws the controller focus outline on every
+	// screen; the prompt strip under the screens shows only in Controller
+	// mode, so keyboard and mouse players see every screen as before.
 	ChildSlot
 	[
-		SAssignNew(ScreenHost, SBox)
-		.HAlign(HAlign_Fill)
-		.VAlign(VAlign_Fill)
+		SAssignNew(FocusOutlineLayer, SWoTFocusOutlineLayer)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.FillHeight(1.0f)
+			[
+				SAssignNew(ScreenHost, SBox)
+				.HAlign(HAlign_Fill)
+				.VAlign(VAlign_Fill)
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.HAlign(HAlign_Right)
+			.Padding(FMargin(24.0f, 0.0f, 28.0f, 10.0f))
+			[
+				SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+				.Prompts(this, &SWoTFrontEndRoot::ControllerPrompts)
+				.Font(this, &SWoTFrontEndRoot::PromptFont)
+			]
+		]
 	];
 	// The front end is a modal surface: a controller hides the pointer.
 	CursorLease = FWoTControllerUIInput::AcquireCursorLease();
@@ -406,6 +436,65 @@ bool SWoTFrontEndRoot::HandleControllerBack()
 	}
 	return HandleBackInput().IsEventHandled();
 }
+
+TArray<FWoTButtonPrompt> SWoTFrontEndRoot::ControllerPrompts() const
+{
+	if (!IsPresentationReady())
+	{
+		return {};
+	}
+	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
+	{
+		return FWoTButtonPromptSets::Dropdown();
+	}
+	switch (ViewModel.GetScreen())
+	{
+	case EWoTFrontEndScreen::Play:
+		if (IsPasswordPromptVisible())
+		{
+			return FWoTButtonPromptSets::Password();
+		}
+		if (PendingKeychainAction != EKeychainAction::None
+			|| PendingLocalNetworkAction != ELocalNetworkAction::None)
+		{
+			return FWoTButtonPromptSets::Overlay(
+				WoTFrontEndSlate_Text(TEXT("Not Now")));
+		}
+		if (bShowLocalNetworkNotice)
+		{
+			return FWoTButtonPromptSets::Overlay(WoTFrontEndSlate_Text(TEXT("OK")));
+		}
+		if (bShowOnlineDisclosure)
+		{
+			return FWoTButtonPromptSets::Overlay(WoTFrontEndSlate_Text(TEXT("Cancel")));
+		}
+		return FWoTButtonPromptSets::SelectBack();
+	case EWoTFrontEndScreen::PlayerConfig:
+		return FWoTButtonPromptSets::SelectBack();
+	case EWoTFrontEndScreen::Controls:
+	case EWoTFrontEndScreen::Hardware:
+		return ActiveSettingsScreen.IsValid()
+			? ActiveSettingsScreen->ControllerPrompts() : FWoTButtonPromptSets::Settings();
+	case EWoTFrontEndScreen::Main:
+	default:
+		return bShowReleaseNotesNotice || bShowUpdateFailedNotice
+			? FWoTButtonPromptSets::Notice() : FWoTButtonPromptSets::Select();
+	}
+}
+
+FSlateFontInfo SWoTFrontEndRoot::PromptFont() const
+{
+	// Never an empty face: that would draw Slate's last-resort font.
+	return IsPresentationReady() ? LargeBodyFont()
+		: FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+}
+
+#if WITH_AUTOMATION_TESTS
+TSharedPtr<SWidget> SWoTFrontEndRoot::MapComboBoxForTesting() const
+{
+	return MapComboBox;
+}
+#endif
 
 bool SWoTFrontEndRoot::IsPasswordPromptVisible() const
 {
@@ -704,6 +793,11 @@ FReply SWoTFrontEndRoot::OnPreviewKeyDown(
 	// Escape only: B and View reach the screen through the back stack.
 	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		// An open dropdown closes first (spec r3 [N1]).
+		if (SWoTListCombo::CloseOpenWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
 		return HandleBackInput();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
@@ -1776,15 +1870,29 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 	Panel->AddSlot().AutoSize().Padding(0.0f, 0.0f, 0.0f, 5.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[1]")),
-			HostControl(SAssignNew(MapComboBox, SComboBox<FMapItem>)
+			// The touch-friendly list (spec r3 section 2): D-pad Up/Down move
+			// focus off it while closed, never the selected map.
+			HostControl(SAssignNew(MapComboBox, SWoTListCombo)
 			.ComboBoxStyle(FWoTMenuStyle::Get().ComboBoxStyle())
+			// The live frame brush: the combo style holds a copy of it that
+			// is not rebound when the menu textures are.
+			.MenuBorderBrush(FWoTMenuStyle::Get().Frame())
 			.ItemStyle(FWoTMenuStyle::Get().TableRowStyle())
 			.ScrollBarStyle(FWoTMenuStyle::Get().ScrollBarStyle())
 			.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-			.OptionsSource(&MapItems)
-			.InitiallySelectedItem(SelectedMapItem)
-			.OnGenerateWidget(this, &SWoTFrontEndRoot::GenerateMapWidget)
-			.OnSelectionChanged(this, &SWoTFrontEndRoot::SelectMap)
+			.NumItems_Lambda([this]() { return MapItems.Num(); })
+			.SelectedIndex_Lambda([this]() { return MapItems.IndexOfByKey(SelectedMapItem); })
+			.OnGenerateItem_Lambda([this](int32 Index)
+			{
+				return GenerateMapWidget(MapItems.IsValidIndex(Index) ? MapItems[Index] : FMapItem());
+			})
+			.OnPicked_Lambda([this](int32 Index, ESelectInfo::Type SelectInfo)
+			{
+				if (MapItems.IsValidIndex(Index))
+				{
+					SelectMap(MapItems[Index], SelectInfo);
+				}
+			})
 			[
 				SNew(STextBlock)
 				.Text(this, &SWoTFrontEndRoot::SelectedMapText)

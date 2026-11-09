@@ -9,6 +9,7 @@ class FWoTCursorLease;
 class SButton;
 class SProgressBar;
 class STextBlock;
+class SWoTButtonPrompts;
 
 #ifndef WOT_BOOTSTRAP_TEST_IDENTITIES
 #define WOT_BOOTSTRAP_TEST_IDENTITIES 0
@@ -62,6 +63,8 @@ public:
 	TSharedPtr<SWidget> ExitWidgetForTesting() const;
 	TSharedPtr<SWidget> BrowseInstallerWidgetForTesting() const;
 	TSharedPtr<SWidget> GetOriginalGameWidgetForTesting() const;
+	/** The controller prompt strip (A Select). */
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
 #if WITH_AUTOMATION_TESTS
 	FReply BrowseInstallerForTesting() { return BrowseInstaller(); }
 	FReply GetOriginalGameForTesting() { return GetOriginalGame(); }
@@ -91,6 +94,7 @@ private:
 	TSharedPtr<SButton> BrowseInstallerButton;
 	TSharedPtr<SButton> GetOriginalGameButton;
 	TSharedPtr<STextBlock> TitleText;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	TSharedPtr<SProgressBar> ProgressBar;
 	// The backdrop behind everything: the saved blurred main-menu scene, else
 	// the shipped default, else the generated gradient (WoTSetupBackdrop).

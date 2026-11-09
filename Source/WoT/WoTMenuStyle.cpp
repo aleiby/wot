@@ -2469,7 +2469,35 @@ FReply SWoTRetailSlider::OnKeyDown(
 		CommitCell(Positions);
 		return FReply::Handled();
 	}
+	// D-pad Left/Right step by the keyboard's step, one stop. On a two-column
+	// screen they would otherwise switch columns (spec r3 section 2).
+	if (Key == EKeys::Gamepad_DPad_Left)
+	{
+		CommitCell(ValueCell() - 1);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Gamepad_DPad_Right)
+	{
+		CommitCell(ValueCell() + 1);
+		return FReply::Handled();
+	}
+	// D-pad Up/Down navigate as usual.
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+FNavigationReply SWoTRetailSlider::OnNavigation(
+	const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent)
+{
+	if (InNavigationEvent.GetNavigationGenesis() == ENavigationGenesis::Controller)
+	{
+		const EUINavigation Direction = InNavigationEvent.GetNavigationType();
+		if (Direction == EUINavigation::Left || Direction == EUINavigation::Right)
+		{
+			CommitCell(ValueCell() + (Direction == EUINavigation::Right ? 1 : -1));
+			return FNavigationReply::Stop();
+		}
+	}
+	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
 }
 
 FReply SWoTRetailSlider::OnMouseButtonDown(

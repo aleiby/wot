@@ -31,6 +31,8 @@
 #include "WoTFactionCharacters.h"
 #include "WoTRetailText.h"
 #include "Settings/WoTSettingsSlate.h"
+#include "UI/SWoTFocusOutline.h"
+#include "UI/SWoTListCombo.h"
 #include "UI/WoTBackStack.h"
 #include "UI/WoTControllerUIInput.h"
 #include "GameFramework/PlayerState.h"
@@ -319,8 +321,12 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
 		[this]() { return BackOneLevel(); });
 
+	// The focus outline layer draws the controller focus outline on every
+	// page; the prompt strip shows in Controller mode only.
 	ChildSlot
 	[
+		SNew(SWoTFocusOutlineLayer)
+		[
 		SNew(SOverlay)
 		.Visibility_Lambda([this]()
 		{
@@ -332,6 +338,15 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 			SNew(SImage)
 			.Image(FWoTMenuStyle::Get().Blackout())
 			.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.72f))
+		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(this, &SWoTInGameMenuOverlay::ControllerPrompts)
+			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
 		]
 		+ SOverlay::Slot()
 		.HAlign(HAlign_Center)
@@ -356,6 +371,7 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 					SAssignNew(ContentHost, SBox)
 				]
 			]
+		]
 		]
 		]
 	];
@@ -805,6 +821,19 @@ void SWoTInGameMenuOverlay::Tick(
 	}
 }
 
+TArray<FWoTButtonPrompt> SWoTInGameMenuOverlay::ControllerPrompts() const
+{
+	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
+	{
+		return FWoTButtonPromptSets::Dropdown();
+	}
+	if (ActiveSettingsScreen.IsValid())
+	{
+		return ActiveSettingsScreen->ControllerPrompts();
+	}
+	return FWoTButtonPromptSets::SelectBack();
+}
+
 TSharedPtr<SWidget> SWoTInGameMenuOverlay::InitialFocusWidget() const
 {
 	return ResumeButton;
@@ -833,6 +862,11 @@ FReply SWoTInGameMenuOverlay::OnKeyDown(
 	// Escape keeps its own path; B and View arrive through the back stack.
 	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		// An open dropdown closes first (spec r3 [N1]).
+		if (SWoTListCombo::CloseOpenWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
 		if (CanInteract())
 		{
 			return Resume();
@@ -862,7 +896,12 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 	}
 	if (Key == EKeys::Escape)
 	{
-		BackOneLevel();
+		// With a dropdown open, Escape closes only the dropdown; a second
+		// Escape backs out as before (owner ruling 2026-11-08, spec r3 [N1]).
+		if (!SWoTListCombo::CloseOpenWithin(AsShared()))
+		{
+			BackOneLevel();
+		}
 		return FReply::Handled();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
@@ -1463,6 +1502,16 @@ void SWoTHelpOverlay::Construct(const FArguments& InArgs)
 					]
 				]
 			]
+		]
+		// Controller mode only: B closes Help (spec r3 section 1a).
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(FWoTButtonPromptSets::Close())
+			.Font_Lambda([this]() { return FontForIndex(3); })
 		]
 	];
 }

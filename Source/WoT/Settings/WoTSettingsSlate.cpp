@@ -3,7 +3,6 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SCheckBox.h"
-#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -12,6 +11,8 @@
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
+#include "../UI/SWoTFocusOutline.h"
+#include "../UI/SWoTListCombo.h"
 #include "../UI/WoTBackStack.h"
 #include "../UI/WoTControllerUIInput.h"
 #include "../UI/WoTMenuNavigation.h"
@@ -80,6 +81,9 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 		Confirmed = FWoTGameSettings::Defaults();
 	}
 	Draft = Confirmed;
+	// The page itself holds focus only during a key capture; the binding's
+	// "Press a key..." is the cue, so no outline is drawn around the page.
+	AddMetadata<FWoTSelfDrawnFocusMetaData>(MakeShared<FWoTSelfDrawnFocusMetaData>());
 
 	const FText Title = Retail(Page == EWoTSettingsPage::Controls
 		? TEXT("menuOptions.MenuTitle") : TEXT("menuConfiguration.MenuTitle"));
@@ -241,6 +245,23 @@ TSharedPtr<SWidget> SWoTSettingsScreen::InitialControllerFocusWidget() const
 {
 	return !NavigationRows.IsEmpty() && !NavigationRows[0].IsEmpty()
 		? NavigationRows[0][0] : SaveButton;
+}
+
+TArray<FWoTButtonPrompt> SWoTSettingsScreen::ControllerPrompts() const
+{
+	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
+	{
+		return FWoTButtonPromptSets::Dropdown();
+	}
+	if (IsCapturingBinding())
+	{
+		return FWoTButtonPromptSets::Capture();
+	}
+	if (VideoConfirmDeadline > 0.0)
+	{
+		return FWoTButtonPromptSets::KeepRevert();
+	}
+	return FWoTButtonPromptSets::Settings();
 }
 
 void SWoTSettingsScreen::FocusSaveAfterStrip(bool bAlways)
@@ -719,26 +740,33 @@ void SWoTSettingsScreen::BuildHardwareBody()
 			TEXT("Display brightness: %d of 10"), Step + 1)));
 	}
 
+	// The shared dropdown: the touch-friendly list (spec r3 section 2). D-pad
+	// Up/Down move focus off it while closed and never change the value, so
+	// a controller can no longer apply a brightness change by passing over it.
 	auto MakeCombo = [this, &Style](TArray<TSharedPtr<FString>>* Items,
-		TFunction<int32()> Selected, TFunction<void(int32)> Commit)
+		TFunction<int32()> Selected, TFunction<void(int32)> Commit) -> TSharedRef<SWidget>
 	{
-		return SNew(SComboBox<TSharedPtr<FString>>)
+		return SNew(SWoTListCombo)
 			.ComboBoxStyle(Style.ComboBoxStyle())
+			// The live frame brush: the combo style holds a copy of it that
+			// is not rebound when the menu textures are.
+			.MenuBorderBrush(Style.Frame())
 			.ItemStyle(Style.TableRowStyle())
 			.ScrollBarStyle(Style.ScrollBarStyle())
 			.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-			.OptionsSource(Items)
-			.InitiallySelectedItem(Items->IsValidIndex(Selected()) ? (*Items)[Selected()] : nullptr)
-			.OnGenerateWidget_Lambda([this](TSharedPtr<FString> Item)
+			.NumItems_Lambda([Items]() { return Items->Num(); })
+			.SelectedIndex_Lambda([Selected]() { return Selected(); })
+			.OnGenerateItem_Lambda([this, Items](int32 Index) -> TSharedRef<SWidget>
 			{
+				const TSharedPtr<FString> Item =
+					Items->IsValidIndex(Index) ? (*Items)[Index] : nullptr;
 				return SNew(STextBlock)
 					.Text(FText::FromString(Item.IsValid() ? *Item : FString()))
 					.Font(this, &SWoTSettingsScreen::Body);
 			})
-			.OnSelectionChanged_Lambda([Items, Commit](TSharedPtr<FString> Item, ESelectInfo::Type)
+			.OnPicked_Lambda([Items, Commit](int32 Index, ESelectInfo::Type)
 			{
-				const int32 Index = Items->IndexOfByKey(Item);
-				if (Index != INDEX_NONE) Commit(Index);
+				if (Items->IsValidIndex(Index)) Commit(Index);
 			})
 			[
 				SNew(STextBlock)
@@ -1005,6 +1033,9 @@ FReply SWoTSettingsScreen::KeepVideo()
 	if (CommitDraft())
 	{
 		bVideoPreviewLive = false;
+		// The strip collapses: focus on Keep or Revert returns to Save. Before
+		// OnSaved, which may leave the page.
+		FocusSaveAfterStrip(/*bAlways*/ false);
 		OnSaved.ExecuteIfBound();
 		return FReply::Handled();
 	}
