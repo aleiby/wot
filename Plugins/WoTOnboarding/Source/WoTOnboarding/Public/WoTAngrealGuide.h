@@ -16,7 +16,7 @@ struct WOTONBOARDING_API FWoTAngrealGuideRow
 {
 	GENERATED_BODY()
 
-	/** Shipped script class name — the row key, and the retail localization
+	/** Shipped script class name: the row key, and the retail localization
 	    section its display text resolves from. */
 	UPROPERTY(EditAnywhere, Category = "WoT|Guide")
 	FName ClassName;
@@ -70,7 +70,7 @@ public:
 	const FWoTAngrealGuideRow* FindByClassName(FName ClassName) const;
 
 	/** The row whose resolved title is the longest one contained in Text
-	    (case-insensitive) — death-recap resolution. ResolveTitle supplies
+	    (case-insensitive), for death-recap resolution. ResolveTitle supplies
 	    each row's runtime display title, normally through the retail-text
 	    seam; a row resolving empty never matches (titles are runtime data and
 	    may be absent). Ties keep the earliest row. Null when nothing matches. */
@@ -86,7 +86,7 @@ public:
 	static UWoTAngrealGuide* Load();
 
 #if WITH_EDITOR
-	/** Replace Rows from the importer's JSON payload — {"rows": [{...}]}
+	/** Replace Rows from the importer's JSON payload, {"rows": [{...}]}
 	    with keys class_name, cpp_class, elements, rarity, roles,
 	    max_initial_charges, max_charges, counters, hint_text; empty strings
 	    fold to NAME_None for the name fields. Returns the empty string on

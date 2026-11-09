@@ -167,7 +167,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideAssetLoadSpec,
 bool FWoTOnboardingGuideAssetLoadSpec::RunTest(const FString&)
 {
 	// Skip semantics: a tree whose import pipeline has not run carries no
-	// guide package, and Load() answers null quietly. That is a pass — the
+	// guide package, and Load() answers null quietly. That is a pass: the
 	// spec pins the asset only where it exists.
 	UWoTAngrealGuide* Guide = UWoTAngrealGuide::Load();
 	if (!Guide)

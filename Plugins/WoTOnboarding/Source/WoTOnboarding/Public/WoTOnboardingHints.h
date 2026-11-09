@@ -33,7 +33,7 @@ namespace WoTOnboardingHints
 	    row carries no hint or its template wants a {counter} and nothing
 	    counters the row (Balefire's template carries no {counter} and always
 	    renders). ResolveTitle supplies display titles; a title resolving
-	    empty falls back to SpacedClassName — never placeholder text. */
+	    empty falls back to SpacedClassName, never placeholder text. */
 	WOTONBOARDING_API FString ResolveHintLine(const UWoTAngrealGuide& Guide,
 		const FWoTAngrealGuideRow& Row,
 		TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle);

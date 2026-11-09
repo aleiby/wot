@@ -274,7 +274,7 @@ bool FWoTOnboardingBrowserRealAssetSpec::RunTest(const FString&)
 		return true;
 	}
 	// The default seam resolver: whatever retail text this box resolves is
-	// drawn, and whatever does not resolve falls back to facts-only — both
+	// drawn, and whatever does not resolve falls back to facts-only. Both
 	// are correct renders, so the spec asserts structure, never prose.
 	const TSharedRef<SWoTGuideBrowser> Browser =
 		SNew(SWoTGuideBrowser).Guide(Guide);

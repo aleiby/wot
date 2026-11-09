@@ -12,7 +12,7 @@ class SVerticalBox;
 // The angreal field-guide browser (plan Task 5): a list pane of guide rows
 // grouped by rarity and a detail pane whose Title, Description and Quote are
 // the purchaser's retail text, resolved at runtime through the onboarding
-// retail-text seam and never stored or invented — a row whose text does not
+// retail-text seam and never stored or invented. A row whose text does not
 // resolve shows its facts and omits the prose panes. The widget reads only
 // the guide asset and the seams, so it works over the front end and over a
 // match alike; the module hosts it on the game viewport the way the retail
@@ -25,7 +25,7 @@ public:
 	{}
 		SLATE_ARGUMENT(UWoTAngrealGuide*, Guide)
 		/** Pressing any of these closes the browser (the live ShowGuide
-		    binding, resolved by the module at open time — the retail help
+		    binding, resolved by the module at open time; the retail help
 		    window takes its close keys the same way). */
 		SLATE_ARGUMENT(TArray<FKey>, CloseKeys)
 		/** Display text by (section, property); defaults to the onboarding
@@ -52,8 +52,8 @@ private:
 	FString ResolveRowText(const FWoTAngrealGuideRow& Row,
 		const TCHAR* Property) const;
 	/** The row's resolved retail title, or its spaced class name while the
-	    retail text is unavailable — list rows and deep links stay navigable
-	    either way. */
+	    retail text is unavailable, so list rows and deep links stay
+	    navigable either way. */
 	FString DisplayTitle(const FWoTAngrealGuideRow& Row) const;
 	TSharedRef<SWidget> BuildListPane();
 	TSharedRef<SWidget> BuildDetailPane(const FWoTAngrealGuideRow& Row);

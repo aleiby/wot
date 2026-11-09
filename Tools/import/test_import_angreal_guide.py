@@ -721,7 +721,7 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
                  "duplicate"),
                 ("hp.csv", "HintKey,Template\nA,{title} {boom} x.\n",
                  "placeholder"),
-                ("ha.csv", "HintKey,Template\nA,{title} — x.\n",
+                ("ha.csv", "HintKey,Template\nA,{title} \u2014 x.\n",
                  "ASCII")):
             with self.assertRaises(GenerationError, msg=name) as caught:
                 import_angreal_guide.load_hints_csv(write(name, text))

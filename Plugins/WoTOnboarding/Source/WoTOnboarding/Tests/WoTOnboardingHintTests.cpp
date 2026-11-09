@@ -11,7 +11,7 @@
 
 // The shared counter-hint resolver (plan Task 5; the Task 7 death recap
 // reuses it). Synthetic fixtures throughout: invented class names, titles and
-// hint wording only. Helper names carry the WoTOnboardingHint prefix — the
+// hint wording only. Helper names carry the WoTOnboardingHint prefix: the
 // plugin test files share one unity translation unit.
 
 namespace
@@ -39,8 +39,8 @@ FWoTAngrealGuideRow WoTOnboardingHintRow(const TCHAR* ClassName,
 }
 
 /** The selection fixture: offenses with element flags, then counterers in a
-    deliberate registration order — shield first, then the reflect-like row,
-    then the dedicated rows — so tier preference has to beat Rows order. */
+    deliberate registration order (shield first, then the reflect-like row,
+    then the dedicated rows), so tier preference has to beat Rows order. */
 UWoTAngrealGuide* WoTOnboardingHintMakeGuide(bool bWithReflect,
 	bool bWithDedicated, bool bWithSecondDedicated)
 {

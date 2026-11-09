@@ -23,9 +23,9 @@ commandlet stdout is not a reliable completion signal on the parent hosts.
 
 The angreal census (Tools/test/angreal/angreal_census.py) walks the same tree
 with the same conventions (latin-1 reads, `class X expands|extends Y`
-headers, lowercase class keys), but its parsing is census-specific — it
+headers, lowercase class keys), but its parsing is census-specific (it
 resolves the reference root at import time and only extracts spawn-pool
-properties — so this module carries the standalone parser the plan specifies
+properties), so this module carries the standalone parser the plan specifies
 instead of importing it.
 """
 from __future__ import annotations
@@ -141,7 +141,7 @@ def ancestors(classes: Dict[str, UcClass], name: str) -> List[str]:
 
     The walk stops at the first class missing from the map (engine packages
     ship stripped, so every chain ends where the export does), at a cycle, or
-    immediately — an empty list — when the class itself is unknown.
+    immediately (an empty list) when the class itself is unknown.
     """
     chain: List[str] = []
     current = name.lower()

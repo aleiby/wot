@@ -153,7 +153,7 @@ void FWoTOnboardingModule::StartupModule()
 		[]() { UWoTOnboardingSettings::Get().ToggleShowDeathCounterHints(); },
 		SettingsRowOwner()});
 
-	// Every aid — the guide's menu row and every seam handler — follows the
+	// Every aid (the guide's menu row and every seam handler) follows the
 	// master switch live: with it off the module holds no binding on any
 	// seam, so a disabled plugin and a switched-off one leave the game the
 	// same. Both refreshes are idempotent, so a restart (as the settings
@@ -448,7 +448,7 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 		GuideBrowser->SelectRow(CardClass);
 	}
 	// Above the item-info window (1900), below the in-game menu (2000) and
-	// the help window (2100) — though the close broadcasts keep these from
+	// the help window (2100), though the close broadcasts keep these from
 	// stacking in the first place.
 	GuideViewport->AddViewportWidgetContent(GuideBrowser.ToSharedRef(), 1950);
 	if (Seams.SetOverlayInput)

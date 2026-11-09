@@ -31,7 +31,7 @@ public:
 	bool bShowFirstPickupCards = bDefaultShowFirstPickupCards;
 
 	/** Item classes whose first-pickup card has shown: each class gets one
-	    card per profile. Not a toggle — changes persist without OnChanged. */
+	    card per profile. Not a toggle: changes persist without OnChanged. */
 	UPROPERTY(Config)
 	TArray<FName> SeenPickupCards;
 
