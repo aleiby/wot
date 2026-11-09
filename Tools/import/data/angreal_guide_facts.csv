@@ -33,7 +33,7 @@ AngrealInvSwapPlaces,WoTAngrealInvSwapPlaces,Spirit,Uncommon,Defensive,4,10,,
 AngrealInvTaint,WoTAngrealInvTaint,Air;Earth;Fire;Spirit;Water,Rare,Combat;Offensive,2,10,,Taint
 AngrealInvTarget,WoTAngrealInvTarget,Air;Spirit,Rare,Combat;Offensive,2,5,,Target
 AngrealInvTracer,WoTAngrealInvTracer,Air;Fire,Rare,,4,10,,
-AngrealInvTrapDetect,WoTAngrealInvTrapDetect,Air;Earth;Water,Common,,15,20,AlarmInventory;FireWallInventory;PitInventory;PortcullisInventory;SpearInventory;StaircaseInventory;WallInventory,
+AngrealInvTrapDetect,WoTAngrealInvTrapDetect,Air;Earth;Water,Common,,15,20,AngrealInvExpWard;PitInventory;PortcullisInventory;SpearInventory;StaircaseInventory;WallInventory,
 AngrealInvWallOfAir,WoTAngrealInvWallOfAir,Earth;Spirit;Water,Uncommon,Combat;Defensive,20,40,,
 AngrealInvWaterShield,WoTAngrealInvWaterShield,Water,Rare,Combat;Defensive,3,10,AngrealInvDecay;AngrealInvLightning;AngrealInvTaint,
 AngrealInvWhirlwind,WoTAngrealInvWhirlwind,Air,Uncommon,Combat;Offensive,20,40,,Whirlwind

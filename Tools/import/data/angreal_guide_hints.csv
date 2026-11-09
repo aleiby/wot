@@ -11,8 +11,8 @@ SoulBarb,{title} - {counter} wards spirit weaves.
 Taint,{title} - {counter} lifts the curse from your angreal.
 Target,{title} - {counter} breaks the caster's mark on you.
 Whirlwind,{title} - {counter} keeps the winds off you.
-Alarm,{title} - {counter} reveals it before it gives you away.
-FireWall,{title} - {counter} reveals the flames before you cross.
+Alarm,{title} - touching or striking it raises an alarm that alerts nearby defenders.
+FireWall,{title} - a line of burning logs that blocks the way and burns anyone who touches it.
 Pit,{title} - {counter} reveals the drop before you step in.
 Portcullis,{title} - {counter} reveals the gate before it falls.
 Spear,{title} - {counter} reveals it before it springs.

@@ -335,6 +335,106 @@ defaultproperties
 """,
     "BlankRelic": "class BlankRelic expands RelicBase;\n",
     "SnareInventory": "class SnareInventory expands WOTInventory;\n",
+    # Trap detection: invented traps around the anchors the rule keys on
+    # (Trap, TrapDetectLeech, AngrealInvTrapDetect, AngrealExpWardProjectile).
+    "Trap": "class Trap expands Stockpile;\n",
+    "TrapDetectLeech": """\
+class TrapDetectLeech expands WispBase;
+
+defaultproperties
+{
+     TrapIconInfos(0)=(TrapType=FenceSlab,IconScale=0.300000)
+     TrapIconInfos(1)=(TrapType=Pitfall,IconScale=0.300000)
+     TrapIconInfos(2)=(TrapType=AngrealExpWardProjectile,IconScale=0.300000)
+}
+""",
+    "AngrealInvTrapDetect": """\
+class AngrealInvTrapDetect expands RelicBase;
+
+defaultproperties
+{
+     bCommon=True
+}
+""",
+    "AngrealExpWardProjectile":
+        "class AngrealExpWardProjectile expands WispBase;\n",
+    "WardLob": """\
+class WardLob expands ProjectileLauncher;
+
+defaultproperties
+{
+     bCommon=True
+     ProjectileClassName="FixtureDerive.AngrealExpWardProjectile"
+}
+""",
+    "Pitfall": "class Pitfall expands Trap;\n",
+    "PitfallInventory": """\
+class PitfallInventory expands WOTInventory;
+
+defaultproperties
+{
+     ResourceClass=Class'FixtureDerive.Pitfall'
+}
+""",
+    "Fence": """\
+class Fence expands Trap;
+
+defaultproperties
+{
+     SlabClass=Class'FixtureDerive.FenceSlab'
+}
+""",
+    "FenceSlab": "class FenceSlab expands Trap;\n",
+    "FenceInventory": """\
+class FenceInventory expands WOTInventory;
+
+defaultproperties
+{
+     ResourceClass=Class'FixtureDerive.Fence'
+}
+""",
+    "EmberFence": """\
+class EmberFence expands Fence;
+
+defaultproperties
+{
+     SlabClass=Class'FixtureDerive.EmberFenceSlab'
+}
+""",
+    "EmberFenceSlab": "class EmberFenceSlab expands FenceSlab;\n",
+    "EmberFenceInventory": """\
+class EmberFenceInventory expands WOTInventory;
+
+defaultproperties
+{
+     ResourceClass=Class'FixtureDerive.EmberFence'
+}
+""",
+    "Gong": "class Gong expands Trap;\n",
+    "GongInventory": """\
+class GongInventory expands WOTInventory;
+
+defaultproperties
+{
+     ResourceClass=Class'FixtureDerive.Gong'
+}
+""",
+    "MutedGong": """\
+class MutedGong expands Gong;
+
+defaultproperties
+{
+     TrapType=Pitfall
+}
+""",
+    "MutedGongInventory": """\
+class MutedGongInventory expands WOTInventory;
+
+defaultproperties
+{
+     ResourceClass=Class'FixtureDerive.MutedGong'
+}
+""",
 }
 
 BASE_ROSTER = (
@@ -425,6 +525,43 @@ class SyntheticDerivationTests(DeriveFixtureMixin, unittest.TestCase):
         rows = self.build(roster=blank, overrides=[
             Override("BlankRelic", "Rarity", "", False, CITED, "test")])
         self.assertEqual(rows["BlankRelic"].rarity, "")
+
+
+class TrapDetectionDerivationTests(DeriveFixtureMixin, unittest.TestCase):
+    TRAPS = ("PitfallInventory", "FenceInventory", "EmberFenceInventory",
+             "GongInventory", "MutedGongInventory")
+
+    def build_detection(self):
+        roster = BASE_ROSTER + (
+            RosterEntry("AngrealInvTrapDetect", "FxTrapDetect"),
+            RosterEntry("WardLob", "FxWardLob"),
+        ) + tuple(RosterEntry(name, "Fx" + name, is_trap=True)
+                  for name in self.TRAPS)
+        overrides = [Override(name, "Rarity", "", False, CITED, "test")
+                     for name in self.TRAPS]
+        hints = dict(BASE_HINTS)
+        for name in self.TRAPS:
+            hints[name[:-len("Inventory")]] = "{title} - mind your step."
+        return self.build(roster=roster, overrides=overrides, hints=hints)
+
+    def test_detection_follows_the_detector_table(self):
+        # Pitfall is tabled by its class name, Fence through its slab,
+        # MutedGong through a TrapType naming a tabled ID, and WardLob through
+        # its projectile, the explosive-ward anchor the table names.
+        rows = self.build_detection()
+        self.assertEqual(rows["AngrealInvTrapDetect"].counters,
+                         ["FenceInventory", "MutedGongInventory",
+                          "PitfallInventory", "WardLob"])
+
+    def test_untabled_pieces_go_undetected(self):
+        # A subclass the table does not name stays hidden even when its
+        # parent's slab is tabled (the fire-wall shape), and so does a trap
+        # with no tabled piece at all (the alarm shape).
+        rows = self.build_detection()
+        for row in rows.values():
+            self.assertNotIn("EmberFenceInventory", row.counters,
+                             row.class_name)
+            self.assertNotIn("GongInventory", row.counters, row.class_name)
 
 
 class OverrideAndHintEnforcementTests(DeriveFixtureMixin, unittest.TestCase):
@@ -755,14 +892,16 @@ class InTreeGuideDataTests(unittest.TestCase):
             self.assertEqual(row["CppClass"],
                              self.expected_cpp[row["Class"]], row["Class"])
 
-    def test_trap_rows_close_with_trap_detection(self):
-        trap_names = sorted((row["Class"] for row in self.trap_rows),
-                            key=str.lower)
+    def test_trap_detection_claims_only_placed_pieces(self):
+        trap_names = {row["Class"] for row in self.trap_rows}
         self.assertTrue(trap_names)
         for name in trap_names:
             self.assertTrue(name.endswith("Inventory"), name)
-        detect = self.by_class["AngrealInvTrapDetect"]
-        self.assertEqual(detect["Counters"].split(";"), trap_names)
+        detected = set(
+            self.by_class["AngrealInvTrapDetect"]["Counters"].split(";"))
+        # The detector keeps placed traps and the armed explosive ward only.
+        self.assertTrue(detected & trap_names)
+        self.assertLessEqual(detected - trap_names, {"AngrealInvExpWard"})
         for row in self.trap_rows:
             self.assertEqual(row["Counters"], "", row["Class"])
 
@@ -817,6 +956,15 @@ class ReferenceGeneratedGuideTests(unittest.TestCase):
         for row in self.rows:
             self.assertNotIn("AngrealInvBalefire", row.counters,
                              row.class_name)
+
+    def test_trap_detect_finds_exactly_the_tabled_pieces(self):
+        # TrapDetectLeech.uc:286-291 tables wall slabs, pits, portcullises,
+        # spears, staircases and the explosive ward; alarms and fire walls
+        # are not in it.
+        self.assertEqual(self.by_name["AngrealInvTrapDetect"].counters,
+                         ["AngrealInvExpWard", "PitInventory",
+                          "PortcullisInventory", "SpearInventory",
+                          "StaircaseInventory", "WallInventory"])
 
 
 if __name__ == "__main__":

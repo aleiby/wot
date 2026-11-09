@@ -237,8 +237,14 @@ ROLE_BY_FLAG = {"bCombat": "Combat", "bDefensive": "Defensive",
 # - ReflectSeekerReflector counters the Seeker (ReflectSeekerReflector.uc
 #   redirects a seeker at its originator; no shipped ReflectorClasses entry
 #   names it, so on retail data this rule contributes no edge).
-# - Trap detection counters every placeable trap row (TrapDetectLeech.uc:208
-#   keys off the Trap base class every placed WoTTraps actor descends from).
+# - Trap detection counters the rows whose placed pieces the detector keeps.
+#   It keeps a deployed Trap or an armed explosive ward only when the piece's
+#   trap ID is in its own TrapIconInfos table (TrapDetectLeech.uc:203-233,
+#   table at :286-291). The ID is a Trap's TrapType when set, else the class
+#   name, and no shipped trap sets TrapType, so a subclass the table does not
+#   name (FireWallSlab under WallSlab, Alarm) goes undetected. A trap row
+#   places its ResourceClass plus that actor's SlabClass (Wall.uc builds the
+#   barrier from slabs); a launcher row places its ProjectileClassName.
 # - Curse removal counters the Taint (AngrealInvRemoveCurse.uc stops artifact
 #   effects in radius, the lift for the Taint's permanent artifact curse).
 IGNORE_REFLECTOR_ELEMENT = {
@@ -250,6 +256,8 @@ PROJECTILE_LAUNCHER_CLASS = "projectilelauncher"
 SEEKER_CLASS = "angrealinvseeker"
 TAINT_CLASS = "angrealinvtaint"
 TRAP_DETECT_CLASS = "angrealinvtrapdetect"
+TRAP_DETECT_LEECH_CLASS = "trapdetectleech"
+EXP_WARD_PROJECTILE_CLASS = "angrealexpwardprojectile"
 REMOVE_CURSE_CLASS = "angrealinvremovecurse"
 
 TRAPS_PACKAGE = "wottraps"
@@ -260,6 +268,7 @@ TRAP_ROW_SUFFIX = "Inventory"
 OFFENSIVE_ROLE = "Offensive"
 
 CLASS_REF_RE = re.compile(r"Class'(?:\w+\.)?(\w+)'", re.I)
+TRAP_TYPE_RE = re.compile(r"\bTrapType=(\w+)", re.I)
 BUDGET_ENTRY_RE = re.compile(
     r"ResourcePackageName=(\w+).*?ResourceAdapterName=(\w+)", re.I)
 HINT_PLACEHOLDER_RE = re.compile(r"\{(\w*)\}")
@@ -464,13 +473,59 @@ def _derived_hint_key(entry: RosterEntry) -> str:
     return name
 
 
+def _placed_pieces(classes: Dict[str, UcClass], name: str) -> List[str]:
+    """The actors a roster row puts in the world for the trap detector to find.
+
+    A trap row places its ResourceClass and, for a wall, that actor's
+    SlabClass; a launcher row places its ProjectileClassName.
+    """
+    pieces: List[str] = []
+    actor = _class_ref_name(resolved_prop(classes, name, "ResourceClass") or "")
+    if actor is not None:
+        pieces.append(actor)
+        slab = _class_ref_name(resolved_prop(classes, actor, "SlabClass") or "")
+        if slab is not None:
+            pieces.append(slab)
+    projectile = resolved_prop(classes, name, "ProjectileClassName")
+    if projectile:
+        pieces.append(projectile.split(".")[-1])
+    return pieces
+
+
+def _trap_detect_ids(classes: Dict[str, UcClass]) -> List[str]:
+    """The lowercase trap IDs the detector's TrapIconInfos table names."""
+    ids: List[str] = []
+    for entry in resolved_array(classes, TRAP_DETECT_LEECH_CLASS,
+                                "TrapIconInfos"):
+        match = TRAP_TYPE_RE.search(entry)
+        if match:
+            ids.append(match.group(1).lower())
+    return ids
+
+
+def _trap_detect_finds(classes: Dict[str, UcClass], name: str,
+                       detectable: List[str]) -> bool:
+    """True when the detector keeps one of the row's placed pieces."""
+    for piece in _placed_pieces(classes, name):
+        chain = ancestors(classes, piece)
+        if TRAP_BASE_CLASS in chain:
+            trap_id = resolved_prop(classes, piece, "TrapType") or piece
+        elif EXP_WARD_PROJECTILE_CLASS in chain:
+            trap_id = piece
+        else:
+            continue
+        if trap_id.lower() in detectable:
+            return True
+    return False
+
+
 def _derive_counters(classes: Dict[str, UcClass],
-                     rows: Dict[str, GuideRow],
-                     trap_names: List[str]) -> None:
+                     rows: Dict[str, GuideRow]) -> None:
     """Apply the plan's counter rules; see the anchor-constant comment."""
     offensive = [row for row in rows.values()
                  if OFFENSIVE_ROLE in row.roles]
     names_by_lower = {name.lower(): name for name in rows}
+    detectable = _trap_detect_ids(classes)
     for row in rows.values():
         links = set()
         for reference in resolved_array(classes, row.class_name,
@@ -497,7 +552,9 @@ def _derive_counters(classes: Dict[str, UcClass],
                 and SEEKER_CLASS in names_by_lower):
             counters.append(names_by_lower[SEEKER_CLASS])
         if row.class_name.lower() == TRAP_DETECT_CLASS:
-            counters.extend(trap_names)
+            counters.extend(
+                other.class_name for other in rows.values()
+                if _trap_detect_finds(classes, other.class_name, detectable))
         if (row.class_name.lower() == REMOVE_CURSE_CLASS
                 and TAINT_CLASS in names_by_lower):
             counters.append(names_by_lower[TAINT_CLASS])
@@ -587,8 +644,7 @@ def build_guide_rows(classes: Dict[str, UcClass],
     errors: List[str] = []
     rows: Dict[str, GuideRow] = {}
     rarity_unresolved: Dict[str, str] = {}
-    trap_names = [entry.class_name for entry in roster if entry.is_trap]
-    trap_set = set(trap_names)
+    trap_set = {entry.class_name for entry in roster if entry.is_trap}
 
     for entry in sorted(roster, key=lambda item: item.class_name.lower()):
         name = entry.class_name
@@ -625,7 +681,7 @@ def build_guide_rows(classes: Dict[str, UcClass],
         raise GenerationError("guide generation failed:\n  "
                               + "\n  ".join(errors))
 
-    _derive_counters(classes, rows, trap_names)
+    _derive_counters(classes, rows)
     for entry in roster:
         if entry.is_trap or OFFENSIVE_ROLE in rows[entry.class_name].roles:
             rows[entry.class_name].hint_key = _derived_hint_key(entry)
