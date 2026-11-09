@@ -3428,6 +3428,22 @@ bool FWoTUITextEntrySteamSpec::RunTest(const FString&)
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
 	Steam.LaunchError.Reset();
 
+	// Focus moving to another control keeps what Steam typed, like a physical
+	// keyboard (owner ruling, 2026-11-09): nothing is restored or committed.
+	Slate.SetKeyboardFocus(Field.Box, EFocusCause::SetDirectly);
+	Shown.Settle();
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("A starts a Steam entry again"),
+		FWoTTextEntry::GetActiveRoute() == TOptional<EWoTTextEntryRoute>(EWoTTextEntryRoute::SteamKeyboard));
+	const FString BeforeFocusMove = Field.Text;
+	WoTEntryTest_Type(Shown, TEXT("z"));
+	Field.Calls.Reset();
+	Slate.SetKeyboardFocus(Field.Other, EFocusCause::SetDirectly);
+	Shown.Settle();
+	TestFalse(TEXT("moving focus away ends the Steam entry"), FWoTTextEntry::IsActive());
+	TestEqual(TEXT("and keeps what Steam typed"), Field.Text, BeforeFocusMove + TEXT("z"));
+	TestTrue(TEXT("with no commit or cancel"), Field.Calls.IsEmpty());
+
 	// With SteamDeck=1 a tap on a field starts entry [I8]; without it a click
 	// only places the caret.
 	Slate.SetKeyboardFocus(Field.Other, EFocusCause::SetDirectly);

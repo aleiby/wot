@@ -549,10 +549,14 @@ void FWoTTextEntry::TickLayer(const SWoTTextEntryLayer& Layer)
 		}
 		return;
 	}
-	// Focus moved to another control: the entry ends without a commit.
+	// Focus moved to another control: the entry ends without a commit. On
+	// Steam's route what Steam typed stays in the field, exactly as with a
+	// physical keyboard (owner ruling, 2026-11-09); the panel's draft is
+	// dropped, as a cancel.
+	const bool bSteamRoute = Session->Route == EWoTTextEntryRoute::SteamKeyboard;
 	const TUniquePtr<FWoTTextEntrySession> Ended =
 		WoTTextEntry_End(/*bAbandon*/ false, /*bFocusField*/ false);
-	if (Ended.IsValid() && Ended->Request.Cancel)
+	if (!bSteamRoute && Ended.IsValid() && Ended->Request.Cancel)
 	{
 		Ended->Request.Cancel();
 	}
