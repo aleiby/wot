@@ -32,6 +32,7 @@
 #include "UI/WoTReleaseNotes.h"
 #include "Updater/WoTReleaseIdentity.h"
 #include "WoTSessionSubsystem.h"
+#include "Online/WoTInstallerSharingSubsystem.h"
 #include "Online/WoTLocalNetworkAccess.h"
 #include "Settings/WoTSettingsSlate.h"
 
@@ -198,6 +199,8 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 		if (UWoTGameInstance* Instance = GameInstance.Get())
 		{
 			SessionSubsystem = Instance->GetSubsystem<UWoTSessionSubsystem>();
+			SharingSubsystem =
+				Instance->GetSubsystem<UWoTInstallerSharingSubsystem>();
 		}
 	}
 #if WITH_AUTOMATION_TESTS
@@ -232,6 +235,11 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 				? EVisibility::Visible : EVisibility::Collapsed;
 		}));
 	BindSessionEvents();
+	if (UWoTInstallerSharingSubsystem* Sharing = SharingSubsystem.Get())
+	{
+		SharingNoticeHandle = Sharing->OnNotice().AddSP(
+			this, &SWoTFrontEndRoot::HandleSharingNotice);
+	}
 	ViewModel.ShowMain();
 	if (UWoTBootstrapSubsystem* Bootstrap = ResolveBootstrap())
 	{
@@ -281,6 +289,10 @@ SWoTFrontEndRoot::~SWoTFrontEndRoot()
 	{
 		FSlateApplication::Get().UnregisterInputPreProcessor(BackInputProcessor);
 		BackInputProcessor.Reset();
+	}
+	if (UWoTInstallerSharingSubsystem* Sharing = SharingSubsystem.Get())
+	{
+		Sharing->OnNotice().Remove(SharingNoticeHandle);
 	}
 	if (UWoTSessionSubsystem* Sessions = SessionSubsystem.Get())
 	{
@@ -4074,6 +4086,13 @@ void SWoTFrontEndRoot::HandleJoinComplete(bool bSucceeded)
 {
 	if (!IsPresentationReady()) return;
 	ViewModel.FinishJoin(bSucceeded);
+}
+
+void SWoTFrontEndRoot::HandleSharingNotice(const FString& Text)
+{
+	// The front end's notice line: a short, non-error status. A running
+	// browse/host/join keeps its own line (ReportNotice yields to it).
+	ViewModel.ReportNotice(Text, /*bError*/ false);
 }
 
 void SWoTFrontEndRoot::HandleConnectionFailure(const FString& Reason)

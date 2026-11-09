@@ -449,6 +449,114 @@ class ProcessEnumerationTests(unittest.TestCase):
                 funnel._enumerate_win_process_ids()
 
 
+class FirewallRuleCheckTests(unittest.TestCase):
+    CELL_ROOT = r"D:\Funnel\wot-first-run-funnel-1"
+    CELL_PROGRAM = (r"D:\Funnel\wot-first-run-funnel-1\cell-trees\fresh"
+                    r"\WoT Reborn\Game\WoT\Binaries\Win64\WoT-Win64-Test.exe")
+
+    @staticmethod
+    def _completed(stdout: str, returncode: int = 0, stderr: str = ""):
+        return mock.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
+
+    def _check(self, programs, roots=None):
+        result = self._completed(json.dumps(programs))
+        with mock.patch.object(funnel.subprocess, "run",
+                               return_value=result) as run:
+            check = funnel._firewall_rule_check(roots or [self.CELL_ROOT])
+        return check, run
+
+    def test_query_is_read_only(self):
+        _check, run = self._check([])
+        command = run.call_args.args[0]
+        script = command[-1]
+        self.assertIn("Get-NetFirewallApplicationFilter", script)
+        for verb in ("New-", "Set-", "Remove-", "Enable-", "Disable-",
+                     "Copy-", "Rename-"):
+            self.assertNotIn(verb, script)
+
+    def test_rule_for_a_cell_program_is_reported(self):
+        programs = [
+            r"C:\Program Files\Steam\steam.exe",
+            self.CELL_PROGRAM,
+            # Windows records the path in whatever case the prompt saw.
+            self.CELL_PROGRAM.upper(),
+            "Any", "System", r"%SystemRoot%\system32\svchost.exe",
+        ]
+        check, _run = self._check(programs)
+        self.assertEqual(check["format"], funnel.FIREWALL_RULES_FORMAT)
+        self.assertEqual(check["rules_examined"], len(programs))
+        self.assertEqual(check["rules_under_cells"],
+                         sorted([self.CELL_PROGRAM, self.CELL_PROGRAM.upper()]))
+
+    def test_unrelated_rules_pass(self):
+        check, _run = self._check([
+            r"C:\Program Files\Steam\steam.exe",
+            # A sibling folder that only shares a name prefix.
+            r"D:\Funnel\wot-first-run-funnel-10\WoT.exe",
+            r"D:\Funnel\wot-first-run-funnel-1.exe",
+            "Any",
+        ])
+        self.assertEqual(check["rules_under_cells"], [])
+
+    def test_every_root_is_checked(self):
+        install = r"E:\Other\WoT Reborn"
+        check, _run = self._check(
+            [install + r"\Game\WoT.exe"], [self.CELL_ROOT, install])
+        self.assertEqual(check["rules_under_cells"],
+                         [install + r"\Game\WoT.exe"])
+        self.assertEqual(check["cell_roots"], sorted([self.CELL_ROOT, install]))
+
+    def test_single_rule_and_empty_list_decode(self):
+        result = self._completed(json.dumps(self.CELL_PROGRAM))
+        with mock.patch.object(funnel.subprocess, "run", return_value=result):
+            self.assertEqual(funnel._list_firewall_rule_programs(),
+                             [self.CELL_PROGRAM])
+        result = self._completed("")
+        with mock.patch.object(funnel.subprocess, "run", return_value=result):
+            self.assertEqual(funnel._list_firewall_rule_programs(), [])
+
+    def test_query_failures_fail_closed(self):
+        for result in (self._completed("", returncode=1, stderr="denied"),
+                       self._completed("{not json"),
+                       self._completed(json.dumps([1, 2])),
+                       self._completed(json.dumps({"Program": "x"}))):
+            with self.subTest(stdout=result.stdout):
+                with mock.patch.object(funnel.subprocess, "run",
+                                       return_value=result):
+                    with self.assertRaises(funnel.FunnelFailure):
+                        funnel._list_firewall_rule_programs()
+
+    def test_evidence_records_pass_fail_and_query_errors(self):
+        with tempfile.TemporaryDirectory(dir=_repo_tmp()) as temp:
+            evidence = Path(temp)
+            path = evidence / "safety" / "firewall-rules.json"
+            clean = self._completed(json.dumps(["Any"]))
+            with mock.patch.object(funnel.subprocess, "run",
+                                   return_value=clean):
+                record = funnel._record_cell_firewall_rules(
+                    evidence, [self.CELL_ROOT])
+            self.assertTrue(record["passed"])
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                             record)
+            prompted = self._completed(json.dumps([self.CELL_PROGRAM]))
+            with mock.patch.object(funnel.subprocess, "run",
+                                   return_value=prompted):
+                record = funnel._record_cell_firewall_rules(
+                    evidence, [self.CELL_ROOT])
+            self.assertFalse(record["passed"])
+            self.assertEqual(record["rules_under_cells"], [self.CELL_PROGRAM])
+            failed = self._completed("", returncode=1, stderr="no access")
+            with mock.patch.object(funnel.subprocess, "run",
+                                   return_value=failed):
+                record = funnel._record_cell_firewall_rules(
+                    evidence, [self.CELL_ROOT])
+            self.assertFalse(record["passed"])
+            self.assertIsNone(record["rules_under_cells"])
+            self.assertIn("no access", record["error"])
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
+                             record)
+
+
 class AttemptTreeRemovalTests(unittest.TestCase):
     def test_removes_a_tree_holding_a_read_only_file(self):
         with tempfile.TemporaryDirectory() as temp:

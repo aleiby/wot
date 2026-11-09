@@ -5,6 +5,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Payload/WoTCacheLease.h"
 #include "Updater/WoTExecutableLayout.h"
+#include "Updater/WoTInstallerAcquisition.h"
 #include "WoTBootstrapDiskPreflight.h"
 #include "WoTBootstrapViewModel.h"
 #include "FrontEnd/WoTFrontEndSceneMaterializer.h"
@@ -102,6 +103,10 @@ public:
 	void RequestOriginalGameRecheck();
 	void RequestPickedInstaller(const FString& AbsolutePath);
 	bool IsReady() const;
+	/** The installer location beside the game exactly as the worker searches
+	 * it (path and, when the layout resolved one, parent identity); unset when
+	 * no layout resolved. Read-only: LAN installer sharing's finder uses it. */
+	TOptional<FWoTInstallerLocation> RetainedAdjacentInstallerLocation() const;
 	/** Transition the already-ready UI to the runtime-integrity error screen
 	 * when retained front-end recovery is not admissible. */
 	void HandleRuntimeCacheIntegrityFailure(

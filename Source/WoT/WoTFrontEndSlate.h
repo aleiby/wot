@@ -20,6 +20,7 @@ class SWoTMenuButton;
 class UWoTGameInstance;
 class UWoTSessionSubsystem;
 class UWoTBootstrapSubsystem;
+class UWoTInstallerSharingSubsystem;
 class UTexture2D;
 enum class EWoTBrowserSortColumn : uint8;
 struct FWoTBrowserSortState;
@@ -396,10 +397,14 @@ private:
 		const TArray<FWoTSessionListEntry>& Results);
 	void HandleJoinComplete(bool bSucceeded);
 	void HandleConnectionFailure(const FString& Reason);
+	/** LAN installer sharing's "Sending ... to <label>..." line. */
+	void HandleSharingNotice(const FString& Text);
 
 	TWeakObjectPtr<AWoTFrontEndPlayerController> PlayerController;
 	TWeakObjectPtr<UWoTGameInstance> GameInstance;
 	TWeakObjectPtr<UWoTSessionSubsystem> SessionSubsystem;
+	TWeakObjectPtr<UWoTInstallerSharingSubsystem> SharingSubsystem;
+	FDelegateHandle SharingNoticeHandle;
 	FDelegateHandle HostCompleteHandle;
 	FDelegateHandle SearchCompleteHandle;
 	FDelegateHandle JoinCompleteHandle;

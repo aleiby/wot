@@ -2433,6 +2433,98 @@ def _enumerate_win_process_ids() -> list[int]:
     return [pid for pid in value if pid != 0]
 
 
+FIREWALL_RULES_FORMAT = "wot-funnel-firewall-rules-v1"
+
+
+def _list_firewall_rule_programs() -> list[str]:
+    """Every Windows Firewall rule's program path, by a read-only query.
+
+    Answering (or dismissing) a firewall prompt leaves rules that name the
+    prompting executable, so a rule naming a cell's executable means that cell
+    raised a prompt. Nothing here creates, changes or removes a rule.
+    """
+    powershell = (Path(os.environ.get("SystemRoot", r"C:\Windows"))
+                  / "System32" / "WindowsPowerShell" / "v1.0"
+                  / "powershell.exe")
+    script = (
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+        "ConvertTo-Json -Compress -InputObject "
+        "@(Get-NetFirewallApplicationFilter -ErrorAction Stop | "
+        "ForEach-Object {[string]$_.Program})")
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120)
+    if result.returncode:
+        raise FunnelFailure(
+            "cannot list Windows Firewall rules: "
+            + (result.stderr or result.stdout).strip())
+    try:
+        value = json.loads(result.stdout.strip() or "[]")
+    except json.JSONDecodeError as exc:
+        raise FunnelFailure("cannot decode the Windows Firewall rule list") from exc
+    if isinstance(value, str):
+        value = [value]
+    if (not isinstance(value, list)
+            or any(not isinstance(program, str) for program in value)):
+        raise FunnelFailure("the Windows Firewall rule list is invalid")
+    return value
+
+
+def _windows_program_is_under(program: str, root: str) -> bool:
+    """Case-insensitive Windows containment on whole path components.
+
+    Pure text (PureWindowsPath), so it behaves the same on every host. Rule
+    entries that are not absolute paths ("Any", "System", %SystemRoot%...) are
+    never under a cell.
+    """
+    candidate = PureWindowsPath(program)
+    parent = PureWindowsPath(root)
+    if not candidate.is_absolute() or not parent.is_absolute():
+        return False
+    candidate_parts = [part.casefold() for part in candidate.parts]
+    parent_parts = [part.casefold() for part in parent.parts]
+    return (len(candidate_parts) >= len(parent_parts)
+            and candidate_parts[:len(parent_parts)] == parent_parts)
+
+
+def _firewall_rule_check(roots: Sequence[Path | str]) -> dict:
+    """The read-only firewall evidence for the cells under ``roots``."""
+    cell_roots = sorted({str(root) for root in roots})
+    programs = _list_firewall_rule_programs()
+    under = sorted({
+        program for program in programs
+        if any(_windows_program_is_under(program, root) for root in cell_roots)
+    })
+    return {
+        "format": FIREWALL_RULES_FORMAT,
+        "cell_roots": cell_roots,
+        "rules_examined": len(programs),
+        "rules_under_cells": under,
+    }
+
+
+def _record_cell_firewall_rules(evidence: Path,
+                                roots: Sequence[Path | str]) -> dict:
+    """Write ``safety/firewall-rules.json``; ``passed`` is false when any rule
+    names a program under a cell root, or when the rules cannot be read
+    (fail closed: the run cannot then prove it raised no prompt)."""
+    try:
+        record = _firewall_rule_check(roots)
+        record["passed"] = not record["rules_under_cells"]
+    except (FunnelFailure, OSError, subprocess.SubprocessError,
+            ValueError) as exc:
+        record = {
+            "format": FIREWALL_RULES_FORMAT,
+            "cell_roots": sorted({str(root) for root in roots}),
+            "error": str(exc),
+            "passed": False,
+            "rules_under_cells": None,
+        }
+    _atomic_write_json(evidence / "safety" / "firewall-rules.json", record)
+    return record
+
+
 def _path_is_under(path: str, root: Path) -> bool:
     try:
         candidate_path = Path(path).resolve()
@@ -5918,6 +6010,25 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
                     raise FunnelFailure(
                         "SAFETY: real Mac data roots changed during the run "
                         f"(inventory: {real_profile_guard_path})")
+        if platform_name == "Win64" and selected and _IS_WINDOWS:
+            # Every cell tree lives under the scratch root; the launched
+            # clients' install roots are listed too. A rule naming any of
+            # them means a cell raised a Windows Firewall prompt.
+            firewall = _record_cell_firewall_rules(
+                evidence,
+                [scratch, *sorted(set(_WIN_INSTALL_ROOTS.values()), key=str)])
+            if not firewall["passed"]:
+                receipt["verdict"] = "fail"
+                receipt["decisions"].append(
+                    "SAFETY: a Windows Firewall rule names a cell's program "
+                    "(a cell raised a firewall prompt), or the read-only rule "
+                    "query failed")
+                save()
+                if sys.exc_info()[0] is None:
+                    raise FunnelFailure(
+                        "SAFETY: Windows Firewall rules name cell programs or "
+                        "could not be read (evidence: "
+                        f"{evidence / 'safety' / 'firewall-rules.json'})")
         cleanup_failed = any(row.get("action") in {
             "terminated", "aborted-identity-change", "mac-cleanup-error",
             "observer-close-error",

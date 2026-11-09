@@ -116,6 +116,15 @@ TWoTBootstrapResult<bool> WoTProbeAdjacentInstallerParentWritable(
 	const FString& CanonicalAdjacentPath,
 	const FWoTNativeFileIdentity* ExpectedParentIdentity = nullptr);
 
+/** Opens an inspected Candidate for streaming without hashing it (LAN
+ * installer sharing hashes while it sends). The parent is reopened against the
+ * location's identity, the leaf is opened exactly the way acquisition holds an
+ * installer, and the held object must still be the inspected one and fully
+ * local. The caller reads through ReadNativeFileAt. */
+TWoTBootstrapResult<FWoTNativeFileHandle> WoTOpenInspectedInstallerForStreaming(
+	FWoTInstallerLocation& Location,
+	const FWoTNativeFileIdentity& InspectedIdentity);
+
 /** Best-effort retirement of the removed download-resume directory. */
 void WoTRemoveLegacyInstallerStateBestEffort(const FString& StateDir);
 

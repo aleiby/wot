@@ -1061,6 +1061,28 @@ void UWoTBootstrapSubsystem::RequestPickedInstaller(
 	Worker->RequestPickedInstaller(MoveTemp(CanonicalPath).GetValue());
 }
 
+TOptional<FWoTInstallerLocation>
+UWoTBootstrapSubsystem::RetainedAdjacentInstallerLocation() const
+{
+	if (CanonicalAdjacentInstallerPath.IsEmpty())
+	{
+		return {};
+	}
+	FWoTInstallerLocation Location;
+	Location.Source = EWoTInstallerSource::Adjacent;
+	Location.CanonicalPath = CanonicalAdjacentInstallerPath;
+	Location.bRequirePinnedName = true;
+	if (ExecutableLayout.IsSet()
+		&& ExecutableLayout->bHasAdjacentInstallerParentIdentity
+		&& ExecutableLayout->CanonicalAdjacentInstallerPath
+			== CanonicalAdjacentInstallerPath)
+	{
+		Location.ParentIdentity =
+			ExecutableLayout->AdjacentInstallerParentIdentity;
+	}
+	return Location;
+}
+
 bool UWoTBootstrapSubsystem::IsReady() const
 {
 	return ViewModel.Snapshot().Phase == EWoTBootstrapPhase::Ready

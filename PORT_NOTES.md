@@ -894,6 +894,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** The main menu shows the running version small in its bottom-right corner, for example `v0.1.2`; a development build shows `dev` and its commit. Update banners and the update-failed notice use the same version number when the release names one.
 - **Why:** Players and testers need to see which build they are running, and updates name versions the same way the menu does.
 
+### The game can share the original installer on the local network
+- **Original:** None. This is a port-only feature for the Steam Deck install route (owner decision 3).
+- **Port:** Once setup has finished, a running copy offers the original game installer it finds on this computer (beside the game, the file chosen with Browse, a copy it received over the network, or Downloads; not Downloads on a Mac) to other WoT Reborn copies on the same local network. It never listens: it broadcasts a small offer every 2 seconds from a port the system picks, reads only replies to those offers from private network addresses, and sends the file over outgoing connections, at most two at once. It checks the file's SHA-256 while sending and stops offering a file that is not the original installer. The player sees a short "Sending the original game installer to ..." notice. Settings > Hardware > Network > "Share the original installer on this network" turns it off; it is on by default. On a Mac it starts only after the player has seen the game's Local Network notice.
+- **Why:** A Steam Deck can copy the 1 GB installer from the owner's PC or Mac instead of downloading it again. Nothing leaves the local network, and a copy is accepted only with the installer's exact size and SHA-256, as for an installer found on disk.
+
 ## Platform
 
 ### macOS Local Network notice
