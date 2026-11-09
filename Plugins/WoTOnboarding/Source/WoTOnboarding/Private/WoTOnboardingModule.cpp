@@ -3,6 +3,7 @@
 #include "SWoTGuideBrowser.h"
 #include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
+#include "WoTOnboardingDeathRecap.h"
 #include "WoTOnboardingPickupCards.h"
 #include "WoTOnboardingSeams.h"
 #include "WoTOnboardingSettings.h"
@@ -29,6 +30,11 @@ FName WoTOnboardingGuideKeeper()
     in-game menu 2000, help 2100), so a window that opens over a card covers
     it even before the close broadcast removes it. */
 constexpr int32 WoTOnboardingPickupCardZOrder = 1850;
+
+/** Seconds on screen, fades included. A recap carries one more line to read
+    than a pickup card, and the player is waiting to respawn anyway. */
+constexpr float WoTOnboardingPickupCardLifetime = 4.0f;
+constexpr float WoTOnboardingDeathRecapLifetime = 6.0f;
 
 FName WoTOnboardingShowGuideAction()
 {
@@ -224,6 +230,8 @@ void FWoTOnboardingModule::RefreshSeamBindings()
 		this, &FWoTOnboardingModule::HandleCloseClientWindows);
 	ItemAddedHandle = Seams.ClientItemAdded.AddRaw(
 		this, &FWoTOnboardingModule::HandleClientItemAdded);
+	KilledByHandle = Seams.ClientKilledBy.AddRaw(
+		this, &FWoTOnboardingModule::HandleClientKilledBy);
 }
 
 void FWoTOnboardingModule::UnbindSeamHandlers()
@@ -243,6 +251,11 @@ void FWoTOnboardingModule::UnbindSeamHandlers()
 	{
 		Seams.ClientItemAdded.Remove(ItemAddedHandle);
 		ItemAddedHandle.Reset();
+	}
+	if (KilledByHandle.IsValid())
+	{
+		Seams.ClientKilledBy.Remove(KilledByHandle);
+		KilledByHandle.Reset();
 	}
 }
 
@@ -275,8 +288,10 @@ void FWoTOnboardingModule::HandleSettingsChanged()
 		CloseGuideBrowser();
 		ClosePickupCard();
 	}
-	else if (!Settings.bShowFirstPickupCards)
+	else if (bCardIsDeathRecap ? !Settings.bShowDeathCounterHints
+	                           : !Settings.bShowFirstPickupCards)
 	{
+		// The card slot serves both aids; the visible card goes with its own.
 		ClosePickupCard();
 	}
 	RefreshSeamBindings();
@@ -319,6 +334,42 @@ void FWoTOnboardingModule::HandleClientItemAdded(FName ClassName)
 	ShowPickupCard(*Guide->FindByClassName(ClassName));
 }
 
+void FWoTOnboardingModule::HandleClientKilledBy(FName ClassName)
+{
+	UWoTAngrealGuide* Guide = nullptr;
+	if (GIsAutomationTesting)
+	{
+		// Inert under automation unless a spec opted in, as for the pickup
+		// card: other suites' kills must not load the guide.
+		Guide = PickupCardTestGuide.Get();
+		if (!Guide)
+		{
+			return;
+		}
+	}
+	const UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
+	if (!Settings.bEnableOnboardingAids || !Settings.bShowDeathCounterHints)
+	{
+		return;
+	}
+	if (!Guide)
+	{
+		Guide = ResolveGuide();
+	}
+	// A pickup card does not hold the screen against a recap, which
+	// replaces it.
+	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const bool bScreenBusy = GuideBrowser.IsValid()
+		|| (Seams.IsClientWindowOpen && Seams.IsClientWindowOpen());
+	if (WoTOnboardingDeathRecap::Decide(Settings, Guide, ClassName, bScreenBusy)
+		!= EWoTDeathRecapVerdict::Show)
+	{
+		return;
+	}
+	++DeathRecapsShown;
+	ShowDeathRecap(*Guide, *Guide->FindByClassName(ClassName));
+}
+
 UWoTAngrealGuide* FWoTOnboardingModule::ResolveGuide()
 {
 	if (!CachedGuide.IsValid() && !bGuideAbsent)
@@ -336,27 +387,61 @@ UWoTAngrealGuide* FWoTOnboardingModule::ResolveGuide()
 	return CachedGuide.Get();
 }
 
-void FWoTOnboardingModule::ShowPickupCard(const FWoTAngrealGuideRow& Row)
+bool FWoTOnboardingModule::CanHostCard()
 {
 	// The guide's hosting gates: a real local viewport, never under
 	// automation (specs construct the widget directly).
-	if (GIsAutomationTesting || IsRunningDedicatedServer() || !GEngine
-		|| !GEngine->GameViewport)
+	return !GIsAutomationTesting && !IsRunningDedicatedServer() && GEngine
+		&& GEngine->GameViewport;
+}
+
+void FWoTOnboardingModule::ShowPickupCard(const FWoTAngrealGuideRow& Row)
+{
+	if (!CanHostCard())
 	{
 		return;
 	}
-	const FWoTPickupCardText Text = WoTOnboardingPickupCards::ComposeText(Row,
+	HostCard(WoTOnboardingPickupCards::ComposeText(Row,
 		[](const FString& Section, const FString& Property)
 		{
 			// The resolver derives the owning file from the section.
 			return FWoTOnboardingSeams::Get().ResolveText(
 				FString(), Section, Property);
 		},
-		WoTOnboardingGuideKeyName());
+		WoTOnboardingGuideKeyName()),
+		Row.ClassName, /*bDeathRecap*/ false);
+}
+
+void FWoTOnboardingModule::ShowDeathRecap(const UWoTAngrealGuide& Guide,
+	const FWoTAngrealGuideRow& Row)
+{
+	if (!CanHostCard())
+	{
+		return;
+	}
+	HostCard(WoTOnboardingDeathRecap::ComposeText(Guide, Row,
+		[](const FWoTAngrealGuideRow& TitleRow)
+		{
+			// The retail localization address: section = the class name.
+			return FWoTOnboardingSeams::Get().ResolveText(
+				FString(), TitleRow.ClassName.ToString(), TEXT("Title"));
+		},
+		WoTOnboardingGuideKeyName()),
+		Row.ClassName, /*bDeathRecap*/ true);
+}
+
+void FWoTOnboardingModule::HostCard(const FWoTPickupCardText& Text,
+	FName ClassName, bool bDeathRecap)
+{
+	// One card slot: a newer card replaces the visible one.
+	ClosePickupCard();
 	PickupCardViewport = GEngine->GameViewport;
-	PickupCardClass = Row.ClassName;
+	PickupCardClass = ClassName;
+	bCardIsDeathRecap = bDeathRecap;
 	PickupCard = SNew(SWoTPickupCard)
 		.Text(Text)
+		.Lifetime(bDeathRecap ? WoTOnboardingDeathRecapLifetime
+		                      : WoTOnboardingPickupCardLifetime)
 		.OnExpired(FSimpleDelegate::CreateRaw(
 			this, &FWoTOnboardingModule::ClosePickupCardDeferred));
 	// Passive: no input mode change and no focus; play carries on.
@@ -384,6 +469,7 @@ void FWoTOnboardingModule::ClosePickupCard()
 	PickupCard.Reset();
 	PickupCardViewport.Reset();
 	PickupCardClass = NAME_None;
+	bCardIsDeathRecap = false;
 }
 
 void FWoTOnboardingModule::ClosePickupCardDeferred()

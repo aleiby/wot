@@ -10,7 +10,7 @@ struct FSlateBrush;
 // The onboarding extension seam (docs/plans/2026-11-06-onboarding-aids.md,
 // Architecture §2): the one surface the game module exposes to the optional
 // WoTOnboarding plugin, and the seed of a general improvement-module surface.
-// Plain types only — a consumer binds these without linking any game class —
+// Plain types only, so a consumer binds these without linking any game class,
 // and every seam is inert when unbound: the game module broadcasts and
 // registers through them whether or not anything listens, and a build without
 // the plugin behaves identically to one with it disabled.
@@ -20,9 +20,10 @@ struct FSlateBrush;
     guide rows and retail-text sections use. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FWoTClientItemAdded, FName /*ClassName*/);
 
-/** A 'WOTDeathMessage' line the owning client just queued to its right-hand
-    message column. */
-DECLARE_MULTICAST_DELEGATE_OneParam(FWoTClientDeathMessage, const FString& /*Line*/);
+/** The item that killed the owning client's player, as the server named it
+    (WoTKillingItem): the shipped script class name, the same key as above.
+    The server sends it whether or not anything on the client listens. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FWoTClientKilledBy, FName /*ClassName*/);
 
 /** The player asked to open the field guide (input wiring lands in Task 4). */
 DECLARE_MULTICAST_DELEGATE(FWoTShowGuideRequested);
@@ -40,7 +41,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FWoTCloseClientWindows, FName /*Keeper*/);
 /** The menu chrome the game module publishes so an improvement module's
     windows can draw beside the retail overlays without linking any game
     class: the two authenticated menu faces plus the shared panel brushes.
-    Resolved per open — the fonts are revocable payload data, so a resolver
+    Resolved per open: the fonts are revocable payload data, so a resolver
     answering unset means "draw with your own fallback". The brushes point at
     process-lifetime style storage. */
 struct FWoTOnboardingMenuChrome
@@ -61,7 +62,7 @@ struct FWoTOnboardingMenuChrome
 };
 
 /** One registered extra row for the menus or the settings screen. Both
-    callbacks are invoked lazily — the label at draw time (display text may
+    callbacks are invoked lazily: the label at draw time (display text may
     resolve late), the action on activation. */
 struct FWoTOnboardingRow
 {
@@ -78,7 +79,7 @@ struct WOT_API FWoTOnboardingSeams
 	static FWoTOnboardingSeams& Get();
 
 	FWoTClientItemAdded ClientItemAdded;
-	FWoTClientDeathMessage ClientDeathMessage;
+	FWoTClientKilledBy ClientKilledBy;
 	FWoTShowGuideRequested ShowGuideRequested;
 	FWoTCloseClientWindows CloseClientWindows;
 
@@ -109,8 +110,8 @@ struct WOT_API FWoTOnboardingSeams
 	    enters UI-only input with the cursor shown and focus on the given
 	    widget; false restores game input (what the retail overlays do through
 	    their owning controller). Installed by the local gameplay controller
-	    while it lives; unbound it is a no-op — the front end already runs UI
-	    input, so a window there manages focus itself. */
+	    while it lives; unbound it is a no-op, since the front end already
+	    runs UI input and a window there manages focus itself. */
 	TFunction<void(bool /*bOverlayOpen*/, TSharedPtr<SWidget> /*FocusWidget*/)>
 		SetOverlayInput;
 

@@ -892,9 +892,18 @@ public:
 	// PlayerState. Server-side only (scoring is authoritative); weak so it nulls if they leave.
 	UPROPERTY() TWeakObjectPtr<AController> SuicideInstigator;
 	UPROPERTY() float SuicideInstigationTime = 0.0f;
+	// The item class whose effect displaced us, kept beside SuicideInstigator for the
+	// optional death recap only; scoring never reads it. Server-side.
+	UPROPERTY() TSubclassOf<class AWoTInventory> SuicideInstigatorItemClass;
 	// WOTPawn.SetSuicideInstigator: record Other's controller as the instigator, stamped at
 	// Level.TimeSeconds. Other is the caster's pawn (alive + possessed at the call site).
-	void SetSuicideInstigator(APawn* Other);
+	// Item, when known, is the angreal behind the displacement (for the death recap).
+	void SetSuicideInstigator(APawn* Other, const class AWoTInventory* Item = nullptr);
+
+	// The item behind the blow that killed this pawn (WoTKillingItem::Resolve), for the
+	// optional death recap the game mode sends the victim. Server-side and presentation
+	// only: set as the killing blow lands, NAME_None for a death no item dealt.
+	FName KillingItemName;
 
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;

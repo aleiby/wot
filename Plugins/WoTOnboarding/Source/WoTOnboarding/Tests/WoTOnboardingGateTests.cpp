@@ -93,6 +93,7 @@ void WoTOnboardingGateExpectBindings(FAutomationTestBase& Test,
 		{TEXT("ShowGuideRequested"), Seams.ShowGuideRequested.IsBoundToObject(&Module)},
 		{TEXT("CloseClientWindows"), Seams.CloseClientWindows.IsBoundToObject(&Module)},
 		{TEXT("ClientItemAdded"), Seams.ClientItemAdded.IsBoundToObject(&Module)},
+		{TEXT("ClientKilledBy"), Seams.ClientKilledBy.IsBoundToObject(&Module)},
 	};
 	for (const auto& Check : Checks)
 	{
@@ -101,14 +102,6 @@ void WoTOnboardingGateExpectBindings(FAutomationTestBase& Test,
 			Test.AddError(FString::Printf(TEXT("%s: %s %s a module binding"),
 				When, Check.Seam, Check.bBound ? TEXT("holds") : TEXT("lacks")));
 		}
-	}
-	// The death-message seam is not one the module listens on yet; it must
-	// never hold a binding while the aids are off.
-	if (!bExpected)
-	{
-		Test.TestFalse(FString::Printf(
-			TEXT("%s: ClientDeathMessage holds a module binding"), When),
-			Seams.ClientDeathMessage.IsBoundToObject(&Module));
 	}
 }
 

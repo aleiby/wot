@@ -7,7 +7,7 @@
 // The onboarding seams' contract is that they are inert when unbound: the
 // plan's parity-off gate (Task 7) leans on exactly this, so a build without
 // the plugin behaves like one with it disabled. These specs exercise fresh
-// local instances — the struct is plain — so they stay true after later
+// local instances (the struct is plain), so they stay true after later
 // tasks bind handlers and register rows on the live singleton. No worlds.
 
 namespace
@@ -23,7 +23,7 @@ bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 {
 	FWoTOnboardingSeams Seams;
 	TestFalse(TEXT("no item listener"), Seams.ClientItemAdded.IsBound());
-	TestFalse(TEXT("no death listener"), Seams.ClientDeathMessage.IsBound());
+	TestFalse(TEXT("no killed-by listener"), Seams.ClientKilledBy.IsBound());
 	TestFalse(TEXT("no guide listener"), Seams.ShowGuideRequested.IsBound());
 	// Unbound queries read as "no retail window open"; callers gate on the
 	// binding before asking.
@@ -32,7 +32,7 @@ bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 	// Broadcasting into the void must be safe and effect-free; the hook sites
 	// in the inventory component and the player controller rely on it.
 	Seams.ClientItemAdded.Broadcast(FName(TEXT("EmberLob")));
-	Seams.ClientDeathMessage.Broadcast(TEXT("Wanderer fell from a ledge."));
+	Seams.ClientKilledBy.Broadcast(FName(TEXT("EmberLob")));
 	Seams.ShowGuideRequested.Broadcast();
 	TestTrue(TEXT("the seam registry is one process-wide instance"),
 		&FWoTOnboardingSeams::Get() == &FWoTOnboardingSeams::Get());

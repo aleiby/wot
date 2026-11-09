@@ -49,27 +49,6 @@ UWoTAngrealGuide* WoTOnboardingMakeFixtureGuide()
 		{TEXT("EmberLob")}));
 	return Guide;
 }
-
-FString WoTOnboardingFixtureTitle(const FWoTAngrealGuideRow& Row)
-{
-	// The invented runtime titles the resolver seam would supply. EmberLob's
-	// title is a strict substring of EmberLobGreater's, which is what the
-	// longest-match rule exists for.
-	if (Row.ClassName == FName(TEXT("EmberLob")))
-	{
-		return TEXT("Ember Lob");
-	}
-	if (Row.ClassName == FName(TEXT("EmberLobGreater")))
-	{
-		return TEXT("Greater Ember Lob");
-	}
-	if (Row.ClassName == FName(TEXT("CinderWard")))
-	{
-		return TEXT("Cinder Ward");
-	}
-	// BounceWard deliberately resolves no title (absent retail text).
-	return FString();
-}
 } // namespace
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideFindByClassNameSpec,
@@ -98,42 +77,6 @@ bool FWoTOnboardingGuideFindByClassNameSpec::RunTest(const FString&)
 		Guide->FindByClassName(FName(TEXT("NeverARow"))));
 	TestNull(TEXT("NAME_None finds nothing"),
 		Guide->FindByClassName(NAME_None));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideFindByTitleInSpec,
-	"WoT.Onboarding.GuideFindByTitleIn", WoTOnboardingGuideFlags)
-
-bool FWoTOnboardingGuideFindByTitleInSpec::RunTest(const FString&)
-{
-	UWoTAngrealGuide* Guide = WoTOnboardingMakeFixtureGuide();
-	const auto Resolve = [](const FWoTAngrealGuideRow& Row)
-	{
-		return WoTOnboardingFixtureTitle(Row);
-	};
-
-	const FWoTAngrealGuideRow* Longest = Guide->FindByTitleIn(
-		TEXT("Wanderer was slain by Greater Ember Lob."), Resolve);
-	if (TestNotNull(TEXT("longest contained title matches"), Longest))
-	{
-		// "Ember Lob" is contained too; the longer title names the line.
-		TestEqual(TEXT("longest match wins"), Longest->ClassName,
-			FName(TEXT("EmberLobGreater")));
-	}
-
-	const FWoTAngrealGuideRow* Folded = Guide->FindByTitleIn(
-		TEXT("wanderer was slain by CINDER WARD."), Resolve);
-	if (TestNotNull(TEXT("match is case-insensitive"), Folded))
-	{
-		TestEqual(TEXT("case-folded match"), Folded->ClassName,
-			FName(TEXT("CinderWard")));
-	}
-
-	TestNull(TEXT("text naming no title matches nothing"),
-		Guide->FindByTitleIn(TEXT("Wanderer fell from a ledge."), Resolve));
-	TestNull(TEXT("rows resolving empty titles never match"),
-		Guide->FindByTitleIn(TEXT("Anything at all."),
-			[](const FWoTAngrealGuideRow&) { return FString(); }));
 	return true;
 }
 

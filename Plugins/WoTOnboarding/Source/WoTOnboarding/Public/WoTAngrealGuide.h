@@ -69,14 +69,6 @@ public:
 	/** The row keyed by the shipped script class name; null when absent. */
 	const FWoTAngrealGuideRow* FindByClassName(FName ClassName) const;
 
-	/** The row whose resolved title is the longest one contained in Text
-	    (case-insensitive), for death-recap resolution. ResolveTitle supplies
-	    each row's runtime display title, normally through the retail-text
-	    seam; a row resolving empty never matches (titles are runtime data and
-	    may be absent). Ties keep the earliest row. Null when nothing matches. */
-	const FWoTAngrealGuideRow* FindByTitleIn(const FString& Text,
-		TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle) const;
-
 	/** Every row whose Counters names ClassName, in Rows order. */
 	TArray<const FWoTAngrealGuideRow*> CounteredBy(FName ClassName) const;
 

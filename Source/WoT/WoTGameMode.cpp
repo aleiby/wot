@@ -847,8 +847,47 @@ void AWoTGameMode::PlayerKilled(AController* Killer, AWoTCharacter* Victim, FNam
 	{
 		return;
 	}
+	// The optional death recap's one fact: the item that killed this player, sent to the
+	// victim alone and whatever this server's own settings. A client without the
+	// onboarding aids receives it and does nothing.
+	const FName KillingItem = KillingItemFor(Killer, *Victim);
+	if (!KillingItem.IsNone())
+	{
+		PlayerController->ClientKilledBy(KillingItem);
+	}
 	PlayerController->UnPossess();
 	PlayerController->ArmRespawnFire(Victim, RespawnDelay);
+}
+
+AController* AWoTGameMode::ActiveSuicideInstigator(const AWoTCharacter& VictimPawn) const
+{
+	// SuicideInstigator holds the instigator's controller (the persistent identity),
+	// so it survives the caster's own pawn being replaced on respawn within the window.
+	AController* InstigatorController = VictimPawn.SuicideInstigator.Get();
+	if (InstigatorController
+		&& VictimPawn.SuicideInstigationTime + SuicideInstigationRelevance
+			> GetWorld()->GetTimeSeconds())
+	{
+		return InstigatorController;
+	}
+	return nullptr;
+}
+
+FName AWoTGameMode::KillingItemFor(const AController* Killer,
+	const AWoTCharacter& Victim) const
+{
+	if (!Victim.KillingItemName.IsNone())
+	{
+		return Victim.KillingItemName;
+	}
+	// A fall or a hazard soon after a Whirlwind or a Swap Places names the displacing
+	// angreal, on the same terms ScoreKill credits its caster with the kill.
+	if (!Killer && ActiveSuicideInstigator(Victim))
+	{
+		return UWoTInventoryComponent::GetHandSetItemClassName(
+			Victim.SuicideInstigatorItemClass);
+	}
+	return NAME_None;
 }
 
 void AWoTGameMode::ScoreKill(AController* Killer, AWoTCharacter* Victim)
@@ -876,12 +915,7 @@ void AWoTGameMode::ScoreKillIdentity(AController* Killer,
 	// credits the caster who put the victim there, instead of scoring a plain suicide.
 	if (Killer == nullptr && VictimPawn)
 	{
-		// SuicideInstigator holds the instigator's controller (the persistent identity),
-		// so it survives the caster's own pawn being replaced on respawn within the window.
-		AController* InstigatorController = VictimPawn->SuicideInstigator.Get();
-		if (InstigatorController
-			&& VictimPawn->SuicideInstigationTime + SuicideInstigationRelevance
-				> GetWorld()->GetTimeSeconds())
+		if (AController* InstigatorController = ActiveSuicideInstigator(*VictimPawn))
 		{
 			Killer = InstigatorController;
 		}
@@ -1661,10 +1695,9 @@ AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
 	float BestScore = -100000.0f;
 	APlayerStart* BestStart = nullptr;
 	const AWoTLeafMap* LeafMap = nullptr;
-	for (TActorIterator<AWoTLeafMap> It(World); It; ++It)
+	if (TActorIterator<AWoTLeafMap> It(World); It)
 	{
 		LeafMap = *It;
-		break;
 	}
 
 	for (TActorIterator<APlayerStart> StartIt(World); StartIt; ++StartIt)
@@ -1872,14 +1905,11 @@ APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
 				// UE5's FindTeleportSpot resolves only the one-sided collision
 				// mesh and pushed such a pawn out of the floor's underside: it
 				// fell out of the world.
-				for (TActorIterator<AWoTLeafMap> It(World); It; ++It)
+				if (TActorIterator<AWoTLeafMap> It(World);
+					It && It->IsPointInSolid(ResolvedLocation))
 				{
-					if (It->IsPointInSolid(ResolvedLocation))
-					{
-						Spawned->Destroy();
-						return nullptr;
-					}
-					break;
+					Spawned->Destroy();
+					return nullptr;
 				}
 				RetailSpawn.SetLocation(ResolvedLocation);
 				Spawned->SetActorTransform(RetailSpawn, false, nullptr,

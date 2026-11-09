@@ -4624,6 +4624,14 @@ void AWoTPlayerController::ClientTypedMessage_Implementation(const FString& S, F
 	RouteTypedMessage(S, Type, GetNetMode() == NM_Standalone);
 }
 
+void AWoTPlayerController::ClientKilledBy_Implementation(FName ItemClassName)
+{
+	if (!ItemClassName.IsNone())
+	{
+		FWoTOnboardingSeams::Get().ClientKilledBy.Broadcast(ItemClassName);
+	}
+}
+
 void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool bStandalone)
 {
 	// WOTPlayer.ClientMessage (WOTPlayer.uc:1862-1890): 'Pickup' and 'FailedMessage' land
@@ -4649,9 +4657,6 @@ void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool 
 			{
 				HUD->AddRightMessage(S);
 			}
-			// Onboarding seam, behavior-neutral: the death-recap aid reads
-			// the same line the right queue just received.
-			FWoTOnboardingSeams::Get().ClientDeathMessage.Broadcast(S);
 		}
 	}
 	else if (Type == FName(TEXT("DeathMessage")))

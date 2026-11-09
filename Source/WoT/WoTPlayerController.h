@@ -568,6 +568,12 @@ public:
 	// can exercise the MP-only death-message gate (a test world is always standalone).
 	void RouteTypedMessage(const FString& S, FName Type, bool bStandalone);
 
+	// The optional death recap (WoTKillingItem): the server names the item that killed this
+	// player, to this player only. The owning client passes it to the onboarding seam,
+	// which only the optional aids bind, so a client without them drops it.
+	UFUNCTION(Client, Reliable)
+	void ClientKilledBy(FName ItemClassName);
+
 	// AngrealInventory.uc:615-616 GiveTo: the first-new-artifact owner presentation —
 	// ClientPlaySound(NotifyNewPickupSoundName) + BaseHUD.SetFlashTexture(texture, fade).
 	UFUNCTION(Client, Reliable)

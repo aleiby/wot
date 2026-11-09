@@ -26,32 +26,6 @@ const FWoTAngrealGuideRow* UWoTAngrealGuide::FindByClassName(
 	});
 }
 
-const FWoTAngrealGuideRow* UWoTAngrealGuide::FindByTitleIn(
-	const FString& Text,
-	TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle) const
-{
-	// Longest contained resolved title wins: a recap line naming one item may
-	// contain another row's shorter title as a substring, and the longer
-	// match is the one the line actually names. Ties keep the earliest row,
-	// so the result is deterministic in Rows order.
-	const FWoTAngrealGuideRow* Best = nullptr;
-	int32 BestLength = 0;
-	for (const FWoTAngrealGuideRow& Row : Rows)
-	{
-		const FString Title = ResolveTitle(Row);
-		// An empty title (unresolved retail text) would "match" any text;
-		// such a row is simply unresolvable.
-		if (Title.Len() <= BestLength || Title.Len() > Text.Len()
-			|| !Text.Contains(Title, ESearchCase::IgnoreCase))
-		{
-			continue;
-		}
-		Best = &Row;
-		BestLength = Title.Len();
-	}
-	return Best;
-}
-
 TArray<const FWoTAngrealGuideRow*> UWoTAngrealGuide::CounteredBy(
 	FName ClassName) const
 {
