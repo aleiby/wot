@@ -37,14 +37,18 @@
 #include "Settings/WoTSettingsSlate.h"
 #include "UI/SWoTFocusOutline.h"
 #include "UI/SWoTListCombo.h"
+#include "UI/SWoTOnScreenKeyboard.h"
+#include "UI/SWoTTextFieldActivator.h"
 #include "UI/WoTBackStack.h"
 #include "UI/WoTControllerUIInput.h"
 #include "UI/WoTMenuNavigation.h"
+#include "UI/WoTTextEntry.h"
 
 // Escape's per-window back path. B and View go through the back stack
 // (FWoTBackStack) since controller sub-project 3; Escape keeps this path,
-// except that with a dropdown open it closes only the dropdown (owner ruling
-// 2026-11-08, spec r3 [N1]).
+// except that with the keyboard panel open it cancels the panel first, and
+// with a dropdown open it closes only the dropdown (owner ruling 2026-11-08,
+// spec r3 [M3] [N1]).
 class FWoTFrontEndBackInputProcessor final : public IInputProcessor
 {
 public:
@@ -67,8 +71,7 @@ public:
 			return false;
 		}
 		const TSharedPtr<SWoTFrontEndRoot> PinnedRoot = Root.Pin();
-		if (!PinnedRoot.IsValid() || !PinnedRoot->IsPresentationReady()
-			|| PinnedRoot->ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+		if (!PinnedRoot.IsValid() || !PinnedRoot->IsPresentationReady())
 		{
 			return false;
 		}
@@ -90,6 +93,15 @@ public:
 		}
 		if (!bInsideRootWindowFamily) return false;
 
+		// An open keyboard panel cancels first, and no screen back happens.
+		if (FWoTTextEntry::CancelWithin(PinnedRoot.ToSharedRef()))
+		{
+			return true;
+		}
+		if (PinnedRoot->ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+		{
+			return false;
+		}
 		// An open dropdown closes first; a second Escape backs the screen.
 		if (SWoTListCombo::CloseOpenWithin(PinnedRoot.ToSharedRef()))
 		{
@@ -280,9 +292,16 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 			.HAlign(HAlign_Fill)
 			.VAlign(VAlign_Fill)
 			[
-				SAssignNew(ScreenHost, SBox)
-				.HAlign(HAlign_Fill)
-				.VAlign(VAlign_Fill)
+				// Hosts the keyboard panel over every screen (spec r3 section
+				// 3). Outside the screen host, so a rebuild keeps the panel and
+				// its draft; the prompt strip stays drawn above it.
+				SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
+				.Font(this, &SWoTFrontEndRoot::PromptFont)
+				[
+					SAssignNew(ScreenHost, SBox)
+					.HAlign(HAlign_Fill)
+					.VAlign(VAlign_Fill)
+				]
 			]
 			+ SOverlay::Slot()
 			.HAlign(HAlign_Right)
@@ -445,6 +464,11 @@ TArray<FWoTButtonPrompt> SWoTFrontEndRoot::ControllerPrompts() const
 	{
 		return {};
 	}
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel's set, or Steam's keyboard's.
+		return FWoTTextEntry::ControllerPrompts();
+	}
 	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
 	{
 		return FWoTButtonPromptSets::Dropdown();
@@ -547,6 +571,11 @@ void SWoTFrontEndRoot::SyncPlayOverlayFocus()
 		PrePlayOverlayFocus.Reset();
 		return;
 	}
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel keeps focus; overlays sync once the entry ends.
+		return;
+	}
 	const TSharedPtr<SWidget> OverlayFocus = PlayOverlayFocusTarget();
 	const TSharedPtr<SWidget> Previous = LastPlayOverlayFocus.Pin();
 	if (OverlayFocus == Previous)
@@ -595,6 +624,13 @@ void SWoTFrontEndRoot::SyncPlayOverlayFocus()
 
 void SWoTFrontEndRoot::FocusInitialWidget()
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// A rebuild during entry keeps the entry and its draft [M6]: focus
+		// stays on the panel, or returns to the rebuilt field for Steam's keys.
+		FWoTTextEntry::RestoreFocus();
+		return;
+	}
 	const TSharedPtr<SWidget> InitialFocus = InitialFocusWidget();
 	if (FSlateApplication::IsInitialized() && InitialFocus.IsValid())
 	{
@@ -795,6 +831,11 @@ FReply SWoTFrontEndRoot::OnPreviewKeyDown(
 	// Escape only: B and View reach the screen through the back stack.
 	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		// An open keyboard panel cancels first (spec r3 [M3]).
+		if (FWoTTextEntry::CancelWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
 		// An open dropdown closes first (spec r3 [N1]).
 		if (SWoTListCombo::CloseOpenWithin(AsShared()))
 		{
@@ -834,6 +875,10 @@ void SWoTFrontEndRoot::RebuildScreen()
 	HostNavigationRows.Reset();
 	JoinNavigationRows.Reset();
 	PlayerNameTextBox.Reset();
+	ServerNameTextBox.Reset();
+	AdminPasswordTextBox.Reset();
+	GamePasswordTextBox.Reset();
+	DirectAddressTextBox.Reset();
 	MainMenuButtons.Reset();
 	MapComboBox.Reset();
 	SessionListView.Reset();
@@ -1187,7 +1232,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
-			SAssignNew(PlayerNameTextBox, SEditableTextBox)
+			TextField(SAssignNew(PlayerNameTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.MaximumLength(20)
@@ -1196,7 +1241,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 				return WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName());
 			})
 			.OnTextChanged(this, &SWoTFrontEndRoot::SetPlayerName)
-			.OnTextCommitted(this, &SWoTFrontEndRoot::CommitPlayerName)
+			.OnTextCommitted(this, &SWoTFrontEndRoot::CommitPlayerName),
+			PlayerNameEntryRequest())
 		]
 	];
 	Rows->AddSlot()
@@ -1685,12 +1731,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 					]
 					+ SVerticalBox::Slot().AutoHeight()
 					[
-						SAssignNew(PasswordTextBox, SEditableTextBox)
+						TextField(SAssignNew(PasswordTextBox, SEditableTextBox)
 						.Style(Style.EditableTextBoxStyle())
 						.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 						.IsPassword(true)
 						.OnTextCommitted(this,
-							&SWoTFrontEndRoot::CommitServerPassword)
+							&SWoTFrontEndRoot::CommitServerPassword),
+						ServerPasswordEntryRequest())
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
 					.HAlign(HAlign_Right)
@@ -1860,14 +1907,15 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 	Panel->AddSlot().AutoSize().Padding(0.0f, 0.0f, 0.0f, 9.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[7]")),
-			HostControl(SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(ServerNameTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.Text_Lambda([this]()
 			{
 				return WoTFrontEndSlate_Text(ViewModel.GetHostRequest().ServerName);
 			})
-			.OnTextChanged(this, &SWoTFrontEndRoot::SetServerName)))
+			.OnTextChanged(this, &SWoTFrontEndRoot::SetServerName)),
+			ServerNameEntryRequest()))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 0.0f, 0.0f, 5.0f)
 	[
@@ -2098,7 +2146,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				? FName(TEXT("menuStartBattleServer.MenuList[13]"))
 				: FName(TEXT("menuStartArenaServer.MenuList[8]")));
 		}),
-			HostControl(SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(AdminPasswordTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.IsPassword(true)
@@ -2109,7 +2157,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnTextChanged_Lambda([this](const FText& Text)
 			{
 				ViewModel.SetAdminPassword(Text.ToString());
-			})))
+			})),
+			HostPasswordEntryRequest(/*bAdmin*/ true)))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
@@ -2119,7 +2168,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				? FName(TEXT("menuStartBattleServer.MenuList[14]"))
 				: FName(TEXT("menuStartArenaServer.MenuList[9]")));
 		}),
-			HostControl(SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(GamePasswordTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.IsPassword(true)
@@ -2130,7 +2179,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnTextChanged_Lambda([this](const FText& Text)
 			{
 				ViewModel.SetGamePassword(Text.ToString());
-			})))
+			})),
+			HostPasswordEntryRequest(/*bAdmin*/ false)))
 	];
 	TArray<TSharedPtr<SWidget>> HostNetworkRow;
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 8.0f)
@@ -2375,12 +2425,16 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(
 					0.0f, 0.0f, 4.0f, 0.0f)
 				[
-					SAssignNew(DirectAddressBox, SEditableTextBox)
+					TextField(SAssignNew(DirectAddressTextBox, SEditableTextBox)
 						.Style(Style.EditableTextBoxStyle())
 						.Font(this, &SWoTFrontEndRoot::PlayBrowserFont)
 						.HintText(WoTFrontEndSlate_Text(
 								TEXT("192.0.2.10:7777")))
-						.OnTextChanged(this, &SWoTFrontEndRoot::SetDirectAddress)
+						// Shows the address the root keeps, so a rebuild or
+						// the keyboard panel's Done is reflected here.
+						.Text_Lambda([this]() { return WoTFrontEndSlate_Text(DirectAddress); })
+						.OnTextChanged(this, &SWoTFrontEndRoot::SetDirectAddress),
+						DirectAddressEntryRequest())
 				]
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
@@ -2403,6 +2457,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 		]
 	];
 
+	DirectAddressBox = DirectAddressTextBox;
 	JoinNavigationRows.Add(JoinTopRow);
 	JoinNavigationRows.Add(JoinOptionsRow);
 	JoinNavigationRows.Add(JoinHeadingRow);
@@ -3329,6 +3384,146 @@ void SWoTFrontEndRoot::SortSessionItems()
 			}
 			return (Sort.bDescending ? -Result : Result) < 0;
 		});
+}
+
+TSharedRef<SWidget> SWoTFrontEndRoot::TextField(const TSharedRef<SWidget>& Field,
+	const FWoTTextEntryRequest& Request)
+{
+	return SNew(SWoTTextFieldActivator)
+		.Request(Request)
+		[
+			Field
+		];
+}
+
+FWoTTextValidation SWoTFrontEndRoot::ValidateHostPassword(const FString& Text)
+{
+	FString Sanitized;
+	if (FWoTFrontEndModel::SanitizeHostPassword(Text, Sanitized))
+	{
+		return FWoTTextValidation::Accept();
+	}
+	// SanitizeHostPassword rejects rather than trims, so the message names
+	// the rule (spec r3 section 3).
+	return FWoTTextValidation::Reject(WoTFrontEndSlate_Text(
+		TEXT("Passwords are up to 32 characters: letters, digits and symbols, ")
+		TEXT("with no spaces and none of ? # = \" \\")));
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::PlayerNameEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = RetailText(TEXT("menuPlayer.MenuList[1]"));
+	Request.MaxLength = 20;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PlayerNameTextBox); };
+	Request.GetText = [this]() { return ViewModel.GetPendingPlayerName(); };
+	Request.SetText = [this](const FString& Text)
+	{
+		ViewModel.SelectPendingPlayerName(Text);
+		// The box's own commit (CommitPlayerName) sets its text directly, which
+		// ends its binding, so the entry sets it the same way.
+		if (PlayerNameTextBox.IsValid())
+		{
+			PlayerNameTextBox->SetText(WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName()));
+		}
+	};
+	Request.Filter = [](const FString& Text)
+	{
+		return FWoTFrontEndModel::FilterPlayerNameInput(Text);
+	};
+	Request.Commit = [this]()
+	{
+		CommitPlayerName(WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName()),
+			ETextCommit::OnEnter);
+	};
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::ServerPasswordEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = WoTFrontEndSlate_Text(TEXT("Server Password"));
+	Request.MaxLength = 32;
+	Request.bPassword = true;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PasswordTextBox); };
+	Request.GetText = [this]()
+	{
+		return PasswordTextBox.IsValid() ? PasswordTextBox->GetText().ToString() : FString();
+	};
+	Request.SetText = [this](const FString& Text)
+	{
+		if (PasswordTextBox.IsValid())
+		{
+			PasswordTextBox->SetText(WoTFrontEndSlate_Text(Text));
+		}
+	};
+	Request.Validate = &SWoTFrontEndRoot::ValidateHostPassword;
+	Request.Commit = [this]() { SubmitServerPassword(); };
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::ServerNameEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = RetailText(TEXT("menuStartArenaServer.MenuList[7]"));
+	// New for controller entry (spec r3 [M6]); the keyboard's box is unbounded.
+	Request.MaxLength = 32;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(ServerNameTextBox); };
+	Request.GetText = [this]() { return ViewModel.GetHostRequest().ServerName; };
+	Request.SetText = [this](const FString& Text) { SetServerName(WoTFrontEndSlate_Text(Text)); };
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::HostPasswordEntryRequest(bool bAdmin)
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = TAttribute<FText>::CreateLambda([this, bAdmin]()
+	{
+		const bool bBattle = ViewModel.IsBattleMapSelected();
+		return RetailText(bAdmin
+			? (bBattle ? FName(TEXT("menuStartBattleServer.MenuList[13]"))
+				: FName(TEXT("menuStartArenaServer.MenuList[8]")))
+			: (bBattle ? FName(TEXT("menuStartBattleServer.MenuList[14]"))
+				: FName(TEXT("menuStartArenaServer.MenuList[9]"))));
+	});
+	Request.MaxLength = 32;
+	Request.bPassword = true;
+	Request.GetField = [this, bAdmin]()
+	{
+		return StaticCastSharedPtr<SWidget>(bAdmin ? AdminPasswordTextBox : GamePasswordTextBox);
+	};
+	Request.GetText = [this, bAdmin]()
+	{
+		return bAdmin ? ViewModel.GetHostRequest().AdminPassword
+			: ViewModel.GetHostRequest().GamePassword;
+	};
+	Request.SetText = [this, bAdmin](const FString& Text)
+	{
+		if (bAdmin)
+		{
+			ViewModel.SetAdminPassword(Text);
+		}
+		else
+		{
+			ViewModel.SetGamePassword(Text);
+		}
+	};
+	Request.Validate = &SWoTFrontEndRoot::ValidateHostPassword;
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::DirectAddressEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = WoTFrontEndSlate_Text(TEXT("Direct Address"));
+	// New for controller entry (spec r3 [M6]); the keyboard's box is unbounded.
+	Request.MaxLength = 64;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(DirectAddressTextBox); };
+	Request.GetText = [this]() { return DirectAddress; };
+	Request.SetText = [this](const FString& Text) { SetDirectAddress(WoTFrontEndSlate_Text(Text)); };
+	// Done connects, as the Connect button beside the box does.
+	Request.Commit = [this]() { ConnectDirect(); };
+	return Request;
 }
 
 void SWoTFrontEndRoot::SetServerName(const FText& Text)

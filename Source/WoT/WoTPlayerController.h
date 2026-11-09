@@ -18,6 +18,8 @@ class SWoTInGameMenuOverlay;
 class SWoTChatInputOverlay;
 class SWoTItemInfoOverlay;
 class SWoTHelpOverlay;
+class SViewport;
+class SWidget;
 class UGameViewportClient;
 
 UENUM()
@@ -340,11 +342,25 @@ public:
 	bool IsChatTyping() const { return bChatTyping; }
 	void CancelChatInput();
 	void SubmitChatInput(const FString& Line);
+	/**
+	 * The keyboard panel opened over chat (spec r3 section 3 [I7]). Controller
+	 * chat is not a parity path: held gameplay keys are flushed, retained mouse
+	 * capture is released, chat's input router is suspended and input routes
+	 * UI-only to the panel.
+	 */
+	void SuspendChatInputForTextEntry(const TSharedRef<SWidget>& Panel);
+	/** The panel closed: chat's input mode is restored exactly as it opened. */
+	void ResumeChatInputAfterTextEntry();
+	bool IsChatInputSuspendedForTextEntry() const { return bChatInputSuspended; }
+	/** The open chat line's widget, if chat is open with one. */
+	TSharedPtr<SWoTChatInputOverlay> GetChatInputWidget() const { return ChatInputWidget; }
 #if WITH_AUTOMATION_TESTS
 	FString GetChatTextForTesting() const;
 	void SetChatTextForTesting(const FString& Text);
 	void SubmitChatForTesting();
 	void EnableChatWidgetForTesting() { bEnableChatWidgetForTesting = true; }
+	/** True while chat's input router is registered and not suspended. */
+	bool IsChatInputRouterActiveForTesting() const;
 #endif
 
 	// Engine.PlayerPawn SShot/ToggleFullscreen direct features plus
@@ -614,6 +630,10 @@ private:
 	void RemoveInGameMenuWidget(bool bRestoreGameInput);
 	void BeginChatInput(const FString& InitialText);
 	void CreateChatInputWidget();
+	/** Chat's input mode: game-and-UI with the line focused, the viewport
+	 * ignoring input, and gameplay mouse capture retained when asked. */
+	void ApplyChatInputMode(bool bRetainMouseCapture,
+		const TSharedPtr<SViewport>& ViewportWidget, uint32 SlateUserIndex);
 	void RemoveChatInputWidget(bool bRestoreGameInput);
 	void BroadcastSay(const FString& Message);
 	void ServerEditCitadelInput();
@@ -715,6 +735,8 @@ private:
 	TWeakObjectPtr<UGameViewportClient> ChatInputViewport;
 	FString ChatInputText;
 	bool bChatTyping = false;
+	/** The keyboard panel is open over chat. */
+	bool bChatInputSuspended = false;
 #if WITH_AUTOMATION_TESTS
 	bool bEnableChatWidgetForTesting = false;
 #endif

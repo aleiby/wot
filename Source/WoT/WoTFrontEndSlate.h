@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Online/WoTKeychainAccess.h"
 #include "UI/SWoTButtonPrompts.h"
+#include "UI/WoTTextEntry.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 #include "UI/WoTUpdateBanner.h"
@@ -32,6 +33,7 @@ class FWoTBackStackEntryHandle;
 class FWoTCursorLease;
 class SWoTFocusOutlineLayer;
 class SWoTListCombo;
+class SWoTTextEntryLayer;
 
 enum class EWoTFrontEndMainMenuAction : uint8
 {
@@ -217,6 +219,17 @@ public:
 	TSharedPtr<SWidget> OnlineDisclosurePrimaryWidgetForTesting() const
 		{ return OnlineDisclosurePrimaryWidget; }
 	TSharedPtr<SWidget> PasswordTextBoxForTesting() const { return PasswordTextBox; }
+	/** The text fields of spec r3 section 3, as last built. */
+	TSharedPtr<SWidget> PlayerNameTextBoxForTesting() const { return PlayerNameTextBox; }
+	TSharedPtr<SWidget> ServerNameTextBoxForTesting() const { return ServerNameTextBox; }
+	TSharedPtr<SWidget> AdminPasswordTextBoxForTesting() const { return AdminPasswordTextBox; }
+	TSharedPtr<SWidget> GamePasswordTextBoxForTesting() const { return GamePasswordTextBox; }
+	TSharedPtr<SWidget> DirectAddressTextBoxForTesting() const { return DirectAddressTextBox; }
+	const FString& DirectAddressForTesting() const { return DirectAddress; }
+	/** The layer that hosts the keyboard panel over every screen. */
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayerForTesting() const { return TextEntryLayer; }
+	/** Rebuilds the current screen, as a session event or overlay change does. */
+	void RebuildScreenForTesting() { RebuildScreen(); }
 	/** The Play focus graph's columns, as last built. */
 	const TArray<TArray<TSharedPtr<SWidget>>>& HostNavigationRowsForTesting() const
 		{ return HostNavigationRows; }
@@ -306,6 +319,18 @@ private:
 	void CommitServerPassword(const FText& Text,
 		ETextCommit::Type CommitType);
 	FString PasswordPromptText() const;
+	/** Wraps a text field for controller and touch entry (spec r3 section 3). */
+	TSharedRef<SWidget> TextField(const TSharedRef<SWidget>& Field,
+		const FWoTTextEntryRequest& Request);
+	// Each field's request, bound to the view model or the root, never to the
+	// field widget, so a Play rebuild during entry keeps the draft [M6].
+	FWoTTextEntryRequest PlayerNameEntryRequest();
+	FWoTTextEntryRequest ServerPasswordEntryRequest();
+	FWoTTextEntryRequest ServerNameEntryRequest();
+	FWoTTextEntryRequest HostPasswordEntryRequest(bool bAdmin);
+	FWoTTextEntryRequest DirectAddressEntryRequest();
+	/** SanitizeHostPassword as Done's rule: it rejects, naming the rule. */
+	static FWoTTextValidation ValidateHostPassword(const FString& Text);
 	FReply SelectBrowserSortColumn(EWoTBrowserSortColumn Column);
 
 	TSharedRef<SWidget> GenerateMapWidget(FMapItem Item) const;
@@ -505,6 +530,11 @@ private:
 	TSharedPtr<SEditableTextBox> PlayerNameTextBox;
 	TSharedPtr<SWidget> PasswordPromptWidget;
 	TSharedPtr<SEditableTextBox> PasswordTextBox;
+	TSharedPtr<SEditableTextBox> ServerNameTextBox;
+	TSharedPtr<SEditableTextBox> AdminPasswordTextBox;
+	TSharedPtr<SEditableTextBox> GamePasswordTextBox;
+	TSharedPtr<SEditableTextBox> DirectAddressTextBox;
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayer;
 	TSharedPtr<SWidget> FirstFocusableWidget;
 	/** Initial focus in Controller mode where spec r3 section 1a differs from
 	 * today's (Pointer keeps FirstFocusableWidget). */

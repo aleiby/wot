@@ -119,6 +119,10 @@ public:
 		{ return ControllerSensitivitySlider; }
 	TSharedPtr<SCheckBox> ControllerInvertCheckBoxForTesting() const
 		{ return ControllerInvertCheckBox; }
+	/** The Steam keyboard toggle; null where Steam's keyboard cannot open. */
+	TSharedPtr<SCheckBox> SteamKeyboardCheckBoxForTesting() const
+		{ return SteamKeyboardCheckBox; }
+	bool SteamKeyboardDraftForTesting() const { return bSteamKeyboardDraft; }
 #endif
 
 private:
@@ -187,6 +191,10 @@ private:
 	TSharedPtr<SWidget> WindowModeControl;
 	TSharedPtr<SWidget> ControllerSensitivitySlider;
 	TSharedPtr<SCheckBox> ControllerInvertCheckBox;
+	/** Steam's keyboard for text fields: its own side file, not the settings. */
+	TSharedPtr<SCheckBox> SteamKeyboardCheckBox;
+	bool bSteamKeyboardConfirmed = false;
+	bool bSteamKeyboardDraft = false;
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;
