@@ -1,11 +1,9 @@
 #include "WoTInstallerSharingSubsystem.h"
 
 #include "Engine/GameInstance.h"
-#include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/CoreMisc.h"
 #include "WoTBootstrapSubsystem.h"
-#include "WoTHUD.h"
 #include "WoTLocalNetworkAccess.h"
 #include "WoTPreferencesSubsystem.h"
 #include "Payload/WoTPayloadActivation.h"
@@ -71,7 +69,8 @@ void UWoTInstallerSharingSubsystem::Deinitialize()
 		TickerHandle.Reset();
 	}
 	StopSharer();
-	Notice.Clear();
+	// Takes the notice off the viewport.
+	NoticeLine.Reset();
 	Super::Deinitialize();
 }
 
@@ -170,6 +169,13 @@ FString UWoTInstallerSharingSubsystem::NoticeText(
 	}
 }
 
+FString UWoTInstallerSharingSubsystem::NothingToShareHint()
+{
+	return WoTSharingFinderSkipsDownloads()
+		? FString(TEXT("On a Mac, keep the original installer beside WoT Reborn or choose it with Browse to share it."))
+		: FString(TEXT("No original installer found on this computer to share."));
+}
+
 void UWoTInstallerSharingSubsystem::ApplySharingSwitch(bool bOn)
 {
 	bSwitchOn = bOn;
@@ -192,6 +198,10 @@ bool UWoTInstallerSharingSubsystem::Tick(float DeltaSeconds)
 {
 	(void)DeltaSeconds;
 	Evaluate();
+	if (NoticeLine.IsValid())
+	{
+		NoticeLine->Tick();
+	}
 	return true;
 }
 
@@ -350,12 +360,17 @@ void UWoTInstallerSharingSubsystem::StopSharer()
 		InlineSharer.Reset();
 	}
 #endif
-	// Delivers the "... stopped" notice of a transfer the stop ended.
-	DrainEvents();
+	// The stop ended every transfer ("... stopped"); sharing is off now, so
+	// the notice goes away instead of showing that line.
+	DrainEvents(/*bPresent*/ false);
+	if (NoticeLine.IsValid())
+	{
+		NoticeLine->Reset();
+	}
 	SearchState = EWoTInstallerSharingSearch::Unknown;
 }
 
-void UWoTInstallerSharingSubsystem::DrainEvents()
+void UWoTInstallerSharingSubsystem::DrainEvents(bool bPresent)
 {
 	if (!Events.IsValid())
 	{
@@ -364,11 +379,12 @@ void UWoTInstallerSharingSubsystem::DrainEvents()
 	FWoTInstallerSharerEvent Event;
 	while (Events->Dequeue(Event))
 	{
-		Deliver(Event);
+		Deliver(Event, bPresent);
 	}
 }
 
-void UWoTInstallerSharingSubsystem::Deliver(const FWoTInstallerSharerEvent& Event)
+void UWoTInstallerSharingSubsystem::Deliver(
+	const FWoTInstallerSharerEvent& Event, bool bPresent)
 {
 	if (Event.Kind == FWoTInstallerSharerEvent::EKind::SearchFinished)
 	{
@@ -377,23 +393,46 @@ void UWoTInstallerSharingSubsystem::Deliver(const FWoTInstallerSharerEvent& Even
 		return;
 	}
 	const FString Text = NoticeText(Event);
-	if (Text.IsEmpty() || bDeinitialized)
+	if (Text.IsEmpty() || bDeinitialized || !bPresent)
 	{
 		return;
 	}
-	// The front end's notice line (SWoTFrontEndRoot forwards it to its view
-	// model) ...
-	Notice.Broadcast(Text);
-	// ... and, in a match, a line in the local HUD's message queue. The front
-	// end has no HUD, so only one of the two ever shows it.
-	const UGameInstance* Instance = GetGameInstance();
-	APlayerController* Controller = Instance != nullptr
-		? Instance->GetFirstLocalPlayerController() : nullptr;
-	if (AWoTHUD* HUD = Controller != nullptr
-			? Cast<AWoTHUD>(Controller->GetHUD()) : nullptr)
+	// One notice over every screen (front end, Settings, a match); the front
+	// end's status line and the HUD's message queue are never used for it.
+	if (Event.Kind == FWoTInstallerSharerEvent::EKind::SendStarted)
 	{
-		HUD->AddLeftMessage(Text);
+		GetNoticeLine().TransferStarted(Text);
 	}
+	else
+	{
+		GetNoticeLine().TransferEnded(Text);
+	}
+}
+
+FWoTSharingNoticeLine& UWoTInstallerSharingSubsystem::GetNoticeLine()
+{
+	if (!NoticeLine.IsValid())
+	{
+		TUniquePtr<IWoTSharingNoticePresenter> Presenter;
+		TFunction<double()> Clock;
+#if WITH_AUTOMATION_TESTS
+		if (TestConfig.IsSet())
+		{
+			if (TestConfig->MakeNoticePresenter)
+			{
+				Presenter = TestConfig->MakeNoticePresenter();
+			}
+			Clock = TestConfig->NoticeNowSeconds;
+		}
+#endif
+		if (!Presenter.IsValid())
+		{
+			Presenter = WoTCreateViewportSharingNoticePresenter(GetGameInstance());
+		}
+		NoticeLine = MakeUnique<FWoTSharingNoticeLine>(
+			MoveTemp(Presenter), MoveTemp(Clock));
+	}
+	return *NoticeLine;
 }
 
 #if WITH_AUTOMATION_TESTS
@@ -401,6 +440,8 @@ void UWoTInstallerSharingSubsystem::ConfigureForTesting(
 	FWoTInstallerSharingTestConfig&& InConfig, bool bInSwitchOn)
 {
 	StopSharer();
+	// The next notice is drawn by the spec's presenter.
+	NoticeLine.Reset();
 	TestConfig = MoveTemp(InConfig);
 	bSwitchOn = bInSwitchOn;
 	bSwitchLoaded = true;

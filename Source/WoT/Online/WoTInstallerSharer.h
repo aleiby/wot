@@ -146,6 +146,10 @@ public:
 		double StallSeconds = 15.0;
 		double ConnectTimeoutSeconds = 5.0;
 		double OfferHeartbeatIntervalSeconds = 60.0;
+		/** lan-share-send-start/end: the first transfer to a receiver, then at
+		 * most one per this interval per receiver IP (a receiver whose inbound
+		 * TCP is blocked retries every second). A sent end is always written. */
+		double SendHeartbeatIntervalSeconds = 60.0;
 		int32 MaxTransfers = 2;
 		/** Tests and the test harness only: loopback peers pass the
 		 * private-address rule. */
@@ -207,6 +211,8 @@ private:
 	TUniquePtr<IWoTInstallerShareSocket> Datagram;
 	TArray<TUniquePtr<FTransfer>> Transfers;
 	TMap<uint32, double> LastRequestSeconds;
+	/** When each receiver IP last got a send-start heartbeat. */
+	TMap<uint32, double> LastSendHeartbeatSeconds;
 	TSet<FWoTShareId> UsedTokens;
 	FString FoundWhere;
 	double NextSearchSeconds = 0.0;

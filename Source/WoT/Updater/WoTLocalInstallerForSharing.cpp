@@ -90,6 +90,29 @@ const TCHAR* LexToString(EWoTSharingInstallerSource Source)
 	}
 }
 
+#if WITH_AUTOMATION_TESTS
+namespace
+{
+TOptional<bool> GWoTSharingFinderSkipsDownloadsOverride;
+}
+
+void WoTSetSharingFinderSkipsDownloadsForTesting(TOptional<bool> Override)
+{
+	GWoTSharingFinderSkipsDownloadsOverride = Override;
+}
+#endif
+
+bool WoTSharingFinderSkipsDownloads()
+{
+#if WITH_AUTOMATION_TESTS
+	if (GWoTSharingFinderSkipsDownloadsOverride.IsSet())
+	{
+		return GWoTSharingFinderSkipsDownloadsOverride.GetValue();
+	}
+#endif
+	return PLATFORM_MAC != 0;
+}
+
 FWoTLocalInstallerSearch WoTProductionLocalInstallerSearch(
 	TOptional<FWoTInstallerLocation> Adjacent)
 {
@@ -102,12 +125,15 @@ FWoTLocalInstallerSearch WoTProductionLocalInstallerSearch(
 		Search.UserStateRoot = Root.GetValue().CanonicalPath;
 		Search.UserStateRootIdentity = Root.GetValue().Directory.GetIdentity();
 	}
-#if PLATFORM_MAC
-	// A path lookup only: Downloads itself is never opened here.
-	Search.SkipRememberedUnder = WoTPlatformDownloadsDirectory();
-#else
-	Search.DownloadsDirectory = WoTResolveDownloadsDirectory();
-#endif
+	if (WoTSharingFinderSkipsDownloads())
+	{
+		// A path lookup only: Downloads itself is never opened here.
+		Search.SkipRememberedUnder = WoTPlatformDownloadsDirectory();
+	}
+	else
+	{
+		Search.DownloadsDirectory = WoTResolveDownloadsDirectory();
+	}
 	return Search;
 }
 

@@ -5,10 +5,9 @@
 #include "Containers/Queue.h"
 #include "Containers/Ticker.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "SWoTSharingNotice.h"
 #include "WoTInstallerSharer.h"
 #include "WoTInstallerSharingSubsystem.generated.h"
-
-DECLARE_MULTICAST_DELEGATE_OneParam(FWoTInstallerSharingNotice, const FString&);
 
 /** What the running sharer's last search found. */
 enum class EWoTInstallerSharingSearch : uint8
@@ -28,6 +27,10 @@ struct FWoTInstallerSharingTestConfig
 	TFunction<bool()> HasSeenLocalNetworkHeadsUp;
 	FWoTInstallerSharer::FConfig SharerConfig;
 	TFunction<FWoTInstallerSharer::FDependencies()> MakeDependencies;
+	/** The notice's presenter; the production viewport one when unset. */
+	TFunction<TUniquePtr<IWoTSharingNoticePresenter>()> MakeNoticePresenter;
+	/** The notice's hide-timer clock; FPlatformTime::Seconds when unset. */
+	TFunction<double()> NoticeNowSeconds;
 };
 #endif
 
@@ -35,8 +38,9 @@ struct FWoTInstallerSharingTestConfig
  * Runs the sharer once the bootstrap is Ready while the Settings switch is on
  * and, where the OS asks before local-network traffic (macOS), only after the
  * player has been through the game's Local Network heads-up. Stops it when the
- * switch goes off and at shutdown. Each transfer becomes a short notice: the
- * front end's notice line and, in a match, the local HUD's message queue.
+ * switch goes off and at shutdown. Each transfer start and end shows a short
+ * notice line over every screen (SWoTSharingNotice, game viewport content), so
+ * the sharer's player always sees it; nothing else draws it.
  */
 UCLASS()
 class UWoTInstallerSharingSubsystem : public UGameInstanceSubsystem
@@ -66,6 +70,10 @@ public:
 	/** The notice line for a transfer event; empty for other events. */
 	static FString NoticeText(const FWoTInstallerSharerEvent& Event);
 
+	/** The Settings hint while sharing is on and nothing was found. Where the
+	 * finder skips Downloads (Mac), it names the places it does search. */
+	static FString NothingToShareHint();
+
 	/** Settings saved the switch: start or stop now. Turning it off stops any
 	 * transfer in progress. */
 	void ApplySharingSwitch(bool bOn);
@@ -78,13 +86,17 @@ public:
 		return bSwitchOn && SearchState == EWoTInstallerSharingSearch::NotFound;
 	}
 
-	/** Every notice line, on the game thread. */
-	FWoTInstallerSharingNotice& OnNotice() { return Notice; }
-
 #if WITH_AUTOMATION_TESTS
 	void ConfigureForTesting(FWoTInstallerSharingTestConfig&& InConfig,
 		bool bInSwitchOn);
 	void EvaluateForTesting() { Evaluate(); }
+	/** One ticker step: Evaluate, then the notice's hide timer. */
+	void TickForTesting() { Tick(0.0f); }
+	/** Null until the first notice. */
+	const FWoTSharingNoticeLine* NoticeLineForTesting() const
+	{
+		return NoticeLine.Get();
+	}
 	/** One inline sharer step, then the game-thread delivery. */
 	void PumpForTesting();
 	FWoTInstallerSharer* InlineSharerForTesting() const
@@ -98,8 +110,11 @@ private:
 	void Evaluate();
 	void StartSharer();
 	void StopSharer();
-	void DrainEvents();
-	void Deliver(const FWoTInstallerSharerEvent& Event);
+	/** bPresent false: search results only, no notice lines (a stop that
+	 * hides the notice anyway). */
+	void DrainEvents(bool bPresent = true);
+	void Deliver(const FWoTInstallerSharerEvent& Event, bool bPresent);
+	FWoTSharingNoticeLine& GetNoticeLine();
 	bool IsBootstrapReady() const;
 	bool HasSeenHeadsUp();
 	TFunction<void(const FWoTInstallerSharerEvent&)> MakeEventSink() const;
@@ -108,7 +123,7 @@ private:
 	TSharedPtr<FEventQueue> Events;
 	TUniquePtr<FWoTInstallerSharerThread> SharerThread;
 	FTSTicker::FDelegateHandle TickerHandle;
-	FWoTInstallerSharingNotice Notice;
+	TUniquePtr<FWoTSharingNoticeLine> NoticeLine;
 	EWoTInstallerSharingSearch SearchState = EWoTInstallerSharingSearch::Unknown;
 	double NextHeadsUpCheckSeconds = 0.0;
 	bool bSwitchLoaded = false;

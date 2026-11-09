@@ -16,12 +16,17 @@
 #include "Misc/ScopeExit.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Text/STextBlock.h"
+#include "../Online/SWoTSharingNotice.h"
 #include "../Online/WoTInstallerShareProtocol.h"
 #include "../Online/WoTInstallerSharer.h"
 #include "../Online/WoTInstallerSharingSubsystem.h"
 #include "../Online/WoTLocalNetworkAccess.h"
 #include "../Updater/WoTLocalInstallerForSharing.h"
 #include "../Updater/WoTRememberedInstaller.h"
+#include "../WoTFrontEndSlate.h"
+#include "../WoTMenuStyle.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "WoTBootstrapCore/Hash.h"
 #include "WoTBootstrapCore/NativeHandles.h"
@@ -1170,6 +1175,60 @@ bool FWoTInstallerShareStopSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareSendHeartbeatsSpec,
+	"WoT.InstallerShare.Sharer.SendHeartbeatsThrottled", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareSendHeartbeatsSpec::RunTest(const FString&)
+{
+	FWoTShareSpecRig Rig;
+	// A receiver whose inbound TCP is blocked: every connect fails, and it
+	// sends a new REQUEST every second for good.
+	Rig.Net->NextConnect = EWoTShareIo::Failed;
+	Rig.Make();
+	Rig.Pump();
+	const uint32 Deck = WoTShareSpecIp(192, 168, 4, 127);
+	for (int32 Second = 0; Second <= 130; ++Second)
+	{
+		Rig.Request(Deck, WoTShareSpecId(static_cast<uint8>(Second)));
+		Rig.Pump();
+		*Rig.Clock += 1.0;
+	}
+	TestEqual(TEXT("every retry still gets a connection attempt"),
+		Rig.Net->StreamsCreated, 131);
+	TestEqual(TEXT("send-start: the first, then one a minute"),
+		Rig.CountBeats(TEXT("lan-share-send-start")), 3);
+	TestEqual(TEXT("each recorded start has its end"),
+		Rig.CountBeats(TEXT("lan-share-send-end")), 3);
+	const FWoTShareSpecBeat* End = Rig.LastBeat(TEXT("lan-share-send-end"));
+	TestTrue(TEXT("recorded as connect-failed"),
+		End != nullptr && End->Detail.Contains(TEXT("result=connect-failed")));
+
+	// Another receiver has its own minute.
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 30), WoTShareSpecId(200), 0, 40000,
+		WoTInstallerShare::LabelMac);
+	Rig.Pump();
+	TestEqual(TEXT("a second receiver's first transfer is recorded"),
+		Rig.CountBeats(TEXT("lan-share-send-start")), 4);
+
+	// Inside the Deck's minute, its connection finally works: a finished
+	// copy is always recorded, even when its start was not.
+	*Rig.Clock += 1.0;
+	Rig.Net->NextConnect = EWoTShareIo::Done;
+	Rig.Request(Deck, WoTShareSpecId(201));
+	for (int32 Step = 0; Step < 10; ++Step)
+	{
+		Rig.Pump();
+	}
+	TestEqual(TEXT("its start is still held back"),
+		Rig.CountBeats(TEXT("lan-share-send-start")), 4);
+	const FWoTShareSpecBeat* Sent = Rig.LastBeat(TEXT("lan-share-send-end"));
+	TestTrue(TEXT("but its end is written, as sent"), Sent != nullptr
+		&& Sent->Detail.Contains(TEXT("result=sent"))
+		&& Sent->Detail.Contains(TEXT("peer=steam-deck"))
+		&& Sent->Detail.Contains(TEXT("hash=good")));
+	return !HasAnyErrors();
+}
+
 namespace
 {
 class FWoTInstallerShareFinderFixture final
@@ -1346,34 +1405,73 @@ bool FWoTInstallerShareReceivedPathSpec::RunTest(const FString&)
 
 namespace
 {
-/** A sharing subsystem in inline mode over a fresh rig. */
+/** Everything the spec presenter was asked to draw. */
+struct FWoTShareSpecNoticeLog
+{
+	/** Every Show, in order. */
+	TArray<FString> Shown;
+	int32 Hides = 0;
+	/** The widget the spec presenter draws, while it is shown. */
+	TSharedPtr<SWoTSharingNotice> Widget;
+
+	bool IsVisible() const { return Widget.IsValid(); }
+	FString VisibleText() const
+	{
+		return Widget.IsValid() ? Widget->GetTextForTesting().ToString() : FString();
+	}
+};
+
+/** Draws the real notice widget, just not into a viewport. */
+class FWoTShareSpecPresenter final : public IWoTSharingNoticePresenter
+{
+public:
+	explicit FWoTShareSpecPresenter(TSharedRef<FWoTShareSpecNoticeLog> InLog)
+		: Log(MoveTemp(InLog))
+	{
+	}
+	virtual void Show(const FText& Text) override
+	{
+		Log->Shown.Add(Text.ToString());
+		if (!Log->Widget.IsValid())
+		{
+			Log->Widget = SNew(SWoTSharingNotice);
+		}
+		Log->Widget->SetText(Text);
+	}
+	virtual void Hide() override
+	{
+		++Log->Hides;
+		Log->Widget.Reset();
+	}
+
+private:
+	TSharedRef<FWoTShareSpecNoticeLog> Log;
+};
+
+/** A sharing subsystem in inline mode over a fresh rig. The notice's hide
+ * timer runs on the rig's clock. */
 struct FWoTInstallerShareSubsystemRig
 {
 	FWoTShareSpecRig Share;
 	TSharedRef<bool> bReady = MakeShared<bool>(true);
 	TSharedRef<bool> bHeadsUp = MakeShared<bool>(false);
-	TArray<FString> Notices;
+	TSharedRef<FWoTShareSpecNoticeLog> Notice = MakeShared<FWoTShareSpecNoticeLog>();
 	UGameInstance* Instance = nullptr;
 	UWoTInstallerSharingSubsystem* Sharing = nullptr;
 
 	FWoTInstallerShareSubsystemRig()
 	{
 		// A game-instance subsystem lives in a game instance (never
-		// initialized here: no world, no local player, no HUD).
+		// initialized here: no world, no local player, no viewport).
 		Instance = NewObject<UGameInstance>();
 		Instance->AddToRoot();
 		Sharing = NewObject<UWoTInstallerSharingSubsystem>(Instance);
 		Sharing->AddToRoot();
-		Sharing->OnNotice().AddLambda([this](const FString& Text)
-		{
-			Notices.Add(Text);
-		});
 	}
 
 	~FWoTInstallerShareSubsystemRig()
 	{
 		Sharing->ApplySharingSwitch(false);
-		Sharing->OnNotice().Clear();
 		Sharing->RemoveFromRoot();
 		Instance->RemoveFromRoot();
 		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
@@ -1386,8 +1484,55 @@ struct FWoTInstallerShareSubsystemRig
 		Config.HasSeenLocalNetworkHeadsUp = [Seen = bHeadsUp]() { return *Seen; };
 		Config.SharerConfig = Share.Config();
 		Config.MakeDependencies = [this]() { return Share.Dependencies(); };
+		Config.MakeNoticePresenter = [Log = Notice]()
+		{
+			return TUniquePtr<IWoTSharingNoticePresenter>(
+				MakeUnique<FWoTShareSpecPresenter>(Log));
+		};
+		Config.NoticeNowSeconds = [ClockValue = Share.Clock]() { return *ClockValue; };
 		Sharing->ConfigureForTesting(MoveTemp(Config), bSwitchOn);
 	}
+
+	/** Configured, sharing and offering, with nothing on screen yet. */
+	bool Start()
+	{
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+		Configure(true);
+		Sharing->EvaluateForTesting();
+		Sharing->PumpForTesting();
+		return Sharing->InlineSharerForTesting() != nullptr;
+	}
+
+	/** A REQUEST from From, as a receiver sends it. */
+	void Request(uint32 From, uint8 TokenSeed,
+		const TCHAR* Label = WoTInstallerShare::LabelSteamDeck)
+	{
+		FWoTShareRequest Message;
+		Message.SessionId = Sharing->InlineSharerForTesting()->SessionId();
+		Message.Token = WoTShareSpecId(TokenSeed);
+		Message.TcpPort = 45000;
+		Message.Label = Label;
+		Share.Net->Inbox.Add({From, 50000, WoTInstallerShare::EncodeRequest(Message)});
+	}
+
+	/** Moves the clock, then one ticker step (the hide timer). */
+	void Advance(double Seconds)
+	{
+		*Share.Clock += Seconds;
+		Sharing->TickForTesting();
+	}
+};
+
+const TCHAR* const WoTShareSpecSendingDeck =
+	TEXT("Sending the original game installer to a Steam Deck...");
+const TCHAR* const WoTShareSpecSendingMac =
+	TEXT("Sending the original game installer to a Mac...");
+
+class FWoTShareSpecFeedback final : public IWoTFrontEndFeedbackSink
+{
+public:
+	virtual void MoveSelector() override {}
+	virtual void Select() override {}
 };
 } // namespace
 
@@ -1481,16 +1626,308 @@ bool FWoTInstallerShareSwitchStopsSpec::RunTest(const FString&)
 		return false;
 	}
 	Rig.Sharing->PumpForTesting();
-	TestTrue(TEXT("the player sees the sending notice"), Rig.Notices.Num() == 1
-		&& Rig.Notices[0] == TEXT("Sending the original game installer to a Steam Deck..."));
+	TestEqual(TEXT("the player sees the sending notice"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingDeck));
 	Rig.Sharing->ApplySharingSwitch(false);
 	TestFalse(TEXT("switching sharing off stops the sharer"),
 		Rig.Sharing->IsSharerRunning());
 	TestTrue(TEXT("and the transfer's connection"), Rig.Share.Net->Streams[0]->bClosed);
-	TestTrue(TEXT("the notice ends with ... stopped"), Rig.Notices.Num() == 2
-		&& Rig.Notices[1] == TEXT("Sending the original game installer to a Steam Deck... stopped"));
+	TestFalse(TEXT("and hides the notice at once"), Rig.Notice->IsVisible());
+	TestTrue(TEXT("without flashing a stopped line"), Rig.Notice->Shown.Num() == 1
+		&& Rig.Notice->Shown[0] == WoTShareSpecSendingDeck);
+	TestTrue(TEXT("the notice forgets the transfer"),
+		Rig.Sharing->NoticeLineForTesting() != nullptr
+		&& !Rig.Sharing->NoticeLineForTesting()->IsShown()
+		&& Rig.Sharing->NoticeLineForTesting()->SendingCount() == 0);
 	Rig.Sharing->ApplySharingSwitch(true);
 	TestTrue(TEXT("switching it back on shares again"), Rig.Sharing->IsSharerRunning());
+	TestFalse(TEXT("with nothing on screen until a transfer starts"),
+		Rig.Notice->IsVisible());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeSendingSpec,
+	"WoT.InstallerShare.Notice.SendingShows", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeSendingSpec::RunTest(const FString&)
+{
+	FWoTInstallerShareSubsystemRig Rig;
+	Rig.Share.Net->bNextBlocked = true;
+	if (!TestTrue(TEXT("the sharer runs"), Rig.Start()))
+	{
+		return false;
+	}
+	TestFalse(TEXT("nothing shows before a transfer"), Rig.Notice->IsVisible());
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 127), 90);
+	Rig.Sharing->PumpForTesting();
+	TestTrue(TEXT("a connected transfer shows the notice"), Rig.Notice->IsVisible());
+	TestEqual(TEXT("with the sending line"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingDeck));
+	// It stays while the transfer is sending, however long that takes.
+	Rig.Advance(10.0);
+	TestTrue(TEXT("a sending line has no timeout"), Rig.Notice->IsVisible());
+	if (Rig.Notice->Widget.IsValid())
+	{
+		const TSharedRef<SWoTSharingNotice> Widget = Rig.Notice->Widget.ToSharedRef();
+		TestTrue(TEXT("the widget never takes a click"),
+			Widget->GetVisibility() == EVisibility::HitTestInvisible);
+		TestFalse(TEXT("nor focus"), Widget->SupportsKeyboardFocus());
+		const TSharedPtr<STextBlock> Text = Widget->TextBlockForTesting();
+		TestTrue(TEXT("its font meets the Deck legibility floor"), Text.IsValid()
+			&& Text->GetFont().Size >= 10.0f);
+	}
+	TestTrue(TEXT("its viewport layer is above every game layer"),
+		WoTSharingNoticeZOrder > 2200);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeSentSpec,
+	"WoT.InstallerShare.Notice.SentHidesAfterSixSeconds", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeSentSpec::RunTest(const FString&)
+{
+	FWoTInstallerShareSubsystemRig Rig;
+	Rig.Share.Net->bNextBlocked = true;
+	if (!TestTrue(TEXT("the sharer runs"), Rig.Start()))
+	{
+		return false;
+	}
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 127), 91);
+	Rig.Sharing->PumpForTesting();
+	if (Rig.Share.Net->Streams.Num() != 1)
+	{
+		AddError(TEXT("no stream"));
+		return false;
+	}
+	Rig.Share.Net->Streams[0]->bBlocked = false;
+	for (int32 Step = 0; Step < 10
+		&& Rig.Sharing->InlineSharerForTesting()->ActiveTransferCount() > 0; ++Step)
+	{
+		Rig.Sharing->PumpForTesting();
+	}
+	TestEqual(TEXT("the copy finishes with ... sent"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingDeck) + TEXT(" sent"));
+	Rig.Advance(5.9);
+	TestTrue(TEXT("the sent line stays for 6 s"), Rig.Notice->IsVisible());
+	Rig.Advance(0.2);
+	TestFalse(TEXT("then hides"), Rig.Notice->IsVisible());
+	TestEqual(TEXT("hidden once"), Rig.Notice->Hides, 1);
+	Rig.Advance(30.0);
+	TestFalse(TEXT("and stays hidden"), Rig.Notice->IsVisible());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeStoppedSpec,
+	"WoT.InstallerShare.Notice.StoppedHidesAfterSixSeconds", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeStoppedSpec::RunTest(const FString&)
+{
+	FWoTInstallerShareSubsystemRig Rig;
+	Rig.Share.Net->bNextBlocked = true;
+	if (!TestTrue(TEXT("the sharer runs"), Rig.Start()))
+	{
+		return false;
+	}
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 127), 92);
+	Rig.Sharing->PumpForTesting();
+	if (Rig.Share.Net->Streams.Num() != 1)
+	{
+		AddError(TEXT("no stream"));
+		return false;
+	}
+	// The receiver hangs up (its Cancel).
+	Rig.Share.Net->Streams[0]->bBlocked = false;
+	Rig.Share.Net->Streams[0]->bBroken = true;
+	Rig.Sharing->PumpForTesting();
+	TestEqual(TEXT("the transfer ended"),
+		Rig.Sharing->InlineSharerForTesting()->ActiveTransferCount(), 0);
+	TestEqual(TEXT("the notice ends with ... stopped"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingDeck) + TEXT(" stopped"));
+	Rig.Advance(5.9);
+	TestTrue(TEXT("the stopped line stays for 6 s"), Rig.Notice->IsVisible());
+	Rig.Advance(0.2);
+	TestFalse(TEXT("then hides"), Rig.Notice->IsVisible());
+	TestTrue(TEXT("sharing itself goes on"), Rig.Sharing->IsSharerRunning());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeTwoTransfersSpec,
+	"WoT.InstallerShare.Notice.TwoTransfers", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeTwoTransfersSpec::RunTest(const FString&)
+{
+	FWoTInstallerShareSubsystemRig Rig;
+	Rig.Share.Net->bNextBlocked = true;
+	if (!TestTrue(TEXT("the sharer runs"), Rig.Start()))
+	{
+		return false;
+	}
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 127), 93);
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 30), 94, WoTInstallerShare::LabelMac);
+	Rig.Sharing->PumpForTesting();
+	if (Rig.Share.Net->Streams.Num() != 2)
+	{
+		AddError(TEXT("two streams expected"));
+		return false;
+	}
+	TestEqual(TEXT("two transfers are sending"),
+		Rig.Sharing->NoticeLineForTesting() != nullptr
+			? Rig.Sharing->NoticeLineForTesting()->SendingCount() : -1, 2);
+	TestEqual(TEXT("the newest line shows"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingMac));
+	// The Deck's copy finishes; the Mac's is still sending.
+	Rig.Share.Net->Streams[0]->bBlocked = false;
+	for (int32 Step = 0; Step < 10
+		&& Rig.Sharing->InlineSharerForTesting()->ActiveTransferCount() > 1; ++Step)
+	{
+		Rig.Sharing->PumpForTesting();
+	}
+	TestEqual(TEXT("the newest line is the Deck's sent"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingDeck) + TEXT(" sent"));
+	Rig.Advance(7.0);
+	TestTrue(TEXT("the notice stays while the Mac's copy is sending"),
+		Rig.Notice->IsVisible());
+	Rig.Share.Net->Streams[1]->bBlocked = false;
+	for (int32 Step = 0; Step < 10
+		&& Rig.Sharing->InlineSharerForTesting()->ActiveTransferCount() > 0; ++Step)
+	{
+		Rig.Sharing->PumpForTesting();
+	}
+	TestEqual(TEXT("then shows the Mac's sent"), Rig.Notice->VisibleText(),
+		FString(WoTShareSpecSendingMac) + TEXT(" sent"));
+	Rig.Advance(5.9);
+	TestTrue(TEXT("for 6 s after the last transfer ends"), Rig.Notice->IsVisible());
+	Rig.Advance(0.2);
+	TestFalse(TEXT("then hides"), Rig.Notice->IsVisible());
+	TestEqual(TEXT("one widget the whole time"), Rig.Notice->Hides, 1);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeFrontEndSpec,
+	"WoT.InstallerShare.Notice.FrontEndStatusUntouched", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeFrontEndSpec::RunTest(const FString&)
+{
+	// The notice is its own viewport widget: the front end's status line
+	// (and the main-menu banner it feeds) is never written by sharing.
+	for (const TCHAR* Leaf : {TEXT("WoTFrontEndSlate.cpp"), TEXT("WoTFrontEndSlate.h")})
+	{
+		FString Source;
+		if (TestTrue(FString::Printf(TEXT("%s is readable"), Leaf),
+				FFileHelper::LoadFileToString(Source, *FPaths::Combine(
+					FPaths::ProjectDir(), TEXT("Source/WoT"), Leaf))))
+		{
+			TestFalse(FString::Printf(TEXT("%s has no sharing route"), Leaf),
+				Source.Contains(TEXT("InstallerSharing"), ESearchCase::CaseSensitive)
+				|| Source.Contains(TEXT("SharingNotice"), ESearchCase::CaseSensitive));
+		}
+	}
+
+	TMap<FName, FString> Labels;
+	Labels.Add(FName(TEXT("menuMain.MenuList[2]")), TEXT("Multiplayer"));
+	Labels.Add(FName(TEXT("menuMain.MenuList[7]")), TEXT("Quit"));
+	const TSharedRef<SWoTFrontEndRoot> Root = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr)
+		.PresentationAuthorityForTesting(FWoTFrontEndPresentationAuthority::CreateForTesting(
+			TEXT("installer-share-notice-fixture"),
+			FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30),
+			FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14),
+			MoveTemp(Labels), MakeShared<FWoTShareSpecFeedback>()));
+	const FString StatusBefore = Root->ViewModelForTesting().GetStatusText();
+	const bool bErrorBefore = Root->ViewModelForTesting().IsStatusError();
+
+	FWoTInstallerShareSubsystemRig Rig;
+	if (!TestTrue(TEXT("the sharer runs"), Rig.Start()))
+	{
+		return false;
+	}
+	Rig.Request(WoTShareSpecIp(192, 168, 4, 127), 95);
+	for (int32 Step = 0; Step < 10; ++Step)
+	{
+		Rig.Sharing->PumpForTesting();
+	}
+	TestTrue(TEXT("a whole transfer showed its lines"), Rig.Notice->Shown.Num() == 2
+		&& Rig.Notice->Shown[1] == FString(WoTShareSpecSendingDeck) + TEXT(" sent"));
+	TestEqual(TEXT("the front end's status text is untouched"),
+		Root->ViewModelForTesting().GetStatusText(), StatusBefore);
+	TestEqual(TEXT("and so is its error state"),
+		Root->ViewModelForTesting().IsStatusError(), bErrorBefore);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareNoticeNoViewportSpec,
+	"WoT.InstallerShare.Notice.NoGameViewport", WoTInstallerShareSpecFlags)
+
+bool FWoTInstallerShareNoticeNoViewportSpec::RunTest(const FString&)
+{
+	// A game instance with no world context has no game viewport (a dedicated
+	// server, or early boot before the window exists).
+	UGameInstance* Instance = NewObject<UGameInstance>();
+	Instance->AddToRoot();
+	ON_SCOPE_EXIT
+	{
+		Instance->RemoveFromRoot();
+	};
+	TestNull(TEXT("no game viewport"), Instance->GetGameViewportClient());
+	{
+		TUniquePtr<IWoTSharingNoticePresenter> Presenter =
+			WoTCreateViewportSharingNoticePresenter(Instance);
+		Presenter->Show(FText::FromString(WoTShareSpecSendingDeck));
+		Presenter->Show(FText::FromString(FString(WoTShareSpecSendingDeck) + TEXT(" sent")));
+		Presenter->Hide();
+		Presenter->Hide();
+		Presenter->Show(FText::FromString(WoTShareSpecSendingDeck));
+		// Destroyed while "showing": nothing to remove.
+	}
+	{
+		TUniquePtr<IWoTSharingNoticePresenter> Orphan =
+			WoTCreateViewportSharingNoticePresenter(nullptr);
+		Orphan->Show(FText::FromString(WoTShareSpecSendingDeck));
+		Orphan->Hide();
+	}
+	// The subsystem's own presenter (no spec presenter) over the same
+	// viewport-less instance: the notice logic runs, nothing is drawn.
+	UWoTInstallerSharingSubsystem* Sharing =
+		NewObject<UWoTInstallerSharingSubsystem>(Instance);
+	Sharing->AddToRoot();
+	FWoTShareSpecRig Share;
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT
+	{
+		Sharing->ApplySharingSwitch(false);
+		Sharing->RemoveFromRoot();
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
+	};
+	FWoTInstallerSharingTestConfig Config;
+	Config.IsBootstrapReady = []() { return true; };
+	Config.SharerConfig = Share.Config();
+	Config.MakeDependencies = [&Share]() { return Share.Dependencies(); };
+	Config.NoticeNowSeconds = [ClockValue = Share.Clock]() { return *ClockValue; };
+	Sharing->ConfigureForTesting(MoveTemp(Config), true);
+	Sharing->EvaluateForTesting();
+	Sharing->PumpForTesting();
+	FWoTInstallerSharer* Sharer = Sharing->InlineSharerForTesting();
+	if (!TestNotNull(TEXT("an inline sharer runs"), Sharer))
+	{
+		return false;
+	}
+	FWoTShareRequest Request;
+	Request.SessionId = Sharer->SessionId();
+	Request.Token = WoTShareSpecId(96);
+	Request.TcpPort = 45000;
+	Request.Label = WoTInstallerShare::LabelSteamDeck;
+	Share.Net->Inbox.Add({WoTShareSpecIp(192, 168, 4, 127), 50000,
+		WoTInstallerShare::EncodeRequest(Request)});
+	for (int32 Step = 0; Step < 10; ++Step)
+	{
+		Sharing->PumpForTesting();
+	}
+	TestTrue(TEXT("the notice line ran"), Sharing->NoticeLineForTesting() != nullptr
+		&& Sharing->NoticeLineForTesting()->IsShown());
+	*Share.Clock += 7.0;
+	Sharing->TickForTesting();
+	TestTrue(TEXT("and hid on time"), Sharing->NoticeLineForTesting() != nullptr
+		&& !Sharing->NoticeLineForTesting()->IsShown());
 	return !HasAnyErrors();
 }
 

@@ -46,10 +46,18 @@ struct FWoTLocalInstallerForSharing
 	FWoTNativeFileIdentity Identity;
 };
 
+/** True where the production search skips Downloads: on Mac, until the Files
+ * & Folders measurement shows the check cannot raise a permission prompt. */
+bool WoTSharingFinderSkipsDownloads();
+
+#if WITH_AUTOMATION_TESTS
+/** Replaces the platform answer above; unset restores it. */
+void WoTSetSharingFinderSkipsDownloadsForTesting(TOptional<bool> Override);
+#endif
+
 /** The production search: the given adjacent location, the adopted user data
- * root, and Downloads except on Mac. On Mac the finder skips Downloads, and a
- * remembered pick inside it, until the Files & Folders measurement shows the
- * check cannot raise a permission prompt. */
+ * root, and Downloads unless WoTSharingFinderSkipsDownloads(), in which case
+ * a remembered pick inside Downloads is skipped too. */
 FWoTLocalInstallerSearch WoTProductionLocalInstallerSearch(
 	TOptional<FWoTInstallerLocation> Adjacent);
 

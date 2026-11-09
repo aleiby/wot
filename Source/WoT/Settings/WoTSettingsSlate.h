@@ -111,6 +111,7 @@ public:
 	TSharedPtr<SCheckBox> SharingCheckBoxForTesting() const
 		{ return SharingCheckBox; }
 	bool IsSharingHintVisibleForTesting() const { return IsSharingHintVisible(); }
+	TSharedPtr<STextBlock> SharingHintForTesting() const { return SharingHint; }
 	/** The game instance's sharing subsystem, for a screen built outside one. */
 	void SetSharingSubsystemForTesting(UWoTInstallerSharingSubsystem* Sharing);
 #endif
@@ -180,6 +181,7 @@ private:
 	TSharedPtr<SWidget> ControllerSensitivitySlider;
 	TSharedPtr<SCheckBox> ControllerInvertCheckBox;
 	TSharedPtr<SCheckBox> SharingCheckBox;
+	TSharedPtr<STextBlock> SharingHint;
 #if WITH_AUTOMATION_TESTS
 	TWeakObjectPtr<UWoTInstallerSharingSubsystem> SharingForTesting;
 #endif

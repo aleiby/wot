@@ -450,6 +450,8 @@ struct FWoTInstallerSharer::FTransfer
 	bool bConnected = false;
 	bool bAnnounced = false;
 	bool bEnded = false;
+	/** Its send-start heartbeat was written, so its send-end is too. */
+	bool bStartRecorded = false;
 };
 
 FWoTInstallerSharer::FWoTInstallerSharer(
@@ -670,6 +672,14 @@ void FWoTInstallerSharer::ReceiveRequests(double Now, double WaitSeconds)
 			It.RemoveCurrent();
 		}
 	}
+	// An entry past its interval no longer holds anything back.
+	for (auto It = LastSendHeartbeatSeconds.CreateIterator(); It; ++It)
+	{
+		if (Now - It.Value() >= Config.SendHeartbeatIntervalSeconds)
+		{
+			It.RemoveCurrent();
+		}
+	}
 }
 
 void FWoTInstallerSharer::HandleRequest(double Now,
@@ -714,10 +724,19 @@ void FWoTInstallerSharer::HandleRequest(double Now,
 	Transfer->Peer = WoTInstallerShare::PeerToken(Transfer->Label);
 	Transfer->StartedSeconds = Now;
 	Transfer->LastProgressSeconds = Now;
-	Beat(TEXT("lan-share-send-start"), FString::Printf(
-		TEXT("peer=%s offset=%llu length=%llu"), Transfer->Peer,
-		static_cast<unsigned long long>(Transfer->Offset),
-		static_cast<unsigned long long>(Transfer->Length)));
+	// Rate-limited like offers: a receiver whose inbound TCP is blocked
+	// retries forever and must not grow the heartbeat file.
+	const double* LastBeat = LastSendHeartbeatSeconds.Find(SourceAddress);
+	if (LastBeat == nullptr
+		|| Now - *LastBeat >= Config.SendHeartbeatIntervalSeconds)
+	{
+		LastSendHeartbeatSeconds.Add(SourceAddress, Now);
+		Transfer->bStartRecorded = true;
+		Beat(TEXT("lan-share-send-start"), FString::Printf(
+			TEXT("peer=%s offset=%llu length=%llu"), Transfer->Peer,
+			static_cast<unsigned long long>(Transfer->Offset),
+			static_cast<unsigned long long>(Transfer->Length)));
+	}
 	// Outward only: the receiver listens, the sharer connects.
 	Transfer->Socket = Deps.Network->CreateStream();
 	if (!Transfer->Socket.IsValid()
@@ -854,11 +873,15 @@ void FWoTInstallerSharer::End(FTransfer& Transfer, EWoTShareTransferResult Resul
 	const TCHAR* Hash = Result == EWoTShareTransferResult::BadHash ? TEXT("bad")
 		: (Result == EWoTShareTransferResult::Sent && Transfer.bHashing)
 			? TEXT("good") : TEXT("not-checked");
-	Beat(TEXT("lan-share-send-end"), FString::Printf(
-		TEXT("result=%s peer=%s offset=%llu bytes=%llu hash=%s"),
-		LexToString(Result), Transfer.Peer,
-		static_cast<unsigned long long>(Transfer.Offset),
-		static_cast<unsigned long long>(FileBytes), Hash));
+	// Paired with its send-start; a finished copy is always recorded.
+	if (Transfer.bStartRecorded || Result == EWoTShareTransferResult::Sent)
+	{
+		Beat(TEXT("lan-share-send-end"), FString::Printf(
+			TEXT("result=%s peer=%s offset=%llu bytes=%llu hash=%s"),
+			LexToString(Result), Transfer.Peer,
+			static_cast<unsigned long long>(Transfer.Offset),
+			static_cast<unsigned long long>(FileBytes), Hash));
+	}
 	if (Transfer.bAnnounced)
 	{
 		FWoTInstallerSharerEvent Event;

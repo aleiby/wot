@@ -2433,15 +2433,18 @@ def _enumerate_win_process_ids() -> list[int]:
     return [pid for pid in value if pid != 0]
 
 
-FIREWALL_RULES_FORMAT = "wot-funnel-firewall-rules-v1"
+FIREWALL_RULES_FORMAT = "wot-funnel-firewall-rules-v2"
+_FIREWALL_QUERY_ERRORS = (FunnelFailure, OSError, subprocess.SubprocessError,
+                          ValueError)
 
 
-def _list_firewall_rule_programs() -> list[str]:
-    """Every Windows Firewall rule's program path, by a read-only query.
+def _list_firewall_rules() -> list[dict]:
+    """Every Windows Firewall rule's InstanceID and program path, by a
+    read-only query, as ``{"instance_id": ..., "program": ...}``.
 
     Answering (or dismissing) a firewall prompt leaves rules that name the
-    prompting executable, so a rule naming a cell's executable means that cell
-    raised a prompt. Nothing here creates, changes or removes a rule.
+    prompting executable, so a new rule naming a cell's executable means that
+    cell raised a prompt. Nothing here creates, changes or removes a rule.
     """
     powershell = (Path(os.environ.get("SystemRoot", r"C:\Windows"))
                   / "System32" / "WindowsPowerShell" / "v1.0"
@@ -2450,7 +2453,8 @@ def _list_firewall_rule_programs() -> list[str]:
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
         "ConvertTo-Json -Compress -InputObject "
         "@(Get-NetFirewallApplicationFilter -ErrorAction Stop | "
-        "ForEach-Object {[string]$_.Program})")
+        "ForEach-Object {@{InstanceID = [string]$_.InstanceID; "
+        "Program = [string]$_.Program}})")
     result = subprocess.run(
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -2463,12 +2467,16 @@ def _list_firewall_rule_programs() -> list[str]:
         value = json.loads(result.stdout.strip() or "[]")
     except json.JSONDecodeError as exc:
         raise FunnelFailure("cannot decode the Windows Firewall rule list") from exc
-    if isinstance(value, str):
+    if isinstance(value, dict):
         value = [value]
     if (not isinstance(value, list)
-            or any(not isinstance(program, str) for program in value)):
+            or any(not isinstance(rule, dict)
+                   or not isinstance(rule.get("InstanceID"), str)
+                   or not isinstance(rule.get("Program"), str)
+                   for rule in value)):
         raise FunnelFailure("the Windows Firewall rule list is invalid")
-    return value
+    return [{"instance_id": rule["InstanceID"], "program": rule["Program"]}
+            for rule in value]
 
 
 def _windows_program_is_under(program: str, root: str) -> bool:
@@ -2488,39 +2496,75 @@ def _windows_program_is_under(program: str, root: str) -> bool:
             and candidate_parts[:len(parent_parts)] == parent_parts)
 
 
-def _firewall_rule_check(roots: Sequence[Path | str]) -> dict:
-    """The read-only firewall evidence for the cells under ``roots``."""
+def _firewall_rule_key(rule: dict) -> tuple[str, str]:
+    return rule["instance_id"], rule["program"]
+
+
+def _firewall_rules_under(rules: Sequence[dict],
+                          cell_roots: Sequence[str]) -> list[dict]:
+    """The rules whose program sits under any of ``cell_roots``, sorted."""
+    under = {
+        _firewall_rule_key(rule): rule for rule in rules
+        if any(_windows_program_is_under(rule["program"], root)
+               for root in cell_roots)
+    }
+    return [under[key] for key in sorted(under)]
+
+
+def _snapshot_firewall_rules() -> dict:
+    """Every rule before the first cell launches, or the query's error.
+
+    The whole list is kept: the clients' install roots are known only after
+    they launch, so the matching happens when the run ends."""
+    try:
+        return {"error": None, "rules": _list_firewall_rules()}
+    except _FIREWALL_QUERY_ERRORS as exc:
+        return {"error": str(exc), "rules": None}
+
+
+def _firewall_rule_check(roots: Sequence[Path | str],
+                         before: dict) -> dict:
+    """The read-only firewall evidence for the cells under ``roots``: both
+    snapshots (only the rules under the cells) and the rules that are new
+    since ``before`` (None when either snapshot failed)."""
     cell_roots = sorted({str(root) for root in roots})
-    programs = _list_firewall_rule_programs()
-    under = sorted({
-        program for program in programs
-        if any(_windows_program_is_under(program, root) for root in cell_roots)
-    })
+
+    def snapshot(rules: list[dict] | None, error: str | None) -> dict:
+        if error is not None or rules is None:
+            return {"error": error or "the rules were not read",
+                    "rules_examined": None, "rules_under_cells": None}
+        return {"error": None, "rules_examined": len(rules),
+                "rules_under_cells": _firewall_rules_under(rules, cell_roots)}
+
+    before_record = snapshot(before.get("rules"), before.get("error"))
+    try:
+        after_record = snapshot(_list_firewall_rules(), None)
+    except _FIREWALL_QUERY_ERRORS as exc:
+        after_record = snapshot(None, str(exc))
+    new = None
+    if before_record["error"] is None and after_record["error"] is None:
+        known = {_firewall_rule_key(rule)
+                 for rule in before_record["rules_under_cells"]}
+        new = [rule for rule in after_record["rules_under_cells"]
+               if _firewall_rule_key(rule) not in known]
     return {
         "format": FIREWALL_RULES_FORMAT,
         "cell_roots": cell_roots,
-        "rules_examined": len(programs),
-        "rules_under_cells": under,
+        "before": before_record,
+        "after": after_record,
+        "new_rules_under_cells": new,
     }
 
 
 def _record_cell_firewall_rules(evidence: Path,
-                                roots: Sequence[Path | str]) -> dict:
-    """Write ``safety/firewall-rules.json``; ``passed`` is false when any rule
-    names a program under a cell root, or when the rules cannot be read
-    (fail closed: the run cannot then prove it raised no prompt)."""
-    try:
-        record = _firewall_rule_check(roots)
-        record["passed"] = not record["rules_under_cells"]
-    except (FunnelFailure, OSError, subprocess.SubprocessError,
-            ValueError) as exc:
-        record = {
-            "format": FIREWALL_RULES_FORMAT,
-            "cell_roots": sorted({str(root) for root in roots}),
-            "error": str(exc),
-            "passed": False,
-            "rules_under_cells": None,
-        }
+                                roots: Sequence[Path | str],
+                                before: dict) -> dict:
+    """Write ``safety/firewall-rules.json``; ``passed`` is false when a rule
+    naming a program under a cell root appeared during the run, or when either
+    query failed (fail closed: the run cannot then prove it raised no prompt).
+    Rules from earlier runs under a reused work root are not this run's."""
+    record = _firewall_rule_check(roots, before)
+    record["passed"] = record["new_rules_under_cells"] == []
     _atomic_write_json(evidence / "safety" / "firewall-rules.json", record)
     return record
 
@@ -5179,8 +5223,17 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
             "format": "wot-real-mac-preferences-guard-v1",
             "scope": "whole-run", "unchanged": None,
         })
+    # Windows Firewall rules before the first launch: a reused work root
+    # keeps the rules earlier runs left, so only rules that are new by the end
+    # of this run count against it.
+    check_firewall = platform_name == "Win64" and bool(selected) and _IS_WINDOWS
+    firewall_before = _snapshot_firewall_rules() if check_firewall else None
 
     try:
+        if firewall_before is not None and firewall_before["error"] is not None:
+            raise FunnelFailure(
+                "SAFETY: cannot read the Windows Firewall rules before the "
+                f"first cell: {firewall_before['error']}")
         if args.installer:
             installer = args.installer.expanduser().resolve()
             receipt["installer"] = _verify_installer(installer)
@@ -6010,24 +6063,26 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
                     raise FunnelFailure(
                         "SAFETY: real Mac data roots changed during the run "
                         f"(inventory: {real_profile_guard_path})")
-        if platform_name == "Win64" and selected and _IS_WINDOWS:
+        if firewall_before is not None:
             # Every cell tree lives under the scratch root; the launched
             # clients' install roots are listed too. A rule naming any of
-            # them means a cell raised a Windows Firewall prompt.
+            # them that was not there before the first launch means a cell
+            # raised a Windows Firewall prompt.
             firewall = _record_cell_firewall_rules(
                 evidence,
-                [scratch, *sorted(set(_WIN_INSTALL_ROOTS.values()), key=str)])
+                [scratch, *sorted(set(_WIN_INSTALL_ROOTS.values()), key=str)],
+                firewall_before)
             if not firewall["passed"]:
                 receipt["verdict"] = "fail"
                 receipt["decisions"].append(
-                    "SAFETY: a Windows Firewall rule names a cell's program "
-                    "(a cell raised a firewall prompt), or the read-only rule "
-                    "query failed")
+                    "SAFETY: a new Windows Firewall rule names a cell's "
+                    "program (a cell raised a firewall prompt), or a "
+                    "read-only rule query failed")
                 save()
                 if sys.exc_info()[0] is None:
                     raise FunnelFailure(
-                        "SAFETY: Windows Firewall rules name cell programs or "
-                        "could not be read (evidence: "
+                        "SAFETY: new Windows Firewall rules name cell programs "
+                        "or the rules could not be read (evidence: "
                         f"{evidence / 'safety' / 'firewall-rules.json'})")
         cleanup_failed = any(row.get("action") in {
             "terminated", "aborted-identity-change", "mac-cleanup-error",

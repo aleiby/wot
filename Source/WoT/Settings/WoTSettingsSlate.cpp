@@ -810,12 +810,14 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildHardwareBody()
 	];
 	Rows->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 	[
-		SNew(STextBlock)
+		SAssignNew(SharingHint, STextBlock)
 		.Visibility_Lambda([this]()
 		{
 			return IsSharingHintVisible() ? EVisibility::Visible : EVisibility::Collapsed;
 		})
-		.Text(Literal(TEXT("No original installer found on this computer to share.")))
+		// Names where the finder looks when it skips Downloads (Mac).
+		.Text(FText::FromString(
+			UWoTInstallerSharingSubsystem::NothingToShareHint()))
 		.Font(this, &SWoTSettingsScreen::Body)
 		.ColorAndOpacity(FWoTMenuStyle::SelectedColor())
 		.AutoWrapText(true)
