@@ -857,6 +857,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIControllerInputMenuRepeatSpec,
 
 bool FWoTUIControllerInputMenuRepeatSpec::RunTest(const FString&)
 {
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
 	UWorld* World = WoTUITest_CreateWorld();
 	if (!TestNotNull(TEXT("world exists"), World))
 	{
@@ -992,6 +997,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIBackStackFrontEndSpec,
 
 bool FWoTUIBackStackFrontEndSpec::RunTest(const FString&)
 {
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
@@ -1191,6 +1201,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIBackStackPasswordSpec,
 
 bool FWoTUIBackStackPasswordSpec::RunTest(const FString&)
 {
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
