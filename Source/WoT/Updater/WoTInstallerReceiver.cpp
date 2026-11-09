@@ -201,7 +201,10 @@ class FWoTReceiverUeNetwork final : public IWoTInstallerReceiveNetwork
 public:
 	virtual TUniquePtr<IWoTInstallerReceiveSocket> CreateDatagram() override
 	{
-		return Create(NAME_DGram, TEXT("WoTInstallerReceiveOffer"));
+		// Non-blocking like the listener: a select that reports a datagram the
+		// kernel then drops (a bad checksum) must never block RecvFrom, which
+		// would hang the worker's stop and Quit.
+		return Create(NAME_DGram, TEXT("WoTInstallerReceiveOffer"), /*bNonBlocking*/ true);
 	}
 
 	virtual TUniquePtr<IWoTInstallerReceiveSocket> CreateStream() override
@@ -211,7 +214,7 @@ public:
 
 private:
 	static TUniquePtr<IWoTInstallerReceiveSocket> Create(
-		const FName& Type, const TCHAR* Description)
+		const FName& Type, const TCHAR* Description, bool bNonBlocking = false)
 	{
 		ISocketSubsystem* Subsystem =
 			ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -223,6 +226,11 @@ private:
 			FNetworkProtocolTypes::IPv4);
 		if (Socket == nullptr)
 		{
+			return nullptr;
+		}
+		if (bNonBlocking && !Socket->SetNonBlocking(true))
+		{
+			Subsystem->DestroySocket(Socket);
 			return nullptr;
 		}
 		return MakeUnique<FWoTReceiverUeSocket>(*Subsystem, Socket);
