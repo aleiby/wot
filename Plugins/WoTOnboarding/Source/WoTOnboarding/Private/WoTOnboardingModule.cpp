@@ -153,29 +153,13 @@ void FWoTOnboardingModule::StartupModule()
 		[]() { UWoTOnboardingSettings::Get().ToggleShowDeathCounterHints(); },
 		SettingsRowOwner()});
 
-	// The guide (Task 5): the menu row follows the master toggle live — it is
-	// an aid, unlike the settings rows above — and the F3 seam toggles the
-	// browser. Remove-before-add keeps a restart (as the settings specs
-	// perform) from doubling bindings.
+	// Every aid — the guide's menu row and every seam handler — follows the
+	// master switch live: with it off the module holds no binding on any
+	// seam, so a disabled plugin and a switched-off one leave the game the
+	// same. Both refreshes are idempotent, so a restart (as the settings
+	// specs perform) never doubles anything.
 	RefreshMenuRowRegistration();
-	if (ShowGuideHandle.IsValid())
-	{
-		Seams.ShowGuideRequested.Remove(ShowGuideHandle);
-	}
-	ShowGuideHandle = Seams.ShowGuideRequested.AddRaw(
-		this, &FWoTOnboardingModule::HandleShowGuideRequested);
-	if (CloseWindowsHandle.IsValid())
-	{
-		Seams.CloseClientWindows.Remove(CloseWindowsHandle);
-	}
-	CloseWindowsHandle = Seams.CloseClientWindows.AddRaw(
-		this, &FWoTOnboardingModule::HandleCloseClientWindows);
-	if (ItemAddedHandle.IsValid())
-	{
-		Seams.ClientItemAdded.Remove(ItemAddedHandle);
-	}
-	ItemAddedHandle = Seams.ClientItemAdded.AddRaw(
-		this, &FWoTOnboardingModule::HandleClientItemAdded);
+	RefreshSeamBindings();
 	UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
 	if (SettingsChangedHandle.IsValid())
 	{
@@ -190,26 +174,12 @@ void FWoTOnboardingModule::ShutdownModule()
 	CloseGuideBrowser();
 	ClosePickupCard();
 	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
-	if (ItemAddedHandle.IsValid())
-	{
-		Seams.ClientItemAdded.Remove(ItemAddedHandle);
-		ItemAddedHandle.Reset();
-	}
+	UnbindSeamHandlers();
 	PickupCardTestGuide.Reset();
 	bGuideAbsent = false;
 	if (UObjectInitialized())
 	{
 		CachedGuide.Reset();
-	}
-	if (ShowGuideHandle.IsValid())
-	{
-		Seams.ShowGuideRequested.Remove(ShowGuideHandle);
-		ShowGuideHandle.Reset();
-	}
-	if (CloseWindowsHandle.IsValid())
-	{
-		Seams.CloseClientWindows.Remove(CloseWindowsHandle);
-		CloseWindowsHandle.Reset();
 	}
 	if (SettingsChangedHandle.IsValid())
 	{
@@ -238,6 +208,42 @@ void FWoTOnboardingModule::RefreshMenuRowRegistration()
 		[]() { return WoTOnboardingGuideMenuLabel(); },
 		[this]() { ToggleGuideBrowser(); },
 		SettingsRowOwner()});
+}
+
+void FWoTOnboardingModule::RefreshSeamBindings()
+{
+	UnbindSeamHandlers();
+	if (!UWoTOnboardingSettings::Get().bEnableOnboardingAids)
+	{
+		return;
+	}
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	ShowGuideHandle = Seams.ShowGuideRequested.AddRaw(
+		this, &FWoTOnboardingModule::HandleShowGuideRequested);
+	CloseWindowsHandle = Seams.CloseClientWindows.AddRaw(
+		this, &FWoTOnboardingModule::HandleCloseClientWindows);
+	ItemAddedHandle = Seams.ClientItemAdded.AddRaw(
+		this, &FWoTOnboardingModule::HandleClientItemAdded);
+}
+
+void FWoTOnboardingModule::UnbindSeamHandlers()
+{
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	if (ShowGuideHandle.IsValid())
+	{
+		Seams.ShowGuideRequested.Remove(ShowGuideHandle);
+		ShowGuideHandle.Reset();
+	}
+	if (CloseWindowsHandle.IsValid())
+	{
+		Seams.CloseClientWindows.Remove(CloseWindowsHandle);
+		CloseWindowsHandle.Reset();
+	}
+	if (ItemAddedHandle.IsValid())
+	{
+		Seams.ClientItemAdded.Remove(ItemAddedHandle);
+		ItemAddedHandle.Reset();
+	}
 }
 
 void FWoTOnboardingModule::HandleShowGuideRequested()
@@ -273,6 +279,7 @@ void FWoTOnboardingModule::HandleSettingsChanged()
 	{
 		ClosePickupCard();
 	}
+	RefreshSeamBindings();
 }
 
 void FWoTOnboardingModule::HandleClientItemAdded(FName ClassName)

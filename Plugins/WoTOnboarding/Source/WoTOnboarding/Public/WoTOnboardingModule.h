@@ -18,7 +18,9 @@ class UGameViewportClient;
 // the master toggle live opens it from the front-end and in-game menus).
 // Task 6 adds the first-pickup card: the first add of each guide class shows
 // a passive card once per profile, and the guide key pressed while a card is
-// up opens the guide at that card's row. The death recap arrives with Task 7.
+// up opens the guide at that card's row. Every seam binding and the menu row
+// follow the master switch live (Task 7's parity-off gate); only the settings
+// rows, the way back on, stay registered while it is off.
 class WOTONBOARDING_API FWoTOnboardingModule final : public IModuleInterface
 {
 public:
@@ -30,6 +32,8 @@ public:
 
 	/** True while the guide browser is on the viewport. */
 	bool IsGuideBrowserOpen() const { return GuideBrowser.IsValid(); }
+	/** True while a first-pickup card is on the viewport. */
+	bool IsPickupCardOpen() const { return PickupCard.IsValid(); }
 
 	/** Specs only. Under automation the ClientItemAdded handler is inert, so
 	    no other suite's inventory traffic writes the persisted seen list,
@@ -44,6 +48,10 @@ public:
 
 private:
 	void RefreshMenuRowRegistration();
+	/** Binds the seam handlers while the master switch is on and unbinds them
+	    while it is off, so a switched-off plugin holds no seam binding. */
+	void RefreshSeamBindings();
+	void UnbindSeamHandlers();
 	void HandleShowGuideRequested();
 	void HandleCloseClientWindows(FName Keeper);
 	void HandleSettingsChanged();
