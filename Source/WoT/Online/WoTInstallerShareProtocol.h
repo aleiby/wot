@@ -137,10 +137,41 @@ namespace WoTInstallerShare
 	 * is Darwin (CrossOver), is "a Mac"; any other Wine host (Proton on Linux)
 	 * is "a Steam Deck"; native Windows is "a Windows PC". */
 	const TCHAR* LocalLabelFor(bool bPlatformMac, bool bUnderWine,
-		FStringView WineHostSysname);
+		FStringView HostSysname);
 
 	/** This copy's label. */
 	FString LocalLabel();
+
+	/** Wine's host OS name ("Linux", "Darwin") from ntdll's
+	 * wine_get_host_version; empty on native Windows and on a Mac build. */
+	FString WineHostSysname();
+#if WITH_AUTOMATION_TESTS
+	/** Replaces WineHostSysname's answer; unset restores detection. */
+	void SetWineHostSysnameForTesting(TOptional<FString> Sysname);
+#endif
+
+	/** Pure receiver trigger rule (spec B1): a receiver starts listening by
+	 * itself only in a Windows build under Wine on Linux (Proton on a Steam
+	 * Deck), where nothing prompts. Wine on macOS (CrossOver) counts as a Mac,
+	 * and native Windows and Mac wait for the player's click, because a
+	 * listening socket is what raises the firewall or Local Network prompt. */
+	bool ReceiverStartsAutomaticallyFor(bool bPlatformWindows, bool bUnderWine,
+		FStringView HostSysname);
+
+	/** ReceiverStartsAutomaticallyFor for this copy. */
+	bool ReceiverStartsAutomatically();
+
+#if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
+	/** Test harness only (never compiled into guarded Shipping): with
+	 * -wottestlanloopback the receiver binds 127.0.0.1 and the sharer offers to
+	 * 127.0.0.1 only, and both accept loopback peers, so a funnel cell can pair
+	 * two processes on one PC without raising a firewall prompt. */
+	bool HarnessLoopback();
+	/** Test harness only: WOT_TEST_LAN_RECEIVER_OFF=1 in the environment keeps
+	 * the receiver from ever starting, so a sharer elsewhere on the LAN cannot
+	 * feed a cell that judges where the installer came from. */
+	bool HarnessReceiverOff();
+#endif
 
 	/** What the player sees for a peer: one of the generic labels, never a
 	 * peer-chosen string. */

@@ -13,6 +13,10 @@ enum class EWoTInstallerSource : uint8
 	/** A Browse pick recorded after it built the cache; searched right after
 	 * the installer beside the game and before Downloads. */
 	Remembered,
+	/** A copy received over the local network from another WoT Reborn
+	 * (<user data root>/OriginalGame/<pinned name>); searched after the
+	 * remembered pick and before Downloads. */
+	Received,
 };
 
 /** The canonical spelling of a Browse pick: its parent directory resolved once

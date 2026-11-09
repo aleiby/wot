@@ -105,6 +105,10 @@ TEST_SEAM_MARKERS = (
     "wottestpreferencesdir=",
     "wottestuninstall=",
     "wot-test-fail-after-started",
+    # LAN installer sharing (WoTInstallerShareProtocol.cpp, same harness
+    # gate): the loopback pairing switch and the receiver-off variable.
+    "wottestlanloopback",
+    "WOT_TEST_LAN_RECEIVER_OFF",
 )
 
 PLATFORMS = ("Win64", "Mac")

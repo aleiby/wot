@@ -323,6 +323,16 @@ void UWoTInstallerSharingSubsystem::StartSharer()
 	Config.Label = WoTInstallerShare::LocalLabel();
 	Config.Size = WoT::Bootstrap::InstallerSize;
 	Config.Sha256 = MoveTemp(Pin).GetValue();
+#if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
+	if (WoTInstallerShare::HarnessLoopback())
+	{
+		// A funnel cell pairs two processes on this PC: offers go to loopback
+		// only (a socket bound to loopback never sees a broadcast), and only
+		// loopback receivers are served. Never compiled into Shipping.
+		Config.bAllowLoopbackPeers = true;
+		Config.DestinationsOverride = {0x7F000001u};
+	}
+#endif
 	TOptional<FWoTInstallerLocation> Adjacent;
 	if (const UGameInstance* Instance = GetGameInstance())
 	{

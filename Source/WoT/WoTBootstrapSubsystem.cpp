@@ -337,8 +337,14 @@ void UWoTBootstrapSubsystem::DispatchProgress(FWoTBootstrapProgressEvent&& Event
 		{
 			return;
 		}
+		// A LAN copy attempt publishes its bytes under its own stage id, so a
+		// newer attempt's lower byte count still replaces an older one's.
 		const bool bReplace = !PendingProgress.IsSet()
 			|| Event.OperationEpoch > PendingProgress->OperationEpoch
+			|| (Event.OperationEpoch == PendingProgress->OperationEpoch
+				&& Event.StageId != PendingProgress->StageId
+				&& (Event.CompletedBytes.IsSet()
+					|| PendingProgress->CompletedBytes.IsSet()))
 			|| (Event.OperationEpoch == PendingProgress->OperationEpoch
 				&& ((Event.CompletedBytes.IsSet()
 					&& (!PendingProgress->CompletedBytes.IsSet()
@@ -1059,6 +1065,26 @@ void UWoTBootstrapSubsystem::RequestPickedInstaller(
 		return;
 	}
 	Worker->RequestPickedInstaller(MoveTemp(CanonicalPath).GetValue());
+}
+
+void UWoTBootstrapSubsystem::RequestInstallerCopy()
+{
+	if (!bShuttingDown && Worker.IsValid()
+		&& ViewModel.Snapshot().Phase
+			== EWoTBootstrapPhase::OriginalGameNeeded)
+	{
+		Worker->RequestInstallerReceive();
+	}
+}
+
+void UWoTBootstrapSubsystem::CancelInstallerCopy()
+{
+	if (!bShuttingDown && Worker.IsValid()
+		&& ViewModel.Snapshot().Phase
+			== EWoTBootstrapPhase::OriginalGameNeeded)
+	{
+		Worker->CancelInstallerReceive();
+	}
 }
 
 TOptional<FWoTInstallerLocation>

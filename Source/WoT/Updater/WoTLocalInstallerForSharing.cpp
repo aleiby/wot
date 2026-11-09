@@ -189,11 +189,10 @@ TOptional<FWoTLocalInstallerForSharing> WoTFindLocalInstallerForSharing(
 			WoTReceivedInstallerPathUnder(Search.UserStateRoot);
 		if (!ReceivedPath.IsEmpty())
 		{
-			// EWoTInstallerSource only labels acquisition results; Inspect and
-			// the streaming open ignore it. The receiver accepts the pinned
-			// leaf only, like the adjacent location.
+			// The receiver places the pinned leaf only, and the bootstrap
+			// sweep accepts nothing else there.
 			FWoTInstallerLocation Location;
-			Location.Source = EWoTInstallerSource::Adjacent;
+			Location.Source = EWoTInstallerSource::Received;
 			Location.CanonicalPath = ReceivedPath;
 			Location.bRequirePinnedName = true;
 			if (TOptional<FWoTLocalInstallerForSharing> Found =

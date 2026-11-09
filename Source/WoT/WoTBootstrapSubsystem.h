@@ -78,6 +78,11 @@ public:
 	virtual bool RequestRestartToUpdate() { return false; }
 	virtual void RequestOriginalGameRecheck() {}
 	virtual void RequestPickedInstaller(FString) {}
+	/** "Copy from another computer": start the LAN installer receiver while
+	 * the original game is needed (spec B1, B5). */
+	virtual void RequestInstallerReceive() {}
+	/** Cancel the LAN copy in progress; the receiver keeps listening. */
+	virtual void CancelInstallerReceive() {}
 	virtual void CancelAndJoin() = 0;
 };
 
@@ -102,6 +107,11 @@ public:
 	bool RequestRestartToUpdate();
 	void RequestOriginalGameRecheck();
 	void RequestPickedInstaller(const FString& AbsolutePath);
+	/** The screen's "Copy from another computer": only while the original
+	 * game is needed. */
+	void RequestInstallerCopy();
+	/** The screen's Cancel during a LAN copy. */
+	void CancelInstallerCopy();
 	bool IsReady() const;
 	/** The installer location beside the game exactly as the worker searches
 	 * it (path and, when the layout resolved one, parent identity); unset when

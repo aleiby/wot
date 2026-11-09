@@ -1,6 +1,10 @@
 #include "WoTInstallerShareProtocol.h"
 
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
 #include "Misc/Guid.h"
+#include "Misc/Parse.h"
+#include "Misc/ScopeLock.h"
 #include "WoTBootstrapCore/NativeHandles.h"
 
 #if PLATFORM_WINDOWS
@@ -169,6 +173,11 @@ bool WoTShareDecodeLabel(const uint8* Bytes, int32 Count, FString& OutLabel)
 	OutLabel = FString(Converted.Length(), Converted.Get());
 	return !OutLabel.IsEmpty();
 }
+
+#if WITH_AUTOMATION_TESTS
+FCriticalSection GWoTShareWineHostSysnameLock;
+TOptional<FString> GWoTShareWineHostSysnameForTesting;
+#endif
 
 #if PLATFORM_WINDOWS
 /** Wine's host OS name ("Linux", "Darwin"), or empty on native Windows. */
@@ -386,7 +395,7 @@ TArray<uint32> OfferDestinations(
 }
 
 const TCHAR* LocalLabelFor(bool bPlatformMac, bool bUnderWine,
-	FStringView WineHostSysname)
+	FStringView HostSysname)
 {
 	if (bPlatformMac)
 	{
@@ -396,19 +405,76 @@ const TCHAR* LocalLabelFor(bool bPlatformMac, bool bUnderWine,
 	{
 		return LabelWindowsPC;
 	}
-	return FStringView(TEXT("Darwin")).Equals(WineHostSysname,
+	return FStringView(TEXT("Darwin")).Equals(HostSysname,
 		ESearchCase::IgnoreCase) ? LabelMac : LabelSteamDeck;
 }
 
 FString LocalLabel()
 {
 #if PLATFORM_WINDOWS
-	const FString Sysname = WoTShareWineHostSysname();
+	const FString Sysname = WineHostSysname();
 	return LocalLabelFor(false, WoTIsRunningUnderWine(), Sysname);
 #else
 	return LocalLabelFor(PLATFORM_MAC != 0, false, FStringView());
 #endif
 }
+
+FString WineHostSysname()
+{
+#if WITH_AUTOMATION_TESTS
+	{
+		FScopeLock Lock(&GWoTShareWineHostSysnameLock);
+		if (GWoTShareWineHostSysnameForTesting.IsSet())
+		{
+			return GWoTShareWineHostSysnameForTesting.GetValue();
+		}
+	}
+#endif
+#if PLATFORM_WINDOWS
+	return WoTShareWineHostSysname();
+#else
+	return FString();
+#endif
+}
+
+#if WITH_AUTOMATION_TESTS
+void SetWineHostSysnameForTesting(TOptional<FString> Sysname)
+{
+	FScopeLock Lock(&GWoTShareWineHostSysnameLock);
+	GWoTShareWineHostSysnameForTesting = MoveTemp(Sysname);
+}
+#endif
+
+bool ReceiverStartsAutomaticallyFor(bool bPlatformWindows, bool bUnderWine,
+	FStringView HostSysname)
+{
+	return bPlatformWindows && bUnderWine
+		&& FStringView(TEXT("Linux")).Equals(HostSysname, ESearchCase::IgnoreCase);
+}
+
+bool ReceiverStartsAutomatically()
+{
+#if PLATFORM_WINDOWS
+	const bool bUnderWine = WoTIsRunningUnderWine();
+	return ReceiverStartsAutomaticallyFor(true, bUnderWine,
+		bUnderWine ? WineHostSysname() : FString());
+#else
+	return false;
+#endif
+}
+
+#if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
+bool HarnessLoopback()
+{
+	return FParse::Param(FCommandLine::Get(), TEXT("wottestlanloopback"));
+}
+
+bool HarnessReceiverOff()
+{
+	return FPlatformMisc::GetEnvironmentVariable(
+		TEXT("WOT_TEST_LAN_RECEIVER_OFF")).TrimStartAndEnd().Equals(TEXT("1"));
+}
+#endif
 
 FString DisplayLabel(FStringView PeerLabel)
 {

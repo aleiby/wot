@@ -50,6 +50,31 @@ class DeckHarnessTests(unittest.TestCase):
         self.assertIn("'Proton 11.0'/proton", script)
         self.assertIn("SteamGameId=2524773648", script)
         self.assertIn("'WoT Reborn.exe'", script)
+        # The LAN receiver stays as the build decides unless asked.
+        self.assertNotIn(deck.LAN_RECEIVER_OFF_ENV, script)
+
+    def test_launch_hidden_can_switch_the_lan_receiver_off(self):
+        runner = FakeRunner()
+        deck.launch_hidden(deck.DeckTarget("h"), runner, "/srv/games/WoT Reborn",
+                           unit="wotdeck", app_id=7, lan_receiver_off=True)
+        script = runner.calls[0][1].decode()
+        self.assertEqual(deck.LAN_RECEIVER_OFF_ENV, "WOT_TEST_LAN_RECEIVER_OFF")
+        # A systemd-run --setenv, so the game process (under Proton) sees it.
+        self.assertIn("systemd-run --user --unit=wotdeck --collect ", script)
+        self.assertIn("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1 ", script)
+        self.assertLess(script.index("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1"),
+                        script.index("timeout --kill-after"))
+
+    def test_launch_game_direct_can_switch_the_lan_receiver_off(self):
+        runner = FakeRunner()
+        deck.launch_game_direct(deck.DeckTarget("h"), runner, "/srv/g", unit="wotgame",
+                                app_id=7, lan_receiver_off=True)
+        self.assertIn("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1 ",
+                      runner.calls[0][1].decode())
+        runner = FakeRunner()
+        deck.launch_game_direct(deck.DeckTarget("h"), runner, "/srv/g", unit="wotgame",
+                                app_id=7)
+        self.assertNotIn(deck.LAN_RECEIVER_OFF_ENV, runner.calls[0][1].decode())
 
     def test_heartbeat_events_parse_jsonl_and_skip_garbage(self):
         lines = (b'{"event":"phase-begin","phase":"Ready"}\nnot json\n'

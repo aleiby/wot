@@ -24,6 +24,15 @@ SSH_TRANSPORT_FAILURE = 255
 # GNU timeout only sends TERM; KILL after this grace so nothing outlives a run.
 KILL_AFTER_SECONDS = 30
 UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@-]+$")
+# Read only by Test builds (never compiled into Shipping): with it set, the
+# game's LAN installer receiver never starts, so a sharer elsewhere on the
+# network (the owner's PC, say) cannot hand the installer to a cell that
+# judges where the installer came from.
+LAN_RECEIVER_OFF_ENV = "WOT_TEST_LAN_RECEIVER_OFF"
+
+
+def _receiver_off_setenv(lan_receiver_off: bool) -> str:
+    return f"--setenv={LAN_RECEIVER_OFF_ENV}=1 " if lan_receiver_off else ""
 
 
 class DeckError(RuntimeError):
@@ -92,11 +101,13 @@ def deploy_tree(target: DeckTarget, runner, local_dir: Path, remote_dir: str):
 
 def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
                   app_id: int, proton: str = "Proton 11.0",
-                  runtime: str = "SteamLinuxRuntime_4"):
+                  runtime: str = "SteamLinuxRuntime_4",
+                  lan_receiver_off: bool = False):
     """Start the game under Proton as a user unit that outlives the SSH session.
 
     It runs off-screen in Game Mode (gamescope only shows apps Steam launched);
-    use show_window to bring it forward.
+    use show_window to bring it forward. lan_receiver_off sets
+    LAN_RECEIVER_OFF_ENV for the game (Test builds honour it).
     """
     if not UNIT_NAME.match(unit):
         raise DeckError(f"unit name must match {UNIT_NAME.pattern}: {unit!r}")
@@ -107,6 +118,7 @@ def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
         f"--setenv=STEAM_COMPAT_DATA_PATH={prefix} "
         f"--setenv=STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
         f"--setenv=SteamAppId={int(app_id)} --setenv=SteamGameId={int(app_id)} "
+        f"{_receiver_off_setenv(lan_receiver_off)}"
         f"--setenv=DISPLAY=:0 -p WorkingDirectory=\"$PWD\" "
         f"timeout --kill-after={KILL_AFTER_SECONDS} 3600 "
         f"{_proton_command(runtime, proton)} 'WoT Reborn.exe'"
@@ -118,11 +130,13 @@ def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
 
 def launch_game_direct(target: DeckTarget, runner, remote_dir: str, unit: str,
                        app_id: int, proton: str = "Proton 11.0",
-                       runtime: str = "SteamLinuxRuntime_4"):
+                       runtime: str = "SteamLinuxRuntime_4",
+                       lan_receiver_off: bool = False):
     """Start the game executable itself, bypassing the launcher.
 
     The game takes its shared session lock without the launcher handling any
     staged update first, so a later launcher run meets a running game.
+    lan_receiver_off is as for launch_hidden.
     """
     if not UNIT_NAME.match(unit):
         raise DeckError(f"unit name must match {UNIT_NAME.pattern}: {unit!r}")
@@ -135,6 +149,7 @@ def launch_game_direct(target: DeckTarget, runner, remote_dir: str, unit: str,
         f"--setenv=STEAM_COMPAT_DATA_PATH={prefix} "
         f"--setenv=STEAM_COMPAT_CLIENT_INSTALL_PATH={STEAM} "
         f"--setenv=SteamAppId={int(app_id)} --setenv=SteamGameId={int(app_id)} "
+        f"{_receiver_off_setenv(lan_receiver_off)}"
         f"--setenv=DISPLAY=:0 -p WorkingDirectory=\"$PWD\" "
         f"timeout --kill-after={KILL_AFTER_SECONDS} 3600 "
         f"{_proton_command(runtime, proton)} \"$exe\""
@@ -297,6 +312,8 @@ def main(argv: List[str] = None) -> int:
     p.add_argument("--unit", default="wotdeck")
     p.add_argument("--app-id", type=int, required=True)
     p.add_argument("--proton", default="Proton 11.0")
+    p.add_argument("--lan-receiver-off", action="store_true",
+                   help="keep a Test build's LAN installer receiver off")
     p = sub.add_parser("stop", help="stop a launched unit")
     p.add_argument("--unit", default="wotdeck")
     p = sub.add_parser("heartbeat", help="summarize the game's heartbeat")
@@ -328,7 +345,7 @@ def main(argv: List[str] = None) -> int:
         deploy_tree(target, runner, args.local_dir, args.remote_dir)
     elif args.command == "launch":
         launch_hidden(target, runner, args.remote_dir, args.unit, args.app_id,
-                      args.proton)
+                      args.proton, lan_receiver_off=args.lan_receiver_off)
     elif args.command == "stop":
         stop(target, runner, args.unit)
     elif args.command == "heartbeat":
