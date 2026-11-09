@@ -46,6 +46,7 @@
 #include "Traps/WoTPortcullis.h"
 #include "Traps/WoTStaircase.h"
 #include "Traps/WoTTrap.h"
+#include "UI/WoTControllerUIInput.h"
 #include "UI/WoTTextEntry.h"
 
 #include "EngineUtils.h"
@@ -3113,6 +3114,80 @@ void AWoTPlayerController::TeamTalk()
 	BeginChatInput(TEXT("TeamSay "));
 }
 
+void AWoTPlayerController::ChatByController(bool bTeam)
+{
+	// Talk or TeamTalk exactly as the T and Y keys run them (the same prefill
+	// and the same SubmitChatInput), then the line's text entry in the same
+	// step: a controller has no keys to type on the line itself.
+	const bool bWasTyping = bChatTyping;
+	if (bTeam)
+	{
+		TeamTalk();
+	}
+	else
+	{
+		Talk();
+	}
+	if (!bWasTyping && bChatTyping)
+	{
+		BeginChatTextEntry();
+	}
+}
+
+void AWoTPlayerController::ChatFromInGameMenu(bool bTeam)
+{
+	// Chat never opens over the menu (BeginChatInput): leave it first, as the
+	// menu's Scoreboard and Help do.
+	ResumeFromInGameMenu();
+	if (IsInGameMenuOpen())
+	{
+		return;   // leaving for the front end: the menu stays
+	}
+	if (FWoTControllerUIInput::IsControllerMode())
+	{
+		ChatByController(bTeam);
+	}
+	else if (bTeam)
+	{
+		TeamTalk();   // plain keyboard chat, as Y opens it [M6]
+	}
+	else
+	{
+		Talk();       // plain keyboard chat, as T opens it [M6]
+	}
+}
+
+void AWoTPlayerController::TauntFromInGameMenu(int32 TauntIndex)
+{
+	ResumeFromInGameMenu();
+	if (IsInGameMenuOpen())
+	{
+		return;   // leaving for the front end: the menu stays
+	}
+	PlayTaunt(TauntIndex);
+}
+
+bool AWoTPlayerController::BeginChatTextEntry()
+{
+	if (!bChatTyping || !ChatInputWidget.IsValid())
+	{
+		return false;
+	}
+	int32 SlateUserIndex = 0;
+	if (FSlateApplication::IsInitialized())
+	{
+		SlateUserIndex = FSlateApplication::Get().GetUserIndexForKeyboard();
+		if (const ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
+		{
+			if (const TSharedPtr<const FSlateUser> SlateUser = LocalPlayer->GetSlateUser())
+			{
+				SlateUserIndex = SlateUser->GetUserIndex();
+			}
+		}
+	}
+	return ChatInputWidget->BeginTextEntry(SlateUserIndex);
+}
+
 void AWoTPlayerController::BeginChatInput(const FString& InitialText)
 {
 	if (bChatTyping || !IsLocalController() || IsInGameMenuOpen()
@@ -3373,6 +3448,9 @@ void AWoTPlayerController::SubmitChatInput(const FString& Line)
 	{
 		return;
 	}
+#if WITH_AUTOMATION_TESTS
+	LastSubmittedChatLineForTesting = Line;
+#endif
 	ChatInputText = Line;
 	RemoveChatInputWidget(/*bRestoreGameInput*/ true);
 
@@ -3670,6 +3748,9 @@ FName AWoTPlayerController::TauntSlotForIndex(int32 TauntIndex)
 
 void AWoTPlayerController::PlayTaunt(int32 TauntIndex)
 {
+#if WITH_AUTOMATION_TESTS
+	PlayTauntRequestsForTesting.Add(TauntIndex);
+#endif
 	ServerPlayTaunt(TauntIndex);
 }
 

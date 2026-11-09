@@ -6,6 +6,7 @@
 
 #if WITH_AUTOMATION_TESTS
 
+#include "../Gamepad/WoTGamepadLayer.h"
 #include "../UI/SWoTBootstrapScreen.h"
 #include "../UI/SWoTButtonPrompts.h"
 #include "../UI/SWoTFocusOutline.h"
@@ -65,6 +66,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerInput.h"
+#include "InputKeyEventArgs.h"
 #include "Misc/FileHelper.h"
 #include "Slate/SceneViewport.h"
 #include "Widgets/SViewport.h"
@@ -4287,6 +4289,407 @@ bool FWoTChatTextEntrySpec::RunTest(const FString&)
 	TestTrue(TEXT("the keyboard line"), Controller->LeftMessages.Contains(TEXT("Avery: ok")));
 	return !HasAnyErrors();
 }
+
+// ---------------------------------------------------------------------------
+// Controller sub-project 3, PR 4: chat and taunts in a match (spec r3
+// section 4): D-pad up chat, and the in-game menu's Chat, Team Chat and Taunts.
+
+namespace
+{
+/** A gameplay key edge, delivered to the controller as the viewport does. */
+void WoTChatTest_Send(AWoTPlayerController* Controller, FKey Key, EInputEvent Event)
+{
+	Controller->InputKey(FInputKeyEventArgs::CreateSimulated(Key, Event,
+		Event == IE_Released ? 0.0f : 1.0f));
+}
+
+/** World frames at 60 Hz, each with a settled Slate pass. */
+void WoTChatTest_Frames(FWoTEntryTest_ChatFixture& Fixture, int32 Count)
+{
+	for (int32 Frame = 0; Frame < Count; ++Frame)
+	{
+		Fixture.Settle();
+	}
+}
+
+/** Frames enough for a D-pad up hold to pass the hold time. */
+int32 WoTChatTest_HoldFrames()
+{
+	return FMath::CeilToInt((WoTGamepadTuning().HoldSeconds + 0.1f) * 60.0f);
+}
+
+/** TeamTalk on Y, as DefaultInput.ini binds it (the fixture adds Talk on T). */
+void WoTChatTest_EnsureTeamTalkKey(AWoTPlayerController* Controller)
+{
+	const bool bHasTeamTalk = Controller->PlayerInput->ActionMappings.ContainsByPredicate(
+		[](const FInputActionKeyMapping& Mapping)
+		{
+			return Mapping.ActionName == TEXT("TeamTalk") && Mapping.Key == EKeys::Y;
+		});
+	if (!bHasTeamTalk)
+	{
+		Controller->PlayerInput->AddActionMapping(FInputActionKeyMapping(TEXT("TeamTalk"), EKeys::Y));
+	}
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTChatControllerDPadUpSpec,
+	"WoT.Chat.Controller.DPadUp", WoTUITest_Flags)
+
+bool FWoTChatControllerDPadUpSpec::RunTest(const FString&)
+{
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
 #endif
+	FSlateApplication& Slate = FSlateApplication::Get();
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTEntryTest_Guard EntryGuard;
+	FWoTEntryTest_ChatFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	AWoTTestLeftMessageCaptureController* Controller = Fixture.Controller;
+	WoTChatTest_EnsureTeamTalkKey(Controller);
+	WoTChatTest_Frames(Fixture, 2);   // the controller layer installs its context
+	const UWoTGamepadLayer* Layer = Controller->GetGamepadLayerForTest();
+	if (!TestTrue(TEXT("the controller layer is in gameplay"),
+		Layer && Layer->GetMode() == EWoTGamepadMode::Gameplay))
+	{
+		return false;
+	}
+
+	// A tap opens Talk's line and its keyboard panel in one step.
+	WoTChatTest_Send(Controller, EKeys::Gamepad_DPad_Up, IE_Pressed);
+	WoTChatTest_Frames(Fixture, 6);
+	WoTChatTest_Send(Controller, EKeys::Gamepad_DPad_Up, IE_Released);
+	WoTChatTest_Frames(Fixture, 2);
+	TSharedPtr<SWoTChatInputOverlay> Chat = Controller->GetChatInputWidget();
+	if (!TestTrue(TEXT("a D-pad up tap opens chat"), Controller->IsChatTyping() && Chat.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("as T opens it: Say:"), Chat->GetLabel().ToString(), FString(TEXT("Say:")));
+	TSharedPtr<SWoTOnScreenKeyboard> Panel = FWoTTextEntry::GetPanel();
+	if (!TestTrue(TEXT("the keyboard panel opens with it"),
+		Panel.IsValid() && FWoTTextEntry::IsActiveWithin(Chat.ToSharedRef())))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the panel has focus"), Panel->HasKeyboardFocus());
+	TestTrue(TEXT("chat input is suspended for the panel"),
+		Controller->IsChatInputSuspendedForTextEntry());
+	Fixture.Type(TEXT("hi"));
+	Fixture.Press(EKeys::Gamepad_Special_Right);
+	TestFalse(TEXT("Done sends the line"), Controller->IsChatTyping());
+	TestEqual(TEXT("the line is Talk's"), Controller->GetLastSubmittedChatLineForTesting(),
+		FString(TEXT("Say hi")));
+	TestTrue(TEXT("as Say"), Controller->LeftMessages.Contains(TEXT("Avery: hi")));
+	Fixture.Press(EKeys::T);
+	Fixture.Type(TEXT("hi"));
+	Fixture.Press(EKeys::Enter);
+	TestEqual(TEXT("keyboard chat (T) sends the same line"),
+		Controller->GetLastSubmittedChatLineForTesting(), FString(TEXT("Say hi")));
+	WoTChatTest_Frames(Fixture, 2);
+
+	// A hold opens TeamTalk's line and the panel while D-pad up is still held.
+	{
+		FWoTUITest_InputScope Scope(Fixture.Window.ToSharedRef());
+		WoTChatTest_Send(Controller, EKeys::Gamepad_DPad_Up, IE_Pressed);
+		WoTChatTest_Frames(Fixture, WoTChatTest_HoldFrames());
+		Chat = Controller->GetChatInputWidget();
+		Panel = FWoTTextEntry::GetPanel();
+		if (!TestTrue(TEXT("a D-pad up hold opens chat and the panel before the release"),
+			Controller->IsChatTyping() && Chat.IsValid() && Panel.IsValid()))
+		{
+			return false;
+		}
+		TestEqual(TEXT("as Y opens it: Team say:"), Chat->GetLabel().ToString(),
+			FString(TEXT("Team say:")));
+		// XInput's own repeats of the held D-pad up now reach the panel: a press
+		// that began in gameplay never repeats there [I1].
+		const FIntPoint Highlight = Panel->GetHighlight();
+		for (int32 Repeat = 0; Repeat < 3; ++Repeat)
+		{
+			Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_DPad_Up, /*bRepeat*/ true));
+			Fixture.Settle();
+		}
+		*Scope.Time += FWoTControllerUIInput::FirstRepeatDelay + 0.5;
+		Scope.Input->TickRepeat(Slate);
+		Fixture.Settle();
+		TestTrue(TEXT("the held press does not move the panel's highlight"),
+			Panel->GetHighlight() == Highlight);
+		TestFalse(TEXT("and arms no repeat"), Scope.Input->IsRepeatArmed(0));
+		Slate.ProcessKeyUpEvent(WoTUITest_Key(EKeys::Gamepad_DPad_Up));
+		Fixture.Settle();
+		TestTrue(TEXT("the release leaves the panel open"), FWoTTextEntry::IsActive());
+		Fixture.Type(TEXT("gg"));
+		Fixture.Press(EKeys::Gamepad_Special_Right);
+		TestEqual(TEXT("the line is TeamTalk's"), Controller->GetLastSubmittedChatLineForTesting(),
+			FString(TEXT("TeamSay gg")));
+	}
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	Fixture.Press(EKeys::Y);
+	Fixture.Type(TEXT("gg"));
+	Fixture.Press(EKeys::Enter);
+	TestEqual(TEXT("keyboard team chat (Y) sends the same line"),
+		Controller->GetLastSubmittedChatLineForTesting(), FString(TEXT("TeamSay gg")));
+	WoTChatTest_Frames(Fixture, 2);
+
+	// With Steam's keyboard turned on (the Deck), the tap opens it instead.
+	{
+		FWoTEntryTest_Steam Steam;
+		WoTChatTest_Send(Controller, EKeys::Gamepad_DPad_Up, IE_Pressed);
+		WoTChatTest_Frames(Fixture, 6);
+		WoTChatTest_Send(Controller, EKeys::Gamepad_DPad_Up, IE_Released);
+		WoTChatTest_Frames(Fixture, 2);
+		Chat = Controller->GetChatInputWidget();
+		TestTrue(TEXT("the tap opens chat"), Controller->IsChatTyping() && Chat.IsValid());
+		TestTrue(TEXT("on Steam's keyboard"), FWoTTextEntry::GetActiveRoute().IsSet()
+			&& FWoTTextEntry::GetActiveRoute().GetValue() == EWoTTextEntryRoute::SteamKeyboard);
+		TestEqual(TEXT("Steam's keyboard was asked for once"), Steam.Launched.Num(), 1);
+		TestTrue(TEXT("Steam's keyboard types into the chat line"),
+			Chat.IsValid() && Slate.GetKeyboardFocusedWidget() == Chat->TextWidget());
+		Fixture.Type(TEXT("ok"));
+		Fixture.Press(EKeys::Enter);
+		TestEqual(TEXT("Steam's Enter sends Talk's line"),
+			Controller->GetLastSubmittedChatLineForTesting(), FString(TEXT("Say ok")));
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTChatControllerInGameMenuSpec,
+	"WoT.Chat.Controller.InGameMenu", WoTUITest_Flags)
+
+bool FWoTChatControllerInGameMenuSpec::RunTest(const FString&)
+{
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
+	FSlateApplication& Slate = FSlateApplication::Get();
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTEntryTest_Guard EntryGuard;
+	FWoTEntryTest_ChatFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	AWoTTestLeftMessageCaptureController* Controller = Fixture.Controller;
+	Controller->ToggleInGameMenu();
+	const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+		.PlayerController(Controller)
+		.RequiredFontsForTesting(WoTUITest_Fonts());
+	// Positions come from the runtime list.
+	const int32 ChatIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Chat);
+	const int32 TeamChatIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::TeamChat);
+	if (!TestTrue(TEXT("the menu has Chat and Team Chat"),
+		ChatIndex != INDEX_NONE && TeamChatIndex != INDEX_NONE))
+	{
+		return false;
+	}
+	TestEqual(TEXT("labelled Chat"), Overlay->MenuLabelsForTesting()[ChatIndex],
+		FString(TEXT("Chat")));
+	TestEqual(TEXT("labelled Team Chat"), Overlay->MenuLabelsForTesting()[TeamChatIndex],
+		FString(TEXT("Team Chat")));
+
+	// Pointer mode: Chat opens plain keyboard chat, with no panel [M6].
+	Overlay->ActivateVisibleMainMenuEntryForTesting(ChatIndex);
+	Fixture.Settle();
+	TestFalse(TEXT("Chat closes the menu"), Controller->IsInGameMenuOpen());
+	TSharedPtr<SWoTChatInputOverlay> Chat = Controller->GetChatInputWidget();
+	if (!TestTrue(TEXT("and opens chat"), Controller->IsChatTyping() && Chat.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("as T opens it: Say:"), Chat->GetLabel().ToString(), FString(TEXT("Say:")));
+	TestFalse(TEXT("with the pointer, no keyboard panel"), FWoTTextEntry::IsActive());
+	TestTrue(TEXT("keyboard chat's input router runs"),
+		Controller->IsChatInputRouterActiveForTesting());
+	TestTrue(TEXT("the chat line has focus"), Slate.GetKeyboardFocusedWidget() == Chat->TextWidget());
+	Fixture.Type(TEXT("ok"));
+	Fixture.Press(EKeys::Enter);
+	TestEqual(TEXT("the keyboard line is Talk's"), Controller->GetLastSubmittedChatLineForTesting(),
+		FString(TEXT("Say ok")));
+
+	// Controller mode: Team Chat opens TeamTalk's line and its panel together.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Controller->ToggleInGameMenu();
+	TestTrue(TEXT("the menu is open again"), Controller->IsInGameMenuOpen());
+	Overlay->ActivateVisibleMainMenuEntryForTesting(TeamChatIndex);
+	Fixture.Settle();
+	TestFalse(TEXT("Team Chat closes the menu"), Controller->IsInGameMenuOpen());
+	Chat = Controller->GetChatInputWidget();
+	TSharedPtr<SWoTOnScreenKeyboard> Panel = FWoTTextEntry::GetPanel();
+	if (!TestTrue(TEXT("and opens chat with the keyboard panel"),
+		Controller->IsChatTyping() && Chat.IsValid() && Panel.IsValid()))
+	{
+		return false;
+	}
+	TestEqual(TEXT("as Y opens it: Team say:"), Chat->GetLabel().ToString(),
+		FString(TEXT("Team say:")));
+	TestTrue(TEXT("the panel has focus"), Panel->HasKeyboardFocus());
+	Fixture.Type(TEXT("gg"));
+	Fixture.Press(EKeys::Gamepad_Special_Right);
+	TestEqual(TEXT("the line is TeamTalk's"), Controller->GetLastSubmittedChatLineForTesting(),
+		FString(TEXT("TeamSay gg")));
+
+	// Controller mode Chat: Talk's line and the panel; View cancels only the panel.
+	Controller->ToggleInGameMenu();
+	Overlay->ActivateVisibleMainMenuEntryForTesting(ChatIndex);
+	Fixture.Settle();
+	Chat = Controller->GetChatInputWidget();
+	TestTrue(TEXT("Chat opens Talk's line with the panel"),
+		Chat.IsValid() && Chat->GetLabel().ToString() == TEXT("Say:")
+		&& FWoTTextEntry::GetPanel().IsValid());
+	Fixture.Press(EKeys::Gamepad_Special_Left);
+	TestFalse(TEXT("View cancels the panel"), FWoTTextEntry::IsActive());
+	TestTrue(TEXT("and chat stays open"), Controller->IsChatTyping());
+	Controller->CancelChatInput();
+	return !HasAnyErrors();
+}
+#endif
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuTauntsSpec,
+	"WoT.FrontEnd.InGameMenu.Taunts", WoTUITest_Flags)
+
+bool FWoTInGameMenuTauntsSpec::RunTest(const FString&)
+{
+	FWoTUITest_ModeGuard ModeGuard;
+	UWorld* World = WoTUITest_CreateWorld();
+	if (!TestNotNull(TEXT("world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTUITest_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+		.PlayerController(Controller)
+		.RequiredFontsForTesting(WoTUITest_Fonts());
+	FWoTUITest_Window Shown(Overlay);
+	FSlateApplication& Slate = FSlateApplication::Get();
+	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1024.0f, 768.0f), FSlateLayoutTransform()),
+		0.0, 0.0f);
+	Shown.Settle();
+	Overlay->FocusResumeButton();
+	Shown.Settle();
+
+	// The fixed order (spec r3 section 4 [I9]): Chat, Team Chat and Taunts right
+	// after Help, before Quit. Positions come from the runtime list.
+	const TArray<FString> Labels = Overlay->MenuLabelsForTesting();
+	const int32 HelpIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Help);
+	const int32 ChatIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Chat);
+	const int32 TeamChatIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::TeamChat);
+	const int32 TauntsIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Taunts);
+	const int32 QuitIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit);
+	if (!TestTrue(TEXT("Chat, Team Chat and Taunts follow Help in that order"),
+		HelpIndex != INDEX_NONE && ChatIndex == HelpIndex + 1
+		&& TeamChatIndex == HelpIndex + 2 && TauntsIndex == HelpIndex + 3))
+	{
+		return false;
+	}
+	TestTrue(TEXT("before Quit, which stays last"),
+		TauntsIndex < QuitIndex && QuitIndex == Labels.Num() - 1);
+	TestEqual(TEXT("labelled Taunts"), Labels[TauntsIndex], FString(TEXT("Taunts")));
+
+	// The D-pad walks to Taunts; A opens its page on Taunt 1.
+	for (int32 Step = 0; Step < TauntsIndex; ++Step)
+	{
+		WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
+	}
+	TestEqual(TEXT("the D-pad reaches Taunts"), Overlay->SelectedMainMenuIndexForTesting(),
+		TauntsIndex);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	if (!TestTrue(TEXT("A opens the Taunts page"), Overlay->IsShowingTauntsForTesting()))
+	{
+		return false;
+	}
+	const TArray<FString> ExpectedTaunts = {TEXT("Taunt 1"), TEXT("Taunt 2"), TEXT("Taunt 3"),
+		TEXT("Taunt 4"), TEXT("Taunt 5"), TEXT("Taunt 6"), TEXT("Random")};
+	TestTrue(TEXT("Taunt 1 to Taunt 6, then Random"),
+		Overlay->TauntLabelsForTesting() == ExpectedTaunts);
+	auto TauntFocused = [&Slate, &Overlay](int32 Index)
+	{
+		return Overlay->SelectedTauntIndexForTesting() == Index
+			&& Slate.GetKeyboardFocusedWidget() == Overlay->TauntButtonForTesting(Index);
+	};
+	TestTrue(TEXT("the page opens on Taunt 1"), TauntFocused(0));
+	TestTrue(TEXT("the menu stays open on the page"), Controller->IsInGameMenuOpen());
+	TestTrue(TEXT("opening the page plays nothing"),
+		Controller->GetPlayTauntRequestsForTesting().IsEmpty());
+
+	// Its prompts (spec r3 section 1a): A Taunt, B Back, in Controller mode.
+	const TSharedPtr<SWoTButtonPrompts> Strip = Overlay->ButtonPromptsForTesting();
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	Shown.Settle();
+	TestEqual(TEXT("the Taunts page's prompts"),
+		Strip.IsValid() ? FWoTButtonPrompt::Describe(Strip->GetShownPrompts()) : FString(),
+		FString(TEXT("A Taunt | B Back")));
+
+	// Seven entries wrap, for the D-pad, the arrows and the stick.
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Up);
+	TestTrue(TEXT("D-pad up wraps from Taunt 1 to Random"), TauntFocused(6));
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("D-pad down wraps from Random to Taunt 1"), TauntFocused(0));
+	WoTWidgetTest_Press(Shown, EKeys::Down);
+	TestTrue(TEXT("Down moves to Taunt 2"), TauntFocused(1));
+	WoTWidgetTest_Press(Shown, EKeys::Up);
+	WoTWidgetTest_Press(Shown, EKeys::Up);
+	TestTrue(TEXT("Up wraps to Random"), TauntFocused(6));
+	const FNavigationEvent StickDown(FModifierKeysState(), 0, EUINavigation::Down,
+		ENavigationGenesis::Controller);
+	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickDown);
+	Shown.Settle();
+	TestTrue(TEXT("the stick wraps the same way"), TauntFocused(0));
+
+	// Escape returns to the menu, matching B [M3]; B and View back out too.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	TestTrue(TEXT("Escape is handled"), WoTWidgetTest_Press(Shown, EKeys::Escape));
+	TestTrue(TEXT("Escape on Taunts returns to the menu"),
+		Overlay->IsShowingMainMenuForTesting() && !Overlay->IsShowingTauntsForTesting());
+	TestTrue(TEXT("and does not resume"), Controller->IsInGameMenuOpen());
+	for (const FKey& Back : {EKeys::Gamepad_FaceButton_Right, EKeys::Gamepad_Special_Left})
+	{
+		Overlay->OpenTauntsForTesting();
+		Shown.Settle();
+		TestTrue(*FString::Printf(TEXT("%s is handled on Taunts"), *Back.ToString()),
+			WoTWidgetTest_Press(Shown, Back));
+		TestTrue(*FString::Printf(TEXT("%s returns to the menu"), *Back.ToString()),
+			Overlay->IsShowingMainMenuForTesting());
+		TestTrue(*FString::Printf(TEXT("%s does not resume"), *Back.ToString()),
+			Controller->IsInGameMenuOpen());
+	}
+
+	// A on an entry: the menu closes and PlayTaunt gets that entry's argument.
+	Overlay->OpenTauntsForTesting();
+	Shown.Settle();
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
+	TestTrue(TEXT("Taunt 3 is selected"), TauntFocused(2));
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestFalse(TEXT("a taunt closes the menu"), Controller->IsInGameMenuOpen());
+	TestTrue(TEXT("Taunt 3 calls PlayTaunt(3)"),
+		Controller->GetPlayTauntRequestsForTesting() == TArray<int32>({3}));
+	for (int32 Entry = 0; Entry < ExpectedTaunts.Num(); ++Entry)
+	{
+		Controller->ToggleInGameMenu();
+		Overlay->OpenTauntsForTesting();
+		Overlay->ActivateTauntEntryForTesting(Entry);
+		TestFalse(*FString::Printf(TEXT("%s closes the menu"), *ExpectedTaunts[Entry]),
+			Controller->IsInGameMenuOpen());
+	}
+	TestTrue(TEXT("Taunt 1..6 call PlayTaunt(1..6) and Random PlayTaunt(-1)"),
+		Controller->GetPlayTauntRequestsForTesting()
+			== TArray<int32>({3, 1, 2, 3, 4, 5, 6, -1}));
+	return !HasAnyErrors();
+}
 
 #endif // WITH_AUTOMATION_TESTS

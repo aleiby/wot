@@ -354,6 +354,26 @@ public:
 	bool IsChatInputSuspendedForTextEntry() const { return bChatInputSuspended; }
 	/** The open chat line's widget, if chat is open with one. */
 	TSharedPtr<SWoTChatInputOverlay> GetChatInputWidget() const { return ChatInputWidget; }
+	/**
+	 * Chat by controller (spec r3 section 4): D-pad up's tap (Say) and hold
+	 * (TeamSay). Talk or TeamTalk opens the line exactly as T and Y do, so the
+	 * line sent is the same; the line's text entry (the keyboard panel, or
+	 * Steam's keyboard when that route is on) starts in the same step.
+	 */
+	void ChatByController(bool bTeam);
+	/**
+	 * The in-game menu's Chat and Team Chat (spec r3 section 4): the menu
+	 * closes, then chat opens as T and Y open it. After controller input the
+	 * text entry starts with it; after mouse or keyboard input it is plain
+	 * keyboard chat [M6].
+	 */
+	void ChatFromInGameMenu(bool bTeam);
+	/**
+	 * The in-game menu's Taunts page (spec r3 section 4): the menu closes, then
+	 * PlayTaunt(1..6), or PlayTaunt(-1) for Random, exactly as the taunt keys
+	 * call it.
+	 */
+	void TauntFromInGameMenu(int32 TauntIndex);
 #if WITH_AUTOMATION_TESTS
 	FString GetChatTextForTesting() const;
 	void SetChatTextForTesting(const FString& Text);
@@ -361,6 +381,9 @@ public:
 	void EnableChatWidgetForTesting() { bEnableChatWidgetForTesting = true; }
 	/** True while chat's input router is registered and not suspended. */
 	bool IsChatInputRouterActiveForTesting() const;
+	/** The line the last SubmitChatInput received, as typed or sent. */
+	const FString& GetLastSubmittedChatLineForTesting() const
+		{ return LastSubmittedChatLineForTesting; }
 #endif
 
 	// Engine.PlayerPawn SShot/ToggleFullscreen direct features plus
@@ -379,6 +402,9 @@ public:
 	UFUNCTION(Server, Reliable) void ServerRequestPause();
 #if WITH_AUTOMATION_TESTS
 	FName GetLastTauntSlotForTesting() const { return LastTauntSlotForTesting; }
+	/** Every PlayTaunt argument, in call order. */
+	const TArray<int32>& GetPlayTauntRequestsForTesting() const
+		{ return PlayTauntRequestsForTesting; }
 	void HandlePauseRequestForTesting(ENetMode NetMode) { HandlePauseRequest(NetMode); }
 #endif
 	bool IsHelpOpen() const { return bHelpOpen; }
@@ -635,6 +661,9 @@ private:
 	void ApplyChatInputMode(bool bRetainMouseCapture,
 		const TSharedPtr<SViewport>& ViewportWidget, uint32 SlateUserIndex);
 	void RemoveChatInputWidget(bool bRestoreGameInput);
+	/** Starts the open chat line's text entry (controller chat); false when no
+	 * line with a widget is open. */
+	bool BeginChatTextEntry();
 	void BroadcastSay(const FString& Message);
 	void ServerEditCitadelInput();
 	void CreateHelpWidget(const struct FWoTHelpContent& Content);
@@ -739,6 +768,8 @@ private:
 	bool bChatInputSuspended = false;
 #if WITH_AUTOMATION_TESTS
 	bool bEnableChatWidgetForTesting = false;
+	FString LastSubmittedChatLineForTesting;
+	TArray<int32> PlayTauntRequestsForTesting;
 #endif
 	TSharedPtr<FWoTChatInputPreProcessor> ChatInputPreProcessor;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> HelpPresentationAuthority;

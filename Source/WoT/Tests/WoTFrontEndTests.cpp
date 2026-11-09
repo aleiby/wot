@@ -858,8 +858,10 @@ bool FWoTInGameMenuSettingsSpec::RunTest(const FString&)
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 
+	// Chat, Team Chat and Taunts sit after Help (spec r3 section 4).
 	const TArray<FString> ExpectedLabels = {
 		TEXT("Resume"), TEXT("Scoreboard (F4)"), TEXT("Help (F1)"),
+		TEXT("Chat"), TEXT("Team Chat"), TEXT("Taunts"),
 		TEXT("Player Config"), TEXT("Controls"), TEXT("Hardware"),
 		TEXT("Quit to Main Menu")};
 	TestTrue(TEXT("menu items retain the required order and labels"),
@@ -1077,17 +1079,23 @@ bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 	TestTrue(TEXT("Up moves focus back to Resume"),
 		Slate.GetKeyboardFocusedWidget()
 			== Overlay->MainMenuButtonForTesting(0));
+	// Positions come from the runtime list (spec r3 section 4).
+	const int32 QuitIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit);
+	const int32 ControlsIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Controls);
+	TestEqual(TEXT("Quit is the last entry"), QuitIndex,
+		Overlay->MenuLabelsForTesting().Num() - 1);
 	TestTrue(TEXT("Up wraps from first to last"), PressKey(EKeys::Up));
 	TestTrue(TEXT("first-to-last wrap focuses Quit"),
 		Slate.GetKeyboardFocusedWidget()
-			== Overlay->MainMenuButtonForTesting(6));
+			== Overlay->MainMenuButtonForTesting(QuitIndex));
 	TestTrue(TEXT("Down wraps from last to first"), PressKey(EKeys::Down));
 	TestTrue(TEXT("last-to-first wrap focuses Resume"),
 		Slate.GetKeyboardFocusedWidget()
 			== Overlay->MainMenuButtonForTesting(0));
 
 	const TSharedPtr<SWoTMenuButton> Controls =
-		Overlay->MainMenuButtonForTesting(4);
+		Overlay->MainMenuButtonForTesting(ControlsIndex);
 	if (TestTrue(TEXT("Controls button exists for hover"), Controls.IsValid()))
 	{
 		const FVector2D Position =
@@ -1098,7 +1106,7 @@ bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 		TestTrue(TEXT("hover moves keyboard focus"),
 			Slate.GetKeyboardFocusedWidget() == Controls);
 		TestEqual(TEXT("hover leaves exactly Controls selected"),
-			Overlay->SelectedMainMenuIndexForTesting(), 4);
+			Overlay->SelectedMainMenuIndexForTesting(), ControlsIndex);
 	}
 	TestTrue(TEXT("Enter is handled by the focused entry"), PressKey(EKeys::Enter));
 	TestTrue(TEXT("Enter activates the focused Controls entry"),
@@ -1200,13 +1208,21 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 		return Slate.GetKeyboardFocusedWidget() == Overlay->MainMenuButtonForTesting(Index)
 			&& Overlay->SelectedMainMenuIndexForTesting() == Index;
 	};
+	// Positions come from the runtime list (spec r3 section 4).
+	const int32 Last = Overlay->MenuLabelsForTesting().Num() - 1;
+	const int32 ControlsIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Controls);
+	if (!TestTrue(TEXT("Controls is in the menu"), ControlsIndex > 0))
+	{
+		return false;
+	}
 	// The D-pad moves the one highlighted entry and wraps like the arrow keys.
 	PressKey(EKeys::Gamepad_DPad_Down);
 	TestTrue(TEXT("D-pad down selects the next entry"), FocusedIs(1));
 	PressKey(EKeys::Gamepad_DPad_Up);
 	TestTrue(TEXT("D-pad up returns to Resume"), FocusedIs(0));
 	PressKey(EKeys::Gamepad_DPad_Up);
-	TestTrue(TEXT("D-pad up wraps from first to last"), FocusedIs(6));
+	TestTrue(TEXT("D-pad up wraps from first to last"), FocusedIs(Last));
 	PressKey(EKeys::Gamepad_DPad_Down);
 	TestTrue(TEXT("D-pad down wraps from last to first"), FocusedIs(0));
 	// The stick arrives as analog navigation, not keys; it wraps the same way.
@@ -1214,7 +1230,7 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 		ENavigationGenesis::Controller);
 	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickUp);
 	Slate.Tick();
-	TestTrue(TEXT("stick up wraps from first to last"), FocusedIs(6));
+	TestTrue(TEXT("stick up wraps from first to last"), FocusedIs(Last));
 	const FNavigationEvent StickDown(FModifierKeysState(), 0, EUINavigation::Down,
 		ENavigationGenesis::Controller);
 	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickDown);
@@ -1222,11 +1238,11 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 	TestTrue(TEXT("stick down wraps from last to first"), FocusedIs(0));
 
 	// B backs out one level, then resumes, like Escape.
-	for (int32 Step = 0; Step < 4; ++Step)
+	for (int32 Step = 0; Step < ControlsIndex; ++Step)
 	{
 		PressKey(EKeys::Gamepad_DPad_Down);
 	}
-	TestTrue(TEXT("Controls is selected"), FocusedIs(4));
+	TestTrue(TEXT("Controls is selected"), FocusedIs(ControlsIndex));
 	PressKey(EKeys::Gamepad_FaceButton_Bottom);
 	TestTrue(TEXT("A opens Controls"), Overlay->SettingsScreenForTesting().IsValid());
 	TestTrue(TEXT("B is handled on Controls"), PressKey(EKeys::Gamepad_FaceButton_Right));
@@ -1259,8 +1275,17 @@ bool FWoTInGameMenuStableActionSpec::RunTest(const FString&)
 		SNew(SWoTInGameMenuOverlay).PlayerController(Controller);
 	TestTrue(TEXT("edit-phase menu includes the citadel row"),
 		Overlay->MenuLabelsForTesting().Contains(TEXT("Edit Citadel (F10)")));
+	// Positions come from the runtime list (spec r3 section 4): Hardware's
+	// row as rendered during the edit phase.
+	const int32 HardwareIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Hardware);
+	const int32 EditPhaseRows = Overlay->RenderedMainMenuEntryCountForTesting();
+	TestTrue(TEXT("the citadel row sits above Hardware, so leaving the phase shifts it"),
+		HardwareIndex != INDEX_NONE
+		&& Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::EditCitadel) < HardwareIndex
+		&& Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::EditCitadel) != INDEX_NONE);
 	Battle->bTeleportersDisabled = false;
-	Overlay->ActivateVisibleMainMenuEntryForTesting(6);
+	Overlay->ActivateVisibleMainMenuEntryForTesting(HardwareIndex);
 	TestTrue(TEXT("phase changes cannot retarget a visible Hardware row to Quit"),
 		Overlay->SettingsScreenForTesting().IsValid());
 	TestFalse(TEXT("stable Hardware dispatch does not begin leaving"),
@@ -1269,18 +1294,20 @@ bool FWoTInGameMenuStableActionSpec::RunTest(const FString&)
 	{
 		Overlay->SettingsScreenForTesting()->HandleBack();
 	}
-	TestEqual(TEXT("post-transition menu rebuild has seven rendered rows"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 7);
+	TestEqual(TEXT("post-transition menu rebuild drops only the citadel row"),
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows - 1);
+	TestFalse(TEXT("the rebuilt menu has no citadel row"),
+		Overlay->MenuLabelsForTesting().Contains(TEXT("Edit Citadel (F10)")));
 	Battle->bTeleportersDisabled = true;
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 	TestEqual(TEXT("entering edit phase atomically adds the rendered row"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 8);
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows);
 	Battle->bTeleportersDisabled = false;
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 	TestEqual(TEXT("leaving edit phase atomically removes the rendered row"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 7);
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows - 1);
 	Controller->Destroy();
 	WoTFrontEndTests_DestroyWorld(World);
 	return !HasAnyErrors();
