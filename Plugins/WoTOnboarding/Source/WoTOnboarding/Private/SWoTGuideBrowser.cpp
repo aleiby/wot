@@ -247,7 +247,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildListPane()
 		[
 			SNew(STextBlock)
 			.Text(FText::FromString(Group.Header))
-			.Font(Chrome.SmallFont)
+			.Font(Chrome.BodyFont)
 			.ColorAndOpacity(Chrome.Accent)
 		];
 		for (const FWoTAngrealGuideRow* Row : Group.Rows)
@@ -291,7 +291,7 @@ void SWoTGuideBrowser::AddLinkRows(SVerticalBox& Into, const TCHAR* Heading,
 	[
 		SNew(STextBlock)
 		.Text(FText::FromString(Heading))
-		.Font(Chrome.SmallFont)
+		.Font(Chrome.BodyFont)
 		.ColorAndOpacity(Chrome.Foreground)
 	];
 	for (const FWoTAngrealGuideRow* Target : Targets)
@@ -387,7 +387,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetailPane(
 			Gems->AddSlot().FillWidth(1.0f).HAlign(HAlign_Center)
 			[
 				SNew(STextBlock)
-				.Font(Chrome.SmallFont)
+				.Font(Chrome.BodyFont)
 				.Text(FText::FromString(FString::Printf(TEXT("%s %s"),
 					bActive ? TEXT("[ON]") : TEXT("[--]"),
 					*FString(ElementName).ToUpper())))
@@ -408,14 +408,14 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetailPane(
 		[
 			SNew(STextBlock)
 			.Text(FText::FromString(WoTGuideBrowserJoinNames(Row.Roles)))
-			.Font(Chrome.SmallFont)
+			.Font(Chrome.BodyFont)
 			.ColorAndOpacity(Chrome.Foreground)
 			.Justification(ETextJustify::Center)
 		];
 	}
 
 	// Prose panes only where the retail text resolves; a row without it shows
-	// its facts and nothing else — never placeholder text.
+	// its facts and nothing else, never placeholder text.
 	const FString Description = ResolveRowText(Row, TEXT("Description"));
 	if (!Description.IsEmpty())
 	{

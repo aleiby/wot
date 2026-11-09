@@ -41,8 +41,9 @@ void SWoTPickupCard::Construct(const FArguments& InArgs)
 		[
 			SNew(STextBlock)
 			.Text(FText::FromString(CardText.KeyHint))
-			.Font(Chrome.SmallFont)
+			.Font(Chrome.BodyFont)
 			.ColorAndOpacity(Chrome.Foreground)
+			.AutoWrapText(true)
 		];
 	}
 
