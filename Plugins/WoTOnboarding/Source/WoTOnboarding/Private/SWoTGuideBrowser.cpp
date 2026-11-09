@@ -1,6 +1,7 @@
 #include "SWoTGuideBrowser.h"
 
 #include "WoTAngrealGuide.h"
+#include "WoTOnboardingChrome.h"
 #include "WoTOnboardingHints.h"
 
 #include "Styling/CoreStyle.h"
@@ -16,32 +17,6 @@
 
 namespace
 {
-/** The chrome a build without resolvable retail faces draws with: engine
-    default faces and flat panels. Never retail-looking, always usable. */
-FWoTOnboardingMenuChrome WoTGuideBrowserFallbackChrome()
-{
-	FWoTOnboardingMenuChrome Chrome;
-	Chrome.TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 26);
-	Chrome.BodyFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
-	Chrome.ItalicFont = FCoreStyle::GetDefaultFontStyle(TEXT("Italic"), 14);
-	Chrome.SmallFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
-	const FSlateBrush* White = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-	Chrome.Background = White;
-	Chrome.Frame = White;
-	Chrome.Blackout = White;
-	Chrome.Separator = White;
-	Chrome.Foreground = FSlateColor(FLinearColor(0.92f, 0.92f, 0.88f));
-	Chrome.Accent = FSlateColor(FLinearColor(1.0f, 0.85f, 0.45f));
-	return Chrome;
-}
-
-/** True when the browser draws the retail chrome (brush tints differ: the
-    retail blackout brush is already dark, the fallback is a white brush). */
-bool WoTGuideBrowserHasRetailChrome(const FWoTOnboardingMenuChrome& Chrome)
-{
-	return static_cast<bool>(Chrome.BindWidget);
-}
-
 const TCHAR* WoTGuideBrowserRarityKey(const FWoTAngrealGuideRow& Row)
 {
 	if (Row.Rarity == FName(TEXT("Rare")))
@@ -100,12 +75,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 	CloseKeys = InArgs._CloseKeys;
 	OnClose = InArgs._OnClose;
 
-	const TOptional<FWoTOnboardingMenuChrome> Resolved =
-		FWoTOnboardingSeams::Get().ResolveMenuChrome
-			? FWoTOnboardingSeams::Get().ResolveMenuChrome()
-			: TOptional<FWoTOnboardingMenuChrome>();
-	Chrome = Resolved.IsSet() ? Resolved.GetValue()
-	                          : WoTGuideBrowserFallbackChrome();
+	Chrome = WoTOnboardingChrome::Resolve();
 
 	if (!Guide.IsValid() || Guide->Rows.IsEmpty())
 	{
@@ -114,7 +84,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 	}
 	SelectedClassName = Guide->Rows[0].ClassName;
 
-	const bool bRetailChrome = WoTGuideBrowserHasRetailChrome(Chrome);
+	const bool bRetailChrome = WoTOnboardingChrome::IsRetail(Chrome);
 	ChildSlot
 	[
 		SNew(SOverlay)

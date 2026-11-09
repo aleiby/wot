@@ -25,6 +25,10 @@ bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 	TestFalse(TEXT("no item listener"), Seams.ClientItemAdded.IsBound());
 	TestFalse(TEXT("no death listener"), Seams.ClientDeathMessage.IsBound());
 	TestFalse(TEXT("no guide listener"), Seams.ShowGuideRequested.IsBound());
+	// Unbound queries read as "no retail window open"; callers gate on the
+	// binding before asking.
+	TestFalse(TEXT("no window-open query"),
+		static_cast<bool>(Seams.IsClientWindowOpen));
 	// Broadcasting into the void must be safe and effect-free; the hook sites
 	// in the inventory component and the player controller rely on it.
 	Seams.ClientItemAdded.Broadcast(FName(TEXT("EmberLob")));

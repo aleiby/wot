@@ -549,6 +549,15 @@ void AWoTPlayerController::BeginPlay()
 					Controller->SetInputMode(FInputModeGameOnly());
 				}
 			};
+		// The retail windows that hold the screen, for an improvement module's
+		// passive overlays to wait on. Cleared on EndPlay with the input seam.
+		Seams.IsClientWindowOpen = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller && (Controller->IsItemInfoOpen()
+					|| Controller->IsHelpOpen() || Controller->InGameMenu.IsOpen());
+			};
 	}
 	ClearProgressMessages();
 	BindProgressFailureDelegates();
@@ -4132,6 +4141,7 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 			OnboardingCloseWindowsHandle.Reset();
 		}
 		Seams.SetOverlayInput = nullptr;
+		Seams.IsClientWindowOpen = nullptr;
 	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.

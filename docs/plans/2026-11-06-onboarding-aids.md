@@ -341,3 +341,38 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
     and the in-game menu); an empty registry renders today's screen exactly.
   - `ShowGuideRequested` stays unbound until Task 5; the F3 press is a
     seam broadcast with no other behavior.
+- 2026-11-08 — Task 5 landed (guide browser). Decisions:
+  - The `{counter}` rule is structural: a counterer with exactly one edge
+    is dedicated; a counterer whose countered rows share no element is the
+    Reflect family; one whose countered rows share an element is an element
+    shield. Dedicated beats Reflect beats shields; ties keep `Rows` order.
+  - One client window at a time, as the original kept it: a
+    `CloseClientWindows(Keeper)` seam lets the guide and the retail windows
+    close each other. The guide draws the retail menu chrome through a
+    revocation-aware `ResolveMenuChrome` seam (flat fallback without it),
+    and takes in-match UI input through `SetOverlayInput`.
+  - The Field Guide menu row follows the master switch live; the settings
+    rows stay unconditional (Task 4).
+- 2026-11-09 — Task 6 implemented (first-pickup card). Decisions:
+  - The card names only the guide key. A pickup selects the new item only
+    when nothing was selected (`WOTPlayer.uc` `AddInventory`), so the
+    item-info key would usually describe a different item. Instead, the
+    guide key pressed while a card is up opens the guide at the card's row.
+  - A busy screen waits rather than queues: a first add while a card, the
+    guide, or a retail window holds the screen shows nothing and leaves the
+    class unseen, so its next first add (the next life's inventory, say)
+    shows it. Retail windows (item info, help, the in-game menu) reach the
+    plugin through a new `IsClientWindowOpen` seam query.
+  - Key names come from the local player's live mappings, where the game
+    applies its managed rebinds, falling back to the project input settings.
+  - Placement: left edge, mid-height. The right-hand message column starts
+    at y=80 of 480 (`BaseHUD.uc:1125`), progress lines are centred from a
+    quarter height down (`BaseHUD.uc:684`), and the hand fan is
+    bottom-centre.
+  - Under automation the item-added handler is inert unless a spec supplies
+    a guide, so no other suite's inventory traffic writes the persisted
+    seen list.
+  - Open for Task 7: the shipped death line is "victim, conjunction,
+    killer" (`giWOT.uc:147-158`) and never names the item, so the recap
+    cannot resolve the item from the line by title. Task 7 needs another
+    source for the killing item.

@@ -1,14 +1,19 @@
 #include "WoTOnboardingModule.h"
 
 #include "SWoTGuideBrowser.h"
+#include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
+#include "WoTOnboardingPickupCards.h"
 #include "WoTOnboardingSeams.h"
 #include "WoTOnboardingSettings.h"
 
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/InputSettings.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerInput.h"
 #include "Modules/ModuleManager.h"
 
 namespace
@@ -20,34 +25,67 @@ FName WoTOnboardingGuideKeeper()
 	return FName(TEXT("WoTOnboardingGuide"));
 }
 
-/** The keys bound to the ShowGuide action (Task 4's F3 by default). The
-    browser takes them as close keys, because UI-only input never routes a
-    second press to the action binding — the window handles it, as the retail
-    help window handles its own. */
-TArray<FKey> WoTOnboardingShowGuideKeys()
+/** Card z-order: under every client window (item info 1900, guide 1950, the
+    in-game menu 2000, help 2100), so a window that opens over a card covers
+    it even before the close broadcast removes it. */
+constexpr int32 WoTOnboardingPickupCardZOrder = 1850;
+
+FName WoTOnboardingShowGuideAction()
+{
+	return FName(TEXT("ShowGuide"));
+}
+
+/** The live keys for an input action: the local player's own mappings, where
+    the game applies its managed rebinds, else the project input settings
+    (no player yet, as in the front end's first frames or under automation). */
+TArray<FKey> WoTOnboardingActionKeys(FName Action)
 {
 	TArray<FKey> Keys;
+	const UWorld* World = GEngine && GEngine->GameViewport
+		? GEngine->GameViewport->GetWorld() : nullptr;
+	const APlayerController* Controller =
+		World ? World->GetFirstPlayerController() : nullptr;
+	if (Controller && Controller->PlayerInput)
+	{
+		for (const FInputActionKeyMapping& Mapping :
+			Controller->PlayerInput->GetKeysForAction(Action))
+		{
+			Keys.AddUnique(Mapping.Key);
+		}
+		return Keys;
+	}
 	if (const UInputSettings* Input = UInputSettings::GetInputSettings())
 	{
 		TArray<FInputActionKeyMapping> Mappings;
-		Input->GetActionMappingByName(FName(TEXT("ShowGuide")), Mappings);
+		Input->GetActionMappingByName(Action, Mappings);
 		for (const FInputActionKeyMapping& Mapping : Mappings)
 		{
-			Keys.Add(Mapping.Key);
+			Keys.AddUnique(Mapping.Key);
 		}
 	}
 	return Keys;
+}
+
+/** The first ShowGuide key's display name; empty while the action is unbound. */
+FString WoTOnboardingGuideKeyName()
+{
+	for (const FKey& Key : WoTOnboardingActionKeys(WoTOnboardingShowGuideAction()))
+	{
+		if (Key.IsValid())
+		{
+			return Key.GetDisplayName(false).ToString();
+		}
+	}
+	return FString();
 }
 
 FString WoTOnboardingGuideMenuLabel()
 {
 	// The in-game menu labels its windows "Name (Key)"; the guide row reads
 	// its live binding the same way.
-	const TArray<FKey> Keys = WoTOnboardingShowGuideKeys();
-	return Keys.IsEmpty() || !Keys[0].IsValid()
-		? FString(TEXT("Field Guide"))
-		: FString::Printf(TEXT("Field Guide (%s)"),
-			*Keys[0].GetDisplayName(false).ToString());
+	const FString KeyName = WoTOnboardingGuideKeyName();
+	return KeyName.IsEmpty() ? FString(TEXT("Field Guide"))
+		: FString::Printf(TEXT("Field Guide (%s)"), *KeyName);
 }
 
 FString WoTOnboardingAidRowLabel(const TCHAR* Name, bool bOn, bool bMasterOn)
@@ -132,6 +170,12 @@ void FWoTOnboardingModule::StartupModule()
 	}
 	CloseWindowsHandle = Seams.CloseClientWindows.AddRaw(
 		this, &FWoTOnboardingModule::HandleCloseClientWindows);
+	if (ItemAddedHandle.IsValid())
+	{
+		Seams.ClientItemAdded.Remove(ItemAddedHandle);
+	}
+	ItemAddedHandle = Seams.ClientItemAdded.AddRaw(
+		this, &FWoTOnboardingModule::HandleClientItemAdded);
 	UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
 	if (SettingsChangedHandle.IsValid())
 	{
@@ -144,7 +188,19 @@ void FWoTOnboardingModule::StartupModule()
 void FWoTOnboardingModule::ShutdownModule()
 {
 	CloseGuideBrowser();
+	ClosePickupCard();
 	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	if (ItemAddedHandle.IsValid())
+	{
+		Seams.ClientItemAdded.Remove(ItemAddedHandle);
+		ItemAddedHandle.Reset();
+	}
+	PickupCardTestGuide.Reset();
+	bGuideAbsent = false;
+	if (UObjectInitialized())
+	{
+		CachedGuide.Reset();
+	}
 	if (ShowGuideHandle.IsValid())
 	{
 		Seams.ShowGuideRequested.Remove(ShowGuideHandle);
@@ -195,6 +251,8 @@ void FWoTOnboardingModule::HandleShowGuideRequested()
 
 void FWoTOnboardingModule::HandleCloseClientWindows(FName Keeper)
 {
+	// The card yields to every window, the guide included.
+	ClosePickupCard();
 	if (Keeper != WoTOnboardingGuideKeeper())
 	{
 		CloseGuideBrowser();
@@ -204,11 +262,136 @@ void FWoTOnboardingModule::HandleCloseClientWindows(FName Keeper)
 void FWoTOnboardingModule::HandleSettingsChanged()
 {
 	RefreshMenuRowRegistration();
-	if (!UWoTOnboardingSettings::Get().bEnableOnboardingAids)
+	const UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
+	if (!Settings.bEnableOnboardingAids)
 	{
-		// Master off tears down every aid, the open browser included.
+		// Master off tears down every aid: the open browser and any card.
 		CloseGuideBrowser();
+		ClosePickupCard();
 	}
+	else if (!Settings.bShowFirstPickupCards)
+	{
+		ClosePickupCard();
+	}
+}
+
+void FWoTOnboardingModule::HandleClientItemAdded(FName ClassName)
+{
+	UWoTAngrealGuide* Guide = nullptr;
+	if (GIsAutomationTesting)
+	{
+		// Inert under automation unless a pickup-card spec opted in: other
+		// suites' inventory traffic must never write the persisted seen list.
+		Guide = PickupCardTestGuide.Get();
+		if (!Guide)
+		{
+			return;
+		}
+	}
+	UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
+	if (!Settings.bEnableOnboardingAids || !Settings.bShowFirstPickupCards
+		|| Settings.HasSeenPickupCard(ClassName))
+	{
+		// The cheap verdicts first: no guide load on every inventory change.
+		return;
+	}
+	if (!Guide)
+	{
+		Guide = ResolveGuide();
+	}
+	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const bool bScreenBusy = PickupCard.IsValid() || GuideBrowser.IsValid()
+		|| (Seams.IsClientWindowOpen && Seams.IsClientWindowOpen());
+	if (WoTOnboardingPickupCards::Decide(Settings, Guide, ClassName, bScreenBusy)
+		!= EWoTPickupCardVerdict::Show)
+	{
+		return;
+	}
+	Settings.MarkPickupCardSeen(ClassName);
+	++PickupCardsShown;
+	ShowPickupCard(*Guide->FindByClassName(ClassName));
+}
+
+UWoTAngrealGuide* FWoTOnboardingModule::ResolveGuide()
+{
+	if (!CachedGuide.IsValid() && !bGuideAbsent)
+	{
+		if (UWoTAngrealGuide* Loaded = UWoTAngrealGuide::Load())
+		{
+			CachedGuide.Reset(Loaded);
+		}
+		else
+		{
+			// One quiet answer per session (the loader logged it).
+			bGuideAbsent = true;
+		}
+	}
+	return CachedGuide.Get();
+}
+
+void FWoTOnboardingModule::ShowPickupCard(const FWoTAngrealGuideRow& Row)
+{
+	// The guide's hosting gates: a real local viewport, never under
+	// automation (specs construct the widget directly).
+	if (GIsAutomationTesting || IsRunningDedicatedServer() || !GEngine
+		|| !GEngine->GameViewport)
+	{
+		return;
+	}
+	const FWoTPickupCardText Text = WoTOnboardingPickupCards::ComposeText(Row,
+		[](const FString& Section, const FString& Property)
+		{
+			// The resolver derives the owning file from the section.
+			return FWoTOnboardingSeams::Get().ResolveText(
+				FString(), Section, Property);
+		},
+		WoTOnboardingGuideKeyName());
+	PickupCardViewport = GEngine->GameViewport;
+	PickupCardClass = Row.ClassName;
+	PickupCard = SNew(SWoTPickupCard)
+		.Text(Text)
+		.OnExpired(FSimpleDelegate::CreateRaw(
+			this, &FWoTOnboardingModule::ClosePickupCardDeferred));
+	// Passive: no input mode change and no focus; play carries on.
+	PickupCardViewport->AddViewportWidgetContent(
+		PickupCard.ToSharedRef(), WoTOnboardingPickupCardZOrder);
+}
+
+void FWoTOnboardingModule::ClosePickupCard()
+{
+	if (PickupCardCloseTicker.IsValid())
+	{
+		// A direct close supersedes a pending deferred one, which could
+		// otherwise remove a later card.
+		FTSTicker::RemoveTicker(PickupCardCloseTicker);
+		PickupCardCloseTicker.Reset();
+	}
+	if (!PickupCard.IsValid())
+	{
+		return;
+	}
+	if (UGameViewportClient* Viewport = PickupCardViewport.Get())
+	{
+		Viewport->RemoveViewportWidgetContent(PickupCard.ToSharedRef());
+	}
+	PickupCard.Reset();
+	PickupCardViewport.Reset();
+	PickupCardClass = NAME_None;
+}
+
+void FWoTOnboardingModule::ClosePickupCardDeferred()
+{
+	if (PickupCardCloseTicker.IsValid())
+	{
+		return;
+	}
+	PickupCardCloseTicker = FTSTicker::GetCoreTicker().AddTicker(
+		FTickerDelegate::CreateLambda([this](float)
+		{
+			PickupCardCloseTicker.Reset();
+			ClosePickupCard();
+			return false;
+		}));
 }
 
 void FWoTOnboardingModule::ToggleGuideBrowser()
@@ -233,13 +416,16 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 	{
 		return;
 	}
-	UWoTAngrealGuide* Guide = UWoTAngrealGuide::Load();
+	UWoTAngrealGuide* Guide = ResolveGuide();
 	if (!Guide || Guide->Rows.IsEmpty())
 	{
 		// A tree whose import pipeline has not run carries no guide; the aid
 		// quietly does nothing (the asset loader already logged it once).
 		return;
 	}
+	// The card's suggestion followed: the guide opens at the card's item.
+	// Captured first, because the close broadcast below removes the card.
+	const FName CardClass = PickupCardClass;
 	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
 	// One client window at a time, as the original kept it: the retail
 	// windows close before the guide takes the screen.
@@ -247,9 +433,13 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 	GuideViewport = GEngine->GameViewport;
 	GuideBrowser = SNew(SWoTGuideBrowser)
 		.Guide(Guide)
-		.CloseKeys(WoTOnboardingShowGuideKeys())
+		.CloseKeys(WoTOnboardingActionKeys(WoTOnboardingShowGuideAction()))
 		.OnClose(FSimpleDelegate::CreateRaw(
 			this, &FWoTOnboardingModule::CloseGuideBrowser));
+	if (!CardClass.IsNone())
+	{
+		GuideBrowser->SelectRow(CardClass);
+	}
 	// Above the item-info window (1900), below the in-game menu (2000) and
 	// the help window (2100) — though the close broadcasts keep these from
 	// stacking in the first place.

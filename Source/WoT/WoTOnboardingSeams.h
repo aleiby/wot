@@ -113,4 +113,11 @@ struct WOT_API FWoTOnboardingSeams
 	    input, so a window there manages focus itself. */
 	TFunction<void(bool /*bOverlayOpen*/, TSharedPtr<SWidget> /*FocusWidget*/)>
 		SetOverlayInput;
+
+	/** Whether a retail window that wants the screen to itself is open (item
+	    info, help, the in-game menu). A passive overlay, such as the
+	    first-pickup card, stays off the screen while one is. Installed by the
+	    local gameplay controller while it lives; unbound reads as nothing
+	    open. */
+	TFunction<bool()> IsClientWindowOpen;
 };
