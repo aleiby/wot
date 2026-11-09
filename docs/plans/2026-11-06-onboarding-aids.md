@@ -77,7 +77,10 @@ hint text):
 - `ReturnToSenderReflector` counters every offensive row descending from
   `ProjectileLauncher`.
 - `ReflectSeekerReflector` counters the Seeker.
-- Trap detection counters every placeable trap row.
+- Trap detection counters the rows whose placed pieces (a trap's resource and
+  a wall's slabs, or a launcher's projectile) carry an identity in the
+  detector's own table. The table leaves out alarms and fire walls and
+  includes the armed explosive ward (Task 7 correction, see the status log).
 - Curse removal counters the Taint.
 - Overrides may add or strip edges only with `Supersedes=yes` and a citation
   (the canonical example: Balefire's travel-through-everything behavior strips
@@ -262,9 +265,12 @@ specs; `PORT_NOTES.md`; a proposed CONTRIBUTING delta.
   the game module's seam spec already proves unbound seams are inert — so a
   build without the plugin is behaviorally identical to one with it disabled.
 - `PORT_NOTES.md` entry (Original / Port / Why): the original taught items
-  through its single-player ramp and a modal first-pickup info window in its
-  tutorial mode; the port adds an optional, default-on onboarding plugin
-  (guide, pickup card, death hint), fully disableable for parity.
+  through its single-player ramp, where mission and tutorial maps flag
+  chosen pickups for a first-pickup notice (`AngrealInventory.uc:601-619`;
+  no multiplayer map flags any, and the game type's info-hint path at
+  `giWOT.uc:208-224` fires for no shipped item); the port adds an optional,
+  default-on onboarding plugin (guide, pickup card, death hint), fully
+  disableable for parity.
 - CONTRIBUTING delta (separate commit, for maintainer review): extend
   "Parity fixes and enhancements" with the optional-improvement lane —
   improvements ship as plugins behind a master setting, parity lanes run
@@ -376,3 +382,22 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
     killer" (`giWOT.uc:147-158`) and never names the item, so the recap
     cannot resolve the item from the line by title. Task 7 needs another
     source for the killing item.
+- 2026-11-09 — Task 7 gates and notes landed; the death recap stays open
+  (above) pending a decision on where the killing item comes from.
+  Decisions:
+  - Every seam binding follows the master switch live, as the menu row
+    already did: switched off, the module holds no binding on any seam, so a
+    switched-off build and one without the plugin behave the same. Only the
+    settings rows, the way back on, stay registered.
+  - The honesty gate's first run caught a wrong counter rule. Trap
+    detection keeps a piece only when its identity is in the detector's own
+    table (`TrapDetectLeech.uc:203-233`, table at `:286-291`): wall slabs,
+    pits, portcullises, spears, staircases and the armed explosive ward. The
+    identity is the class name, because no shipped trap sets `TrapType`, so
+    alarms and fire walls (`FireWallSlab` is not `WallSlab`) go undetected.
+    The generator now derives the edge from that table: Trap Detect no
+    longer claims the alarm and the fire wall and now lists the explosive
+    ward. The two trap hints that promised a counter were reworded, and the
+    port already matched the original here.
+  - The PORT_NOTES entry describes what ships now (guide and card); the
+    recap extends it when it lands.
