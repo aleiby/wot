@@ -7,6 +7,7 @@
 #include "Components/AudioComponent.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerController.h"
@@ -822,6 +823,40 @@ TOptional<FWoTRequiredMenuFonts> FWoTMenuStyle::ResolveRequiredFonts() const
 		Owner->FontGeneration()};
 	return Result.IsValid() ? TOptional<FWoTRequiredMenuFonts>(MoveTemp(Result))
 		: TOptional<FWoTRequiredMenuFonts>();
+}
+
+float FWoTMenuStyle::ViewportDpiScale(const FVector2D& PhysicalSize)
+{
+	// SGameLayerManager scales the game layer by this curve value for the
+	// viewport's pixel size (the platform DPI it divides out is reapplied by the
+	// window), so it is the layout scale of every viewport overlay.
+	// Rounded: a widget's local size times its layout scale can land a hair
+	// under the viewport's whole pixel count.
+	return GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(
+		FMath::RoundToInt32(PhysicalSize.X), FMath::RoundToInt32(PhysicalSize.Y)));
+}
+
+float FWoTMenuStyle::PhysicalTextPixels(float Size, float LayoutScale)
+{
+	return Size * FontConstants::RenderDPI / 72.0f * LayoutScale;
+}
+
+float FWoTMenuStyle::LegibleFontSize(float Size, float LayoutScale)
+{
+	const float PixelsPerPoint =
+		PhysicalTextPixels(1.0f, FMath::Max(LayoutScale, 0.01f));
+	// The tolerance keeps a size that lands exactly on the floor from rounding
+	// up a whole point through float error.
+	const float Floor = FMath::CeilToFloat(
+		MinimumLegiblePixels / PixelsPerPoint - UE_KINDA_SMALL_NUMBER);
+	return FMath::Max(Size, Floor);
+}
+
+FSlateFontInfo FWoTMenuStyle::LegibleSmallFont(float LayoutScale) const
+{
+	FSlateFontInfo Font = Small;
+	Font.Size = LegibleFontSize(Small.Size, LayoutScale);
+	return Font;
 }
 
 FWoTRetailBrowserStyle& FWoTRetailBrowserStyle::Get()
