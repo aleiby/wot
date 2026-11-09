@@ -312,8 +312,8 @@ void SWoTListCombo::Construct(const FArguments& InArgs)
 	[
 		SAssignNew(MenuAnchor, SMenuAnchor)
 		.Placement(MenuPlacement_ComboBox)
-		// The popup draws in the current window (spec r3 section 2).
-		.Method(EPopupMethod::UseCurrentWindow)
+		// The popup method comes from OnQueryPopupMethod: the current window,
+		// unthrottled (spec r3 section 2).
 		.OnMenuOpenChanged(this, &SWoTListCombo::OnMenuOpenChanged)
 		.MenuContent(Popup)
 		[
@@ -690,10 +690,23 @@ FReply SWoTListCombo::HandlePress(int32 Index, const FGeometry& RowGeometry,
 	return FReply::Handled();
 }
 
+FPopupMethodReply SWoTListCombo::OnQueryPopupMethod() const
+{
+	return FPopupMethodReply::UseMethod(EPopupMethod::UseCurrentWindow)
+		.SetShouldThrottle(EShouldThrottle::No);
+}
+
 FReply SWoTListCombo::HandleMove(const FPointerEvent& Event)
 {
 	if (!Press.bArmed || Event.GetPointerIndex() != Press.PointerIndex)
 	{
+		return FReply::Unhandled();
+	}
+	if (!Event.IsTouchEvent() && !Event.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		// The release happened outside the list: never start a drag with no
+		// button held.
+		CancelPress();
 		return FReply::Unhandled();
 	}
 	const double DeltaY = Event.GetScreenSpacePosition().Y - Press.Start.Y;

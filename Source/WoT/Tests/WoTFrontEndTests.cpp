@@ -2021,13 +2021,13 @@ bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 		return false;
 	}
 	FChildren* LayerChildren = LayerChild->GetChildren();
-	if (!TestTrue(TEXT("the layer holds one column"),
+	if (!TestTrue(TEXT("the layer holds one overlay"),
 		LayerChildren != nullptr && LayerChildren->Num() == 1))
 	{
 		return false;
 	}
 	FChildren* ColumnChildren = LayerChildren->GetChildAt(0)->GetChildren();
-	if (!TestTrue(TEXT("the column holds the content host and the prompt strip"),
+	if (!TestTrue(TEXT("the overlay holds the content host and the prompt strip"),
 		ColumnChildren != nullptr && ColumnChildren->Num() == 2))
 	{
 		return false;

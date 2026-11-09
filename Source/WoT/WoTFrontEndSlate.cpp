@@ -268,23 +268,25 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 	}
 
 	// The focus outline layer draws the controller focus outline on every
-	// screen; the prompt strip under the screens shows only in Controller
-	// mode, so keyboard and mouse players see every screen as before.
+	// screen. The prompt strip overlays the screens' bottom-right corner and
+	// shows only in Controller mode; as an overlay it never resizes the screen
+	// host, so the menus don't move when the input mode flips.
 	ChildSlot
 	[
 		SAssignNew(FocusOutlineLayer, SWoTFocusOutlineLayer)
 		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot()
-			.FillHeight(1.0f)
+			SNew(SOverlay)
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Fill)
+			.VAlign(VAlign_Fill)
 			[
 				SAssignNew(ScreenHost, SBox)
 				.HAlign(HAlign_Fill)
 				.VAlign(VAlign_Fill)
 			]
-			+ SVerticalBox::Slot()
-			.AutoHeight()
+			+ SOverlay::Slot()
 			.HAlign(HAlign_Right)
+			.VAlign(VAlign_Bottom)
 			.Padding(FMargin(24.0f, 0.0f, 28.0f, 10.0f))
 			[
 				SAssignNew(ButtonPrompts, SWoTButtonPrompts)

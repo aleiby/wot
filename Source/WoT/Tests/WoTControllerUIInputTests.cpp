@@ -2789,4 +2789,43 @@ bool FWoTUIWidgetsInGamePromptsSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIWidgetsPromptNoLayoutShiftSpec,
+	"WoT.FrontEnd.ButtonPrompts.NoLayoutShift", WoTUITest_Flags)
+
+bool FWoTUIWidgetsPromptNoLayoutShiftSpec::RunTest(const FString&)
+{
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+	FWoTUITest_FrontEnd FrontEnd(Authority, WoTUITest_MakeRoot(Authority),
+		FVector2D(1280.0f, 720.0f));
+	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
+	// Root -> outline layer -> overlay -> the screens' content host (slot 0).
+	FChildren* RootChildren = Root->GetChildren();
+	FChildren* LayerChildren = RootChildren && RootChildren->Num() == 1
+		? RootChildren->GetChildAt(0)->GetChildren() : nullptr;
+	FChildren* OverlayChildren = LayerChildren && LayerChildren->Num() == 1
+		? LayerChildren->GetChildAt(0)->GetChildren() : nullptr;
+	if (!TestTrue(TEXT("the front end has its content host"),
+		OverlayChildren != nullptr && OverlayChildren->Num() == 2))
+	{
+		return false;
+	}
+	const TSharedRef<SWidget> Host = OverlayChildren->GetChildAt(0);
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	FrontEnd.Settle();
+	const FVector2D PointerSize = Host->GetCachedGeometry().GetLocalSize();
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	FrontEnd.Settle();
+	TestFalse(TEXT("Controller mode shows Main's prompts"),
+		Root->ButtonPromptsForTesting()->GetShownPrompts().IsEmpty());
+	const FVector2D ControllerSize = Host->GetCachedGeometry().GetLocalSize();
+	TestTrue(TEXT("the content host has a size"), PointerSize.Y > 0.0);
+	TestEqual(TEXT("showing the prompt strip never resizes the screens"),
+		ControllerSize, PointerSize);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS

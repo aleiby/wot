@@ -105,6 +105,9 @@ public:
 	static constexpr float DragThreshold = 8.0f;
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
+	/** The popup draws in the current window, unthrottled: a throttled popup
+	 * puts Slate in responsive mode, which stops PIE worlds ticking. */
+	virtual FPopupMethodReply OnQueryPopupMethod() const override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry,
 		const FPointerEvent& MouseEvent) override;
