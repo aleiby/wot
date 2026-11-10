@@ -1566,7 +1566,8 @@ def run(env: Env, ui: UI, options: Options, log: Log) -> str:
     if shortcut.steam_closed:
         lines.append("Steam was closed to add the game.")
     lines.append("")
-    lines.append("Next: Return to Gaming Mode, then open WoT Reborn from Library > Non-Steam. "
+    lines.append("Next: Return to Gaming Mode, then open WoT Reborn from Library > Non-Steam "
+                 "(Steam may list it as \"WoT Reborn.exe\"). "
                  "Steam shows the new artwork after it restarts.")
     lines.append("")
     lines.append("A log is kept at %s." % layout.log)
