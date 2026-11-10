@@ -3,6 +3,7 @@
 #include "WoTOnboardingChrome.h"
 #include "WoTOnboardingSeams.h"
 
+#include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -48,6 +49,44 @@ FLinearColor WoTRetailArtFlatGemColor(FName Element)
 	return FLinearColor(0.90f, 0.78f, 0.38f);
 }
 } // namespace
+
+ESlateDrawEffect FWoTRetailArt::DrawEffectFor(const FSlateBrush& Brush)
+{
+	const UTexture* Texture = Cast<UTexture>(Brush.GetResourceObject());
+	return Texture && !Texture->SRGB ? ESlateDrawEffect::NoGamma : ESlateDrawEffect::None;
+}
+
+void SWoTRetailImage::Construct(const FArguments& InArgs)
+{
+	ImageBrush = InArgs._Image;
+	ImageColorAndOpacity = InArgs._ColorAndOpacity;
+	SetCanTick(false);
+	bCanSupportFocus = false;
+}
+
+int32 SWoTRetailImage::OnPaint(const FPaintArgs&, const FGeometry& AllottedGeometry,
+	const FSlateRect&, FSlateWindowElementList& OutDrawElements, int32 LayerId,
+	const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	if (ImageBrush && ImageBrush->DrawAs != ESlateBrushDrawType::NoDrawType)
+	{
+		const ESlateDrawEffect DrawEffects = (ShouldBeEnabled(bParentEnabled)
+			? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect)
+			| FWoTRetailArt::DrawEffectFor(*ImageBrush);
+		const FLinearColor FinalTint = InWidgetStyle.GetColorAndOpacityTint()
+			* ImageColorAndOpacity.Get().GetColor(InWidgetStyle)
+			* ImageBrush->GetTint(InWidgetStyle);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+			AllottedGeometry.ToPaintGeometry(), ImageBrush, DrawEffects, FinalTint);
+	}
+	return LayerId;
+}
+
+FVector2D SWoTRetailImage::ComputeDesiredSize(float) const
+{
+	return ImageBrush ? FVector2D(ImageBrush->ImageSize.X, ImageBrush->ImageSize.Y)
+		: FVector2D::ZeroVector;
+}
 
 TUniquePtr<FWoTRetailArt::FBrushEntry> FWoTRetailArt::MakeEntry(UTexture2D* Texture)
 {
@@ -373,7 +412,7 @@ void SWoTRetailArt::DrawRegion(FSlateWindowElementList& Out, int32 Layer,
 	Brush.SetUVRegion(FBox2f(Region.Min / TextureSize, Region.Max / TextureSize));
 	FSlateDrawElement::MakeBox(Out, Layer,
 		Geometry.ToPaintGeometry(Size, FSlateLayoutTransform(Position)), &Brush,
-		ESlateDrawEffect::None, Tint);
+		FWoTRetailArt::DrawEffectFor(Brush), Tint);
 }
 
 void SWoTRetailArt::TileRegion(FSlateWindowElementList& Out, int32 Layer,

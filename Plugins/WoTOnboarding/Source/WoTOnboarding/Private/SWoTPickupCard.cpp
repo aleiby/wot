@@ -4,7 +4,6 @@
 #include "WoTOnboardingChrome.h"
 
 #include "Styling/CoreStyle.h"
-#include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -86,7 +85,7 @@ TSharedRef<SWidget> SWoTPickupCard::BuildIcon(FName ClassName)
 		.WidthOverride(WoTPickupCardIcon)
 		.HeightOverride(WoTPickupCardIcon)
 		[
-			SNew(SImage)
+			SNew(SWoTRetailImage)
 			.Image(Icon ? Icon : FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
 			.ColorAndOpacity(Icon ? FLinearColor::White
 			                      : FLinearColor(0.10f, 0.09f, 0.08f, 1.0f))

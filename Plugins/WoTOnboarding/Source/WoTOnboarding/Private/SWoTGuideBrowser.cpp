@@ -353,7 +353,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGridCell(FName ClassName)
 	// Grid icons draw at 50 of their 64 texels, so they sample smoothly.
 	if (const FSlateBrush* Icon = Art->ItemIcon(ClassName, true))
 	{
-		Face->AddSlot()[SNew(SImage).Image(Icon)];
+		Face->AddSlot()[SNew(SWoTRetailImage).Image(Icon)];
 	}
 	else
 	{
@@ -369,7 +369,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGridCell(FName ClassName)
 	const FSlateBrush* Frame = Art->SelectionFrame();
 	Face->AddSlot()
 	[
-		SNew(SImage)
+		SNew(SWoTRetailImage)
 		.Image(Frame ? Frame : WoTGuideBrowserWhite())
 		.ColorAndOpacity(Frame ? FLinearColor::White
 		                       : FLinearColor(1.0f, 0.85f, 0.45f, 0.35f))
@@ -491,7 +491,7 @@ bool SWoTGuideBrowser::AddIconRow(SVerticalBox& Into, float Top, const TCHAR* La
 				.WidthOverride(WoTGuideBrowserCounterIcon)
 				.HeightOverride(WoTGuideBrowserCounterIcon)
 				[
-					SNew(SImage)
+					SNew(SWoTRetailImage)
 					.Image(Icon ? Icon : WoTGuideBrowserWhite())
 					.ColorAndOpacity(Icon ? FLinearColor::White
 					                      : WoTGuideBrowserEmptySlotColor())
@@ -538,7 +538,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 	TSharedRef<SOverlay> IconFace = SNew(SOverlay);
 	if (const FSlateBrush* Icon = Art->ItemIcon(Row.ClassName, false))
 	{
-		IconFace->AddSlot()[SNew(SImage).Image(Icon)];
+		IconFace->AddSlot()[SNew(SWoTRetailImage).Image(Icon)];
 	}
 	else
 	{
@@ -551,7 +551,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 	}
 	if (const FSlateBrush* Mask = Art->IconMask())
 	{
-		IconFace->AddSlot()[SNew(SImage).Image(Mask)];
+		IconFace->AddSlot()[SNew(SWoTRetailImage).Image(Mask)];
 	}
 	Header->AddSlot()
 	.HAlign(HAlign_Center)

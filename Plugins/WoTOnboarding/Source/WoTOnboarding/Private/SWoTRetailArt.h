@@ -1,7 +1,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/Attribute.h"
+#include "Rendering/RenderingCommon.h"
 #include "Styling/SlateBrush.h"
+#include "Styling/SlateColor.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SLeafWidget.h"
 
@@ -23,6 +26,10 @@ public:
 	/** The window art through the onboarding seams. Icons resolve on first
 	    use. */
 	static TSharedRef<FWoTRetailArt> Resolve();
+
+	// Textures flagged linear hold the original display colours. Slate would
+	// apply its display gamma to them a second time.
+	static ESlateDrawEffect DrawEffectFor(const FSlateBrush& Brush);
 
 	/** The frame and fill texture (WOTWindow's CornerTexture), or null. */
 	UTexture2D* InfoBoxC1() const { return CornerTexture.Get(); }
@@ -52,6 +59,30 @@ private:
 	TUniquePtr<FBrushEntry> Frame;
 	/** Crisp and smooth icons by class; a null entry records a miss. */
 	TMap<FName, TUniquePtr<FBrushEntry>> Icons[2];
+};
+
+/** A retail image with the same tint and sizing as an SImage. */
+class SWoTRetailImage : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SWoTRetailImage)
+		: _Image(nullptr)
+		, _ColorAndOpacity(FLinearColor::White)
+	{}
+		SLATE_ARGUMENT(const FSlateBrush*, Image)
+		SLATE_ATTRIBUTE(FSlateColor, ColorAndOpacity)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+		int32 LayerId, const FWidgetStyle& InWidgetStyle,
+		bool bParentEnabled) const override;
+	virtual FVector2D ComputeDesiredSize(float LayoutScaleMultiplier) const override;
+
+private:
+	const FSlateBrush* ImageBrush = nullptr;
+	TAttribute<FSlateColor> ImageColorAndOpacity;
 };
 
 /** One gem of the original gem bar (InventoryInfoWindow.uc:146-150 and its
