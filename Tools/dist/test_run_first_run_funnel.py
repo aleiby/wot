@@ -3389,5 +3389,84 @@ class ReleaseCookedPathDescriptorTests(unittest.TestCase):
             funnel._validate_release_cooked_paths(
                 self._paths("../../../WoT/Plugins/Other/Other.uplugin"))
 
+    ONBOARDING = "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"
+
+    def test_accepts_each_seeded_plugin_descriptor_once(self):
+        baseline = funnel._validate_release_cooked_paths(self._paths())
+        with mock.patch.object(funnel, "_current_plugin_descriptors",
+                               return_value=[self.ONBOARDING]):
+            self.assertEqual(funnel._validate_release_cooked_paths(
+                self._paths(self.ONBOARDING)), baseline)
+            rejected = {
+                "duplicated": self._paths(self.ONBOARDING, self.ONBOARDING),
+                "another plugin": self._paths(
+                    self.ONBOARDING, "../../../WoT/Plugins/Other/Other.uplugin"),
+                "case variant": self._paths(self.ONBOARDING.replace(
+                    "WoTOnboarding.uplugin", "wotonboarding.uplugin")),
+                "neutral shell missing": self._paths(
+                    self.ONBOARDING, drop_shell=True),
+            }
+            for label, paths in rejected.items():
+                with self.subTest(label), self.assertRaisesRegex(
+                        funnel.FunnelFailure, "plugin descriptor"):
+                    funnel._validate_release_cooked_paths(paths)
+        with mock.patch.object(funnel, "_current_plugin_descriptors",
+                               return_value=[]):
+            with self.assertRaisesRegex(funnel.FunnelFailure,
+                                        "plugin descriptor"):
+                funnel._validate_release_cooked_paths(
+                    self._paths(self.ONBOARDING))
+
+    def test_older_census_without_plugin_descriptors_never_reads_the_tree(self):
+        with mock.patch.object(funnel, "_current_plugin_descriptors",
+                               side_effect=AssertionError("tree read")):
+            validation = funnel._validate_release_cooked_paths(self._paths())
+        self.assertEqual(validation["neutral_shell_plugin_descriptor_count"], 1)
+
+    def test_plugin_census_and_snapshot_mirror_the_packager(self):
+        import build_stripped_pak as packager
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory).resolve()
+
+            def git(*arguments):
+                subprocess.run(["git", "-C", str(repo), *arguments],
+                               check=True, capture_output=True)
+
+            def write(relative, text="{}\n"):
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+
+            git("init", "-q")
+            git("config", "user.email", "funnel@example.invalid")
+            git("config", "user.name", "Funnel Test")
+            write(".gitignore", "Binaries/\nIntermediate/\nContent/\n")
+            write("Source/WoT/WoT.cpp", "int wot;\n")
+            write("Plugins/WoTOnboarding/WoTOnboarding.uplugin")
+            write("Plugins/WoTOnboarding/Source/M.cpp", "int m;\n")
+            write("Plugins/Group/Nested/Nested.uplugin")
+            git("add", "-A")
+            git("commit", "-qm", "fixture")
+            write("Plugins/WoTOnboarding/Binaries/Win64/X.uplugin")
+            write("Plugins/WoTNeutralShells/WoTNeutralShells.uplugin")
+            write("Plugins/Draft/Draft.uplugin")
+            write("Plugins/WoTOnboarding/Source/M.cpp", "int m = 2;\n")
+
+            with mock.patch.object(funnel, "REPO", repo):
+                descriptors = funnel._current_plugin_descriptors()
+                snapshot = funnel._current_source_snapshot()
+            self.assertEqual(descriptors, [
+                "../../../WoT/Plugins/Draft/Draft.uplugin",
+                "../../../WoT/Plugins/Group/Nested/Nested.uplugin",
+                "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin",
+            ])
+            self.assertEqual(descriptors, [
+                "../../../WoT/" + relative for relative in
+                packager._plugin_seed_identity(repo)["descriptors"]])
+            self.assertEqual(snapshot, packager._source_snapshot(repo))
+            self.assertIn("Plugins", snapshot["paths"])
+            self.assertGreater(snapshot["tracked_diff_size"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

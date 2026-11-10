@@ -95,6 +95,12 @@ SYNC_ENTRIES = ("WoT.uproject", "Config", "Source", "Plugins", "Build",
 # Owned by UBT alone. Wiped when the engine identity changes or the root's
 # provenance is unknown.
 UBT_OWNED = ("Intermediate", "Binaries")
+# UBT also writes those two beside every plugin it builds
+# (Plugins/<...>/Binaries, .../Intermediate). They are never mirror inputs --
+# the ISO holds only transferred copies, which must not flow back into UBT's
+# outputs -- and resets and interrupted-run recovery cover them too.
+PLUGINS_ENTRY = "Plugins"
+PLUGIN_UBT_OWNED = frozenset(name.casefold() for name in UBT_OWNED)
 # UBT's per-target command-line history (Actions/ActionHistory.cs
 # GetProjectLocation/GetEngineLocation), kept through interrupted-run
 # recovery.
@@ -238,9 +244,25 @@ def _write_state(root: Path, state: dict) -> None:
                                    "updated_utc": _utc_now()})
 
 
+def _ubt_owned_paths(root: Path) -> list[Path]:
+    """UBT_OWNED plus every plugin's Binaries/Intermediate below Plugins."""
+    paths = [root / name for name in UBT_OWNED]
+    plugins = root / PLUGINS_ENTRY
+    if plugins.is_dir() and not plugins.is_symlink():
+        for current, directories, _files in os.walk(plugins):
+            for name in sorted(directories):
+                path = Path(current) / name
+                if path.is_symlink():
+                    directories.remove(name)
+                elif name.casefold() in PLUGIN_UBT_OWNED:
+                    paths.append(path)
+                    directories.remove(name)
+    return paths
+
+
 def _wipe_ubt_outputs(root: Path) -> None:
-    for name in UBT_OWNED:
-        _remove(root / name)
+    for path in _ubt_owned_paths(root):
+        _remove(path)
 
 
 def prepare(root: Path, platform_name: str, identity: dict, *,
@@ -253,7 +275,7 @@ def prepare(root: Path, platform_name: str, identity: dict, *,
     """
     root.mkdir(parents=True, exist_ok=True)
     state = read_state(root)
-    has_outputs = any((root / name).exists() for name in UBT_OWNED)
+    has_outputs = any(path.exists() for path in _ubt_owned_paths(root))
     reason = None
     if state is None:
         if has_outputs:
@@ -308,8 +330,7 @@ def _recover_interrupted_ubt(root: Path, marker: dict) -> dict:
         return {"label": marker.get("label"), "wiped": True, "deleted": 0}
     threshold = started - RECOVERY_SLOP_SECONDS
     deleted = 0
-    for name in UBT_OWNED:
-        base = root / name
+    for base in _ubt_owned_paths(root):
         if not base.is_dir():
             continue
         for directory, _dirs, files in os.walk(base):
@@ -487,7 +508,10 @@ def _safe_relative(value: str) -> PurePosixPath:
 
 
 def _inventory(base: Path, entries: Sequence[str]) -> dict[str, tuple]:
-    """relative posix path -> ("dir",) | ("file", size) | ("link", target)."""
+    """relative posix path -> ("dir",) | ("file", size) | ("link", target).
+
+    Plugin Binaries/Intermediate are left out on both sides of a mirror.
+    """
     rows: dict[str, tuple] = {}
     for entry in entries:
         top = base / entry
@@ -500,12 +524,15 @@ def _inventory(base: Path, entries: Sequence[str]) -> dict[str, tuple]:
         if not top.is_dir():
             continue
         rows[entry] = ("dir",)
+        plugins = entry == PLUGINS_ENTRY
         for current, directories, files in os.walk(top, followlinks=False):
             current_path = Path(current)
             for name in list(directories):
                 path = current_path / name
                 relative = path.relative_to(base).as_posix()
-                if path.is_symlink():
+                if plugins and name.casefold() in PLUGIN_UBT_OWNED:
+                    directories.remove(name)
+                elif path.is_symlink():
                     rows[relative] = ("link", os.readlink(path))
                     directories.remove(name)
                 else:
@@ -693,21 +720,41 @@ def _copy_with_digest(source: Path, destination: Path) -> tuple[int, str]:
 
 
 def _project_relative(path: str, platform_name: str, *,
-                      binaries_only: bool) -> PurePosixPath | None:
+                      binaries_only: bool,
+                      plugin_directories: Sequence[PurePosixPath] = ()
+                      ) -> PurePosixPath | None:
     if path.startswith("$(EngineDir)/"):
         return None
     if not path.startswith("$(ProjectDir)/"):
         raise BuildRootError(f"receipt path has no known root: {path!r}")
     relative = _safe_relative(path[len("$(ProjectDir)/"):])
-    if binaries_only and relative.parts[:2] != ("Binaries", platform_name):
+    if binaries_only and not any(
+            relative.parts[:len(base.parts) + 2]
+            == (*base.parts, "Binaries", platform_name)
+            for base in (PurePosixPath(), *plugin_directories)):
         raise BuildRootError(
-            f"build product outside Binaries/{platform_name}: {path!r}")
+            f"build product outside Binaries/{platform_name} of the project "
+            f"or a seeded plugin: {path!r}")
     return relative
+
+
+def _plugin_directories(values: Sequence[str]) -> tuple[PurePosixPath, ...]:
+    """Seeded plugin roots (Plugins/<...>) whose Binaries may hold products."""
+    directories = []
+    for value in values:
+        relative = _safe_relative(value)
+        if (relative.parts[0] != PLUGINS_ENTRY or len(relative.parts) < 2
+                or any(part.casefold() in PLUGIN_UBT_OWNED
+                       for part in relative.parts)):
+            raise BuildRootError(f"not a seeded plugin directory: {value!r}")
+        directories.append(relative)
+    return tuple(directories)
 
 
 def transfer_products(root: Path, iso: Path, *, platform_name: str,
                       target: str, configuration: str,
-                      receipt_path: Path, input_tree: dict | None = None
+                      receipt_path: Path, input_tree: dict | None = None,
+                      plugin_directories: Sequence[str] = ()
                       ) -> dict:
     """Copy one target's UBT products from the root into the ISO, verified.
 
@@ -716,8 +763,11 @@ def transfer_products(root: Path, iso: Path, *, platform_name: str,
     products of shared editor targets stay where UBT built them), the receipt
     itself follows so UAT stages from it unchanged, and each project runtime
     dependency that is not a product (WoT.uproject, plugin descriptors) must
-    already be byte-identical in the ISO -- it is a mirrored input.
+    already be byte-identical in the ISO -- it is a mirrored input. Products
+    may live in Binaries/<Platform> of the project or of one of
+    plugin_directories (the seeded plugins a modular editor links into).
     """
+    plugin_roots = _plugin_directories(plugin_directories)
     receipt_relative = ubt_receipt_relative(
         platform_name, target, configuration)
     ubt_receipt = root / receipt_relative
@@ -741,7 +791,8 @@ def transfer_products(root: Path, iso: Path, *, platform_name: str,
         if not isinstance(row, dict) or not isinstance(row.get("Path"), str):
             raise BuildRootError("UBT receipt build product is malformed")
         relative = _project_relative(
-            row["Path"], platform_name, binaries_only=True)
+            row["Path"], platform_name, binaries_only=True,
+            plugin_directories=plugin_roots)
         if relative is None:
             engine_owned += 1
             continue

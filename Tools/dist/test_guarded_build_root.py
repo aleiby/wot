@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import struct
 import sys
@@ -320,6 +321,31 @@ class MirrorTests(BuildRootTestCase):
         with self.assertRaisesRegex(br.BuildRootError, "not prepared"):
             br.mirror(self.iso, self.root)
 
+    def test_plugin_ubt_outputs_are_never_mirrored_or_deleted(self):
+        self.seed_iso()
+        plugin = Path("Plugins") / "WoTOnboarding"
+        self.write(self.iso / plugin / "WoTOnboarding.uplugin", "{}")
+        self.write(self.iso / plugin / "Source" / "M.cpp", "int m;\n")
+        # The ISO holds a transferred copy of an earlier product...
+        self.write(self.iso / plugin / "Binaries" / "Win64" / "P.dll",
+                   b"transferred")
+        clock = self.prepared()
+        # ...while UBT's own outputs live in the root.
+        built = self.write(self.root / plugin / "Binaries" / "Win64" / "P.dll",
+                           b"ubt-built")
+        obj = self.write(self.root / plugin / "Intermediate" / "M.obj", b"o")
+        result = br.mirror(self.iso, self.root, clock=clock,
+                           sleep=clock.sleep)
+        self.assertEqual((result["copied"], result["deleted"]), (8, 0))
+        self.assertEqual(built.read_bytes(), b"ubt-built")
+        self.assertTrue(obj.is_file())
+        self.assertEqual(result["input_tree"], br.tree_digest(self.root))
+        # A plugin the seed dropped leaves the root along with its outputs.
+        shutil.rmtree(self.iso / plugin)
+        br.mirror(self.iso, self.root, clock=clock, sleep=clock.sleep)
+        self.assertFalse((self.root / plugin).exists())
+        self.assertTrue((self.root / "Plugins").is_dir())
+
 
 class TransferTests(BuildRootTestCase):
     def ubt_receipt(self, target="WoT", configuration="Test",
@@ -441,6 +467,37 @@ class TransferTests(BuildRootTestCase):
             with self.assertRaisesRegex(br.BuildRootError, "differs"):
                 self.transfer()
 
+    def test_only_seeded_plugin_binaries_transfer(self):
+        self.build_products()
+        dll = "Plugins/WoTOnboarding/Binaries/Win64/UnrealEditor-P.dll"
+        self.write(self.root / dll, fake_pe(b"plugin"))
+        self.ubt_receipt(products=[
+            {"Path": "$(ProjectDir)/Binaries/Win64/WoT-Win64-Test.exe",
+             "Type": "Executable"},
+            {"Path": "$(ProjectDir)/" + dll, "Type": "DynamicLibrary"}],
+            runtime=[{"Path": "$(ProjectDir)/WoT.uproject", "Type": "UFS"}])
+        for directories in ((), ("Plugins/Other",)):
+            with self.subTest(directories=directories), \
+                    self.assertRaisesRegex(br.BuildRootError,
+                                           "outside Binaries"):
+                self.transfer(plugin_directories=directories)
+        result = self.transfer(plugin_directories=["Plugins/WoTOnboarding"])
+        self.assertEqual(
+            sorted(row["path"] for row in result["receipt"]["products"]),
+            ["Binaries/Win64/WoT-Win64-Test.exe", dll])
+        self.assertEqual((self.iso / dll).read_bytes(), fake_pe(b"plugin"))
+        for unsafe in ("Plugins/../Binaries", "/Plugins/X", "Plugins",
+                       "Source/WoT", "Plugins/X/Binaries"):
+            with self.subTest(unsafe=unsafe), self.assertRaisesRegex(
+                    br.BuildRootError, "unsafe|not a seeded plugin"):
+                self.transfer(plugin_directories=[unsafe])
+        # A seeded plugin's Binaries admit nothing else of it.
+        self.ubt_receipt(products=[{
+            "Path": "$(ProjectDir)/Plugins/WoTOnboarding/Content/x.uasset",
+            "Type": "x"}])
+        with self.assertRaisesRegex(br.BuildRootError, "outside Binaries"):
+            self.transfer(plugin_directories=["Plugins/WoTOnboarding"])
+
 
 class InFlightTests(BuildRootTestCase):
     """An interrupted UBT run must not leave half-written products behind."""
@@ -519,6 +576,33 @@ class InFlightTests(BuildRootTestCase):
                             dict(IDENTITY, commit="0" * 40))
         self.assertIsNotNone(result["reset"])
         self.assertNotIn(br.IN_FLIGHT_KEY, br.read_state(self.root))
+
+    def test_recovery_and_resets_cover_plugin_ubt_outputs(self):
+        descriptor = self.write(self.root / "Plugins/P/P.uplugin", b"{}")
+        older = self.write(self.root / "Plugins/P/Intermediate/old.obj", b"o")
+        start = self.now + 100
+        br.begin_ubt(self.root, "WoTEditor", clock=lambda: start)
+        partial = self.written_at(
+            "Plugins/P/Binaries/Win64/UnrealEditor-P.dll", start + 5)
+        recovered = br.begin_ubt(self.root, "WoTEditor",
+                                 clock=lambda: start + 50)
+        self.assertEqual(recovered["deleted"], 1)
+        self.assertFalse(partial.exists())
+        self.assertTrue(older.is_file() and descriptor.is_file())
+        # An engine change wipes them too, never the plugin's inputs.
+        result = br.prepare(self.root, "Win64",
+                            dict(IDENTITY, commit="0" * 40))
+        self.assertIsNotNone(result["reset"])
+        self.assertFalse((self.root / "Plugins/P/Intermediate").exists())
+        self.assertTrue(descriptor.is_file())
+        # Plugin outputs alone, without state, are of unknown provenance.
+        (self.root / br.STATE_NAME).unlink()
+        orphan = self.write(self.root / "Plugins/P/Binaries/x.dll", b"x")
+        result = br.prepare(self.root, "Win64", IDENTITY)
+        self.assertEqual(
+            result["reset"], "no build-root state beside existing UBT outputs")
+        self.assertFalse(orphan.exists())
+        self.assertTrue(descriptor.is_file())
 
     def test_marker_without_a_start_time_wipes_ubt_outputs(self):
         obj = self.write(self.root / "Intermediate/a.obj", b"o")

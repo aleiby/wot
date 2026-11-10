@@ -35,7 +35,7 @@ import urllib.parse
 import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable, Iterable, Optional, Sequence
 
 _IS_WINDOWS = os.name == "nt"
@@ -802,18 +802,19 @@ def _git_bytes(arguments: list[str], what: str) -> bytes:
 
 
 def _current_source_snapshot() -> dict:
-    """Reproduce the pipeline's Source/Tools snapshot identity."""
-    paths = ("Source", "Tools")
+    """Reproduce the pipeline's Source/Tools/Plugins snapshot identity
+    (build_stripped_pak.SOURCE_SNAPSHOT_PATHS)."""
+    paths = ("Source", "Tools", "Plugins")
     commit = _git_bytes(["rev-parse", "--short=9", "HEAD"], "HEAD").decode(
         "ascii"
     ).strip()
     tracked = _git_bytes(
         ["diff", "--binary", "--no-ext-diff", "HEAD", "--", *paths],
-        "the Source/Tools tracked diff",
+        "the Source/Tools/Plugins tracked diff",
     )
     raw = _git_bytes(
         ["ls-files", "--others", "--exclude-standard", "-z", "--", *paths],
-        "the Source/Tools untracked inventory",
+        "the Source/Tools/Plugins untracked inventory",
     )
     untracked = []
     for encoded in sorted(item for item in raw.split(b"\0") if item):
@@ -821,7 +822,7 @@ def _current_source_snapshot() -> dict:
             relative = encoded.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise FunnelFailure(
-                "an untracked Source/Tools path is not UTF-8"
+                "an untracked Source/Tools/Plugins path is not UTF-8"
             ) from exc
         path = REPO / relative
         if path.is_symlink():
@@ -1215,8 +1216,9 @@ def _validate_release_cooked_paths(value: object) -> dict:
     package_extensions = {".uasset", ".umap", ".uexp", ".ubulk", ".uptnl"}
     normalized = [path.replace("\\", "/") for path in value]
     # The same descriptor rule as build_stripped_pak._validate_guarded_cooked_paths:
-    # exactly one canonical neutral-shell descriptor; mount-rooted engine plugin
-    # descriptors (Mac UAT stages them, Win64 none) are engine metadata.
+    # exactly one canonical neutral-shell descriptor plus only the seeded
+    # project plugin descriptors; mount-rooted engine plugin descriptors
+    # (Mac UAT stages them, Win64 none) are engine metadata.
     plugin_descriptor = (
         "../../../WoT/Plugins/WoTNeutralShells/WoTNeutralShells.uplugin")
     descriptor_paths = [
@@ -1227,11 +1229,16 @@ def _validate_release_cooked_paths(value: object) -> dict:
     engine_descriptors = [
         path for path in descriptor_paths
         if _release_engine_plugin_descriptor(path)]
-    if [path for path in descriptor_paths
-            if path not in engine_descriptors] != [plugin_descriptor]:
+    project_descriptors = [
+        path for path in descriptor_paths if path not in engine_descriptors]
+    # Read the tree only when something beyond the neutral shell was staged.
+    seeded = (set(_current_plugin_descriptors())
+              if set(project_descriptors) - {plugin_descriptor} else set())
+    if [path for path in project_descriptors
+            if path not in seeded] != [plugin_descriptor]:
         raise FunnelFailure(
             "release cooked path census must stage exactly the neutral-shell "
-            "plugin descriptor")
+            "plugin descriptor plus only seeded plugin descriptors")
     project_paths = [
         path for path in normalized
         if path.casefold().startswith(project_prefixes)
@@ -1277,6 +1284,36 @@ def _release_engine_plugin_descriptor(path: str) -> bool:
     return (len(parts) >= 4 and parts[0] == "Engine" and parts[1] == "Plugins"
             and ".." not in parts and "" not in parts
             and parts[-1].casefold().endswith(".uplugin"))
+
+
+def _current_plugin_descriptors() -> list[str]:
+    """The seeded project plugin descriptors, as UnrealPak lists them.
+
+    build_stripped_pak._plugin_seed_inventory's rule, mirrored over the current
+    tree; the current-source check binds that tree to the release's
+    Source/Tools/Plugins snapshot.
+    """
+    raw = _git_bytes(
+        ["ls-files", "--cached", "--others", "--exclude-standard", "-z",
+         "--", "Plugins"],
+        "the Plugins inventory",
+    )
+    descriptors = []
+    for encoded in sorted(item for item in raw.split(b"\0") if item):
+        try:
+            relative = encoded.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise FunnelFailure("a Plugins path is not UTF-8") from exc
+        parts = PurePosixPath(relative).parts[1:]
+        if (not parts or parts[0].casefold() == "wotneutralshells"
+                or any(part.casefold() in {"binaries", "intermediate"}
+                       for part in parts)
+                or not relative.casefold().endswith(".uplugin")):
+            continue
+        path = REPO / relative
+        if path.is_file() or path.is_symlink():
+            descriptors.append("../../../WoT/" + relative)
+    return descriptors
 
 
 def _validate_full_cooked_receipt(
@@ -1567,7 +1604,8 @@ def _resolve_release(
         current = _current_source_snapshot()
         if source != current:
             raise FunnelFailure(
-                "release Source/Tools snapshot differs from the current tree; "
+                "release Source/Tools/Plugins snapshot differs from the "
+                "current tree; "
                 "rebuild with Tools/dist/build_stripped_pak.py --guarded "
                 f"(release {source.get('sha256')}, current {current['sha256']})"
             )
@@ -6263,7 +6301,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--development-allow-source-drift", action="store_true",
-        help=("development runs only: skip Source/Tools snapshot equality; "
+        help=("development runs only: skip Source/Tools/Plugins snapshot "
+              "equality; "
               "the stamped receipt is rejected as acceptance evidence"),
     )
     parser.add_argument("--cell-timeout", type=float, default=7200.0)
