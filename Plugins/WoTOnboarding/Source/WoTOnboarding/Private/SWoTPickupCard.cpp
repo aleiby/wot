@@ -101,7 +101,8 @@ TSharedRef<SWidget> SWoTPickupCard::BuildCard()
 		.AutoHeight()
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, CardText.Title,
-				WoTOnboardingChrome::EFace::Title, WoTOnboardingChrome::TextColor())
+				WoTOnboardingChrome::EFace::Title,
+				WoTOnboardingChrome::TextColor(WoTOnboardingChrome::EFace::Title))
 		];
 	if (!CardText.Summary.IsEmpty())
 	{
@@ -110,7 +111,8 @@ TSharedRef<SWidget> SWoTPickupCard::BuildCard()
 		.Padding(FMargin(0.0f, 6.0f, 0.0f, 0.0f))
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, CardText.Summary,
-				WoTOnboardingChrome::EFace::Body, WoTOnboardingChrome::TextColor(),
+				WoTOnboardingChrome::EFace::Body,
+				WoTOnboardingChrome::TextColor(WoTOnboardingChrome::EFace::Body),
 				ETextJustify::Left, true)
 		];
 	}
@@ -121,7 +123,8 @@ TSharedRef<SWidget> SWoTPickupCard::BuildCard()
 		.Padding(FMargin(0.0f, 8.0f, 0.0f, 0.0f))
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, CardText.KeyHint,
-				WoTOnboardingChrome::EFace::Body, WoTOnboardingChrome::LabelColor())
+				WoTOnboardingChrome::EFace::Body,
+				WoTOnboardingChrome::LabelColor(WoTOnboardingChrome::EFace::Body))
 		];
 	}
 	return SNew(SBox)
@@ -151,8 +154,10 @@ TSharedRef<SWidget> SWoTPickupCard::BuildRecap()
 	// "KILLED BY" over the killer, "COUNTER" over the counter and the hint,
 	// then the guide key.
 	const TSharedRef<FWoTOnboardingFaces> FacesRef = Faces.ToSharedRef();
-	const FLinearColor Label = WoTOnboardingChrome::LabelColor();
-	const FLinearColor Body = WoTOnboardingChrome::TextColor();
+	const FLinearColor Label =
+		WoTOnboardingChrome::LabelColor(WoTOnboardingChrome::EFace::Body);
+	const FLinearColor Body =
+		WoTOnboardingChrome::TextColor(WoTOnboardingChrome::EFace::Body);
 
 	TSharedRef<SVerticalBox> CounterColumn = SNew(SVerticalBox)
 		+ SVerticalBox::Slot()
@@ -217,7 +222,8 @@ TSharedRef<SWidget> SWoTPickupCard::BuildRecap()
 					.Padding(FMargin(0.0f, 2.0f, 0.0f, 0.0f))
 					[
 						WoTOnboardingChrome::MakeText(FacesRef, CardText.Title,
-							WoTOnboardingChrome::EFace::Title, Body)
+							WoTOnboardingChrome::EFace::Title,
+							WoTOnboardingChrome::TextColor(WoTOnboardingChrome::EFace::Title))
 					]
 				]
 			]

@@ -83,13 +83,11 @@ namespace WoTOnboardingChrome
 	FSlateFontInfo Font(const FWoTOnboardingMenuChrome& Chrome, EFace Face,
 		int32 PixelScale);
 
-	/** The original menus' bright text colour (Menu.SetFontBrightness(true)):
-	    what the player reads, and what is selected. */
-	FLinearColor TextColor();
+	/** The face's gold at full draw level (255). */
+	FLinearColor TextColor(EFace Face);
 
-	/** The original canvas default (127, 127, 127): labels and what is not
-	    selected. */
-	FLinearColor LabelColor();
+	/** The face's gold at half draw level (127), for dim labels. */
+	FLinearColor LabelColor(EFace Face);
 
 	/** A text block in one of Faces' faces; it follows them when they
 	    refresh for a new strike scale. */

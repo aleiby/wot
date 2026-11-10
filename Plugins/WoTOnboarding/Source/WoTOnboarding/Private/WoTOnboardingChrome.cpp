@@ -5,6 +5,27 @@
 
 namespace
 {
+FLinearColor WoTOnboardingFaceGold(WoTOnboardingChrome::EFace Face, int32 Level)
+{
+	// The colour the original faces' glyphs carry; the published faces
+	// deliver coverage only.
+	static const FColor Gold[] = {
+		FColor(255, 212, 68, 255),
+		FColor(255, 207, 55, 255),
+		FColor(255, 204, 50, 255),
+		FColor(255, 209, 90, 255),
+		FColor(255, 218, 130, 255),
+	};
+	static_assert(static_cast<int32>(UE_ARRAY_COUNT(Gold))
+		== static_cast<int32>(WoTOnboardingChrome::EFace::Count),
+		"one gold per face");
+	const FColor& Glyph = Gold[static_cast<int32>(Face)];
+	return FLinearColor(FColor(
+		static_cast<uint8>((Glyph.R * Level + 127) / 255),
+		static_cast<uint8>((Glyph.G * Level + 127) / 255),
+		static_cast<uint8>((Glyph.B * Level + 127) / 255), 255));
+}
+
 FName WoTOnboardingFaceName(WoTOnboardingChrome::EFace Face)
 {
 	switch (Face)
@@ -121,15 +142,14 @@ FSlateFontInfo WoTOnboardingChrome::Font(const FWoTOnboardingMenuChrome& Chrome,
 	return WoTOnboardingResolveFace(Chrome, Face, PixelScale, bPublished);
 }
 
-FLinearColor WoTOnboardingChrome::TextColor()
+FLinearColor WoTOnboardingChrome::TextColor(EFace Face)
 {
-	return FLinearColor::White;
+	return WoTOnboardingFaceGold(Face, 255);
 }
 
-FLinearColor WoTOnboardingChrome::LabelColor()
+FLinearColor WoTOnboardingChrome::LabelColor(EFace Face)
 {
-	constexpr float CanvasDefault = 127.0f / 255.0f;
-	return FLinearColor(CanvasDefault, CanvasDefault, CanvasDefault, 1.0f);
+	return WoTOnboardingFaceGold(Face, 127);
 }
 
 TSharedRef<STextBlock> WoTOnboardingChrome::MakeText(

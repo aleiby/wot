@@ -88,11 +88,9 @@ FString WoTOnboardingGuideKeyName()
 
 FString WoTOnboardingGuideMenuLabel()
 {
-	// The in-game menu labels its windows "Name (Key)"; the guide row reads
-	// its live binding the same way.
-	const FString KeyName = WoTOnboardingGuideKeyName();
-	return KeyName.IsEmpty() ? FString(TEXT("Field Guide"))
-		: FString::Printf(TEXT("Field Guide (%s)"), *KeyName);
+	// The front end draws this row in the title face, which has no digits
+	// or brackets. The card and the controls screen show the key.
+	return FString(TEXT("Field Guide"));
 }
 
 FString WoTOnboardingAidRowLabel(const TCHAR* Name, bool bOn, bool bMasterOn)

@@ -1,6 +1,5 @@
 #include "SWoTRetailArt.h"
 
-#include "WoTOnboardingChrome.h"
 #include "WoTOnboardingSeams.h"
 
 #include "Engine/Texture.h"
@@ -325,9 +324,10 @@ void SWoTRetailArt::PaintDivider(FSlateWindowElementList& Out, int32 Layer,
 	const float W = static_cast<float>(Geometry.GetLocalSize().X);
 	if (!DrawsRetailArt())
 	{
+		constexpr float DividerShade = 127.0f / 255.0f;
 		DrawFlat(Out, Layer, Geometry, FVector2f(DividerIndent, Y + 7.0f),
 			FVector2f(W - 2.0f * DividerIndent, 2.0f),
-			WoTOnboardingChrome::LabelColor() * Tint);
+			FLinearColor(DividerShade, DividerShade, DividerShade, 1.0f) * Tint);
 		return;
 	}
 	// WOTWindow.DrawSeparator: the left cap at the indent, the middle tiled,

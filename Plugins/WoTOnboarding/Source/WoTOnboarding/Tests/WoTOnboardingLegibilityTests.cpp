@@ -33,11 +33,12 @@ constexpr float WoTOnboardingLegibilityFloorPixels = 9.0f;
 /** Rounding slack for the float conversions between points and pixels. */
 constexpr float WoTOnboardingLegibilityTolerance = 0.01f;
 
-/** A text block a widget draws, with the font it draws in. */
+/** A text block a widget draws, with its font and colour. */
 struct FWoTOnboardingLegibilityLine
 {
 	FString Text;
 	FSlateFontInfo Font;
+	FLinearColor Color;
 };
 
 void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
@@ -46,7 +47,8 @@ void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
 	if (Widget->GetType() == FName(TEXT("STextBlock")))
 	{
 		const TSharedRef<STextBlock> Block = StaticCastSharedRef<STextBlock>(Widget);
-		Out.Add({Block->GetText().ToString(), Block->GetFont()});
+		Out.Add({Block->GetText().ToString(), Block->GetFont(),
+			Block->GetColorAndOpacity().GetSpecifiedColor()});
 	}
 	if (FChildren* Children = Widget->GetChildren())
 	{
@@ -365,6 +367,131 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 			SNew(SWoTPickupCard).Text(RecapText).InitialPhysicalSize(Deck), RecapTexts);
 		TestEqual(FString::Printf(TEXT("%s: the recap drew its five lines"),
 			Case.Name), RecapLines, 5);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingTextFaceGoldSpec,
+	"WoT.Onboarding.TextFaceGold", WoTOnboardingLegibilityFlags)
+
+bool FWoTOnboardingTextFaceGoldSpec::RunTest(const FString&)
+{
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
+		Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	Seams.ResolveMenuChrome = []() -> TOptional<FWoTOnboardingMenuChrome>
+	{
+		FWoTOnboardingMenuChrome Chrome;
+		Chrome.PixelFont = [](FName FaceName, int32)
+		{
+			const int32 FaceSize = FaceName == FName(TEXT("F_WOTReg30")) ? 19
+				: FaceName == FName(TEXT("F_WOTReg14")) ? 13
+				: FaceName == FName(TEXT("F_WOTIta14")) ? 15
+				: FaceName == FName(TEXT("F_Element")) ? 16
+				: FaceName == FName(TEXT("F_Charge")) ? 17 : 23;
+			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), FaceSize);
+		};
+		Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
+		return Chrome;
+	};
+
+	const TArray<FString> Labels = {TEXT("COMMON"), TEXT("RARE"), TEXT("TRAPS"),
+		TEXT("Esc  Close"), TEXT("COUNTERED BY"), TEXT("COUNTERS"),
+		TEXT("F3  Field Guide"), TEXT("KILLED BY"), TEXT("COUNTER")};
+	TArray<FString> SeenTexts;
+	TArray<int32> SeenFaces;
+	const auto CheckTree = [this, &Labels, &SeenTexts, &SeenFaces](
+		const TCHAR* Context, const TSharedRef<SWidget>& Widget)
+	{
+		TArray<FWoTOnboardingLegibilityLine> Lines;
+		WoTOnboardingLegibilityCollect(Widget, Lines);
+		for (const FWoTOnboardingLegibilityLine& Line : Lines)
+		{
+			const FString Message = FString::Printf(TEXT("%s: %s"), Context, *Line.Text);
+			const bool bLabel = Labels.Contains(Line.Text);
+			FLinearColor Expected;
+			switch (static_cast<int32>(Line.Font.Size))
+			{
+			case 19:
+				Expected = FLinearColor(FColor(255, 212, 68, 255));
+				break;
+			case 13:
+				Expected = bLabel ? FLinearColor(FColor(127, 103, 27, 255))
+					: FLinearColor(FColor(255, 207, 55, 255));
+				break;
+			case 15:
+				Expected = FLinearColor(FColor(255, 204, 50, 255));
+				break;
+			case 16:
+				Expected = FLinearColor(FColor(255, 209, 90, 255));
+				break;
+			case 17:
+				Expected = FLinearColor(FColor(255, 218, 130, 255));
+				break;
+			default:
+				AddError(Message + TEXT(" has an unidentified face"));
+				continue;
+			}
+			if (bLabel)
+			{
+				TestEqual(Message + TEXT(" label uses Body"), Line.Font.Size, 13.0f);
+			}
+			TestTrue(Message + TEXT(" has its face's gold at its draw level"),
+				Line.Color == Expected);
+			TestFalse(Message + TEXT(" is not white or neutral grey"),
+				Line.Color.R == Line.Color.G && Line.Color.G == Line.Color.B);
+			SeenTexts.AddUnique(Line.Text);
+			SeenFaces.AddUnique(static_cast<int32>(Line.Font.Size));
+		}
+		return Lines.Num();
+	};
+
+	UWoTAngrealGuide* Guide = WoTOnboardingLegibilityMakeGuide();
+	// The second page exercises the charge face's separate infinity block.
+	Guide->Rows[1].MaxCharges = 999;
+	Guide->Rows[1].ChargeCost = 0;
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(Guide)
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0))
+		.TextResolver(&WoTOnboardingLegibilityText);
+	TestTrue(TEXT("the browser draws its labels and detail text"),
+		CheckTree(TEXT("browser"), Browser) >= 20);
+	Browser->SelectRow(TEXT("DamperDisc"));
+	CheckTree(TEXT("unlimited charges"), Browser);
+	Browser->SelectRow(TEXT("SnareCrate"));
+	CheckTree(TEXT("trap"), Browser);
+
+	FWoTPickupCardText CardText;
+	CardText.ItemClass = TEXT("SparkFlail");
+	CardText.Title = TEXT("Spark Flail");
+	CardText.Summary = TEXT("An invented flail of sparks.");
+	CardText.KeyHint = TEXT("F3  Field Guide");
+	TestEqual(TEXT("the pickup card checks all three lines"),
+		CheckTree(TEXT("pickup card"), SNew(SWoTPickupCard).Text(CardText)), 3);
+
+	FWoTPickupCardText RecapText = CardText;
+	RecapText.Kicker = TEXT("KILLED BY");
+	RecapText.CounterClass = TEXT("DamperDisc");
+	RecapText.SummaryKicker = TEXT("COUNTER");
+	RecapText.Summary = TEXT("Damper Disc smothers it.");
+	TestEqual(TEXT("the death recap checks all five lines"),
+		CheckTree(TEXT("death recap"), SNew(SWoTPickupCard).Text(RecapText)), 5);
+
+	TestEqual(TEXT("all five faces were checked"), SeenFaces.Num(), 5);
+	for (const FString& LabelText : Labels)
+	{
+		TestTrue(LabelText + TEXT(" was checked at half draw level"),
+			SeenTexts.Contains(LabelText));
+	}
+	for (const TCHAR* FullText : {TEXT("FIELD GUIDE"), TEXT("Spark Flail"),
+		TEXT("Common artifact"), TEXT("Charges:"), TEXT("4"), TEXT("/"), TEXT("10"),
+		TEXT(":"), TEXT("FIRE"), TEXT("EARTH"), TEXT("Trap"),
+		TEXT("An invented flail of sparks."), TEXT("An invented line of verse."),
+		TEXT("Damper Disc smothers it.")})
+	{
+		TestTrue(FString(FullText) + TEXT(" was checked at full draw level"),
+			SeenTexts.Contains(FString(FullText)));
 	}
 	return !HasAnyErrors();
 }

@@ -210,7 +210,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 							.FillWidth(1.0f)
 							[
 								WoTOnboardingChrome::MakeText(FacesRef, TEXT("FIELD GUIDE"),
-									EFace::Body, WoTOnboardingChrome::TextColor())
+									EFace::Body, WoTOnboardingChrome::TextColor(EFace::Body))
 							]
 							+ SHorizontalBox::Slot()
 							.AutoWidth()
@@ -223,7 +223,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 								.OnClicked(this, &SWoTGuideBrowser::Close)
 								[
 									WoTOnboardingChrome::MakeText(FacesRef, TEXT("Esc  Close"),
-										EFace::Body, WoTOnboardingChrome::LabelColor())
+										EFace::Body, WoTOnboardingChrome::LabelColor(EFace::Body))
 								]
 							]
 						]
@@ -330,7 +330,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGrid()
 		.Padding(FMargin(0.0f, bFirstGroup ? 0.0f : 2.0f, 0.0f, 2.0f))
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, Group.Label, EFace::Body,
-				WoTOnboardingChrome::LabelColor())
+				WoTOnboardingChrome::LabelColor(EFace::Body))
 		];
 		bFirstGroup = false;
 		for (int32 Start = 0; Start < Group.Rows.Num(); Start += WoTGuideBrowserColumns)
@@ -426,7 +426,8 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGemBar(const FWoTAngrealGuideRow& Row
 		[
 			WoTOnboardingChrome::MakeText(FacesRef,
 				ResolveWindowText(Gem.LabelKey, Gem.Element.ToString().ToUpper()),
-				EFace::Element, WoTOnboardingChrome::TextColor(), ETextJustify::Center)
+				EFace::Element, WoTOnboardingChrome::TextColor(EFace::Element),
+				ETextJustify::Center)
 		];
 	}
 	return SNew(SBox)
@@ -468,7 +469,7 @@ bool SWoTGuideBrowser::AddIconRow(SVerticalBox& Into, float Top, const TCHAR* La
 	.Padding(FMargin(0.0f, 0.0f, 6.0f, 0.0f))
 	[
 		WoTOnboardingChrome::MakeText(Faces.ToSharedRef(), Label, EFace::Body,
-			WoTOnboardingChrome::LabelColor())
+			WoTOnboardingChrome::LabelColor(EFace::Body))
 	];
 	for (const FWoTAngrealGuideRow* Target : Targets)
 	{
@@ -511,17 +512,16 @@ bool SWoTGuideBrowser::AddIconRow(SVerticalBox& Into, float Top, const TCHAR* La
 TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row)
 {
 	const TSharedRef<FWoTOnboardingFaces> FacesRef = Faces.ToSharedRef();
-	const FLinearColor TextTint = WoTOnboardingChrome::TextColor();
 	TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
-	const auto AddLine = [&Body, &FacesRef, &TextTint](float Top, const FString& Line,
+	const auto AddLine = [&Body, &FacesRef](float Top, const FString& Line,
 		EFace Face)
 	{
 		Body->AddSlot()
 		.AutoHeight()
 		.Padding(FMargin(WoTGuideBrowserGemReach, Top, WoTGuideBrowserGemReach, 0.0f))
 		[
-			WoTOnboardingChrome::MakeText(FacesRef, Line, Face, TextTint,
-				ETextJustify::Center, true)
+			WoTOnboardingChrome::MakeText(FacesRef, Line, Face,
+				WoTOnboardingChrome::TextColor(Face), ETextJustify::Center, true)
 		];
 	};
 
@@ -533,7 +533,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 	.Padding(FMargin(WoTGuideBrowserGemReach, 0.0f, WoTGuideBrowserGemReach, 0.0f))
 	[
 		WoTOnboardingChrome::MakeText(FacesRef, DisplayTitle(Row), EFace::Title,
-			TextTint, ETextJustify::Center, true)
+			WoTOnboardingChrome::TextColor(EFace::Title), ETextJustify::Center, true)
 	];
 	TSharedRef<SOverlay> IconFace = SNew(SOverlay);
 	if (const FSlateBrush* Icon = Art->ItemIcon(Row.ClassName, false))
@@ -578,7 +578,8 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
-			WoTOnboardingChrome::MakeText(FacesRef, RarityText, EFace::Body, TextTint)
+			WoTOnboardingChrome::MakeText(FacesRef, RarityText, EFace::Body,
+				WoTOnboardingChrome::TextColor(EFace::Body))
 		];
 	const FString ChargesLabel = ResolveWindowText(TEXT("ChargesStr"),
 		TEXT("Charges:"));
@@ -591,7 +592,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 		.AutoWidth()
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, ChargesLabel, EFace::Body,
-				TextTint)
+				WoTOnboardingChrome::TextColor(EFace::Body))
 		];
 		Facts->AddSlot()
 		.AutoWidth()
@@ -604,7 +605,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 				return FText::FromString(FacesRef->IsPublished(EFace::Charge)
 					? FString(TEXT(":")) : FString(TEXT("\u221E")));
 			})
-			.ColorAndOpacity(TextTint)
+			.ColorAndOpacity(WoTOnboardingChrome::TextColor(EFace::Charge))
 		];
 	}
 	else if (bAngreal && Row.MaxCharges > 0)
@@ -613,26 +614,27 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 		.AutoWidth()
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, ChargesLabel, EFace::Body,
-				TextTint)
+				WoTOnboardingChrome::TextColor(EFace::Body))
 		];
 		Facts->AddSlot()
 		.AutoWidth()
 		.Padding(FMargin(6.0f, 0.0f, 0.0f, 0.0f))
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, FString::FromInt(Row.MaxInitialCharges),
-				EFace::Charge, TextTint)
+				EFace::Charge, WoTOnboardingChrome::TextColor(EFace::Charge))
 		];
 		Facts->AddSlot()
 		.AutoWidth()
 		.Padding(FMargin(3.0f, 0.0f))
 		[
-			WoTOnboardingChrome::MakeText(FacesRef, TEXT("/"), EFace::Body, TextTint)
+			WoTOnboardingChrome::MakeText(FacesRef, TEXT("/"), EFace::Body,
+				WoTOnboardingChrome::TextColor(EFace::Body))
 		];
 		Facts->AddSlot()
 		.AutoWidth()
 		[
 			WoTOnboardingChrome::MakeText(FacesRef, FString::FromInt(Row.MaxCharges),
-				EFace::Charge, TextTint)
+				EFace::Charge, WoTOnboardingChrome::TextColor(EFace::Charge))
 		];
 	}
 	Header->AddSlot()
