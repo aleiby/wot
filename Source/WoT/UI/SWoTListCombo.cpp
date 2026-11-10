@@ -562,6 +562,14 @@ FReply SWoTListCombo::OnHeaderClicked()
 	else
 	{
 		Open(OpenUserIndex);
+		// Hand focus to the open list in the reply. Without a native key window
+		// (a backgrounded game, a headless Mac editor) Slate otherwise focuses the
+		// widget under the pointer after this handler returns, and the list's
+		// lost-focus dismissal closes it again on the same click.
+		if (IsOpen() && Popup.IsValid())
+		{
+			return FReply::Handled().SetUserFocus(Popup.ToSharedRef(), EFocusCause::Mouse);
+		}
 	}
 	return FReply::Handled();
 }
