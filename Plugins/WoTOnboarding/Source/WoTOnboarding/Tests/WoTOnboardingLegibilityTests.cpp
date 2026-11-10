@@ -41,9 +41,15 @@ struct FWoTOnboardingLegibilityLine
 	FLinearColor Color;
 };
 
-void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
+void WoTOnboardingLegibilityWalk(const TSharedRef<SWidget>& Widget,
 	TArray<FWoTOnboardingLegibilityLine>& Out)
 {
+	// Slate draws nothing under a collapsed widget, and the prepass leaves
+	// its bound attributes stale.
+	if (Widget->GetVisibility() == EVisibility::Collapsed)
+	{
+		return;
+	}
 	if (Widget->GetType() == FName(TEXT("STextBlock")))
 	{
 		const TSharedRef<STextBlock> Block = StaticCastSharedRef<STextBlock>(Widget);
@@ -54,9 +60,18 @@ void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
 	{
 		for (int32 Index = 0; Index < Children->Num(); ++Index)
 		{
-			WoTOnboardingLegibilityCollect(Children->GetChildAt(Index), Out);
+			WoTOnboardingLegibilityWalk(Children->GetChildAt(Index), Out);
 		}
 	}
+}
+
+/** Every text block Widget draws. A bound font holds its first value only
+    after a prepass, so the walk starts with one. */
+void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
+	TArray<FWoTOnboardingLegibilityLine>& Out)
+{
+	Widget->SlatePrepass(1.0f);
+	WoTOnboardingLegibilityWalk(Widget, Out);
 }
 
 /** Rows that make the browser build every pane it has: the rarity and
