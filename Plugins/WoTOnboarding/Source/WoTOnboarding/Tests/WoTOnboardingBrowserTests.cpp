@@ -3,11 +3,13 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "SWoTGuideBrowser.h"
+#include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingSeams.h"
 
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
+#include "Layout/ArrangedChildren.h"
 #include "Layout/Geometry.h"
 #include "Misc/ScopeExit.h"
 #include "Styling/CoreStyle.h"
@@ -140,6 +142,52 @@ TSharedPtr<SButton> WoTOnboardingBrowserFindTagged(
 	return nullptr;
 }
 
+TSharedPtr<SWidget> WoTOnboardingBrowserFindWidget(
+	const TSharedRef<SWidget>& Root,
+	TFunctionRef<bool(const TSharedRef<SWidget>&)> Matches)
+{
+	if (Matches(Root)) return Root;
+	if (FChildren* ChildWidgets = Root->GetChildren())
+	{
+		for (int32 ChildIndex = 0; ChildIndex < ChildWidgets->Num(); ++ChildIndex)
+		{
+			if (TSharedPtr<SWidget> Match = WoTOnboardingBrowserFindWidget(
+				ChildWidgets->GetChildAt(ChildIndex), Matches))
+			{
+				return Match;
+			}
+		}
+	}
+	return nullptr;
+}
+
+TSharedPtr<STextBlock> WoTOnboardingBrowserFindText(
+	const TSharedRef<SWidget>& Root, const FString& ExpectedText)
+{
+	const TSharedPtr<SWidget> Match = WoTOnboardingBrowserFindWidget(Root,
+		[&ExpectedText](const TSharedRef<SWidget>& Candidate)
+		{
+			return Candidate->GetType() == FName(TEXT("STextBlock"))
+				&& StaticCastSharedRef<STextBlock>(Candidate)->GetText().ToString()
+					== ExpectedText;
+		});
+	return StaticCastSharedPtr<STextBlock>(Match);
+}
+
+void WoTOnboardingBrowserArrangeTree(const TSharedRef<SWidget>& Root,
+	const FGeometry& RootGeometry, TArray<FArrangedWidget>& OutWidgets)
+{
+	OutWidgets.Emplace(Root, RootGeometry);
+	FArrangedChildren ArrangedChildren(EVisibility::Visible);
+	Root->ArrangeChildren(RootGeometry, ArrangedChildren);
+	for (int32 ChildIndex = 0; ChildIndex < ArrangedChildren.Num(); ++ChildIndex)
+	{
+		const FArrangedWidget& ChildWidget = ArrangedChildren[ChildIndex];
+		WoTOnboardingBrowserArrangeTree(ChildWidget.Widget, ChildWidget.Geometry,
+			OutWidgets);
+	}
+}
+
 TSharedRef<SWoTGuideBrowser> WoTOnboardingBrowserMake(UWoTAngrealGuide* Guide,
 	bool bResolveText, FName InitialRow = NAME_None)
 {
@@ -221,7 +269,9 @@ bool FWoTOnboardingBrowserDeepLinkSpec::RunTest(const FString&)
 	TestTrue(TEXT("the hint line resolves through the shared resolver"),
 		Texts.Contains(TEXT("Cinder Warden Disc quells it.")));
 	TestTrue(TEXT("the item-info window's own strings label the facts"),
-		Texts.Contains(TEXT("Kind: plain")) && Texts.Contains(TEXT("Uses:  3 / 8")));
+		Texts.Contains(TEXT("Kind: plain")) && Texts.Contains(TEXT("Uses:"))
+		&& Texts.Contains(TEXT("3")) && Texts.Contains(TEXT("/"))
+		&& Texts.Contains(TEXT("8")));
 	TestTrue(TEXT("the item-info window's own strings label the gems"),
 		Texts.Contains(TEXT("BLAZE")) && Texts.Contains(TEXT("EARTH")));
 
@@ -289,8 +339,10 @@ bool FWoTOnboardingBrowserFactsOnlySpec::RunTest(const FString&)
 	WoTOnboardingBrowserCollectText(Browser, Texts);
 	TestTrue(TEXT("the heading falls back to the spaced class name"),
 		Texts.Contains(TEXT("Cinder Jet")));
-	TestTrue(TEXT("the facts render: charges"),
-		Texts.Contains(TEXT("Charges:  3 / 8")));
+	TestTrue(TEXT("the facts render: charge label"), Texts.Contains(TEXT("Charges:")));
+	TestTrue(TEXT("the facts render: starting charges"), Texts.Contains(TEXT("3")));
+	TestTrue(TEXT("the facts render: charge separator"), Texts.Contains(TEXT("/")));
+	TestTrue(TEXT("the facts render: charge cap"), Texts.Contains(TEXT("8")));
 	TestTrue(TEXT("the facts render: rarity fallback"),
 		Texts.Contains(TEXT("Common artifact")));
 	for (const TCHAR* Element : {TEXT("EARTH"), TEXT("AIR"), TEXT("FIRE"),
@@ -357,6 +409,196 @@ bool FWoTOnboardingBrowserFactsOnlySpec::RunTest(const FString&)
 	TestTrue(TEXT("the published charge face draws its ':' glyph"),
 		Texts.Contains(TEXT(":")));
 	TestFalse(TEXT("and not the stand-in sign"), Texts.Contains(TEXT("\u221E")));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserChargeFacesSpec,
+	"WoT.Onboarding.BrowserChargeFaces", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserChargeFacesSpec::RunTest(const FString&)
+{
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
+		Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	Seams.ResolveMenuChrome = []() -> TOptional<FWoTOnboardingMenuChrome>
+	{
+		FWoTOnboardingMenuChrome Chrome;
+		Chrome.PixelFont = [](FName FaceName, int32)
+		{
+			const int32 FaceSize = FaceName == FName(TEXT("F_Charge")) ? 17
+				: FaceName == FName(TEXT("F_WOTReg14")) ? 13 : 19;
+			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), FaceSize);
+		};
+		Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
+		return Chrome;
+	};
+	const TSharedRef<SWoTGuideBrowser> Browser =
+		WoTOnboardingBrowserMake(WoTOnboardingBrowserMakeGuide(), false);
+	Browser->SlatePrepass(1.0f);
+	for (const TCHAR* CountText : {TEXT("3"), TEXT("8")})
+	{
+		const TSharedPtr<STextBlock> CountBlock =
+			WoTOnboardingBrowserFindText(Browser, CountText);
+		if (TestTrue(FString::Printf(TEXT("count %s renders separately"), CountText),
+			CountBlock.IsValid()))
+		{
+			TestEqual(TEXT("counts use the published charge face"),
+				CountBlock->GetFont().Size, 17.0f);
+		}
+	}
+	for (const TCHAR* BodyText : {TEXT("Charges:"), TEXT("/")})
+	{
+		const TSharedPtr<STextBlock> BodyBlock =
+			WoTOnboardingBrowserFindText(Browser, BodyText);
+		if (TestTrue(FString::Printf(TEXT("text %s renders separately"), BodyText),
+			BodyBlock.IsValid()))
+		{
+			TestEqual(TEXT("the label and slash use the published body face"),
+				BodyBlock->GetFont().Size, 13.0f);
+		}
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserHeaderOffsetsSpec,
+	"WoT.Onboarding.BrowserHeaderOffsets", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
+{
+	const TSharedRef<SWoTGuideBrowser> Browser =
+		WoTOnboardingBrowserMake(WoTOnboardingBrowserMakeGuide(), true);
+	for (const FName RowName : {FName(TEXT("CinderJet")), FName(TEXT("SnareBox"))})
+	{
+		Browser->SelectRow(RowName);
+		const TSharedPtr<SWidget> Detail = WoTOnboardingBrowserFindWidget(Browser,
+			[](const TSharedRef<SWidget>& Candidate)
+			{
+				return Candidate->GetTag() == FName(TEXT("Guide.Detail"));
+			});
+		if (!TestTrue(TEXT("the browser contains its detail pane"), Detail.IsValid()))
+		{
+			return false;
+		}
+		Detail->SlatePrepass(1.0f);
+		TArray<FArrangedWidget> ArrangedWidgets;
+		WoTOnboardingBrowserArrangeTree(Detail.ToSharedRef(),
+			FGeometry::MakeRoot(FVector2D(422.0f, 600.0f), FSlateLayoutTransform()),
+			ArrangedWidgets);
+		const bool bTrapRow = RowName == FName(TEXT("SnareBox"));
+		const TSharedPtr<STextBlock> TitleBlock = WoTOnboardingBrowserFindText(
+			Detail.ToSharedRef(), bTrapRow ? TEXT("Snare Crate") : TEXT("Cinder Jet Rod"));
+		const FArrangedWidget* TitleWidget = ArrangedWidgets.FindByPredicate(
+			[&TitleBlock](const FArrangedWidget& Candidate)
+			{
+				return Candidate.Widget == TitleBlock;
+			});
+		const auto FindArrangedTag = [&ArrangedWidgets](const TCHAR* WidgetTag)
+		{
+			return ArrangedWidgets.FindByPredicate(
+				[WidgetTag](const FArrangedWidget& Candidate)
+				{
+					return Candidate.Widget->GetTag() == FName(WidgetTag);
+				});
+		};
+		const FArrangedWidget* IconWidget = FindArrangedTag(TEXT("Guide.Detail.Icon"));
+		const FArrangedWidget* FactsWidget = FindArrangedTag(TEXT("Guide.Detail.Facts"));
+		const FArrangedWidget* GemWidget = FindArrangedTag(TEXT("Guide.Detail.GemBar"));
+		if (!TestNotNull(TEXT("the title is arranged"), TitleWidget)
+			|| !TestNotNull(TEXT("the icon box is arranged"), IconWidget)
+			|| !TestNotNull(TEXT("the facts line is arranged"), FactsWidget))
+		{
+			return false;
+		}
+		const double TitleTop = TitleWidget->Geometry.GetAbsolutePosition().Y;
+		const double IconTop = IconWidget->Geometry.GetAbsolutePosition().Y;
+		const double FactsTop = FactsWidget->Geometry.GetAbsolutePosition().Y;
+		TestEqual(TEXT("the icon starts 28 units below the title"), IconTop - TitleTop, 28.0);
+		TestEqual(TEXT("the icon box is 64 units high"),
+			static_cast<double>(IconWidget->Geometry.GetLocalSize().Y), 64.0);
+		TestEqual(TEXT("the facts start 48 units below the title"), FactsTop - TitleTop, 48.0);
+		TestTrue(TEXT("the facts are beside the icon within its vertical span"),
+			FactsTop >= IconTop
+			&& FactsTop < IconTop + IconWidget->Geometry.GetLocalSize().Y);
+		if (bTrapRow)
+		{
+			TestTrue(TEXT("a trap has no gem bar art"), GemWidget == nullptr);
+		}
+		else if (TestNotNull(TEXT("the gem bar art is arranged"), GemWidget))
+		{
+			TestEqual(TEXT("the gem bar art starts 96 units below the title"),
+				static_cast<double>(GemWidget->Geometry.GetAbsolutePosition().Y) - TitleTop, 96.0);
+		}
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserAndCardDefaultSizeSpec,
+	"WoT.Onboarding.BrowserAndCardDefaultSize", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserAndCardDefaultSizeSpec::RunTest(const FString&)
+{
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
+		Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	Seams.ResolveMenuChrome = []() -> TOptional<FWoTOnboardingMenuChrome>
+	{
+		FWoTOnboardingMenuChrome Chrome;
+		Chrome.PixelFont = [](FName, int32 StrikeScale)
+		{
+			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13 * StrikeScale);
+		};
+		Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
+		return Chrome;
+	};
+	const TSharedRef<SWoTGuideBrowser> Browser =
+		WoTOnboardingBrowserMake(WoTOnboardingBrowserMakeGuide(), true);
+	FWoTPickupCardText CardText;
+	CardText.Title = TEXT("Fixture pickup");
+	const TSharedRef<SWoTPickupCard> Card = SNew(SWoTPickupCard).Text(CardText);
+	const TSharedRef<SWidget> Windows[] = {Browser, Card};
+	const FGeometry ScreenGeometry = FGeometry::MakeRoot(
+		FVector2D(1920.0f, 1080.0f), FSlateLayoutTransform());
+	for (const TSharedRef<SWidget>& WindowWidget : Windows)
+	{
+		const TSharedPtr<SWidget> ScaleBox = WoTOnboardingBrowserFindWidget(WindowWidget,
+			[](const TSharedRef<SWidget>& Candidate)
+			{
+				return Candidate->GetType() == FName(TEXT("SScaleBox"));
+			});
+		const TSharedPtr<STextBlock> Heading = WoTOnboardingBrowserFindText(WindowWidget,
+			WindowWidget == Browser ? TEXT("Cinder Jet Rod") : TEXT("Fixture pickup"));
+		if (!TestTrue(TEXT("the window has its scale box and heading"),
+			ScaleBox.IsValid() && Heading.IsValid()))
+		{
+			return false;
+		}
+		WindowWidget->SlatePrepass(1.0f);
+		FArrangedChildren BeforeTick(EVisibility::Visible);
+		ScaleBox->ArrangeChildren(ScreenGeometry, BeforeTick);
+		if (!TestEqual(TEXT("the default scale lays out the window"), BeforeTick.Num(), 1))
+		{
+			return false;
+		}
+		TestEqual(TEXT("without an initial size the window starts at 1x"),
+			BeforeTick[0].Geometry.GetAccumulatedLayoutTransform().GetScale(), 1.0f);
+		TestEqual(TEXT("before geometry updates the font uses the default strike"),
+			Heading->GetFont().Size, 13.0f);
+
+		WindowWidget->Tick(ScreenGeometry, 0.0, 0.0f);
+		WindowWidget->SlatePrepass(1.0f);
+		FArrangedChildren AfterTick(EVisibility::Visible);
+		ScaleBox->ArrangeChildren(ScreenGeometry, AfterTick);
+		if (!TestEqual(TEXT("the first tick keeps the window arranged"), AfterTick.Num(), 1))
+		{
+			return false;
+		}
+		TestEqual(TEXT("the first geometry update sets the window to 2x"),
+			AfterTick[0].Geometry.GetAccumulatedLayoutTransform().GetScale(), 2.0f);
+		TestEqual(TEXT("the first geometry update selects the 2x font strike"),
+			Heading->GetFont().Size, 26.0f);
+	}
 	return !HasAnyErrors();
 }
 

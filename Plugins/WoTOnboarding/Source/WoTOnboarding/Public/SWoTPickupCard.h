@@ -22,6 +22,7 @@ class WOTONBOARDING_API SWoTPickupCard : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SWoTPickupCard)
 		: _Lifetime(4.0f)
+		, _InitialPhysicalSize(FVector2D::ZeroVector)
 		, _InitialDpiScale(1.0f)
 	{}
 		SLATE_ARGUMENT(FWoTPickupCardText, Text)

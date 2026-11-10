@@ -326,12 +326,14 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts);
 		TestTrue(FString::Printf(TEXT("%s: the browser drew text"), Case.Name),
 			Lines >= 20);
-		// The labels, the gem names and the prose are all present, so the
-		// size checks above covered them.
+		// The labels, the gem names, the charge counts (drawn in the charge
+		// face) and the prose are all present, so the size checks above
+		// covered them.
 		for (const TCHAR* Expected : {TEXT("FIELD GUIDE"), TEXT("COMMON"),
 			TEXT("RARE"), TEXT("TRAPS"), TEXT("COUNTERS"), TEXT("COUNTERED BY"),
 			TEXT("FIRE"), TEXT("EARTH"), TEXT("Common artifact"),
-			TEXT("Charges:  4 / 10"), TEXT("An invented flail of sparks."),
+			TEXT("Charges:"), TEXT("4"), TEXT("/"), TEXT("10"),
+			TEXT("An invented flail of sparks."),
 			TEXT("An invented line of verse."), TEXT("Damper Disc smothers it.")})
 		{
 			TestTrue(FString::Printf(TEXT("%s: the browser shows \"%s\""),

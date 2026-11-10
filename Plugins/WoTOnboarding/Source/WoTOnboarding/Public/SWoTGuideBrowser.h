@@ -29,6 +29,7 @@ class WOTONBOARDING_API SWoTGuideBrowser : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SWoTGuideBrowser)
 		: _Guide(nullptr)
+		, _InitialPhysicalSize(FVector2D::ZeroVector)
 		, _InitialDpiScale(1.0f)
 	{}
 		SLATE_ARGUMENT(UWoTAngrealGuide*, Guide)

@@ -255,6 +255,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 								+ SScrollBox::Slot()
 								[
 									SAssignNew(DetailHost, SBox)
+									.Tag(FName(TEXT("Guide.Detail")))
 									.WidthOverride(WoTGuideBrowserDetailWidth)
 								]
 							]
@@ -437,6 +438,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGemBar(const FWoTAngrealGuideRow& Row
 			.Padding(FMargin(0.0f, WoTGuideBrowserGemLabelRise, 0.0f, 0.0f))
 			[
 				SNew(SWoTRetailArt)
+				.Tag(FName(TEXT("Guide.Detail.GemBar")))
 				.Piece(EWoTRetailArtPiece::GemBar)
 				.Art(Art)
 				.Elements(Row.Elements)
@@ -523,8 +525,16 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 		];
 	};
 
-	// InventoryInfoWindow.Draw: the title, then the icon under its bevel.
-	AddLine(0.0f, DisplayTitle(Row), EFace::Title);
+	// InventoryInfoWindow.Draw positions the header from the window's top.
+	const bool bAngreal = !Row.Rarity.IsNone();
+	TSharedRef<SOverlay> Header = SNew(SOverlay);
+	Header->AddSlot()
+	.VAlign(VAlign_Top)
+	.Padding(FMargin(WoTGuideBrowserGemReach, 0.0f, WoTGuideBrowserGemReach, 0.0f))
+	[
+		WoTOnboardingChrome::MakeText(FacesRef, DisplayTitle(Row), EFace::Title,
+			TextTint, ETextJustify::Center, true)
+	];
 	TSharedRef<SOverlay> IconFace = SNew(SOverlay);
 	if (const FSlateBrush* Icon = Art->ItemIcon(Row.ClassName, false))
 	{
@@ -543,12 +553,13 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 	{
 		IconFace->AddSlot()[SNew(SImage).Image(Mask)];
 	}
-	Body->AddSlot()
-	.AutoHeight()
+	Header->AddSlot()
 	.HAlign(HAlign_Center)
-	.Padding(FMargin(0.0f, 4.0f, 0.0f, 0.0f))
+	.VAlign(VAlign_Top)
+	.Padding(FMargin(0.0f, 28.0f, 0.0f, 0.0f))
 	[
 		SNew(SBox)
+		.Tag(FName(TEXT("Guide.Detail.Icon")))
 		.WidthOverride(64.0f)
 		.HeightOverride(64.0f)
 		[
@@ -558,12 +569,12 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 
 	// The facts line: rarity (or the trap group's own tag) and the charge
 	// envelope, the line the item-info window leads with.
-	const bool bAngreal = !Row.Rarity.IsNone();
 	const FString RarityText = bAngreal
 		? ResolveWindowText(WoTGuideBrowserRarityKey(Row),
 			WoTGuideBrowserRarityFallback(Row))
 		: FString(TEXT("Trap"));
 	TSharedRef<SHorizontalBox> Facts = SNew(SHorizontalBox)
+		.Tag(FName(TEXT("Guide.Detail.Facts")))
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
@@ -571,7 +582,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 		];
 	const FString ChargesLabel = ResolveWindowText(TEXT("ChargesStr"),
 		TEXT("Charges:"));
-	if (Row.MaxCharges > 0 && Row.ChargeCost == 0)
+	if (bAngreal && Row.MaxCharges > 0 && Row.ChargeCost == 0)
 	{
 		// InventoryInfoWindow.Draw: an angreal that spends no charge shows
 		// the charge face's ':' glyph, its infinity mark. An engine stand-in
@@ -596,19 +607,37 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 			.ColorAndOpacity(TextTint)
 		];
 	}
-	else if (Row.MaxCharges > 0)
+	else if (bAngreal && Row.MaxCharges > 0)
 	{
 		Facts->AddSlot()
 		.AutoWidth()
 		[
-			WoTOnboardingChrome::MakeText(FacesRef, FString::Printf(
-				TEXT("%s  %d / %d"), *ChargesLabel, Row.MaxInitialCharges,
-				Row.MaxCharges), EFace::Body, TextTint)
+			WoTOnboardingChrome::MakeText(FacesRef, ChargesLabel, EFace::Body,
+				TextTint)
+		];
+		Facts->AddSlot()
+		.AutoWidth()
+		.Padding(FMargin(6.0f, 0.0f, 0.0f, 0.0f))
+		[
+			WoTOnboardingChrome::MakeText(FacesRef, FString::FromInt(Row.MaxInitialCharges),
+				EFace::Charge, TextTint)
+		];
+		Facts->AddSlot()
+		.AutoWidth()
+		.Padding(FMargin(3.0f, 0.0f))
+		[
+			WoTOnboardingChrome::MakeText(FacesRef, TEXT("/"), EFace::Body, TextTint)
+		];
+		Facts->AddSlot()
+		.AutoWidth()
+		[
+			WoTOnboardingChrome::MakeText(FacesRef, FString::FromInt(Row.MaxCharges),
+				EFace::Charge, TextTint)
 		];
 	}
-	Body->AddSlot()
-	.AutoHeight()
-	.Padding(FMargin(WoTGuideBrowserGemReach, 6.0f, WoTGuideBrowserGemReach, 0.0f))
+	Header->AddSlot()
+	.VAlign(VAlign_Top)
+	.Padding(FMargin(WoTGuideBrowserGemReach, 48.0f, WoTGuideBrowserGemReach, 0.0f))
 	[
 		Facts
 	];
@@ -616,14 +645,25 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildDetail(const FWoTAngrealGuideRow& Row
 	float Gap = 10.0f;
 	if (bAngreal)
 	{
-		Body->AddSlot()
-		.AutoHeight()
-		.Padding(FMargin(0.0f, 9.0f, 0.0f, 0.0f))
+		Header->AddSlot()
+		.VAlign(VAlign_Top)
+		.Padding(FMargin(0.0f, 96.0f - WoTGuideBrowserGemLabelRise, 0.0f, 0.0f))
 		[
 			BuildGemBar(Row)
 		];
 		Gap = 8.0f;
 	}
+
+	Body->AddSlot()
+	.AutoHeight()
+	[
+		SNew(SBox)
+		.WidthOverride(WoTGuideBrowserDetailWidth)
+		.HeightOverride(bAngreal ? 96.0f + SWoTRetailArt::GemBarHeight : 28.0f + 64.0f)
+		[
+			Header
+		]
+	];
 
 	// Prose only where the retail text resolves; a row without it shows its
 	// facts and nothing else, never placeholder text.
