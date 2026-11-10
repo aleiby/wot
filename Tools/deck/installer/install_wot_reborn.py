@@ -247,8 +247,14 @@ class Env:
         except OSError:
             handle.close()
             return False
-        self._lock_handle = handle  # released when the process exits
+        self._lock_handle = handle  # released by release_lock, or when the process exits
         return True
+
+    def release_lock(self) -> None:
+        """Drop the lock _default_lock took; a no-op when none is held."""
+        handle, self._lock_handle = self._lock_handle, None
+        if handle is not None:
+            handle.close()
 
     def _default_spawn(self, argv: Sequence[str]) -> None:
         self._children.append(subprocess.Popen(
@@ -1633,6 +1639,11 @@ def main(argv: Optional[Sequence[str]] = None, env: Optional[Env] = None,
         ui.error("Something unexpected went wrong while installing WoT Reborn. Run the installer "
                  "again; if it keeps failing, please report it with the log." + where())
         return 2
+    finally:
+        # Free the lock before the closing dialog, so another run can start.
+        release = getattr(env, "release_lock", None)
+        if release is not None:
+            release()
     ui.finish()
     ui.info(summary)
     return 0

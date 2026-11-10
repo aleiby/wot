@@ -1007,7 +1007,10 @@ class EndToEndTests(TempCase):
         self.assertIsNotNone(appid)
         self.assertTrue((harness.config / "grid" / ("%dp.jpg" % appid)).is_file())
         work = harness.home / "Games" / ".wot-reborn-install"
-        self.assertEqual(sorted(p.name for p in work.iterdir()), ["install.log"])
+        # The POSIX flock file stays behind by design (deleting it would race a
+        # second installer); Windows has no lock file.
+        self.assertEqual(sorted(p.name for p in work.iterdir() if p.name != "installer.lock"),
+                         ["install.log"])
         self.assertIn("shortcut route: shortcuts.vdf fallback", (work / "install.log").read_text())
 
         # Run again: repairs a deleted file, keeps Data/, drops .wot-update/, reuses the shortcut.
@@ -1051,7 +1054,10 @@ class EndToEndTests(TempCase):
         self.assertEqual(iw.main([], env=harness.env, ui=harness.ui), 0, harness.ui.errors)
         self.assertEqual((harness.target / "WoT Reborn.exe").read_bytes(), b"newer launcher")
         work = harness.home / "Games" / ".wot-reborn-install"
-        self.assertEqual(sorted(p.name for p in work.iterdir()), ["install.log"])
+        # The POSIX flock file stays behind by design (deleting it would race a
+        # second installer); Windows has no lock file.
+        self.assertEqual(sorted(p.name for p in work.iterdir() if p.name != "installer.lock"),
+                         ["install.log"])
 
     def test_target_override(self):
         harness = Harness(self.tmp, steam_running=False)

@@ -358,8 +358,8 @@ class InstallCellTests(unittest.TestCase):
         self.assertEqual(fake.markers(), ["WOT-CELL-GUARD"])
 
 
-@unittest.skipUnless(os.name == "posix" and shutil.which("bash"),
-                     "the Deck scripts need bash and GNU coreutils")
+@unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"),
+                     "the Deck scripts need bash and GNU coreutils (Linux only)")
 class ScriptsInARealShellTests(unittest.TestCase):
     """The scripts themselves, run by bash against a scratch $HOME (no Deck)."""
 
