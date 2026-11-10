@@ -237,6 +237,13 @@ class ValidateIsoTests(unittest.TestCase):
             with self.assertRaises(bs.BuildFailure, msg=name):
                 bs._validate_iso(self.repo / name / "example-iso")
 
+    def test_the_plugins_directory_is_forbidden(self):
+        # The seed copies the code plugins out of Plugins/.
+        for iso in (self.repo / "Plugins" / "example-iso",
+                    self.repo / "Plugins" / "WoTOnboarding" / "example-iso"):
+            with self.assertRaises(bs.BuildFailure, msg=str(iso)):
+                bs._validate_iso(iso)
+
     def test_default_style_iso_is_accepted(self):
         iso = bs._validate_iso(self.repo / ".stripped-pak")
         self.assertEqual(iso, (self.repo / ".stripped-pak").resolve())
@@ -272,15 +279,27 @@ class SeedEntitlementsValidityTests(unittest.TestCase):
         version_path.write_bytes(
             b'{"format":"wot-release-version-v1",'
             b'"human_version":"","version":1}')
-        bs._write_stamp(self.iso, "seed", {
+        self.write_stamp()
+
+    def write_stamp(self, **overrides):
+        stamp = {
             "copy_set": list(bs.SEED_COPY_SET),
+            "code_plugins": bs._seed_code_plugins(self.repo),
             "import_generated_outputs": [
                 path.as_posix() for path in bs.IMPORT_GENERATED_OUTPUTS],
             "editor_module_mtime": bs._editor_module_mtime(self.repo),
             "entitlements_sha256": bs._entitlements_digests(self.repo),
             "release_commit": self.release_commit,
             "release_sequence": 0,
-        })
+        }
+        stamp.update(overrides)
+        bs._write_stamp(self.iso, "seed", stamp)
+
+    def add_plugin(self, root: Path, name: str = "WoTOnboarding") -> Path:
+        plugin = root / "Plugins" / name
+        plugin.mkdir(parents=True, exist_ok=True)
+        (plugin / f"{name}.uplugin").write_text("{}")
+        return plugin
 
     def tearDown(self):
         self._git_commit_patch.stop()
@@ -289,6 +308,34 @@ class SeedEntitlementsValidityTests(unittest.TestCase):
 
     def test_matching_seed_is_cached(self):
         self.assertTrue(bs._seed_valid(self.iso))
+
+    def test_seed_from_before_code_plugins_is_stale(self):
+        stamp = bs._read_stamp(self.iso, "seed")
+        del stamp["code_plugins"]
+        bs._write_stamp(self.iso, "seed", stamp)
+        self.assertFalse(bs._seed_valid(self.iso))
+
+    def test_seeded_plugin_must_match_the_repo_and_the_iso(self):
+        self.add_plugin(self.repo)
+        # The repo gained the plugin after this seed.
+        self.assertFalse(bs._seed_valid(self.iso))
+        self.write_stamp()
+        # The stamp names it, but the ISO copy is gone.
+        self.assertFalse(bs._seed_valid(self.iso))
+        self.add_plugin(self.iso)
+        self.assertTrue(bs._seed_valid(self.iso))
+
+    def test_plugin_editor_module_rebuild_invalidates_seed(self):
+        binaries = self.add_plugin(self.repo) / "Binaries" / "Mac"
+        binaries.mkdir(parents=True)
+        module = binaries / "libUnrealEditor-WoTOnboarding.dylib"
+        module.write_bytes(b"old")
+        os.utime(module, (1_000_000, 1_000_000))
+        self.add_plugin(self.iso)
+        self.write_stamp()
+        self.assertTrue(bs._seed_valid(self.iso))
+        os.utime(module, (2_000_000, 2_000_000))
+        self.assertFalse(bs._seed_valid(self.iso))
 
     def test_repo_entitlements_edit_invalidates_seed(self):
         self.entitlements.write_text(
@@ -450,6 +497,77 @@ class SeedReleaseCommitTests(unittest.TestCase):
             bs.stage_seed(self.iso, human_version="0.1.2"), "ran")
         self.assertEqual(
             bs.stage_seed(self.iso, human_version="0.1.2"), "cached")
+
+    def write_repo_plugin(self) -> Path:
+        plugin = self.repo / "Plugins" / "WoTOnboarding"
+        files = {
+            "WoTOnboarding.uplugin": b'{"FileVersion": 3}',
+            "Source/WoTOnboarding/Private/A.cpp": b"int a;\n",
+            "Binaries/Mac/libUnrealEditor-WoTOnboarding.dylib": b"dylib",
+            "Binaries/Mac/UnrealEditor.modules": b'{"BuildId": "x"}',
+            "Intermediate/Build/Mac/A.o": b"stale object",
+        }
+        for relative, data in files.items():
+            path = plugin / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return plugin
+
+    def test_seed_copies_the_code_plugin_without_its_intermediate(self):
+        self.write_repo_plugin()
+        self.assertEqual(bs.stage_seed(self.iso), "ran")
+        seeded = self.iso / "Plugins" / "WoTOnboarding"
+        self.assertEqual(
+            (seeded / "WoTOnboarding.uplugin").read_bytes(),
+            b'{"FileVersion": 3}')
+        self.assertEqual(
+            (seeded / "Source/WoTOnboarding/Private/A.cpp").read_bytes(),
+            b"int a;\n")
+        self.assertEqual(
+            (seeded / "Binaries/Mac/libUnrealEditor-WoTOnboarding.dylib")
+            .read_bytes(), b"dylib")
+        self.assertFalse((seeded / "Intermediate").exists())
+        self.assertEqual(
+            bs._read_stamp(self.iso, "seed")["code_plugins"],
+            ["WoTOnboarding"])
+        self.assertEqual(bs.stage_seed(self.iso), "cached")
+
+    def test_reseed_replaces_the_whole_iso_plugin_copy(self):
+        plugin = self.write_repo_plugin()
+        self.assertEqual(bs.stage_seed(self.iso, release_sequence=1), "ran")
+        seeded = self.iso / "Plugins" / "WoTOnboarding"
+        # An ISO build's objects and a source file the repo since deleted.
+        (seeded / "Intermediate" / "Build").mkdir(parents=True)
+        (seeded / "Intermediate" / "Build" / "B.o").write_bytes(b"iso object")
+        (seeded / "Source" / "WoTOnboarding" / "Gone.cpp").write_bytes(b"x")
+        (plugin / "Source/WoTOnboarding/Private/A.cpp").write_bytes(b"int b;\n")
+        self.assertEqual(bs.stage_seed(self.iso, release_sequence=2), "ran")
+        self.assertFalse((seeded / "Intermediate").exists())
+        self.assertFalse((seeded / "Source" / "WoTOnboarding" / "Gone.cpp")
+                         .exists())
+        self.assertEqual(
+            (seeded / "Source/WoTOnboarding/Private/A.cpp").read_bytes(),
+            b"int b;\n")
+
+    def test_a_tree_without_the_plugin_seeds_none_and_drops_an_old_copy(self):
+        self.write_repo_plugin()
+        self.assertEqual(bs.stage_seed(self.iso, release_sequence=1), "ran")
+        shutil.rmtree(self.repo / "Plugins" / "WoTOnboarding")
+        # The repo lost the plugin, so the old seed no longer matches it.
+        self.assertEqual(bs.stage_seed(self.iso, release_sequence=1), "ran")
+        self.assertFalse((self.iso / "Plugins" / "WoTOnboarding").exists())
+        self.assertEqual(bs._read_stamp(self.iso, "seed")["code_plugins"], [])
+
+    def test_seed_refuses_a_symlinked_iso_plugins_directory(self):
+        self.write_repo_plugin()
+        outside = self.repo.parent / "outside"
+        (outside / "WoTOnboarding").mkdir(parents=True)
+        (outside / "WoTOnboarding" / "keep.txt").write_text("keep")
+        self.iso.mkdir(parents=True)
+        (self.iso / "Plugins").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(bs.BuildFailure, "crosses a symlink"):
+            bs.stage_seed(self.iso)
+        self.assertTrue((outside / "WoTOnboarding" / "keep.txt").is_file())
 
     def test_human_version_change_invalidates_seed_and_downstream_steps(self):
         self.assertEqual(bs.stage_seed(self.iso), "ran")
@@ -743,6 +861,24 @@ class SourceSnapshotTests(unittest.TestCase):
         untracked.write_text("print('two')\n")
         self.assertNotEqual(
             dirty["sha256"], bs._source_snapshot(self.repo)["sha256"])
+
+    def test_snapshot_binds_the_seeded_code_plugins(self):
+        self.assertIn("Plugins/WoTOnboarding", bs.SOURCE_SNAPSHOT_PATHS)
+        clean = bs._source_snapshot(self.repo)
+        self.assertEqual(clean["paths"], list(bs.SOURCE_SNAPSHOT_PATHS))
+        plugin = self.repo / "Plugins" / "WoTOnboarding"
+        (plugin / "Source").mkdir(parents=True)
+        source = plugin / "Source" / "New.cpp"
+        source.write_text("int a;\n")
+        # UBT outputs are ignored machine state, never source.
+        (self.repo / ".gitignore").write_text("Binaries/\nIntermediate/\n")
+        (plugin / "Binaries").mkdir()
+        (plugin / "Binaries" / "x.dylib").write_bytes(b"built")
+        dirty = bs._source_snapshot(self.repo)
+        self.assertNotEqual(clean["sha256"], dirty["sha256"])
+        self.assertEqual(
+            [row["path"] for row in dirty["untracked"]],
+            ["Plugins/WoTOnboarding/Source/New.cpp"])
 
 
 class ReleasePackagingTests(unittest.TestCase):
@@ -2393,6 +2529,38 @@ class GuardedModeTests(unittest.TestCase):
         validation = bs._validate_guarded_cooked_paths(paths)
         self.assertEqual(validation["neutral_shell_plugin_descriptor_count"], 1)
         self.assertEqual(validation["engine_plugin_descriptor_count"], 2)
+
+    def test_guarded_inventory_allows_the_optional_onboarding_descriptor(self):
+        # UBT stages the descriptor of every plugin that links a module; the
+        # onboarding aids plugin is optional, so it may or may not be there,
+        # and the validation record keeps its shape either way.
+        baseline = bs._validate_guarded_cooked_paths(self.guarded_cooked_paths())
+        paths = self.guarded_cooked_paths() + [
+            "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"]
+        self.assertEqual(bs._validate_guarded_cooked_paths(paths), baseline)
+
+    def test_guarded_inventory_rejects_a_duplicate_onboarding_descriptor(self):
+        descriptor = "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"
+        paths = self.guarded_cooked_paths() + [descriptor, descriptor]
+        with self.assertRaisesRegex(bs.BuildFailure, "duplicate plugin descriptor"):
+            bs._validate_guarded_cooked_paths(paths)
+
+    def test_guarded_inventory_rejects_an_onboarding_descriptor_elsewhere(self):
+        for descriptor in (
+                "../../../WoT/Plugins/WoTOnboarding/wotonboarding.uplugin",
+                "../../../WoT/Plugins/Other/WoTOnboarding.uplugin"):
+            with self.subTest(descriptor=descriptor):
+                paths = self.guarded_cooked_paths() + [descriptor]
+                with self.assertRaisesRegex(bs.BuildFailure, "plugin descriptor"):
+                    bs._validate_guarded_cooked_paths(paths)
+
+    def test_guarded_inventory_onboarding_never_stands_in_for_the_shell(self):
+        paths = [
+            path for path in self.guarded_cooked_paths()
+            if not path.endswith(".uplugin")
+        ] + ["../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"]
+        with self.assertRaisesRegex(bs.BuildFailure, "plugin descriptor"):
+            bs._validate_guarded_cooked_paths(paths)
 
     def test_guarded_inventory_rejects_an_extra_project_plugin_descriptor(self):
         paths = self.guarded_cooked_paths() + [

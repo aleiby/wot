@@ -3366,6 +3366,19 @@ class LauncherUpdateHandoffTests(unittest.TestCase):
 
 
 
+class SourceSnapshotLockstepTests(unittest.TestCase):
+    """The funnel refuses a stale release by recomputing the packager's
+    source snapshot, so both must bind the same paths (code plugins too)."""
+
+    def test_funnel_and_packager_compute_the_same_snapshot(self):
+        packager = funnel.build_stripped_pak
+        current = funnel._current_source_snapshot()
+        self.assertEqual(current["paths"],
+                         list(packager.SOURCE_SNAPSHOT_PATHS))
+        self.assertIn("Plugins/WoTOnboarding", current["paths"])
+        self.assertEqual(current, packager._source_snapshot(packager.REPO))
+
+
 class ReleaseCookedPathDescriptorTests(unittest.TestCase):
     """The funnel's re-derived census applies the packager's descriptor rule."""
 
@@ -3388,6 +3401,23 @@ class ReleaseCookedPathDescriptorTests(unittest.TestCase):
         with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
             funnel._validate_release_cooked_paths(
                 self._paths("../../../WoT/Plugins/Other/Other.uplugin"))
+
+    def test_allows_the_optional_onboarding_descriptor(self):
+        baseline = funnel._validate_release_cooked_paths(self._paths())
+        self.assertEqual(funnel._validate_release_cooked_paths(self._paths(
+            "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")),
+            baseline)
+
+    def test_onboarding_descriptor_never_stands_in_for_the_shell(self):
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._validate_release_cooked_paths(self._paths(
+                "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin",
+                drop_shell=True))
+
+    def test_refuses_an_onboarding_descriptor_elsewhere(self):
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._validate_release_cooked_paths(self._paths(
+                "../../../WoT/Plugins/Other/WoTOnboarding.uplugin"))
 
 if __name__ == "__main__":
     unittest.main()
