@@ -16,11 +16,12 @@
 #include "UObject/Package.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Text/STextBlock.h"
 
 // The guide browser (plan Tasks 5 and 8). Synthetic fixtures with invented
-// names and invented prose; the real compiled rows are touched only by the
-// final spec, which asserts construction and navigation, never retail prose.
+// names and invented prose; compiled-row specs assert layout, construction
+// and navigation, never retail prose.
 // Helper names carry the WoTOnboardingBrowser prefix for the shared unity
 // translation unit.
 
@@ -696,6 +697,172 @@ bool FWoTOnboardingBrowserNavigationSpec::RunTest(const FString&)
 	TestEqual(TEXT("the guide's own key closes"), Closes, 3);
 	TestFalse(TEXT("other keys pass through"),
 		WoTOnboardingBrowserPress(Browser, EKeys::W).IsEventHandled());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserGridFitsSpec,
+	"WoT.Onboarding.BrowserGridFits", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserGridFitsSpec::RunTest(const FString&)
+{
+	const TStrongObjectPtr<UWoTAngrealGuide> Guide(UWoTAngrealGuide::Load());
+	if (!TestNotNull(TEXT("the compiled rows parse"), Guide.Get()))
+	{
+		return false;
+	}
+	int32 CommonCount = 0;
+	int32 UncommonCount = 0;
+	int32 RareCount = 0;
+	int32 TrapCount = 0;
+	for (const FWoTAngrealGuideRow& GuideRow : Guide->Rows)
+	{
+		if (GuideRow.Rarity == FName(TEXT("Common"))) ++CommonCount;
+		else if (GuideRow.Rarity == FName(TEXT("Uncommon"))) ++UncommonCount;
+		else if (GuideRow.Rarity == FName(TEXT("Rare"))) ++RareCount;
+		else if (GuideRow.Rarity.IsNone()) ++TrapCount;
+	}
+	TestEqual(TEXT("the roster has eight common rows"), CommonCount, 8);
+	TestEqual(TEXT("the roster has ten uncommon rows"), UncommonCount, 10);
+	TestEqual(TEXT("the roster has nineteen rare rows"), RareCount, 19);
+	TestEqual(TEXT("the roster has seven rows without rarity"), TrapCount, 7);
+	TestEqual(TEXT("the roster has forty-four rows"), Guide->Rows.Num(), 44);
+	if (HasAnyErrors()) return false;
+
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
+		Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	for (const bool bPublishedChrome : {false, true})
+	{
+		Seams.ResolveMenuChrome = [bPublishedChrome]() -> TOptional<FWoTOnboardingMenuChrome>
+		{
+			if (!bPublishedChrome) return {};
+			FWoTOnboardingMenuChrome Chrome;
+			Chrome.PixelFont = [](FName, int32 StrikeScale)
+			{
+				return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 13 * StrikeScale);
+			};
+			Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
+			return Chrome;
+		};
+		const auto CheckNear = [this, bPublishedChrome](const FString& What,
+			double Actual, double Expected)
+		{
+			TestTrue(FString::Printf(TEXT("%s: %s (got %.3f, expected %.3f)"),
+				bPublishedChrome ? TEXT("published chrome") : TEXT("engine stand-in"),
+				*What, Actual, Expected), FMath::IsNearlyEqual(Actual, Expected, 0.01));
+		};
+		const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+			.Guide(Guide.Get())
+			.InitialPhysicalSize(FVector2D(1280.0, 800.0));
+		const TArray<FName> Order = Browser->GridOrder();
+		if (!TestEqual(TEXT("every compiled row has a grid entry"), Order.Num(), 44))
+		{
+			return false;
+		}
+		const FWoTAngrealGuideRow* LastRow = Guide->FindByClassName(Order.Last());
+		if (!TestTrue(TEXT("the final grid entry is a trap"),
+			LastRow && LastRow->Rarity.IsNone()))
+		{
+			return false;
+		}
+		Browser->SelectRow(Order.Last());
+		Browser->SlatePrepass(1.0f);
+		TArray<FArrangedWidget> ArrangedWidgets;
+		WoTOnboardingBrowserArrangeTree(Browser,
+			FGeometry::MakeRoot(FVector2D(1280.0, 800.0), FSlateLayoutTransform()),
+			ArrangedWidgets);
+		const FArrangedWidget* WindowBox = ArrangedWidgets.FindByPredicate(
+			[](const FArrangedWidget& Candidate)
+			{
+				const FVector2D DesiredSize(Candidate.Widget->GetDesiredSize());
+				return Candidate.Widget->GetType() == FName(TEXT("SBox"))
+					&& DesiredSize.Equals(FVector2D(960.0, 540.0), 0.01);
+			});
+		const FArrangedWidget* GridWidget = ArrangedWidgets.FindByPredicate(
+			[](const FArrangedWidget& Candidate)
+			{
+				return Candidate.Widget->GetType() == FName(TEXT("SScrollBox"))
+					&& Candidate.Widget->GetTag() == FName(TEXT("Guide.Grid"));
+			});
+		if (!TestNotNull(TEXT("the window box is arranged"), WindowBox)
+			|| !TestNotNull(TEXT("the grid scroll box is arranged"), GridWidget))
+		{
+			return false;
+		}
+		const auto WindowY = [WindowBox](const FGeometry& WidgetGeometry, double LocalY)
+		{
+			return WindowBox->Geometry.AbsoluteToLocal(
+				WidgetGeometry.LocalToAbsolute(FVector2D(0.0, LocalY))).Y;
+		};
+		CheckNear(TEXT("the window is 960 units wide"),
+			WindowBox->Geometry.GetLocalSize().X, 960.0);
+		CheckNear(TEXT("the window is 540 units high"),
+			WindowBox->Geometry.GetLocalSize().Y, 540.0);
+		const double GridTop = WindowY(GridWidget->Geometry, 0.0);
+		const double GridBottom = WindowY(GridWidget->Geometry,
+			GridWidget->Geometry.GetLocalSize().Y);
+		CheckNear(TEXT("the grid starts at 52"), GridTop, 52.0);
+		CheckNear(TEXT("the grid ends at 512"), GridBottom, 512.0);
+
+		// First entries of the seven lines in the shipped rarity groups.
+		const int32 LineStarts[] = {0, 8, 16, 18, 26, 34, 37};
+		const double IconTops[] = {68.0, 142.0, 198.0, 272.0, 328.0, 384.0, 458.0};
+		for (int32 LineIndex = 0; LineIndex < 7; ++LineIndex)
+		{
+			const FName CellTag(*(TEXT("Grid.") + Order[LineStarts[LineIndex]].ToString()));
+			const TSharedPtr<SButton> CellButton =
+				WoTOnboardingBrowserFindTagged(Browser, CellTag);
+			if (!TestTrue(TEXT("the line's first cell is tagged"), CellButton.IsValid()))
+			{
+				return false;
+			}
+			const TSharedPtr<SWidget> IconBox = WoTOnboardingBrowserFindWidget(
+				CellButton.ToSharedRef(),
+				[](const TSharedRef<SWidget>& Candidate)
+				{
+					return Candidate->GetType() == FName(TEXT("SBox"));
+				});
+			const FArrangedWidget* IconWidget = ArrangedWidgets.FindByPredicate(
+				[&IconBox](const FArrangedWidget& Candidate)
+				{
+					return Candidate.Widget == IconBox;
+				});
+			if (!TestNotNull(TEXT("the line's first icon box is arranged"), IconWidget))
+			{
+				return false;
+			}
+			const double IconTop = WindowY(IconWidget->Geometry, 0.0);
+			const double IconBottom = WindowY(IconWidget->Geometry,
+				IconWidget->Geometry.GetLocalSize().Y);
+			CheckNear(FString::Printf(TEXT("line %d keeps its icon top"), LineIndex),
+				IconTop, IconTops[LineIndex]);
+			CheckNear(FString::Printf(TEXT("line %d has a 50-unit icon"), LineIndex),
+				IconBottom - IconTop, 50.0);
+			if (LineIndex == 6)
+			{
+				TestTrue(TEXT("the last icon fits inside the viewport"),
+					IconBottom <= GridBottom + 0.01);
+			}
+		}
+		const TSharedPtr<SWidget> ScrollPanel = WoTOnboardingBrowserFindWidget(GridWidget->Widget,
+			[](const TSharedRef<SWidget>& Candidate)
+			{
+				return Candidate->GetType() == FName(TEXT("SScrollPanel"));
+			});
+		if (!TestTrue(TEXT("the grid contains its scroll panel"), ScrollPanel.IsValid()))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the grid content fits the viewport"),
+			ScrollPanel->GetDesiredSize().Y <= GridBottom - GridTop + 0.01);
+		const TSharedRef<SScrollBox> GridScroll =
+			StaticCastSharedRef<SScrollBox>(GridWidget->Widget);
+		GridScroll->Tick(GridWidget->Geometry, 0.0, 0.0f);
+		CheckNear(TEXT("selecting the last trap leaves the grid at zero"),
+			GridScroll->GetScrollOffset(), 0.0);
+		CheckNear(TEXT("the grid has no scroll range"), GridScroll->GetScrollOffsetOfEnd(), 0.0);
+	}
 	return !HasAnyErrors();
 }
 

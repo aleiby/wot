@@ -37,6 +37,8 @@ constexpr int32 WoTGuideBrowserColumns = 8;
 constexpr float WoTGuideBrowserIcon = 50.0f;
 constexpr float WoTGuideBrowserPitch = 56.0f;
 constexpr float WoTGuideBrowserGridTop = 10.0f;
+// The body face's line, so layout does not depend on which face resolves.
+constexpr float WoTGuideBrowserLineHeight = 14.0f;
 constexpr float WoTGuideBrowserPaneGap = 12.0f;
 /** The detail column, the gem bar's reach included on both sides. */
 constexpr float WoTGuideBrowserDetailWidth = 422.0f;
@@ -205,25 +207,30 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 						.AutoHeight()
 						.Padding(FMargin(0.0f, 0.0f, WoTGuideBrowserGemReach, 0.0f))
 						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.FillWidth(1.0f)
+							SNew(SBox)
+							.HeightOverride(WoTGuideBrowserLineHeight)
+							.VAlign(VAlign_Top)
 							[
-								WoTOnboardingChrome::MakeText(FacesRef, TEXT("FIELD GUIDE"),
-									EFace::Body, WoTOnboardingChrome::TextColor(EFace::Body))
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							[
-								SNew(SButton)
-								.Tag(FName(TEXT("Close")))
-								.ButtonStyle(&WoTGuideBrowserIconButtonStyle())
-								.ContentPadding(FMargin(0.0f))
-								.IsFocusable(false)
-								.OnClicked(this, &SWoTGuideBrowser::Close)
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot()
+								.FillWidth(1.0f)
 								[
-									WoTOnboardingChrome::MakeText(FacesRef, TEXT("Esc  Close"),
-										EFace::Body, WoTOnboardingChrome::LabelColor(EFace::Body))
+									WoTOnboardingChrome::MakeText(FacesRef, TEXT("FIELD GUIDE"),
+										EFace::Body, WoTOnboardingChrome::TextColor(EFace::Body))
+								]
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								[
+									SNew(SButton)
+									.Tag(FName(TEXT("Close")))
+									.ButtonStyle(&WoTGuideBrowserIconButtonStyle())
+									.ContentPadding(FMargin(0.0f))
+									.IsFocusable(false)
+									.OnClicked(this, &SWoTGuideBrowser::Close)
+									[
+										WoTOnboardingChrome::MakeText(FacesRef, TEXT("Esc  Close"),
+											EFace::Body, WoTOnboardingChrome::LabelColor(EFace::Body))
+									]
 								]
 							]
 						]
@@ -239,6 +246,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 								.WidthOverride(WoTGuideBrowserColumns * WoTGuideBrowserPitch)
 								[
 									SAssignNew(GridScroll, SScrollBox)
+									.Tag(FName(TEXT("Guide.Grid")))
 									.ScrollBarVisibility(EVisibility::Collapsed)
 									+ SScrollBox::Slot()
 									[
@@ -319,6 +327,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGrid()
 	const TSharedRef<FWoTOnboardingFaces> FacesRef = Faces.ToSharedRef();
 	TSharedRef<SVerticalBox> Grid = SNew(SVerticalBox);
 	bool bFirstGroup = true;
+	int32 GridLineIndex = 0;
 	for (const FGridGroup& Group : Groups)
 	{
 		if (Group.Rows.IsEmpty())
@@ -329,8 +338,13 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGrid()
 		.AutoHeight()
 		.Padding(FMargin(0.0f, bFirstGroup ? 0.0f : 2.0f, 0.0f, 2.0f))
 		[
-			WoTOnboardingChrome::MakeText(FacesRef, Group.Label, EFace::Body,
-				WoTOnboardingChrome::LabelColor(EFace::Body))
+			SNew(SBox)
+			.HeightOverride(WoTGuideBrowserLineHeight)
+			.VAlign(VAlign_Top)
+			[
+				WoTOnboardingChrome::MakeText(FacesRef, Group.Label, EFace::Body,
+					WoTOnboardingChrome::LabelColor(EFace::Body))
+			]
 		];
 		bFirstGroup = false;
 		for (int32 Start = 0; Start < Group.Rows.Num(); Start += WoTGuideBrowserColumns)
@@ -341,7 +355,14 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGrid()
 			{
 				Line->AddSlot().AutoWidth()[BuildGridCell(Group.Rows[Index])];
 			}
-			Grid->AddSlot().AutoHeight()[Line];
+			++GridLineIndex;
+			Grid->AddSlot()
+			.AutoHeight()
+			.Padding(FMargin(0.0f, 0.0f, 0.0f, GridLineIndex < GridLines.Num()
+				? WoTGuideBrowserPitch - WoTGuideBrowserIcon : 0.0f))
+			[
+				Line
+			];
 		}
 	}
 	return Grid;
@@ -382,7 +403,7 @@ TSharedRef<SWidget> SWoTGuideBrowser::BuildGridCell(FName ClassName)
 
 	TSharedRef<SWidget> Cell = SNew(SBox)
 		.WidthOverride(WoTGuideBrowserPitch)
-		.HeightOverride(WoTGuideBrowserPitch)
+		.HeightOverride(WoTGuideBrowserIcon)
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Top)
 		[
