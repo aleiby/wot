@@ -1,6 +1,7 @@
 """Unit tests for the Steam Deck test harness (no Deck needed: SSH is faked)."""
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -157,6 +158,98 @@ class DeckProbeTests(unittest.TestCase):
         # Proton stalls during Wine startup without a display, even for a console program.
         self.assertIn("DISPLAY=:0", run_script)
         self.assertEqual(rows, [{"check": "env"}])
+
+
+class PipeRunner(FakeRunner):
+    """FakeRunner plus the streaming seam deploy_tree uses."""
+
+    def __init__(self, outputs=None, pipe_result=None):
+        super().__init__(outputs)
+        self.pipes = []
+        self.pipe_result = pipe_result or deck.PipeResult(0, 0, b"", b"", b"")
+
+    def pipe(self, producer, consumer, timeout=None):
+        self.pipes.append((producer, consumer, timeout))
+        return self.pipe_result
+
+
+class DeployTreeTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.local = Path(self.temporary.name) / "WoT Reborn"
+        (self.local / "Game").mkdir(parents=True)
+        (self.local / "WoT Reborn.exe").write_bytes(b"MZ123")
+        (self.local / "Game" / "a.pak").write_bytes(b"abc")
+        self.listing = b"5 WoT Reborn.exe\x003 Game/a.pak\x00"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_deploy_streams_tar_into_ssh_then_checks_every_file(self):
+        runner = PipeRunner([self.listing])
+        count, size = deck.deploy_tree(deck.DeckTarget("h"), runner, self.local,
+                                       "/srv/games/WoT Reborn")
+        self.assertEqual((count, size), (2, 8))
+        producer, consumer, timeout = runner.pipes[0]
+        self.assertEqual(producer, ["tar", "-C", str(self.local), "-cf", "-", "."])
+        self.assertEqual(consumer, deck._ssh_argv(deck.DeckTarget("h")) + [
+            "mkdir -p '/srv/games/WoT Reborn' && tar -C '/srv/games/WoT Reborn' -xf -"])
+        self.assertGreaterEqual(timeout, 1800)
+        # Nothing is buffered: the only other call is the listing, whose stdin is
+        # its own script, not an archive.
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(runner.calls[0][1].decode(),
+                         "cd '/srv/games/WoT Reborn' && find . -type f -printf '%s %P\\0'")
+
+    def test_every_failure_is_loud(self):
+        target = deck.DeckTarget("h")
+        cases = (
+            (PipeRunner(pipe_result=deck.PipeResult(2, 0, b"tar: cannot open", b"", b"")),
+             "local tar failed (exit 2): tar: cannot open"),
+            (PipeRunner(pipe_result=deck.PipeResult(0, 2, b"", b"", b"No space left")),
+             "deploy failed on the Deck (exit 2): No space left"),
+            (PipeRunner([b"5 WoT Reborn.exe\x00"]), "1 file(s) missing"),
+            (PipeRunner([b"5 WoT Reborn.exe\x002 Game/a.pak\x00"]), "1 with another size"),
+            (PipeRunner([b""]), "2 file(s) missing"),
+            (PipeRunner([(1, b"")]), "could not list"),
+        )
+        for runner, fragment in cases:
+            with self.subTest(fragment=fragment):
+                with self.assertRaises(deck.DeckError) as caught:
+                    deck.deploy_tree(target, runner, self.local, "/srv/x")
+                self.assertIn(fragment, str(caught.exception))
+
+    def test_an_empty_or_missing_folder_is_refused_before_any_transfer(self):
+        empty = Path(self.temporary.name) / "empty"
+        empty.mkdir()
+        for folder in (empty, Path(self.temporary.name) / "absent"):
+            runner = PipeRunner()
+            with self.assertRaises(deck.DeckError):
+                deck.deploy_tree(deck.DeckTarget("h"), runner, folder, "/srv/x")
+            self.assertEqual((runner.pipes, runner.calls), ([], []))
+
+    def test_a_stalled_transfer_raises(self):
+        class Stalled(PipeRunner):
+            def pipe(self, producer, consumer, timeout=None):
+                raise subprocess.TimeoutExpired(consumer, timeout)
+
+        with self.assertRaises(deck.DeckError) as caught:
+            deck.deploy_tree(deck.DeckTarget("h"), Stalled(), self.local, "/srv/x", 5)
+        self.assertIn("incomplete", str(caught.exception))
+
+    def test_subprocess_runner_streams_one_process_into_another(self):
+        python = [sys.executable, "-I", "-c"]
+        result = deck.SubprocessRunner().pipe(
+            python + ["import sys; sys.stdout.buffer.write(b'x' * 3000000)"],
+            python + ["import sys; print(len(sys.stdin.buffer.read()))"], 60)
+        self.assertEqual((result.producer_returncode, result.consumer_returncode),
+                         (0, 0))
+        self.assertEqual(result.consumer_stdout.strip(), b"3000000")
+        failed = deck.SubprocessRunner().pipe(
+            python + ["import sys; sys.stderr.write('no tree'); sys.exit(3)"],
+            python + ["import sys; sys.stdin.buffer.read()"], 60)
+        self.assertEqual((failed.producer_returncode, failed.producer_stderr),
+                         (3, b"no tree"))
 
 
 class DeckRobustnessTests(unittest.TestCase):

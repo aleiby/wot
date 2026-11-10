@@ -126,6 +126,12 @@ PLAYER_DOWNLOAD_ASSETS = {
     "Win64": "WoT-Reborn-Windows.zip",
     "Mac": "WoT-Reborn-Mac.dmg",
 }
+# The SteamOS installer (Tools/deck/installer), unsigned and outside the
+# signed set like the notes asset: publish_release builds it at the release's
+# build commit and attaches it to every release, so the README's
+# /releases/latest/download/ link always serves it; verify_release --published
+# rebuilds it there and compares the bytes (steamos_installer_asset.py).
+STEAMOS_INSTALLER_ASSET = "Install-WoT-Reborn.desktop"
 RELEASE_NOTES_FORMAT = "wot-release-notes-v1"
 RELEASE_NOTES_MAX_BYTES = 256 * 1024
 RELEASE_NOTES_MAX_ENTRY_BYTES = 16 * 1024

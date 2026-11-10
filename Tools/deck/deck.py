@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
 import re
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 
 STEAM = "$HOME/.local/share/Steam"
 COMMON = STEAM + "/steamapps/common"
@@ -51,10 +53,49 @@ class DeckTarget:
     user: str = "deck"
 
 
+@dataclass(frozen=True)
+class PipeResult:
+    """Both ends of a `producer | consumer` pipeline."""
+    producer_returncode: int
+    consumer_returncode: int
+    producer_stderr: bytes
+    consumer_stdout: bytes
+    consumer_stderr: bytes
+
+
 class SubprocessRunner:
     def run(self, argv, input_bytes=None, timeout=120):
         return subprocess.run(argv, input=input_bytes, capture_output=True,
                               timeout=timeout, check=False)
+
+    def pipe(self, producer, consumer, timeout=None) -> PipeResult:
+        """Stream producer's stdout into consumer's stdin; nothing is buffered here."""
+        with tempfile.TemporaryFile() as producer_stderr:
+            source = subprocess.Popen(producer, stdout=subprocess.PIPE,
+                                      stderr=producer_stderr)
+            try:
+                sink = subprocess.Popen(consumer, stdin=source.stdout,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except BaseException:
+                source.kill()
+                source.wait()
+                raise
+            finally:
+                # The consumer holds its own end; closing ours lets the producer
+                # see a broken pipe if the consumer exits early.
+                source.stdout.close()
+            try:
+                out, err = sink.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                sink.kill()
+                source.kill()
+                sink.communicate()
+                source.wait()
+                raise
+            source_status = source.wait()
+            producer_stderr.seek(0)
+            return PipeResult(source_status, sink.returncode, producer_stderr.read(),
+                              out, err)
 
 
 def load_target(local_json: Path) -> DeckTarget:
@@ -89,14 +130,74 @@ def _proton_command(runtime: str, proton: str) -> str:
             f"\"{COMMON}\"/{shlex.quote(proton)}/proton waitforexitandrun")
 
 
-def deploy_tree(target: DeckTarget, runner, local_dir: Path, remote_dir: str):
-    archive = subprocess.run(["tar", "-C", str(local_dir), "-cf", "-", "."],
-                             capture_output=True, check=True).stdout
+def local_tree_files(local_dir: Path) -> Dict[str, int]:
+    """{path relative to local_dir, POSIX form: size} for every regular file."""
+    files = {}
+    for directory, names, filenames in os.walk(local_dir):
+        names.sort()
+        for name in sorted(filenames):
+            path = Path(directory) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            files[path.relative_to(local_dir).as_posix()] = path.stat().st_size
+    return files
+
+
+def remote_tree_files(target: DeckTarget, runner, remote_dir: str) -> Dict[str, int]:
+    """{path relative to remote_dir: size} for every regular file on the Deck."""
+    result = ssh(target, runner,
+                 f"cd {shlex.quote(remote_dir)} && find . -type f -printf '%s %P\\0'", 600)
+    if result.returncode != 0:
+        raise DeckError(f"could not list {remote_dir} on the Deck: "
+                        + result.stderr.decode(errors="replace"))
+    files = {}
+    for record in result.stdout.split(b"\0"):
+        if record:
+            size, _, path = record.decode("utf-8", "surrogateescape").partition(" ")
+            files[path] = int(size)
+    return files
+
+
+def deploy_tree(target: DeckTarget, runner, local_dir: Path, remote_dir: str,
+                timeout: float = 3600) -> Tuple[int, int]:
+    """Stream local_dir to remote_dir as `tar -cf - . | ssh ... tar -xf -`.
+
+    Nothing is held in memory (a 2.3 GB game tree used to vanish silently when
+    the whole archive was buffered first). Either end failing raises, and the
+    Deck's copy is then listed and every local file must be there with its
+    size. Returns (file count, total bytes).
+    """
+    local_dir = Path(local_dir)
+    if not local_dir.is_dir():
+        raise DeckError(f"deploy: {local_dir} is not a folder")
+    expected = local_tree_files(local_dir)
+    if not expected:
+        raise DeckError(f"deploy: {local_dir} holds no files")
     script = (f"mkdir -p {shlex.quote(remote_dir)} && "
               f"tar -C {shlex.quote(remote_dir)} -xf -")
-    result = runner.run(_ssh_argv(target) + [script], archive, 1800)
-    if result.returncode != 0:
-        raise DeckError("deploy failed: " + result.stderr.decode(errors="replace"))
+    try:
+        result = runner.pipe(["tar", "-C", str(local_dir), "-cf", "-", "."],
+                             _ssh_argv(target) + [script], timeout)
+    except subprocess.TimeoutExpired:
+        raise DeckError(f"deploy: no finish within {timeout:.0f}s; the Deck's copy is "
+                        "incomplete")
+    except OSError as exc:
+        raise DeckError(f"deploy: could not start tar or ssh: {exc}")
+    if result.producer_returncode != 0:
+        raise DeckError(f"deploy: local tar failed (exit {result.producer_returncode}): "
+                        + result.producer_stderr.decode(errors="replace"))
+    if result.consumer_returncode != 0:
+        raise DeckError(f"deploy failed on the Deck (exit {result.consumer_returncode}): "
+                        + result.consumer_stderr.decode(errors="replace"))
+    deployed = remote_tree_files(target, runner, remote_dir)
+    missing = [path for path in expected if path not in deployed]
+    wrong = [path for path, size in expected.items()
+             if path in deployed and deployed[path] != size]
+    if missing or wrong:
+        raise DeckError(f"deploy: the Deck's copy of {remote_dir} is incomplete: "
+                        f"{len(missing)} file(s) missing, {len(wrong)} with another size "
+                        f"(e.g. {(missing + wrong)[:3]})")
+    return len(expected), sum(expected.values())
 
 
 def launch_hidden(target: DeckTarget, runner, remote_dir: str, unit: str,
@@ -338,11 +439,29 @@ def main(argv: List[str] = None) -> int:
     p.add_argument("remote_dir")
     p.add_argument("candidate_zip")
     p.add_argument("--app-id", type=int, required=True)
+    p = sub.add_parser("install-cell",
+                       help="run the SteamOS installer into a scratch folder on the Deck")
+    p.add_argument("--case", action="append", default=[],
+                   choices=("fresh", "repair", "fallback"),
+                   help="repeatable; default: fresh, then repair. fallback shuts Steam "
+                        "down and needs --allow-steam-shutdown")
+    p.add_argument("--scratch", default="wot-install-cell",
+                   help="folder under the Deck's home (name starts with wot-install-cell)")
+    p.add_argument("--installer-name", default=None,
+                   help="the original installer's file name in ~/Downloads "
+                        "(default: its pinned name)")
+    p.add_argument("--allow-steam-shutdown", action="store_true",
+                   help="allow the fallback case to shut Steam down (the owner's OK)")
+    p.add_argument("--keep", action="store_true",
+                   help="leave the scratch install and art in place (to repair later)")
+    p.add_argument("--timeout", type=float, default=1800.0)
     args = parser.parse_args(argv)
 
     target, runner = load_target(args.local_json), SubprocessRunner()
     if args.command == "deploy":
-        deploy_tree(target, runner, args.local_dir, args.remote_dir)
+        count, size = deploy_tree(target, runner, args.local_dir, args.remote_dir)
+        print(f"deployed {count} files ({size} bytes) to {args.remote_dir}, "
+              "all present with their sizes")
     elif args.command == "launch":
         launch_hidden(target, runner, args.remote_dir, args.unit, args.app_id,
                       args.proton, lan_receiver_off=args.lan_receiver_off)
@@ -375,6 +494,17 @@ def main(argv: List[str] = None) -> int:
                                                    args.app_id, args.candidate_zip)
         print(f"{'PASS' if verdict.ok else 'FAIL'} {name}: {verdict.reason}")
         return 0 if verdict.ok else 1
+    elif args.command == "install-cell":
+        import install_cell
+        layout = install_cell.Layout(
+            args.scratch, args.installer_name or install_cell.PINNED_INSTALLER_NAME)
+        verdicts = install_cell.run_install_cells(
+            target, runner, args.case or install_cell.DEFAULT_CASES, layout,
+            allow_steam_shutdown=args.allow_steam_shutdown, keep=args.keep,
+            timeout=args.timeout)
+        for name, verdict in verdicts:
+            print(f"{'PASS' if verdict.ok else 'FAIL'} {name}: {verdict.reason}")
+        return 0 if all(v.ok for _, v in verdicts) else 1
     elif args.command == "show":
         if not show_window(target, runner, args.class_name):
             print("no matching window", file=sys.stderr)
