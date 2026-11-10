@@ -36,11 +36,12 @@ namespace WoTOnboardingDeathRecap
 		const UWoTOnboardingSettings& Settings, const UWoTAngrealGuide* Guide,
 		FName ClassName, bool bScreenBusy);
 
-	/** The recap for Row: "Killed by <title>", the row's hint line and the
-	    guide key line. ResolveTitle supplies display titles (a title
-	    resolving empty falls back to the spaced class name); GuideKeyName is
-	    the ShowGuide key's display name, or empty. All empty when the row
-	    has no hint line. */
+	/** The recap for Row: "KILLED BY" over its title, "COUNTER" over the
+	    row's hint line and the counter that hint names, and the guide key
+	    line. ResolveTitle supplies display titles (a title resolving empty
+	    falls back to the spaced class name); GuideKeyName is the ShowGuide
+	    key's display name, or empty. All empty when the row has no hint
+	    line. */
 	WOTONBOARDING_API FWoTPickupCardText ComposeText(
 		const UWoTAngrealGuide& Guide, const FWoTAngrealGuideRow& Row,
 		TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle,

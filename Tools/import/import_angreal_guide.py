@@ -210,13 +210,15 @@ EXPECTATIONS_JSON_PATH = (
     REPO / "Tools" / "test" / "angreal" / "angreal_expectations.json")
 
 FACTS_COLUMNS = ("Class", "CppClass", "Elements", "Rarity", "Roles",
-                 "MaxInitialCharges", "MaxCharges", "Counters", "HintKey")
+                 "MaxInitialCharges", "MaxCharges", "ChargeCost", "Counters",
+                 "HintKey")
 OVERRIDE_COLUMNS = ("Class", "Field", "Value", "Supersedes", "Citation")
 HINT_COLUMNS = ("HintKey", "Template")
 MULTI_VALUE_FIELDS = ("Counters", "Elements", "Roles")
 SCALAR_FIELD_ATTRS = {"Rarity": "rarity",
                       "MaxInitialCharges": "max_initial_charges",
                       "MaxCharges": "max_charges",
+                      "ChargeCost": "charge_cost",
                       "HintKey": "hint_key"}
 
 ELEMENT_BY_FLAG = {"bElementAir": "Air", "bElementEarth": "Earth",
@@ -312,6 +314,7 @@ class GuideRow:
     roles: List[str]
     max_initial_charges: str
     max_charges: str
+    charge_cost: str
     counters: List[str]
     hint_key: str
 
@@ -690,6 +693,7 @@ def build_guide_rows(classes: Dict[str, UcClass],
             max_initial_charges=resolved_prop(
                 classes, name, "MaxInitialCharges") or "",
             max_charges=resolved_prop(classes, name, "MaxCharges") or "",
+            charge_cost=resolved_prop(classes, name, "ChargeCost") or "",
             counters=[],
             hint_key="")
     if errors:
@@ -761,7 +765,8 @@ def render_facts_csv(rows: List[GuideRow]) -> str:
         lines.append(",".join(_csv_field(value) for value in (
             row.class_name, row.cpp_class, ";".join(row.elements),
             row.rarity, ";".join(row.roles), row.max_initial_charges,
-            row.max_charges, ";".join(row.counters), row.hint_key)))
+            row.max_charges, row.charge_cost, ";".join(row.counters),
+            row.hint_key)))
     text = "\n".join(lines) + "\n"
     if not text.isascii():
         raise GenerationError("facts CSV must be ASCII")
@@ -798,6 +803,7 @@ FIREBALL_FACTS = {
     "roles": ["Combat", "Offensive"],
     "max_initial_charges": 20,
     "max_charges": 35,
+    "charge_cost": 1,
     "counters": [],
 }
 
@@ -825,7 +831,8 @@ def load_facts_csv(path: Optional[PathLike] = None) -> List[GuideRow]:
     seen = set()
     for number, cells in _read_csv_rows(source, FACTS_COLUMNS):
         (class_name, cpp_class, elements, rarity, roles,
-         max_initial_charges, max_charges, counters, hint_key) = cells
+         max_initial_charges, max_charges, charge_cost, counters,
+         hint_key) = cells
         where = "%s:%d" % (source.name, number)
         if not class_name:
             raise GenerationError("%s: empty Class" % where)
@@ -838,7 +845,8 @@ def load_facts_csv(path: Optional[PathLike] = None) -> List[GuideRow]:
             elements=_split_multi(elements), rarity=rarity,
             roles=_split_multi(roles),
             max_initial_charges=max_initial_charges,
-            max_charges=max_charges, counters=_split_multi(counters),
+            max_charges=max_charges, charge_cost=charge_cost,
+            counters=_split_multi(counters),
             hint_key=hint_key))
     return rows
 
@@ -865,6 +873,7 @@ def payload_rows(rows: List[GuideRow], hints: Dict[str, str]) -> List[dict]:
             "max_initial_charges": _charges_int(
                 row.max_initial_charges, row.class_name),
             "max_charges": _charges_int(row.max_charges, row.class_name),
+            "charge_cost": _charges_int(row.charge_cost, row.class_name),
             "counters": list(row.counters),
             "hint_text": hints[row.hint_key] if row.hint_key else "",
         })

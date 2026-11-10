@@ -109,7 +109,7 @@ void WoTOnboardingGateExpectBindings(FAutomationTestBase& Test,
 
 const TCHAR* const WoTOnboardingGateFactsHeader = TEXT(
 	"Class,CppClass,Elements,Rarity,Roles,MaxInitialCharges,MaxCharges,"
-	"Counters,HintKey");
+	"ChargeCost,Counters,HintKey");
 
 /** Guide classes the port does not carry yet. Printed on every run so the
     list's shrinkage shows; a listed class that resolves fails the gate. */
@@ -127,6 +127,7 @@ struct FWoTOnboardingGateRow
 	TArray<FString> Roles;
 	FString MaxInitialCharges;
 	FString MaxCharges;
+	FString ChargeCost;
 	TArray<FString> Counters;
 };
 
@@ -289,10 +290,10 @@ bool WoTOnboardingGateLoadFacts(FAutomationTestBase& Test,
 	{
 		TArray<FString> Cells;
 		Lines[LineIndex].ParseIntoArray(Cells, TEXT(","), false);
-		if (Cells.Num() != 9 || Lines[LineIndex].Contains(TEXT("\"")))
+		if (Cells.Num() != 10 || Lines[LineIndex].Contains(TEXT("\"")))
 		{
 			Test.AddError(FString::Printf(
-				TEXT("facts CSV line %d is not nine plain fields"), LineIndex + 1));
+				TEXT("facts CSV line %d is not ten plain fields"), LineIndex + 1));
 			return false;
 		}
 		FWoTOnboardingGateRow& Row = OutRows.AddDefaulted_GetRef();
@@ -303,7 +304,8 @@ bool WoTOnboardingGateLoadFacts(FAutomationTestBase& Test,
 		Row.Roles = WoTOnboardingGateSplitList(Cells[4]);
 		Row.MaxInitialCharges = Cells[5];
 		Row.MaxCharges = Cells[6];
-		Row.Counters = WoTOnboardingGateSplitList(Cells[7]);
+		Row.ChargeCost = Cells[7];
+		Row.Counters = WoTOnboardingGateSplitList(Cells[8]);
 	}
 	return Test.TestTrue(TEXT("the facts CSV carries rows"), OutRows.Num() > 0);
 }
@@ -663,6 +665,8 @@ bool FWoTOnboardingHonestyGateSpec::RunTest(const FString&)
 				TEXT("MaxInitialCharges"), Row.MaxInitialCharges);
 			WoTOnboardingGateExpectCharge(*this, Row.Class, Defaults,
 				TEXT("MaxCharges"), Row.MaxCharges);
+			WoTOnboardingGateExpectCharge(*this, Row.Class, Defaults,
+				TEXT("ChargeCost"), Row.ChargeCost);
 			const int32* Envelope = MaxInitialByCppClass.Find(Row.CppClass);
 			if (!Envelope)
 			{
@@ -681,7 +685,7 @@ bool FWoTOnboardingHonestyGateSpec::RunTest(const FString&)
 			// A placeable trap carries no angreal facts.
 			if (!Row.Elements.IsEmpty() || !Row.Rarity.IsEmpty()
 				|| !Row.Roles.IsEmpty() || !Row.MaxInitialCharges.IsEmpty()
-				|| !Row.MaxCharges.IsEmpty())
+				|| !Row.MaxCharges.IsEmpty() || !Row.ChargeCost.IsEmpty())
 			{
 				AddError(FString::Printf(TEXT("%s: a trap row claims angreal "
 					"facts its class cannot back"), *Row.Class));

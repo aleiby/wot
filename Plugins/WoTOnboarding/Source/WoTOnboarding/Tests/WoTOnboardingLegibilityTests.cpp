@@ -13,12 +13,12 @@
 #include "UObject/Package.h"
 #include "Widgets/Text/STextBlock.h"
 
-// Steam Deck legibility for every line the onboarding widgets draw. Valve's
-// compatibility checklist rejects text under 9 px tall at 1280x800 and
-// recommends 12 px. These specs hold onboarding text to 12 px on that screen,
-// and to the 9 px floor at 1280x720 (the Deck's 16:9 mode), on the project's
-// own UI DPI curve. They cover the fallback chrome and a published chrome
-// whose faces are all too small. Synthetic fixtures with invented names and
+// Steam Deck legibility for every line the onboarding widgets draw, and the
+// window scale they draw at. Valve's compatibility checklist rejects text
+// under 9 px tall at 1280x800 and recommends 12 px. These specs hold every
+// onboarding line to 12 px on that screen, and to the 9 px floor at 1280x720
+// (the Deck's 16:9 mode). They cover the engine stand-in faces and published
+// faces that are all too small. Synthetic fixtures with invented names and
 // prose; helper names carry the WoTOnboardingLegibility prefix for the shared
 // unity translation unit.
 
@@ -58,8 +58,8 @@ void WoTOnboardingLegibilityCollect(const TSharedRef<SWidget>& Widget,
 }
 
 /** Rows that make the browser build every pane it has: the rarity and
-    charges line, element gems, roles, description, quote, hint, both link
-    lists, and the trap group. */
+    charges line, the gem bar, description, divider, quote, hint, both icon
+    rows, and the trap group. */
 UWoTAngrealGuide* WoTOnboardingLegibilityMakeGuide()
 {
 	UWoTAngrealGuide* Guide = NewObject<UWoTAngrealGuide>(GetTransientPackage());
@@ -67,7 +67,6 @@ UWoTAngrealGuide* WoTOnboardingLegibilityMakeGuide()
 	Spark.ClassName = TEXT("SparkFlail");
 	Spark.Rarity = TEXT("Common");
 	Spark.Elements = {FName(TEXT("Fire")), FName(TEXT("Air"))};
-	Spark.Roles = {FName(TEXT("Combat")), FName(TEXT("Offensive"))};
 	Spark.MaxInitialCharges = 4;
 	Spark.MaxCharges = 10;
 	Spark.HintText = TEXT("{counter:DamperDisc} smothers it.");
@@ -78,7 +77,6 @@ UWoTAngrealGuide* WoTOnboardingLegibilityMakeGuide()
 	Damper.ClassName = TEXT("DamperDisc");
 	Damper.Rarity = TEXT("Rare");
 	Damper.Elements = {FName(TEXT("Water"))};
-	Damper.Roles = {FName(TEXT("Defensive"))};
 	Damper.Counters = {FName(TEXT("SparkFlail"))};
 	Guide->Rows.Add(Damper);
 
@@ -105,19 +103,15 @@ FString WoTOnboardingLegibilityText(const FString& Section,
 	return FString();
 }
 
-/** A published chrome whose every face is far below the Deck minimum. */
+/** Published faces that all answer far below the Deck minimum, at every
+    strike scale. */
 TOptional<FWoTOnboardingMenuChrome> WoTOnboardingLegibilityTinyChrome()
 {
 	FWoTOnboardingMenuChrome Chrome;
-	Chrome.TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 6);
-	Chrome.BodyFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 6);
-	Chrome.ItalicFont = FCoreStyle::GetDefaultFontStyle(TEXT("Italic"), 6);
-	Chrome.SmallFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 6);
-	const FSlateBrush* White = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-	Chrome.Background = White;
-	Chrome.Frame = White;
-	Chrome.Blackout = White;
-	Chrome.Separator = White;
+	Chrome.PixelFont = [](FName, int32)
+	{
+		return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 6);
+	};
 	Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
 	return Chrome;
 }
@@ -131,8 +125,8 @@ struct FWoTOnboardingLegibilityChromeCase
 TArray<FWoTOnboardingLegibilityChromeCase> WoTOnboardingLegibilityChromeCases()
 {
 	return {
-		{TEXT("fallback chrome"), nullptr},
-		{TEXT("undersized published chrome"), &WoTOnboardingLegibilityTinyChrome},
+		{TEXT("engine stand-in faces"), nullptr},
+		{TEXT("undersized published faces"), &WoTOnboardingLegibilityTinyChrome},
 	};
 }
 
@@ -141,8 +135,8 @@ int32 WoTOnboardingLegibilityExpectLines(FAutomationTestBase& Test,
 	const FString& Context, const TSharedRef<SWidget>& Widget,
 	TArray<FString>& OutTexts)
 {
-	const float DeckScale = WoTOnboardingChrome::LayoutScaleAt(1280, 800);
-	const float WideScale = WoTOnboardingChrome::LayoutScaleAt(1280, 720);
+	const float DeckScale = WoTOnboardingChrome::WindowScaleAt(1280, 800);
+	const float WideScale = WoTOnboardingChrome::WindowScaleAt(1280, 720);
 	TArray<FWoTOnboardingLegibilityLine> Lines;
 	WoTOnboardingLegibilityCollect(Widget, Lines);
 	for (const FWoTOnboardingLegibilityLine& Line : Lines)
@@ -173,17 +167,76 @@ int32 WoTOnboardingLegibilityExpectLines(FAutomationTestBase& Test,
 }
 } // namespace
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingLegibilityWindowScaleSpec,
+	"WoT.Onboarding.LegibilityWindowScale", WoTOnboardingLegibilityFlags)
+
+bool FWoTOnboardingLegibilityWindowScaleSpec::RunTest(const FString&)
+{
+	using WoTOnboardingChrome::PixelScaleFor;
+	using WoTOnboardingChrome::WindowScaleAt;
+	// Whole screen pixels per unit wherever the 960x540 window fits.
+	TestEqual(TEXT("the Deck draws the window at 1x"), WindowScaleAt(1280, 800), 1.0f);
+	TestEqual(TEXT("so does the Deck's 16:9 mode"), WindowScaleAt(1280, 720), 1.0f);
+	TestEqual(TEXT("1080p draws at 2x"), WindowScaleAt(1920, 1080), 2.0f);
+	TestEqual(TEXT("1440p stays at 2x"), WindowScaleAt(2560, 1440), 2.0f);
+	TestEqual(TEXT("4K stays at 2x, the largest strike"), WindowScaleAt(3840, 2160), 2.0f);
+	TestEqual(TEXT("a screen narrower than the window fits by its width"),
+		WindowScaleAt(800, 600), 800.0f / 960.0f, WoTOnboardingLegibilityTolerance);
+	TestEqual(TEXT("no screen yet keeps 1x"), WindowScaleAt(0, 0), 1.0f);
+	TestEqual(TEXT("the strike for a small screen is 1x"),
+		PixelScaleFor(FVector2D(800.0, 600.0)), 1);
+	TestEqual(TEXT("the strike at 1080p is 2x"),
+		PixelScaleFor(FVector2D(1920.0, 1080.0)), 2);
+
+	// A window opened at 1080p under a 1.5 UI DPI scale still lands on 2
+	// screen pixels per unit: the scale box divides the DPI scale back out.
+	FWoTOnboardingWindowScale Scale;
+	TestEqual(TEXT("an uninitialized window draws at 1x"), Scale.SlateScale(), 1.0f);
+	Scale.Initialize(FVector2D(1920.0, 1080.0), 1.5f);
+	TestEqual(TEXT("1080p picks the 2x strike"), Scale.GetPixelScale(), 2);
+	TestEqual(TEXT("1080p draws 2 pixels per unit"), Scale.GetWindowScale(), 2.0f);
+	TestEqual(TEXT("the scale box undoes the DPI scale"), Scale.SlateScale(),
+		2.0f / 1.5f, WoTOnboardingLegibilityTolerance);
+	Scale.Initialize(FVector2D::ZeroVector, 3.0f);
+	TestEqual(TEXT("a zero viewport keeps the last scale"), Scale.GetWindowScale(), 2.0f);
+
+	// The faces follow the strike scale: the published faces are asked for
+	// the strike the window opened at.
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
+		Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	TSharedRef<TArray<int32>> Asked = MakeShared<TArray<int32>>();
+	Seams.ResolveMenuChrome = [Asked]()
+	{
+		FWoTOnboardingMenuChrome Chrome;
+		Chrome.PixelFont = [Asked](FName, int32 PixelScale)
+		{
+			Asked->AddUnique(PixelScale);
+			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 12);
+		};
+		return TOptional<FWoTOnboardingMenuChrome>(Chrome);
+	};
+	FWoTPickupCardText CardText;
+	CardText.Title = TEXT("Spark Flail");
+	const TSharedRef<SWoTPickupCard> Card = SNew(SWoTPickupCard)
+		.Text(CardText)
+		.InitialPhysicalSize(FVector2D(1920.0, 1080.0));
+	TestEqual(TEXT("the card holds its text"), Card->GetCardText().Title,
+		CardText.Title);
+	TestTrue(TEXT("a card opened at 1080p draws the 2x strike"), Asked->Contains(2));
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingLegibilityFloorSpec,
 	"WoT.Onboarding.LegibilityFloor", WoTOnboardingLegibilityFlags)
 
 bool FWoTOnboardingLegibilityFloorSpec::RunTest(const FString&)
 {
-	const float DeckScale = WoTOnboardingChrome::LayoutScaleAt(1280, 800);
-	const float WideScale = WoTOnboardingChrome::LayoutScaleAt(1280, 720);
-	TestTrue(TEXT("the Deck's layout scale is a downscale on the DPI curve"),
-		DeckScale > 0.5f && DeckScale < 1.0f);
-	TestTrue(TEXT("the 16:9 mode lays out smaller still"), WideScale < DeckScale);
-
+	const float DeckScale = WoTOnboardingChrome::WindowScaleAt(1280, 800);
+	TestEqual(TEXT("the Deck's minimum is 9 points at 1x"),
+		WoTOnboardingChrome::DeckMinimumFontSize(), 9.0f,
+		WoTOnboardingLegibilityTolerance);
 	FSlateFontInfo AtMinimum = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"),
 		WoTOnboardingChrome::DeckMinimumFontSize());
 	TestEqual(TEXT("the minimum font size draws exactly the Deck minimum"),
@@ -196,36 +249,49 @@ bool FWoTOnboardingLegibilityFloorSpec::RunTest(const FString&)
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
 
+	using WoTOnboardingChrome::EFace;
+	const TPair<const TCHAR*, EFace> Faces[] = {
+		{TEXT("title"), EFace::Title},
+		{TEXT("body"), EFace::Body},
+		{TEXT("italic"), EFace::Italic},
+		{TEXT("element"), EFace::Element},
+		{TEXT("charge"), EFace::Charge}};
 	for (const FWoTOnboardingLegibilityChromeCase& Case :
 		WoTOnboardingLegibilityChromeCases())
 	{
 		Seams.ResolveMenuChrome = Case.Resolver;
 		const FWoTOnboardingMenuChrome Chrome = WoTOnboardingChrome::Resolve();
-		const TPair<const TCHAR*, const FSlateFontInfo*> Faces[] = {
-			{TEXT("title"), &Chrome.TitleFont},
-			{TEXT("body"), &Chrome.BodyFont},
-			{TEXT("italic"), &Chrome.ItalicFont},
-			{TEXT("small"), &Chrome.SmallFont}};
-		for (const TPair<const TCHAR*, const FSlateFontInfo*>& Face : Faces)
+		const FWoTOnboardingFaces Resolved(Chrome);
+		for (const TPair<const TCHAR*, EFace>& Face : Faces)
 		{
-			const float DeckPixels =
-				WoTOnboardingChrome::PhysicalPixels(*Face.Value, DeckScale);
-			TestTrue(FString::Printf(
-				TEXT("%s: the %s face draws at least %.0f px at 1280x800 (%.1f)"),
-				Case.Name, Face.Key, WoTOnboardingChrome::DeckMinimumTextPixels,
-				DeckPixels),
-				DeckPixels + WoTOnboardingLegibilityTolerance
-					>= WoTOnboardingChrome::DeckMinimumTextPixels);
+			// Each face knows whether it drew the published strike, which
+			// the charge mark's glyph choice follows.
+			TestEqual(FString::Printf(TEXT("%s: the %s face reports its source"),
+				Case.Name, Face.Key), Resolved.IsPublished(Face.Value),
+				WoTOnboardingChrome::IsRetail(Chrome));
+			for (const int32 PixelScale : {1, 2})
+			{
+				const float DeckPixels = WoTOnboardingChrome::PhysicalPixels(
+					WoTOnboardingChrome::Font(Chrome, Face.Value, PixelScale),
+					DeckScale);
+				TestTrue(FString::Printf(
+					TEXT("%s: the %s face at %dx draws at least %.0f px at 1280x800 (%.1f)"),
+					Case.Name, Face.Key, PixelScale,
+					WoTOnboardingChrome::DeckMinimumTextPixels, DeckPixels),
+					DeckPixels + WoTOnboardingLegibilityTolerance
+						>= WoTOnboardingChrome::DeckMinimumTextPixels);
+			}
 		}
 	}
 
 	// The floor only lifts: faces already above it keep their sizes.
-	Seams.ResolveMenuChrome = nullptr;
-	const FWoTOnboardingMenuChrome Fallback = WoTOnboardingChrome::Resolve();
-	TestEqual(TEXT("the fallback title keeps its size"),
-		Fallback.TitleFont.Size, 26.0f);
-	TestEqual(TEXT("the fallback body keeps its size"),
-		Fallback.BodyFont.Size, 14.0f);
+	const FWoTOnboardingMenuChrome Fallback;
+	TestFalse(TEXT("an empty chrome is not the published look"),
+		WoTOnboardingChrome::IsRetail(Fallback));
+	TestEqual(TEXT("the stand-in title keeps its size"),
+		WoTOnboardingChrome::Font(Fallback, EFace::Title, 1).Size, 18.0f);
+	TestEqual(TEXT("the stand-in body keeps its size"),
+		WoTOnboardingChrome::Font(Fallback, EFace::Body, 1).Size, 10.0f);
 	return !HasAnyErrors();
 }
 
@@ -239,6 +305,8 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
 
+	// Every widget opens as it would on the Deck.
+	const FVector2D Deck(1280.0, 800.0);
 	UWoTAngrealGuide* Guide = WoTOnboardingLegibilityMakeGuide();
 	for (const FWoTOnboardingLegibilityChromeCase& Case :
 		WoTOnboardingLegibilityChromeCases())
@@ -248,6 +316,7 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 		// The browser, once per detail page so every pane is built.
 		const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
 			.Guide(Guide)
+			.InitialPhysicalSize(Deck)
 			.TextResolver(&WoTOnboardingLegibilityText);
 		TArray<FString> Texts;
 		int32 Lines = WoTOnboardingLegibilityExpectLines(*this,
@@ -257,13 +326,13 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts);
 		TestTrue(FString::Printf(TEXT("%s: the browser drew text"), Case.Name),
 			Lines >= 20);
-		// The lines that once used the menu's small face are all present,
-		// so the size checks above covered them.
-		for (const TCHAR* Expected : {TEXT("COMMON"), TEXT("RARE"),
-			TEXT("TRAPS"), TEXT("COUNTERS"), TEXT("COUNTERED BY"),
-			TEXT("[ON] FIRE"), TEXT("[--] EARTH"), TEXT("Combat, Offensive"),
-			TEXT("An invented flail of sparks."), TEXT("An invented line of verse."),
-			TEXT("Damper Disc smothers it.")})
+		// The labels, the gem names and the prose are all present, so the
+		// size checks above covered them.
+		for (const TCHAR* Expected : {TEXT("FIELD GUIDE"), TEXT("COMMON"),
+			TEXT("RARE"), TEXT("TRAPS"), TEXT("COUNTERS"), TEXT("COUNTERED BY"),
+			TEXT("FIRE"), TEXT("EARTH"), TEXT("Common artifact"),
+			TEXT("Charges:  4 / 10"), TEXT("An invented flail of sparks."),
+			TEXT("An invented line of verse."), TEXT("Damper Disc smothers it.")})
 		{
 			TestTrue(FString::Printf(TEXT("%s: the browser shows \"%s\""),
 				Case.Name, Expected), Texts.Contains(FString(Expected)));
@@ -271,15 +340,29 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 
 		// The first-pickup card.
 		FWoTPickupCardText CardText;
+		CardText.ItemClass = TEXT("SparkFlail");
 		CardText.Title = TEXT("Spark Flail");
 		CardText.Summary = TEXT("An invented flail of sparks.");
-		CardText.KeyHint = TEXT("Press F3 for the field guide");
+		CardText.KeyHint = TEXT("F3  Field Guide");
 		TArray<FString> CardTexts;
 		const int32 CardLines = WoTOnboardingLegibilityExpectLines(*this,
 			FString::Printf(TEXT("%s, pickup card"), Case.Name),
-			SNew(SWoTPickupCard).Text(CardText), CardTexts);
+			SNew(SWoTPickupCard).Text(CardText).InitialPhysicalSize(Deck), CardTexts);
 		TestEqual(FString::Printf(TEXT("%s: the card drew its three lines"),
 			Case.Name), CardLines, 3);
+
+		// The death recap.
+		FWoTPickupCardText RecapText = CardText;
+		RecapText.Kicker = TEXT("KILLED BY");
+		RecapText.CounterClass = TEXT("DamperDisc");
+		RecapText.SummaryKicker = TEXT("COUNTER");
+		RecapText.Summary = TEXT("Damper Disc smothers it.");
+		TArray<FString> RecapTexts;
+		const int32 RecapLines = WoTOnboardingLegibilityExpectLines(*this,
+			FString::Printf(TEXT("%s, death recap"), Case.Name),
+			SNew(SWoTPickupCard).Text(RecapText).InitialPhysicalSize(Deck), RecapTexts);
+		TestEqual(FString::Printf(TEXT("%s: the recap drew its five lines"),
+			Case.Name), RecapLines, 5);
 	}
 	return !HasAnyErrors();
 }

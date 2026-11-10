@@ -176,7 +176,12 @@ bool FWoTOnboardingPickupCardTextSpec::RunTest(const FString&)
 	TestEqual(TEXT("summary is the first sentence"), Text.Summary,
 		FString(TEXT("Lobs an invented ember.")));
 	TestEqual(TEXT("key hint names the live key"), Text.KeyHint,
-		FString(TEXT("Press F3 for the field guide")));
+		FString(TEXT("F3  Field Guide")));
+	TestEqual(TEXT("the card carries its item for the icon"), Text.ItemClass,
+		FName(TEXT("AngrealInvEmberLob")));
+	TestTrue(TEXT("a pickup card is not a recap"),
+		Text.Kicker.IsEmpty() && Text.SummaryKicker.IsEmpty()
+		&& Text.CounterClass.IsNone());
 
 	const FWoTPickupCardText Bare = WoTOnboardingPickupCards::ComposeText(Row,
 		[](const FString&, const FString&) { return FString(); }, FString());
@@ -299,10 +304,12 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingPickupCardWidgetSpec,
 bool FWoTOnboardingPickupCardWidgetSpec::RunTest(const FString&)
 {
 	FWoTPickupCardText Text;
+	Text.ItemClass = FName(TEXT("EmberLob"));
 	Text.Title = TEXT("Ember Lob Rod");
 	Text.Summary = TEXT("Lobs an invented ember.");
-	Text.KeyHint = TEXT("Press F3 for the field guide");
+	Text.KeyHint = TEXT("F3  Field Guide");
 	const TSharedRef<SWoTPickupCard> Card = SNew(SWoTPickupCard).Text(Text);
+	TestFalse(TEXT("a pickup card uses the card layout"), Card->IsRecap());
 	TestFalse(TEXT("the card never takes focus"), Card->SupportsKeyboardFocus());
 	TestFalse(TEXT("the card never hit-tests"),
 		Card->GetVisibility().IsHitTestVisible());

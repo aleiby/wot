@@ -41,6 +41,7 @@
 #include "Inventory/WoTInventory.h"
 #include "Inventory/WoTHandInfo.h"
 #include "Inventory/WoTHandSet.h"
+#include "Inventory/WoTInventoryComponent.h"
 #include "Inventory/WoTSeal.h"
 #include "Projectiles/WoTMashadarGuide.h"
 #include "Traps/WoTPortcullis.h"
@@ -557,6 +558,15 @@ void AWoTPlayerController::BeginPlay()
 				const AWoTPlayerController* Controller = WeakThis.Get();
 				return Controller && (Controller->IsItemInfoOpen()
 					|| Controller->IsHelpOpen() || Controller->InGameMenu.IsOpen());
+			};
+		// The selected hand's item (the one the item-info key describes), so
+		// an improvement module's guide can open at it. Cleared on EndPlay.
+		Seams.SelectedItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? UWoTInventoryComponent::GetHandSetItemName(
+					Controller->GetSelectedItemForInfo()) : FName();
 			};
 	}
 	ClearProgressMessages();
@@ -4142,6 +4152,7 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 		}
 		Seams.SetOverlayInput = nullptr;
 		Seams.IsClientWindowOpen = nullptr;
+		Seams.SelectedItemClass = nullptr;
 	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.
@@ -4284,7 +4295,7 @@ void AWoTPlayerController::SetupInputComponent()
 			this, &AWoTPlayerController::ShowHelp);
 		{
 			// ShowGuide (onboarding seam): a broadcast only, inert when nothing
-			// is bound — the retail help action above stays exactly as ported.
+			// is bound; the retail help action above stays exactly as ported.
 			// A weak lambda, so the controller's surface gains no handler for
 			// an improvement-only action.
 			FInputActionBinding Binding(FName(TEXT("ShowGuide")), IE_Pressed);

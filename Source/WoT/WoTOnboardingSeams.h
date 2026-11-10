@@ -2,10 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Fonts/SlateFontInfo.h"
-#include "Styling/SlateColor.h"
 
 class SWidget;
-struct FSlateBrush;
+class UTexture2D;
 
 // The onboarding extension seam (docs/plans/2026-11-06-onboarding-aids.md,
 // Architecture §2): the one surface the game module exposes to the optional
@@ -38,26 +37,20 @@ DECLARE_MULTICAST_DELEGATE(FWoTShowGuideRequested);
     behaves exactly as before. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FWoTCloseClientWindows, FName /*Keeper*/);
 
-/** The menu chrome the game module publishes so an improvement module's
-    windows can draw beside the retail overlays without linking any game
-    class: the two authenticated menu faces plus the shared panel brushes.
-    Resolved per open: the fonts are revocable payload data, so a resolver
-    answering unset means "draw with your own fallback". The brushes point at
-    process-lifetime style storage. */
+/** The faces the game module publishes so an improvement module's windows
+    can draw in the original game's type without linking any game class.
+    Resolved per open: the faces are revocable payload data, so a resolver
+    answering unset means "draw with your own fallback". */
 struct FWoTOnboardingMenuChrome
 {
-	FSlateFontInfo TitleFont;
-	FSlateFontInfo BodyFont;
-	FSlateFontInfo ItalicFont;
-	FSlateFontInfo SmallFont;
-	const FSlateBrush* Background = nullptr;
-	const FSlateBrush* Frame = nullptr;
-	const FSlateBrush* Blackout = nullptr;
-	const FSlateBrush* Separator = nullptr;
-	FSlateColor Foreground = FSlateColor::UseForeground();
-	FSlateColor Accent = FSlateColor::UseForeground();
-	/** Ties a widget drawing these fonts to their revocable generation (the
-	    widget collapses if the payload is revoked). Optional. */
+	/** One of the original game's bitmap faces (F_WOTReg30, F_WOTReg14,
+	    F_WOTIta14, F_Element) as an exact PixelScale strike (1 or 2), sized
+	    for a widget that draws PixelScale screen pixels per unit, so every
+	    glyph lands on whole screen pixels. Answering a font without a face
+	    means "draw this face with your own fallback". */
+	TFunction<FSlateFontInfo(FName /*Face*/, int32 /*PixelScale*/)> PixelFont;
+	/** Ties a widget drawing these faces to their revocable generation (the
+	    widget collapses if the payload is revoked). */
 	TFunction<void(const TSharedRef<SWidget>&)> BindWidget;
 };
 
@@ -101,9 +94,9 @@ struct WOT_API FWoTOnboardingSeams
 	FString ResolveText(const FString& File, const FString& Section,
 		const FString& Property) const;
 
-	/** The retail menu chrome, installed by the game module at startup. Unset
-	    (or answering unset while the guarded faces are unavailable) means the
-	    caller draws with its own fallback. */
+	/** The original game's faces, installed by the game module at startup.
+	    Unset (or answering unset while the guarded faces are unavailable)
+	    means the caller draws with its own fallback. */
 	TFunction<TOptional<FWoTOnboardingMenuChrome>()> ResolveMenuChrome;
 
 	/** In-match UI input hosting for an improvement module's window: true
@@ -121,4 +114,28 @@ struct WOT_API FWoTOnboardingSeams
 	    local gameplay controller while it lives; unbound reads as nothing
 	    open. */
 	TFunction<bool()> IsClientWindowOpen;
+
+	/** The original UI art by name: InfoBoxC1, InfoBoxC2 and IconMask (the
+	    item-info window's frame, gem bar, dividers and icon bevel) and
+	    StatusIconFrame (the HUD's gold selected-slot frame). Installed by the
+	    game module at startup and resolved the way the HUD resolves its art,
+	    so a release reads it from the player's own files. bSmooth asks for
+	    bilinear filtering, for art drawn at a size that is not a whole
+	    multiple of its own; otherwise it is filtered as the HUD filters it,
+	    so whole-number scales stay crisp (a build that loads cooked assets
+	    keeps each asset's own filtering). Unbound, an unknown name, or
+	    unresolved -> null. The caller keeps what it draws alive. */
+	TFunction<UTexture2D*(FName /*Name*/, bool /*bSmooth*/)> ResolveRetailTexture;
+
+	/** A shipped item class's inventory icon (its StatusIcon), by the same
+	    class-name key as ClientItemAdded, filtered as ResolveRetailTexture
+	    describes. Installed by the game module at startup. Unbound or
+	    unresolved -> null. */
+	TFunction<UTexture2D*(FName /*ClassName*/, bool /*bSmooth*/)> ResolveItemIcon;
+
+	/** The shipped class name of the item in the local player's selected
+	    hand (the HandSet item name), or NAME_None. Installed by the local
+	    gameplay controller while it lives; unbound reads as nothing
+	    selected. */
+	TFunction<FName()> SelectedItemClass;
 };

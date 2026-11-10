@@ -140,6 +140,14 @@ bool FWoTOnboardingGuideCompiledRowsSpec::RunTest(const FString&)
 	TestEqual(TEXT("fireball's starting charges"), Fireball->MaxInitialCharges,
 		20);
 	TestEqual(TEXT("fireball's charge cap"), Fireball->MaxCharges, 35);
+	TestEqual(TEXT("each fireball cast spends a charge"), Fireball->ChargeCost, 1);
+	const FWoTAngrealGuideRow* AirPulse =
+		Guide->FindByClassName(FName(TEXT("AngrealInvAirBurst")));
+	if (TestNotNull(TEXT("the compiled guide resolves the air pulse row"),
+		AirPulse))
+	{
+		TestEqual(TEXT("air pulse never runs down"), AirPulse->ChargeCost, 0);
+	}
 	const FWoTAngrealGuideRow* Counter =
 		WoTOnboardingHints::HintCounter(*Guide, *Fireball);
 	if (TestNotNull(TEXT("fireball's hint names a counter the rows back"),
@@ -167,13 +175,13 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 		{"class_name":"EmberLob","cpp_class":"FxEmberLob",
 		 "elements":["Fire"],"rarity":"Common",
 		 "roles":["Combat","Offensive"],
-		 "max_initial_charges":4,"max_charges":9,
+		 "max_initial_charges":4,"max_charges":9,"charge_cost":1,
 		 "counters":[],
 		 "hint_text":"{counter:CinderWard} quenches it."},
 		{"class_name":"PitSnare","cpp_class":"FxPitSnare",
 		 "elements":[],"rarity":"",
 		 "roles":[],
-		 "max_initial_charges":0,"max_charges":0,
+		 "max_initial_charges":0,"max_charges":0,"charge_cost":0,
 		 "counters":["EmberLob"],
 		 "hint_text":""}]})json");
 
@@ -188,6 +196,7 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 	TestEqual(TEXT("class"), Ember.ClassName, FName(TEXT("EmberLob")));
 	TestEqual(TEXT("cpp"), Ember.CppClass, FName(TEXT("FxEmberLob")));
 	TestEqual(TEXT("charges"), Ember.MaxCharges, 9);
+	TestEqual(TEXT("charge cost"), Ember.ChargeCost, 1);
 	TestEqual(TEXT("hint keeps placeholders literal"), Ember.HintText,
 		FString(TEXT("{counter:CinderWard} quenches it.")));
 	TestTrue(TEXT("empty rarity folds to NAME_None"),
@@ -233,18 +242,26 @@ bool FWoTOnboardingGuideImportJsonRejectsSpec::RunTest(const FString&)
 	Rejects(TEXT("empty class_name"), TEXT(
 		R"({"rows":[{"class_name":"","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""}]})"));
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
 	Rejects(TEXT("negative charges"), TEXT(
 		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":-1,"max_charges":0,)"
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
+	Rejects(TEXT("negative charge cost"), TEXT(
+		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
+		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
+		R"("charge_cost":-1,"counters":[],"hint_text":""}]})"));
+	Rejects(TEXT("missing charge cost"), TEXT(
+		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
+		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
 		R"("counters":[],"hint_text":""}]})"));
 	Rejects(TEXT("duplicate class_name"), TEXT(
 		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""},)"
+		R"("charge_cost":0,"counters":[],"hint_text":""},)"
 		R"({"class_name":"A","cpp_class":"Y","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""}]})"));
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
 	TestEqual(TEXT("surviving row is the original"),
 		Guide->Rows[0].ClassName, FName(TEXT("KeepMe")));
 	return true;

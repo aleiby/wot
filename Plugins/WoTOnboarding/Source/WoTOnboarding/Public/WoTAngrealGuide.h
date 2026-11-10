@@ -47,6 +47,13 @@ struct WOTONBOARDING_API FWoTAngrealGuideRow
 	UPROPERTY(EditAnywhere, Category = "WoT|Guide")
 	int32 MaxCharges = 0;
 
+	/** Charges one use spends: the class's ChargeCost, 1 unless the class
+	    overrides it, as in the original. 0 for an angreal that never runs
+	    down, which the item-info window shows as unlimited; the compiled
+	    rows also carry 0 for the traps, which have no charges. */
+	UPROPERTY(EditAnywhere, Category = "WoT|Guide")
+	int32 ChargeCost = 1;
+
 	/** Rows THIS row counters (a shield lists the offenses it stops).
 	    CounteredBy inverts the relation. */
 	UPROPERTY(EditAnywhere, Category = "WoT|Guide")

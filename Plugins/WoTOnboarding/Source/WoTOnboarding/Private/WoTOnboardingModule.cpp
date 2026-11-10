@@ -10,6 +10,7 @@
 
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "Engine/World.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/InputSettings.h"
@@ -113,6 +114,28 @@ void WoTOnboardingRemoveOwnedRows(TArray<FWoTOnboardingRow>& Rows)
 	{
 		return Row.Owner == FWoTOnboardingModule::SettingsRowOwner();
 	});
+}
+
+/** The viewport's size in pixels and the UI DPI scale the game layer applies
+    at that size, so a window's first frame draws at its final scale (Slate
+    lays a widget out before its first tick). */
+struct FWoTOnboardingViewportScale
+{
+	FVector2D PhysicalSize = FVector2D::ZeroVector;
+	float DpiScale = 1.0f;
+};
+
+FWoTOnboardingViewportScale WoTOnboardingViewportScaleOf(UGameViewportClient& Viewport)
+{
+	FWoTOnboardingViewportScale Result;
+	Viewport.GetViewportSize(Result.PhysicalSize);
+	if (const UUserInterfaceSettings* Settings = GetDefault<UUserInterfaceSettings>())
+	{
+		Result.DpiScale = Settings->GetDPIScaleBasedOnSize(FIntPoint(
+			FMath::TruncToInt32(Result.PhysicalSize.X),
+			FMath::TruncToInt32(Result.PhysicalSize.Y)));
+	}
+	return Result;
 }
 } // namespace
 
@@ -438,10 +461,14 @@ void FWoTOnboardingModule::HostCard(const FWoTPickupCardText& Text,
 	PickupCardViewport = GEngine->GameViewport;
 	PickupCardClass = ClassName;
 	bCardIsDeathRecap = bDeathRecap;
+	const FWoTOnboardingViewportScale ViewportScale =
+		WoTOnboardingViewportScaleOf(*PickupCardViewport);
 	PickupCard = SNew(SWoTPickupCard)
 		.Text(Text)
 		.Lifetime(bDeathRecap ? WoTOnboardingDeathRecapLifetime
 		                      : WoTOnboardingPickupCardLifetime)
+		.InitialPhysicalSize(ViewportScale.PhysicalSize)
+		.InitialDpiScale(ViewportScale.DpiScale)
 		.OnExpired(FSimpleDelegate::CreateRaw(
 			this, &FWoTOnboardingModule::ClosePickupCardDeferred));
 	// Passive: no input mode change and no focus; play carries on.
@@ -516,23 +543,26 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 		// does nothing (the loader already logged it once).
 		return;
 	}
-	// The card's suggestion followed: the guide opens at the card's item.
-	// Captured first, because the close broadcast below removes the card.
-	const FName CardClass = PickupCardClass;
+	// The card's suggestion followed: the guide opens at the card's item, or
+	// else at the item in the player's selected hand. Captured first, because
+	// the close broadcast below removes the card.
 	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FName InitialRow = SWoTGuideBrowser::OpeningRow(*Guide, PickupCardClass,
+		Seams.SelectedItemClass ? Seams.SelectedItemClass() : NAME_None);
 	// One client window at a time, as the original kept it: the retail
 	// windows close before the guide takes the screen.
 	Seams.CloseClientWindows.Broadcast(WoTOnboardingGuideKeeper());
 	GuideViewport = GEngine->GameViewport;
+	const FWoTOnboardingViewportScale ViewportScale =
+		WoTOnboardingViewportScaleOf(*GuideViewport);
 	GuideBrowser = SNew(SWoTGuideBrowser)
 		.Guide(Guide)
+		.InitialRow(InitialRow)
+		.InitialPhysicalSize(ViewportScale.PhysicalSize)
+		.InitialDpiScale(ViewportScale.DpiScale)
 		.CloseKeys(WoTOnboardingActionKeys(WoTOnboardingShowGuideAction()))
 		.OnClose(FSimpleDelegate::CreateRaw(
 			this, &FWoTOnboardingModule::CloseGuideBrowser));
-	if (!CardClass.IsNone())
-	{
-		GuideBrowser->SelectRow(CardClass);
-	}
 	// Above the item-info window (1900), below the in-game menu (2000) and
 	// the help window (2100), though the close broadcasts keep these from
 	// stacking in the first place.

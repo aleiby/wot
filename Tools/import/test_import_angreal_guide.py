@@ -248,7 +248,14 @@ class ReferencePinTests(unittest.TestCase):
 # ForkWard's SplitBounce expands ReturnToSenderReflector (the ancestry path
 # that carries the Fork semantics on real data).
 DERIVE_FIXTURES = {
-    "RelicBase": "class RelicBase expands Stockpile;\n",
+    "RelicBase": """\
+class RelicBase expands Stockpile;
+
+defaultproperties
+{
+     ChargeCost=1
+}
+""",
     "ProjectileLauncher": "class ProjectileLauncher expands RelicBase;\n",
     "ReturnToSenderReflector":
         "class ReturnToSenderReflector expands WispBase;\n",
@@ -287,6 +294,7 @@ defaultproperties
      bRare=True
      MaxInitialCharges=1
      MaxCharges=2
+     ChargeCost=0
 }
 """,
     "CinderWard": """\
@@ -491,6 +499,10 @@ class SyntheticDerivationTests(DeriveFixtureMixin, unittest.TestCase):
         self.assertEqual(ember.roles, ["Offensive"])
         self.assertEqual(ember.max_initial_charges, "4")
         self.assertEqual(ember.max_charges, "9")
+        # Inherited from the base, as the original property system resolves
+        # it; a class that never runs down overrides it to zero.
+        self.assertEqual(ember.charge_cost, "1")
+        self.assertEqual(rows["EmberPuff"].charge_cost, "0")
         self.assertEqual(ember.counters, [])
         self.assertEqual(ember.hint_key, "EmberLob")
         self.assertEqual(rows["CinderWard"].hint_key, "")
@@ -674,10 +686,11 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
         lines = first.splitlines()
         self.assertEqual(lines[0], ",".join(
             import_angreal_guide.FACTS_COLUMNS))
-        self.assertIn("EmberLob,FxEmberLob,Fire,Common,Offensive,4,9,,EmberLob",
-                      lines)
         self.assertIn(
-            "CinderWard,FxCinderWard,,Rare,Defensive,3,5,EmberLob;EmberPuff,",
+            "EmberLob,FxEmberLob,Fire,Common,Offensive,4,9,1,,EmberLob",
+            lines)
+        self.assertIn(
+            "CinderWard,FxCinderWard,,Rare,Defensive,3,5,1,EmberLob;EmberPuff,",
             lines)
         self.assertTrue(first.endswith("\n"))
         self.assertNotIn("\r", first)
@@ -686,7 +699,7 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
         row = import_angreal_guide.GuideRow(
             class_name='Odd"Relic', cpp_class="Fx,Comma", elements=["Fire"],
             rarity="Common", roles=[], max_initial_charges="1",
-            max_charges="2", counters=[], hint_key="")
+            max_charges="2", charge_cost="1", counters=[], hint_key="")
         text = import_angreal_guide.render_facts_csv([row])
         parsed = list(csv.reader(io.StringIO(text)))
         self.assertEqual(parsed[1][0], 'Odd"Relic')
@@ -757,15 +770,17 @@ class PayloadTests(unittest.TestCase):
         return [
             make(class_name="CinderWard", cpp_class="FxCinderWard",
                  elements=[], rarity="Rare", roles=["Combat", "Defensive"],
-                 max_initial_charges="3", max_charges="5",
+                 max_initial_charges="3", max_charges="5", charge_cost="1",
                  counters=["EmberLob"], hint_key=""),
             make(class_name="EmberLob", cpp_class="FxEmberLob",
                  elements=["Fire"], rarity="Common",
                  roles=["Combat", "Offensive"], max_initial_charges="4",
-                 max_charges="9", counters=[], hint_key="EmberLob"),
+                 max_charges="9", charge_cost="0", counters=[],
+                 hint_key="EmberLob"),
             make(class_name="SnareInventory", cpp_class="FxSnareInventory",
                  elements=[], rarity="", roles=[], max_initial_charges="",
-                 max_charges="", counters=[], hint_key="Snare"),
+                 max_charges="", charge_cost="", counters=[],
+                 hint_key="Snare"),
         ]
 
     HINTS = {"EmberLob": "{counter:CinderWard} quenches it.",
@@ -788,11 +803,11 @@ class PayloadTests(unittest.TestCase):
     def test_loader_rejects_duplicate_and_empty_classes(self):
         header = ",".join(import_angreal_guide.FACTS_COLUMNS)
         duplicate = self.write("d.csv", header + "\n"
-                               + "A,FxA,,,,,,,\n" + "A,FxA,,,,,,,\n")
+                               + "A,FxA,,,,,,,,\n" + "A,FxA,,,,,,,,\n")
         with self.assertRaises(GenerationError) as caught:
             import_angreal_guide.load_facts_csv(duplicate)
         self.assertIn("duplicate", str(caught.exception))
-        empty = self.write("e.csv", header + "\n" + ",FxA,,,,,,,\n")
+        empty = self.write("e.csv", header + "\n" + ",FxA,,,,,,,,\n")
         with self.assertRaises(GenerationError) as caught:
             import_angreal_guide.load_facts_csv(empty)
         self.assertIn("empty Class", str(caught.exception))
@@ -808,8 +823,11 @@ class PayloadTests(unittest.TestCase):
                          self.HINTS["Snare"])
         self.assertEqual(by_class["EmberLob"]["max_initial_charges"], 4)
         self.assertEqual(by_class["EmberLob"]["max_charges"], 9)
+        self.assertEqual(by_class["EmberLob"]["charge_cost"], 0)
+        self.assertEqual(by_class["CinderWard"]["charge_cost"], 1)
         self.assertEqual(by_class["SnareInventory"]["max_initial_charges"], 0)
         self.assertEqual(by_class["SnareInventory"]["max_charges"], 0)
+        self.assertEqual(by_class["SnareInventory"]["charge_cost"], 0)
         self.assertEqual(by_class["CinderWard"]["counters"], ["EmberLob"])
 
     def test_payload_rows_reject_unknown_hints_and_bad_charges(self):
@@ -825,13 +843,13 @@ class PayloadTests(unittest.TestCase):
     FIXTURE_PAYLOAD = [{
         "class_name": "FixtureLob", "cpp_class": "FxFixtureLob",
         "elements": ["Fire"], "rarity": "", "roles": [],
-        "max_initial_charges": 0, "max_charges": 9,
+        "max_initial_charges": 0, "max_charges": 9, "charge_cost": 0,
         "counters": ["FixtureWard"],
         "hint_text": 'Say "{title}" twice; a \\ stays put.',
     }, {
         "class_name": "FixtureWard", "cpp_class": "FxFixtureWard",
         "elements": [], "rarity": "Rare", "roles": ["Defensive"],
-        "max_initial_charges": 3, "max_charges": 5,
+        "max_initial_charges": 3, "max_charges": 5, "charge_cost": 1,
         "counters": [], "hint_text": "",
     }]
 
@@ -1001,6 +1019,16 @@ class InTreeGuideDataTests(unittest.TestCase):
                 used[row["HintKey"]] = row["Class"]
                 self.assertIn(row["HintKey"], self.hints, row["Class"])
         self.assertEqual(sorted(used), sorted(self.hints))
+
+    def test_charge_costs_back_the_unlimited_display(self):
+        for row in self.angreal_rows:
+            self.assertTrue(row["ChargeCost"].isdigit(), row["Class"])
+        for row in self.trap_rows:
+            self.assertEqual(row["ChargeCost"], "", row["Class"])
+        # Air Pulse replenishes itself (ChargeCost=0 in its defaults), so the
+        # guide shows it as unlimited, as the item info window does.
+        self.assertEqual(self.by_class["AngrealInvAirBurst"]["ChargeCost"], "0")
+        self.assertEqual(self.by_class["AngrealInvFireball"]["ChargeCost"], "1")
 
     def test_overrides_cite_the_exports(self):
         self.assertTrue(self.overrides)

@@ -179,32 +179,52 @@ bool FWoTOnboardingDeathRecapTextSpec::RunTest(const FString&)
 
 	const FWoTPickupCardText Ember = ComposeText(*Guide,
 		*Guide->FindByClassName(FName(TEXT("EmberLob"))), Titles, TEXT("F3"));
+	TestEqual(TEXT("the kicker leads"), Ember.Kicker, FString(TEXT("KILLED BY")));
 	TestEqual(TEXT("the title names the killing item"), Ember.Title,
-		FString(TEXT("Killed by Ember Lob")));
+		FString(TEXT("Ember Lob")));
+	TestEqual(TEXT("the killing item's icon"), Ember.ItemClass,
+		FName(TEXT("EmberLob")));
+	TestEqual(TEXT("the counter's kicker"), Ember.SummaryKicker,
+		FString(TEXT("COUNTER")));
+	TestEqual(TEXT("the counter the line names"), Ember.CounterClass,
+		FName(TEXT("CinderWard")));
 	TestEqual(TEXT("the line names its counter"), Ember.Summary,
 		FString(TEXT("Cinder Ward quenches it.")));
 	TestEqual(TEXT("the key line reads the guide binding"), Ember.KeyHint,
-		FString(TEXT("Press F3 for the field guide")));
+		FString(TEXT("F3  Field Guide")));
 
 	const FWoTPickupCardText Void = ComposeText(*Guide,
 		*Guide->FindByClassName(FName(TEXT("VoidLance"))), Titles, FString());
 	TestEqual(TEXT("an unresolved title falls back to the spaced class name"),
-		Void.Title, FString(TEXT("Killed by Void Lance")));
+		Void.Title, FString(TEXT("Void Lance")));
 	TestEqual(TEXT("in the line as well"), Void.Summary,
 		FString(TEXT("Void Lance cannot be turned; strike first.")));
+	TestTrue(TEXT("a line that names no counter leaves no counter icon"),
+		Void.CounterClass.IsNone());
 	TestTrue(TEXT("an unbound guide key leaves no key line"), Void.KeyHint.IsEmpty());
 
 	const FWoTPickupCardText Frost = ComposeText(*Guide,
 		*Guide->FindByClassName(FName(TEXT("FrostPin"))), Titles, TEXT("F3"));
 	TestTrue(TEXT("a row with no line composes nothing"),
-		Frost.Title.IsEmpty() && Frost.Summary.IsEmpty() && Frost.KeyHint.IsEmpty());
+		Frost.Kicker.IsEmpty() && Frost.Title.IsEmpty() && Frost.Summary.IsEmpty()
+		&& Frost.KeyHint.IsEmpty() && Frost.ItemClass.IsNone());
 
-	// The recap draws in the pickup card's widget: three lines, in order.
+	// The recap draws in the pickup card's widget, in its recap layout: the
+	// killer under its kicker, then the counter under its own.
+	const TSharedRef<SWoTPickupCard> Recap =
+		SNew(SWoTPickupCard).Text(Ember).Lifetime(6.0f);
+	TestTrue(TEXT("a kicker selects the recap layout"), Recap->IsRecap());
 	TArray<FString> Lines;
-	WoTOnboardingRecapCollectText(SNew(SWoTPickupCard).Text(Ember).Lifetime(6.0f),
+	WoTOnboardingRecapCollectText(Recap, Lines);
+	TestEqual(TEXT("the recap draws its five lines in order"), Lines,
+		TArray<FString>({Ember.Kicker, Ember.Title, Ember.SummaryKicker,
+			Ember.Summary, Ember.KeyHint}));
+
+	Lines.Reset();
+	WoTOnboardingRecapCollectText(SNew(SWoTPickupCard).Text(Void).Lifetime(6.0f),
 		Lines);
-	TestEqual(TEXT("the card draws title, line and key line"), Lines,
-		TArray<FString>({Ember.Title, Ember.Summary, Ember.KeyHint}));
+	TestEqual(TEXT("no key line and no counter icon still draws the rest"), Lines,
+		TArray<FString>({Void.Kicker, Void.Title, Void.SummaryKicker, Void.Summary}));
 	return true;
 }
 

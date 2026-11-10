@@ -1,26 +1,68 @@
 #include "WoTOnboardingChrome.h"
 
-#include "Engine/UserInterfaceSettings.h"
-#include "Fonts/SlateFontInfo.h"
+#include "Layout/Geometry.h"
 #include "Styling/CoreStyle.h"
 
 namespace
 {
-FWoTOnboardingMenuChrome WoTOnboardingFallbackChrome()
+FName WoTOnboardingFaceName(WoTOnboardingChrome::EFace Face)
 {
-	FWoTOnboardingMenuChrome Chrome;
-	Chrome.TitleFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 26);
-	Chrome.BodyFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
-	Chrome.ItalicFont = FCoreStyle::GetDefaultFontStyle(TEXT("Italic"), 14);
-	Chrome.SmallFont = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
-	const FSlateBrush* White = FCoreStyle::Get().GetBrush(TEXT("WhiteBrush"));
-	Chrome.Background = White;
-	Chrome.Frame = White;
-	Chrome.Blackout = White;
-	Chrome.Separator = White;
-	Chrome.Foreground = FSlateColor(FLinearColor(0.92f, 0.92f, 0.88f));
-	Chrome.Accent = FSlateColor(FLinearColor(1.0f, 0.85f, 0.45f));
-	return Chrome;
+	switch (Face)
+	{
+	case WoTOnboardingChrome::EFace::Title:
+		return FName(TEXT("F_WOTReg30"));
+	case WoTOnboardingChrome::EFace::Italic:
+		return FName(TEXT("F_WOTIta14"));
+	case WoTOnboardingChrome::EFace::Element:
+		return FName(TEXT("F_Element"));
+	case WoTOnboardingChrome::EFace::Charge:
+		return FName(TEXT("F_Charge"));
+	default:
+		return FName(TEXT("F_WOTReg14"));
+	}
+}
+
+/** An engine face standing in for an original one, at about its height in
+    window units. */
+FSlateFontInfo WoTOnboardingEngineFace(WoTOnboardingChrome::EFace Face)
+{
+	switch (Face)
+	{
+	case WoTOnboardingChrome::EFace::Title:
+		return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 18);
+	case WoTOnboardingChrome::EFace::Italic:
+		return FCoreStyle::GetDefaultFontStyle(TEXT("Italic"), 10);
+	case WoTOnboardingChrome::EFace::Element:
+		return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 9);
+	default:
+		return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10);
+	}
+}
+
+/** Face at PixelScale as Font() describes, and whether the chrome
+    published it (false for an engine stand-in). */
+FSlateFontInfo WoTOnboardingResolveFace(const FWoTOnboardingMenuChrome& Chrome,
+	WoTOnboardingChrome::EFace Face, int32 PixelScale, bool& bOutPublished)
+{
+	FSlateFontInfo Font;
+	if (Chrome.PixelFont)
+	{
+		Font = Chrome.PixelFont(WoTOnboardingFaceName(Face),
+			FMath::Clamp(PixelScale, 1, 2));
+	}
+	bOutPublished = Font.HasValidFont();
+	if (!bOutPublished)
+	{
+		Font = WoTOnboardingEngineFace(Face);
+	}
+	Font.Size = FMath::Max(Font.Size, WoTOnboardingChrome::DeckMinimumFontSize());
+	return Font;
+}
+
+float WoTOnboardingFit(const FVector2D& PhysicalSize)
+{
+	return FMath::Min(PhysicalSize.X / WoTOnboardingChrome::WindowWidth,
+		PhysicalSize.Y / WoTOnboardingChrome::WindowHeight);
 }
 } // namespace
 
@@ -29,40 +71,116 @@ FWoTOnboardingMenuChrome WoTOnboardingChrome::Resolve()
 	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
 	const TOptional<FWoTOnboardingMenuChrome> Resolved = Seams.ResolveMenuChrome
 		? Seams.ResolveMenuChrome() : TOptional<FWoTOnboardingMenuChrome>();
-	FWoTOnboardingMenuChrome Chrome = Resolved.IsSet()
-		? Resolved.GetValue() : WoTOnboardingFallbackChrome();
-	const float MinimumSize = DeckMinimumFontSize();
-	for (FSlateFontInfo* Font : {&Chrome.TitleFont, &Chrome.BodyFont,
-		&Chrome.ItalicFont, &Chrome.SmallFont})
-	{
-		Font->Size = FMath::Max(Font->Size, MinimumSize);
-	}
-	return Chrome;
+	return Resolved.IsSet() ? Resolved.GetValue() : FWoTOnboardingMenuChrome();
 }
 
 bool WoTOnboardingChrome::IsRetail(const FWoTOnboardingMenuChrome& Chrome)
 {
-	// Only the published chrome carries the revocation binder.
-	return static_cast<bool>(Chrome.BindWidget);
+	return static_cast<bool>(Chrome.PixelFont);
 }
 
-float WoTOnboardingChrome::LayoutScaleAt(int32 Width, int32 Height)
+int32 WoTOnboardingChrome::PixelScaleFor(const FVector2D& PhysicalSize)
 {
-	const UUserInterfaceSettings* Settings = GetDefault<UUserInterfaceSettings>();
-	return Settings
-		? Settings->GetDPIScaleBasedOnSize(FIntPoint(Width, Height)) : 1.0f;
+	const float Fit = WoTOnboardingFit(PhysicalSize);
+	return Fit > 0.0f ? FMath::Clamp(FMath::FloorToInt(Fit), 1, 2) : 1;
+}
+
+float WoTOnboardingChrome::WindowScaleFor(const FVector2D& PhysicalSize)
+{
+	const float Fit = WoTOnboardingFit(PhysicalSize);
+	if (!(Fit > 0.0f))
+	{
+		return 1.0f;
+	}
+	return Fit < 1.0f ? Fit : static_cast<float>(PixelScaleFor(PhysicalSize));
+}
+
+float WoTOnboardingChrome::WindowScaleAt(int32 Width, int32 Height)
+{
+	return WindowScaleFor(
+		FVector2D(static_cast<double>(Width), static_cast<double>(Height)));
 }
 
 float WoTOnboardingChrome::PhysicalPixels(const FSlateFontInfo& Font,
-	float LayoutScale)
+	float WindowScale)
 {
 	return Font.Size * static_cast<float>(FontConstants::RenderDPI) / 72.0f
-		* LayoutScale;
+		* WindowScale;
 }
 
 float WoTOnboardingChrome::DeckMinimumFontSize()
 {
-	const float DeckScale = FMath::Max(LayoutScaleAt(1280, 800), 0.01f);
 	return DeckMinimumTextPixels * 72.0f
-		/ (static_cast<float>(FontConstants::RenderDPI) * DeckScale);
+		/ (static_cast<float>(FontConstants::RenderDPI) * WindowScaleAt(1280, 800));
+}
+
+FSlateFontInfo WoTOnboardingChrome::Font(const FWoTOnboardingMenuChrome& Chrome,
+	EFace Face, int32 PixelScale)
+{
+	bool bPublished = false;
+	return WoTOnboardingResolveFace(Chrome, Face, PixelScale, bPublished);
+}
+
+FLinearColor WoTOnboardingChrome::TextColor()
+{
+	return FLinearColor::White;
+}
+
+FLinearColor WoTOnboardingChrome::LabelColor()
+{
+	constexpr float CanvasDefault = 127.0f / 255.0f;
+	return FLinearColor(CanvasDefault, CanvasDefault, CanvasDefault, 1.0f);
+}
+
+TSharedRef<STextBlock> WoTOnboardingChrome::MakeText(
+	const TSharedRef<FWoTOnboardingFaces>& Faces, const FString& Text, EFace Face,
+	const FLinearColor& Color, ETextJustify::Type Justification, bool bWrap)
+{
+	return SNew(STextBlock)
+		.Text(FText::FromString(Text))
+		.Font_Lambda([Faces, Face]() { return Faces->Get(Face); })
+		.ColorAndOpacity(Color)
+		.Justification(Justification)
+		.AutoWrapText(bWrap);
+}
+
+void FWoTOnboardingWindowScale::Initialize(const FVector2D& PhysicalSize,
+	float InDpiScale)
+{
+	if (PhysicalSize.X <= 0.0f || PhysicalSize.Y <= 0.0f)
+	{
+		return;
+	}
+	DpiScale = FMath::Max(InDpiScale, 0.01f);
+	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
+	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize);
+}
+
+bool FWoTOnboardingWindowScale::Update(const FGeometry& AllottedGeometry)
+{
+	DpiScale = FMath::Max(
+		AllottedGeometry.GetAccumulatedLayoutTransform().GetScale(), 0.01f);
+	const FVector2D PhysicalSize =
+		FVector2D(AllottedGeometry.GetLocalSize()) * DpiScale;
+	const int32 PreviousPixelScale = PixelScale;
+	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
+	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize);
+	return PixelScale != PreviousPixelScale;
+}
+
+FWoTOnboardingFaces::FWoTOnboardingFaces(const FWoTOnboardingMenuChrome& InChrome)
+	: Chrome(InChrome)
+{
+	Refresh(1);
+}
+
+void FWoTOnboardingFaces::Refresh(int32 PixelScale)
+{
+	for (int32 Index = 0;
+		Index < static_cast<int32>(WoTOnboardingChrome::EFace::Count); ++Index)
+	{
+		Fonts[Index] = WoTOnboardingResolveFace(Chrome,
+			static_cast<WoTOnboardingChrome::EFace>(Index), PixelScale,
+			bPublished[Index]);
+	}
 }

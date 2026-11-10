@@ -28,16 +28,28 @@ enum class EWoTPickupCardVerdict : uint8
 	ScreenBusy,
 };
 
-/** What a card says. Every part is runtime data or our own wording. */
+/** What a card says, and whose icons it shows. Every part is runtime data
+    or our own wording. A death recap fills the kickers and the counter; a
+    first-pickup card leaves them empty. */
 struct FWoTPickupCardText
 {
+	/** The item the card is about; its icon leads the card. */
+	FName ItemClass;
+	/** A label over the title ("KILLED BY" on a recap). */
+	FString Kicker;
 	/** The resolved retail title, or the spaced class name without it. */
 	FString Title;
-	/** The first sentence of the resolved retail description; empty when
-	    the description does not resolve (never placeholder text). */
+	/** The counter a recap's hint names; its icon leads the hint. None
+	    when the hint names no counter, and on a pickup card. */
+	FName CounterClass;
+	/** A label over the summary ("COUNTER" on a recap). */
+	FString SummaryKicker;
+	/** A pickup card's first sentence of the resolved retail description,
+	    empty when the description does not resolve (never placeholder
+	    text); a recap's hint line. */
 	FString Summary;
-	/** "Press <key> for the field guide", from the live ShowGuide binding;
-	    empty when the action has no key. */
+	/** "<key>  Field Guide", from the live ShowGuide binding; empty when
+	    the action has no key. */
 	FString KeyHint;
 };
 
@@ -60,4 +72,8 @@ namespace WoTOnboardingPickupCards
 		TFunctionRef<FString(const FString& Section, const FString& Property)>
 			ResolveText,
 		const FString& GuideKeyName);
+
+	/** The key legend a card ends with: "<key>  Field Guide", or empty
+	    for no key. */
+	WOTONBOARDING_API FString GuideKeyHint(const FString& GuideKeyName);
 }

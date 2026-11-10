@@ -55,16 +55,20 @@ FWoTPickupCardText WoTOnboardingPickupCards::ComposeText(
 	// The retail localization address: section = the shipped class name.
 	const FString Section = Row.ClassName.ToString();
 	FWoTPickupCardText Text;
+	Text.ItemClass = Row.ClassName;
 	Text.Title = ResolveText(Section, TEXT("Title")).TrimStartAndEnd();
 	if (Text.Title.IsEmpty())
 	{
 		Text.Title = WoTOnboardingHints::SpacedClassName(Row.ClassName);
 	}
 	Text.Summary = FirstSentence(ResolveText(Section, TEXT("Description")));
-	if (!GuideKeyName.IsEmpty())
-	{
-		Text.KeyHint = FString::Printf(
-			TEXT("Press %s for the field guide"), *GuideKeyName);
-	}
+	Text.KeyHint = GuideKeyHint(GuideKeyName);
 	return Text;
+}
+
+FString WoTOnboardingPickupCards::GuideKeyHint(const FString& GuideKeyName)
+{
+	// The key, then what it opens, the way the window legends read.
+	return GuideKeyName.IsEmpty() ? FString()
+		: FString::Printf(TEXT("%s  Field Guide"), *GuideKeyName);
 }

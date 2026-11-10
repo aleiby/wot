@@ -59,7 +59,7 @@ project policy separates retail parity from improvements.
 
 | File | Status | Contents |
 |---|---|---|
-| `Tools/import/data/angreal_guide_facts.csv` | generated, **checked in** | one row per item: `Class, CppClass, Elements, Rarity, Roles, MaxInitialCharges, MaxCharges, Counters, HintKey`; facts only, no prose |
+| `Tools/import/data/angreal_guide_facts.csv` | generated, **checked in** | one row per item: `Class, CppClass, Elements, Rarity, Roles, MaxInitialCharges, MaxCharges, ChargeCost, Counters, HintKey`; facts only, no prose |
 | `Tools/import/data/angreal_counter_overrides.csv` | authored | `Class, Field, Value, Supersedes, Citation`; every edge removed or added by hand carries an `exports/script/...` citation |
 | `Tools/import/data/angreal_guide_hints.csv` | authored | `HintKey, Template`: our own counter-hint templates (`{title}`/`{counter:<Class>}` resolved at runtime; no retail text) |
 | `Plugins/WoTOnboarding/Source/WoTOnboarding/Private/Generated/WoTAngrealGuideRows.inl` | generated, **checked in** | the facts plus resolved hint templates, one JSON row per line, compiled into the plugin (since 2026-11-09; see the status log) |
@@ -266,8 +266,8 @@ CONTRIBUTING delta.
   the field guide". No row, or a row with no hint line, shows nothing.
 - **Honesty gate** (spec): every facts row's `CppClass` resolves to a ported
   class whose CDO element/rarity flags and reflector configuration back the
-  row's claims; cross-check charge envelope against
-  `angreal_expectations.json`. A claim the port does not back fails the
+  row's claims, charge envelope and charge cost included; cross-check the
+  charge envelope against `angreal_expectations.json`. A claim the port does not back fails the
   suite, naming the row. Not-yet-ported classes go on a printed allowlist in
   the spec so shrinkage is visible.
 - **Parity-off gate** (spec): with the master setting off, no onboarding
@@ -285,6 +285,68 @@ CONTRIBUTING delta.
   "Parity fixes and enhancements" with the optional-improvement lane:
   improvements ship as plugins behind a master setting, parity lanes run
   with them off.
+
+### Task 8: The original window look
+
+**Files:** `Source/WoT/WoTOnboardingSeams.h`, `Source/WoT/WoT.cpp`,
+`Source/WoT/WoTPlayerController.cpp` (seams); plugin chrome and art
+(`WoTOnboardingChrome`, `SWoTRetailArt`), the three widgets, the card text.
+
+The aids draw like the original's item-info window, from the player's own
+files, at the whole-number scale the game's windows use:
+
+- **Art.** The frame is `WOTWindow.DrawWindow` and the divider
+  `WOTWindow.DrawSeparator` (`WOTWindow.uc:107-152`, regions at `:184-198`):
+  `InfoBoxC1` corners, a solid black fill, `InfoBoxC2` edge tiles. The gem
+  bar, the five gems and the layout order are `InventoryInfoWindow`'s
+  (`InventoryInfoWindow.uc:59-169`, regions at `:205-220`); `IconMask` covers
+  the detail icon as it covers the window's. Item icons are each class's
+  `StatusIcon`; the guide marks its selection with the HUD's gold
+  selected-slot frame. The frame pieces, the detail icon and the card icons
+  draw at whole-number scales with the HUD's own filtering; the grid's 50 px
+  icons, the 40 px counter icons and the selection frame are not whole
+  multiples of their 64 px art, so they sample bilinearly.
+- **Type.** `F_WOTReg30` titles, `F_WOTReg14` body, `F_WOTIta14` quotes,
+  `F_Element` gem labels, each as an exact 1x or 2x strike, so every glyph
+  lands on whole screen pixels. Labels draw at the menus' unselected grey.
+- **Scale.** The largest whole number (1 or 2) at which a 960x540 window
+  fits the screen; below 960x540 the window shrinks to fit. The card and the
+  recap use the same scale. At 1280x800 (the Deck) the scale is 1 and the
+  smallest face is 14 px tall, above the 12 px floor.
+- **Guide** (960x540, centred): "FIELD GUIDE" and "Esc Close" across the
+  top; on the left an icon grid in the four groups, 8 columns of 50 px icons
+  at a 56 px pitch; on the right the item-info window's content for the
+  selection (title, masked icon, rarity and charges, gem bar, description,
+  divider, quote), then the rows that counter it, the hint line and the rows
+  it counters, each other row as an icon that opens it. Roles are not shown:
+  the item-info window has no such line. Charges read as the starting
+  envelope over the cap ("20 / 35"); an angreal whose ChargeCost is 0 shows
+  F_Charge's ':' glyph, the window's infinity mark, instead. Both panes scroll when their content
+  overflows (mouse wheel; page keys and the right stick for the detail).
+  Arrow keys, the d-pad and the left stick move the selection through the
+  grid; a click selects. Escape, the controller's B and View buttons and the
+  guide key close it.
+- **Opening selection.** The card's row while a card is up, else the item in
+  the local player's selected hand when the guide carries it, else the first
+  entry of the first group.
+- **Card** (430 wide, left edge, mid-height): a dark band between two
+  dividers, the item's icon, its title, the first sentence of its
+  description, and the guide key as "F3  Field Guide".
+- **Recap** (450 wide, same slot): "KILLED BY" over the killer's icon and
+  title, "COUNTER" over the counter's icon and the hint line, then the
+  guide key.
+- **Fallback.** Without the art or the strikes (an editor without a payload,
+  or a failed resolve) the same layout draws with flat panels, engine faces
+  at or above the Deck floor, and empty icon slots.
+- **Seams** (plain types, every one inert unbound): `ResolveRetailTexture`
+  (the four named UI textures) and `ResolveItemIcon` (a class's
+  `StatusIcon`), installed at startup; `SelectedItemClass`, installed by the
+  local gameplay controller; and `FWoTOnboardingMenuChrome::PixelFont`,
+  resolved with the chrome through a presentation authority for the local
+  player, whose revocation also collapses the widget. The chrome now carries
+  only the faces and that binder: the menu brushes and colours it carried
+  before are gone, since the art arrives through `ResolveRetailTexture`. The
+  two texture seams take a `bSmooth` flag for the bilinear case above.
 
 ## Sequencing
 

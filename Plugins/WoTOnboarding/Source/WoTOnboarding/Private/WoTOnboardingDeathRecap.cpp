@@ -45,17 +45,20 @@ FWoTPickupCardText WoTOnboardingDeathRecap::ComposeText(
 	{
 		return Text;
 	}
-	FString Title = ResolveTitle(Row).TrimStartAndEnd();
-	if (Title.IsEmpty())
+	Text.ItemClass = Row.ClassName;
+	Text.Kicker = TEXT("KILLED BY");
+	Text.Title = ResolveTitle(Row).TrimStartAndEnd();
+	if (Text.Title.IsEmpty())
 	{
-		Title = WoTOnboardingHints::SpacedClassName(Row.ClassName);
+		Text.Title = WoTOnboardingHints::SpacedClassName(Row.ClassName);
 	}
-	Text.Title = FString::Printf(TEXT("Killed by %s"), *Title);
+	// The hint's own counter, when it names one, leads the hint line.
+	if (const FWoTAngrealGuideRow* Counter = WoTOnboardingHints::HintCounter(Guide, Row))
+	{
+		Text.CounterClass = Counter->ClassName;
+	}
+	Text.SummaryKicker = TEXT("COUNTER");
 	Text.Summary = HintLine;
-	if (!GuideKeyName.IsEmpty())
-	{
-		Text.KeyHint = FString::Printf(
-			TEXT("Press %s for the field guide"), *GuideKeyName);
-	}
+	Text.KeyHint = WoTOnboardingPickupCards::GuideKeyHint(GuideKeyName);
 	return Text;
 }

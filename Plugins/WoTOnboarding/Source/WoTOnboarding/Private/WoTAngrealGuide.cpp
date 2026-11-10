@@ -153,6 +153,8 @@ bool WoTGuideRowFromJson(const FJsonObject& Object,
 		|| !WoTGuideReadCount(Object, TEXT("max_initial_charges"),
 			OutRow.MaxInitialCharges, OutError)
 		|| !WoTGuideReadCount(Object, TEXT("max_charges"), OutRow.MaxCharges,
+			OutError)
+		|| !WoTGuideReadCount(Object, TEXT("charge_cost"), OutRow.ChargeCost,
 			OutError))
 	{
 		return false;
@@ -241,6 +243,7 @@ FString UWoTAngrealGuide::ExportRowsAsJson() const
 		Object->SetNumberField(TEXT("max_initial_charges"),
 			Row.MaxInitialCharges);
 		Object->SetNumberField(TEXT("max_charges"), Row.MaxCharges);
+		Object->SetNumberField(TEXT("charge_cost"), Row.ChargeCost);
 		TArray<TSharedPtr<FJsonValue>> Counters;
 		for (const FName& Counter : Row.Counters)
 		{
