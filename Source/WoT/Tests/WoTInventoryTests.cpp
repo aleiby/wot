@@ -1424,12 +1424,17 @@ bool FWoTPlayerStartTest::RunTest(const FString&)
 	};
 	for (const FSeatCase& Seat : Cases)
 	{
-		AWoTCollisionBlocker* FloorActor =
-			World->SpawnActorDeferred<AWoTCollisionBlocker>(
-				AWoTCollisionBlocker::StaticClass(),
-				FTransform(FVector(Seat.X, 0, -10)));
-		FloorActor->Configure(EWoTCollisionBlockerMode::All, 300.0f, 10.0f);
-		FloorActor->FinishSpawning(FTransform(FVector(Seat.X, 0, -10)));
+		// Level geometry (a StaticMeshActor, as the dev world meshes are): FindSpot
+		// fits and traces against the level only, never a BlockAll actor.
+		AStaticMeshActor* FloorActor = World->SpawnActor<AStaticMeshActor>(
+			FVector(Seat.X, 0, -10), FRotator::ZeroRotator, SpawnParams);
+		UBoxComponent* FloorBox = NewObject<UBoxComponent>(FloorActor, TEXT("SeatFloor"));
+		FloorBox->SetBoxExtent(FVector(300.0f, 300.0f, 10.0f));
+		FloorBox->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		FloorBox->SetCollisionObjectType(ECC_WorldStatic);
+		FloorBox->SetCollisionResponseToAllChannels(ECR_Block);
+		FloorBox->SetupAttachment(FloorActor->GetRootComponent());
+		FloorBox->RegisterComponent();
 		APlayerStart* ProductionStart = World->SpawnActor<AWoTPlayerStart>(
 			FVector(Seat.X, 0, Seat.AuthoredHeight), FRotator::ZeroRotator);
 

@@ -60,9 +60,14 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** The exact shipped behavior is not confirmed. The constants will be rechecked if climbing feels different.
 
 ### Player starts buried in solid geometry are never chosen
-- **Original:** Start selection could pick a start whose center lay inside solid world geometry. The spawn then failed, and a joining player could be refused.
-- **Port:** Starts whose center is in solid space are never scored, so joins and restarts land on a start where a player can spawn. A player is refused only if every start is blocked.
-- **Why:** Stops players being refused or falling out of the world on two buried starts.
+- **Original:** Start selection could pick a start whose center lay inside solid world geometry (Battle3_01 has two). Placing a player there always fails, so a joining player was refused and a restart failed.
+- **Port:** Starts whose center is in solid space are never rated.
+- **Why:** Stops players being refused on two buried starts.
+
+### A refused start falls back to the next rated start
+- **Original:** A join, a respawn or a team change uses only the best-rated start. If the player cannot be placed there, a joining player is refused, a dead player stays dead until they press fire again, and a player changing team stays where they stood.
+- **Port:** The best-rated start is still tried first. If it refuses the player, the other starts are tried in rating order, so a player is refused, or left waiting to respawn, only when every start refuses. A start also refuses a player who would overlap another blocking actor, such as a player or a decoration; the original refuses only for movers and places the player overlapping anything else.
+- **Why:** A blocked start must not leave a player without a body, and the original's first choice is kept.
 
 ### Player-start scoring
 - **Original:** The occupied-start penalty uses the game object's own collision size. If every start is occupied, no start is returned.
@@ -75,8 +80,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** UE5 splits the player into a persistent controller and a disposable pawn.
 
 ### Team-select restart replaces the pawn
-- **Original:** Choosing a team restarts the same player pawn.
-- **Port:** The old pawn is removed and a new team pawn spawns at a team start.
+- **Original:** Choosing a team restarts the same player pawn by moving it to a team start. If no start takes it, the pawn stays where it stood and the player keeps playing.
+- **Port:** A new team pawn spawns at a team start, and the old pawn is removed only once the new one exists. While the starts are tried, the old pawn is hidden and does not collide. If no start takes the new pawn, the old pawn reappears where it stood and the player keeps control of it.
 - **Why:** The UE5 split between controller and pawn. This matches the port's normal respawn.
 
 ### Carcass pose on an instant respawn

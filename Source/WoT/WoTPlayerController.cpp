@@ -1735,14 +1735,15 @@ void AWoTPlayerController::ServerRespawnPlayer_Implementation()
 		return;
 	}
 
-	// Retail reuses its PlayerPawn. This port replaces it, so consume the retained body
-	// immediately before RestartPlayer creates and possesses the new pawn.
+	// Retail reuses its PlayerPawn (PlayerPawn.ServerReStartPlayer moves it). This
+	// port replaces it, so consume the retained body immediately before the restart
+	// creates and possesses the new pawn.
 	if (AWoTCharacter* Corpse = RespawnCorpse.Get())
 	{
 		Corpse->Destroy();
 	}
 	RespawnCorpse.Reset();
-	Game->RestartPlayer(this);
+	Game->ServerReStartPlayer(this);
 	if (!GetPawn())
 	{
 		EnterPlayerState(EWoTPlayerStateMachineState::WaitingForSpawn);
@@ -1754,11 +1755,12 @@ bool AWoTPlayerController::ServerRestartPlayerWoT_Validate() { return true; }
 void AWoTPlayerController::ServerRestartPlayerWoT_Implementation()
 {
 	// PlayerPawn.ServerRestartPlayer → Level.Game.RestartPlayer(self), no state gate:
-	// the team-select restart (BattleHUD.uc:63-64) runs on a LIVE player. Retail reuses
-	// the single PlayerPawn; the port replaces it, so consume the current body (live
-	// pawn or retained corpse) before RestartPlayer spawns the team pawn at a team
-	// start (Battle's GetDefaultPawnClassForController + bSpawnInTeamArea weighting).
-	// Only the match-over freeze holds the restart back.
+	// the team-select restart (BattleHUD.uc:63-64) runs on a LIVE player. Retail moves
+	// the single PlayerPawn to the team start (Battle's GetDefaultPawnClassForController
+	// + bSpawnInTeamArea weighting); the port spawns a replacement there instead. The
+	// live pawn is kept until that replacement exists: if every start refuses it, the
+	// player keeps moving the old pawn where it stood, as retail's "Restartplayer
+	// failed" leaves it. Only the match-over freeze holds the restart back.
 	AWoTGameMode* Game = GetWorld() ? GetWorld()->GetAuthGameMode<AWoTGameMode>() : nullptr;
 	if (!IsValid(Game) || bMatchEnded || Game->bGameEnded)
 	{
@@ -1769,12 +1771,7 @@ void AWoTPlayerController::ServerRestartPlayerWoT_Implementation()
 		Corpse->Destroy();
 	}
 	RespawnCorpse.Reset();
-	if (APawn* LivePawn = GetPawn())
-	{
-		UnPossess();
-		LivePawn->Destroy();
-	}
-	Game->RestartPlayer(this);
+	Game->ServerReStartPlayer(this);
 	if (!GetPawn())
 	{
 		EnterPlayerState(EWoTPlayerStateMachineState::WaitingForSpawn);
@@ -2107,7 +2104,9 @@ void AWoTPlayerController::ServerRequestCitadelEdit_Implementation(int32 Mode)
 		CitadelEndEdit();
 		return;
 	}
-	if (CanRequestCitadelEdit())
+	// WOTPlayer.ServerEditCitadel (WOTPlayer.uc:4448-4458): only giMPBattle's
+	// CanEditCitadel is true; EditCitadel reports its own refusals.
+	if (GetWorld() && GetWorld()->GetAuthGameMode<AWoTBattleGameMode>())
 	{
 		CitadelBeginEdit(Mode);
 		return;
@@ -2132,25 +2131,48 @@ void AWoTPlayerController::CitadelBeginEdit(int32 Mode)
 
 	AWoTBattleGameMode* BattleMode = GetWorld()
 		? GetWorld()->GetAuthGameMode<AWoTBattleGameMode>() : nullptr;
-	if (!IsValid(BattleMode) || BattleMode->CanTeleport() || IsEditingCitadel())
+	if (!IsValid(BattleMode) || IsEditingCitadel())
 	{
 		return;
 	}
+	// WOTPlayer.EditCitadel (WOTPlayer.uc:4466-4507) refuses in this order and
+	// tells the player why with a center message each time.
 	const uint8 SessionTeam = CitadelControllerTeam(this);
-	if (SessionTeam == 255 || !IsValid(BattleMode->Battle.Get())
-		|| SessionTeam >= BattleMode->Battle->NumTeams || SessionTeam >= 4)
-	{
-		return;
-	}
 	AWoTZoneVolume* EntryZone = AWoTZoneVolume::EditZoneAt(
 		GetWorld(), GetCitadelViewerLocation());
-	if (!IsValid(EntryZone) || EntryZone->EditTeam != SessionTeam)
+	if (!IsValid(EntryZone))
 	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditZoneStr"), TEXT("Editing is not possible here.")));
 		return;
 	}
-	AWoTBudgetInfo* Budget = BattleMode->FindTeamBudget(SessionTeam);
-	if (!IsValid(Budget) || !Budget->BeginEdit(this))
+	if (EntryZone->EditTeam != SessionTeam)
 	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditAreaStr"), TEXT("This area belongs to another team.")));
+		return;
+	}
+	if (BattleMode->CanTeleport())
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditNowStr"), TEXT("Editing ends when the battle begins.")));
+		return;
+	}
+	// WOTPlayer.Budget is the team BudgetInfo that EnterCitadel bound on joining
+	// (WOTPlayer.uc:4409-4426); a player without a team has none.
+	AWoTBudgetInfo* Budget = (SessionTeam != 255 && IsValid(BattleMode->Battle.Get())
+		&& SessionTeam < BattleMode->Battle->NumTeams && SessionTeam < 4)
+		? BattleMode->FindTeamBudget(SessionTeam) : nullptr;
+	if (!IsValid(Budget))
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditBudgetStr"), TEXT("Editing is not possible right now.")));
+		return;
+	}
+	if (!Budget->BeginEdit(this))
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditLimitStr"), TEXT("Your team is already editing.")));
 		return;
 	}
 	const EWoTCitadelEditCameraMode RequestedCameraMode = Mode == 1
