@@ -2286,7 +2286,7 @@ void SWoTRetailSlider::Construct(const FArguments& InArgs)
 	OnValueChanged = InArgs._OnValueChanged;
 	MinValue = InArgs._MinValue;
 	StepSize = FMath::Max(InArgs._StepSize, UE_SMALL_NUMBER);
-	Positions = FMath::Max(InArgs._Positions, 2);
+	Positions = InArgs._Positions;
 	SetCanTick(false);
 
 	TSharedRef<SHorizontalBox> Strip = SNew(SHorizontalBox);
@@ -2329,10 +2329,16 @@ FSlateColor SWoTRetailSlider::SelectionColor() const
 	return FWoTMenuStyle::MenuColor(IsHovered() || HasKeyboardFocus());
 }
 
+int32 SWoTRetailSlider::PositionCount() const
+{
+	return FMath::Max(Positions.Get(8), 2);
+}
+
 int32 SWoTRetailSlider::ValueCell() const
 {
 	const float CurrentValue = Value.Get(MinValue);
-	if (Positions == 8)
+	const int32 Stops = PositionCount();
+	if (Stops == 8)
 	{
 		// menuWOT.DrawSlider: the knob takes the first cell whose upper bound
 		// (StepSize * i + sMin) exceeds the value, else the last.
@@ -2347,7 +2353,7 @@ int32 SWoTRetailSlider::ValueCell() const
 	}
 	const float Fraction = (CurrentValue - MinValue) / (StepSize * 8.0f);
 	return FMath::Clamp(
-		FMath::RoundToInt(Fraction * static_cast<float>(Positions - 1)) + 1, 1, Positions);
+		FMath::RoundToInt(Fraction * static_cast<float>(Stops - 1)) + 1, 1, Stops);
 }
 
 namespace
@@ -2392,7 +2398,7 @@ float SWoTRetailSlider::KnobLeft(float AllottedWidth) const
 	const float Travel = FMath::Max(AllottedWidth - Metrics.TrackStart
 		- Metrics.TrackEndInset - Metrics.Knob.X, 0.0f);
 	const float Fraction = static_cast<float>(ValueCell() - 1)
-		/ static_cast<float>(Positions - 1);
+		/ static_cast<float>(PositionCount() - 1);
 	return Metrics.TrackStart + Travel * Fraction;
 }
 
@@ -2426,15 +2432,16 @@ int32 SWoTRetailSlider::CellFromMouse(
 	const float LocalX = MyGeometry.AbsoluteToLocal(ScreenPosition).X;
 	const float Fraction = FMath::Clamp(
 		(LocalX - Metrics.TrackStart - Metrics.Knob.X * 0.5f) / Travel, 0.0f, 1.0f);
-	return FMath::RoundToInt(Fraction * static_cast<float>(Positions - 1)) + 1;
+	return FMath::RoundToInt(Fraction * static_cast<float>(PositionCount() - 1)) + 1;
 }
 
 void SWoTRetailSlider::CommitCell(int32 CellIndex)
 {
-	CellIndex = FMath::Clamp(CellIndex, 1, Positions);
+	const int32 Stops = PositionCount();
+	CellIndex = FMath::Clamp(CellIndex, 1, Stops);
 	// The stops span the complete authored eight-step range.
 	const float NewValue = MinValue + StepSize * 8.0f
-		* static_cast<float>(CellIndex - 1) / static_cast<float>(Positions - 1);
+		* static_cast<float>(CellIndex - 1) / static_cast<float>(Stops - 1);
 	OnValueChanged.ExecuteIfBound(NewValue);
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
@@ -2460,7 +2467,7 @@ FReply SWoTRetailSlider::OnKeyDown(
 	}
 	if (Key == EKeys::End)
 	{
-		CommitCell(Positions);
+		CommitCell(PositionCount());
 		return FReply::Handled();
 	}
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);

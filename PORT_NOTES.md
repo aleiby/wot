@@ -811,8 +811,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** Readability at modern resolutions, with no stretching and no outside fonts. The skin is a presentation choice.
 
 ### Menu slider travel and host-setting stops
-- **Original:** The slider knob stopped a few pixels short of each end. The host screen's kill limit, time limit and max players were numbers stepped by one.
-- **Port:** The knob reaches the track's end borders. Those host settings are sliders with one stop per unit, and max players spans 2 to 16.
+- **Original:** The slider knob stopped a few pixels short of each end. The host screen's kill limit, time limit, max players and max team size were numbers stepped by one. View Bob's nine steps shared the slider's eight cells, so its top two steps showed on one cell.
+- **Port:** The knob reaches the track's end borders. Those host settings are sliders with one stop per unit; max players spans 2 to 16, and max team size has one stop per size the map's citadel count allows. View Bob has one stop per step.
 - **Why:** Presentation and usability; all values stay reachable.
 
 ### Host seal settings and citadel count

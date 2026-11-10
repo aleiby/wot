@@ -836,15 +836,28 @@ UTexture2D* AWoTHUD::ResolveHUDTexture(FName Id) const
 
 void AWoTHUD::ChangeCrosshair(int32 Delta)
 {
-	Crosshair += Delta;
-	if (Crosshair >= NumCrossHairs)
+	Crosshair = WrapCrosshair(Crosshair, Delta);
+}
+
+int32 AWoTHUD::WrapCrosshair(int32 InCrosshair, int32 Delta)
+{
+	int32 Wrapped = InCrosshair + Delta;
+	if (Wrapped >= NumCrossHairs)
 	{
-		Crosshair = 0;
+		Wrapped = 0;
 	}
-	else if (Crosshair < 0)
+	else if (Wrapped < 0)
 	{
-		Crosshair = NumCrossHairs - 1;
+		Wrapped = NumCrossHairs - 1;
 	}
+	return Wrapped;
+}
+
+UTexture2D* AWoTHUD::ResolveCrosshairTexture(int32 InCrosshair)
+{
+	const TArray<FWoTHUDDrawCmd> Commands = LayoutCrosshair(InCrosshair, 0, 0);
+	return Commands.IsEmpty() ? nullptr
+		: GetDefault<AWoTHUD>()->ResolveHUDTexture(Commands[0].TexId);
 }
 
 TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutCrosshair(int32 Index, int32 ClipX, int32 ClipY)

@@ -6,6 +6,7 @@
 #include "../Settings/WoTSettingsSlate.h"
 #include "../WoTFrontEndSlate.h"
 #include "../WoTGameInstance.h"
+#include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
@@ -496,6 +497,102 @@ bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
 		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 1.5f);
 	TestTrue(TEXT("owner persisted the controller invert"),
 		Fixture.Owner->GetGameSettings().bControllerInvertY);
+	return !HasAnyErrors();
+}
+
+// menuOptions' Crosshair row is MainHUD.ChangeCrosshair over 21 crosshairs (the
+// 21st draws nothing), not a slider; View Bob steps Bob by 0.004 from 0 to 0.032.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsCrosshairAndViewBobSpec,
+	"WoT.FrontEnd.Settings.CrosshairAndViewBob", ScreenFlags)
+
+bool FWoTSettingsCrosshairAndViewBobSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	const TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, Callbacks);
+	Screen->SlatePrepass(1.0f);
+	const FWoTGameSettings Confirmed = Fixture.Owner->GetGameSettings();
+	const TSharedPtr<SWoTCrosshairSelector> Crosshair = Screen->CrosshairSelectorForTesting();
+	const TSharedPtr<SWoTRetailSlider> ViewBob = Screen->ViewBobSliderForTesting();
+	if (!TestTrue(TEXT("both rows exist"), Crosshair.IsValid() && ViewBob.IsValid()))
+		return false;
+
+	// Crosshair: User.ini Crosshair=13 is shown with the HUD's own art for it.
+	TestEqual(TEXT("the default crosshair is 13"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	TestTrue(TEXT("the row draws the art the HUD draws for crosshair 13"),
+		Crosshair->CrosshairBrush()->GetResourceObject()
+			== AWoTHUD::ResolveCrosshairTexture(13));
+	TestTrue(TEXT("Left is handled"),
+		Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left)).IsEventHandled());
+	TestEqual(TEXT("Left steps to 12"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 12);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right returns to 13"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	TestTrue(TEXT("Left then Right leaves the draft unchanged"),
+		Screen->DraftForTesting() == Confirmed);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Gamepad_DPad_Right));
+	TestEqual(TEXT("the D-pad steps like Right"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 14);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Gamepad_DPad_Left));
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Enter));
+	TestEqual(TEXT("Enter steps forward, as PlayerPawn.ChangeCrosshair does"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 14);
+	Crosshair->OnNavigation(FGeometry(), FNavigationEvent(FModifierKeysState(), 0,
+		EUINavigation::Left, ENavigationGenesis::Controller));
+	TestEqual(TEXT("the stick steps like the D-pad"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	// MainHUD.ChangeCrosshair wraps past the 21st entry (none) to 0 and back.
+	FWoTGameSettings Edge = Screen->DraftForTesting();
+	Edge.Crosshair = 0;
+	Screen->SetDraftForTesting(Edge);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left));
+	TestEqual(TEXT("Left from 0 wraps to the no-crosshair entry"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 20);
+	TestTrue(TEXT("the no-crosshair entry draws nothing"),
+		Crosshair->CrosshairBrush()->GetResourceObject() == nullptr
+		&& Crosshair->CrosshairBrush()->DrawAs == ESlateBrushDrawType::NoDrawType);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right from the last entry wraps to 0"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 0);
+	TestEqual(TEXT("the HUD wraps the same way"), AWoTHUD::WrapCrosshair(20, 1), 0);
+	TestEqual(TEXT("the HUD wraps down the same way"), AWoTHUD::WrapCrosshair(0, -1), 20);
+	Edge.Crosshair = Confirmed.Crosshair;
+	Screen->SetDraftForTesting(Edge);
+
+	// View Bob: nine stops, each visited once in each direction, and the knob
+	// shows the stored step at every one of them.
+	auto Step = [&Screen]()
+	{
+		return FMath::RoundToInt(Screen->DraftForTesting().ViewBob / 0.004f);
+	};
+	TestEqual(TEXT("the default bob 0.016 is step 4"), Step(), 4);
+	TestEqual(TEXT("the default bob shows on the fifth stop"), ViewBob->KnobStopForTesting(), 5);
+	ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Home));
+	TestEqual(TEXT("Home stores no bob"), Screen->DraftForTesting().ViewBob, 0.0f);
+	TestEqual(TEXT("no bob shows on the first stop"), ViewBob->KnobStopForTesting(), 1);
+	for (int32 Expected = 1; Expected <= 8; ++Expected)
+	{
+		ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+		TestEqual(FString::Printf(TEXT("Right reaches step %d"), Expected), Step(), Expected);
+		TestEqual(FString::Printf(TEXT("step %d stores %d x 0.004"), Expected, Expected),
+			Screen->DraftForTesting().ViewBob, 0.004f * static_cast<float>(Expected));
+		TestEqual(FString::Printf(TEXT("step %d shows on stop %d"), Expected, Expected + 1),
+			ViewBob->KnobStopForTesting(), Expected + 1);
+	}
+	ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right at the top stays at 0.032"), Step(), 8);
+	for (int32 Expected = 7; Expected >= 0; --Expected)
+	{
+		ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left));
+		TestEqual(FString::Printf(TEXT("Left reaches step %d"), Expected), Step(), Expected);
+		TestEqual(FString::Printf(TEXT("step %d shows on stop %d going down"),
+			Expected, Expected + 1), ViewBob->KnobStopForTesting(), Expected + 1);
+	}
 	return !HasAnyErrors();
 }
 
