@@ -440,6 +440,27 @@ def _seeded_top_directories() -> frozenset:
         | {"Plugins"})
 
 
+def _seed_link_target(link: Path, tree: Path) -> str:
+    """The target of a symlink the seed may recreate in the ISO.
+
+    The seed copies links as links, so the ISO copy points wherever the source
+    link points from its own place in the tree. Only a relative link that
+    resolves inside ``tree`` keeps the ISO self-contained; any other link lets
+    ISO cleanup and generator writes reach the files it names. (A
+    Content/WoT/Maps link into another checkout once let the seed delete that
+    checkout's bootstrap map.)
+    """
+    target = os.readlink(link)
+    resolved = Path(os.path.realpath(link))
+    root = Path(os.path.realpath(tree))
+    if os.path.isabs(target) or (
+            resolved != root and root not in resolved.parents):
+        raise BuildFailure(
+            f"seed refuses a symlink that leaves {tree.name}: {link} -> "
+            f"{target} (replace it with a real copy)")
+    return target
+
+
 def _copy_tree(source: Path, target: Path, *, hardlink_files: bool) -> dict:
     counts = {"directories": 0, "hardlinks": 0, "copies": 0, "symlinks": 0}
     for root, directories, files in os.walk(source, followlinks=False):
@@ -452,14 +473,15 @@ def _copy_tree(source: Path, target: Path, *, hardlink_files: bool) -> dict:
             item = root_path / name
             if item.is_symlink():
                 destination = destination_root / name
-                destination.symlink_to(os.readlink(item), target_is_directory=True)
+                destination.symlink_to(_seed_link_target(item, source),
+                                       target_is_directory=True)
                 directories.remove(name)
                 counts["symlinks"] += 1
         for name in files:
             item = root_path / name
             destination = destination_root / name
             if item.is_symlink():
-                destination.symlink_to(os.readlink(item))
+                destination.symlink_to(_seed_link_target(item, source))
                 counts["symlinks"] += 1
                 continue
             if hardlink_files:
@@ -520,8 +542,9 @@ def _copy_tools_seed(source_root: Path, target_root: Path) -> dict:
         destination.parent.mkdir(parents=True, exist_ok=True)
         created_directories.update(missing)
         if source.is_symlink():
-            destination.symlink_to(os.readlink(source),
-                                   target_is_directory=source.is_dir())
+            destination.symlink_to(
+                _seed_link_target(source, source_root / "Tools"),
+                target_is_directory=source.is_dir())
             counts["symlinks"] += 1
         else:
             shutil.copy2(source, destination)
@@ -571,7 +594,7 @@ def _copy_code_plugins_seed(source_root: Path, target_root: Path) -> dict:
                 continue
             destination = target / item.name
             if item.is_symlink():
-                destination.symlink_to(os.readlink(item),
+                destination.symlink_to(_seed_link_target(item, source),
                                        target_is_directory=item.is_dir())
                 counts["symlinks"] += 1
             elif item.is_dir():
@@ -2364,12 +2387,13 @@ def _neutral_shell_stamp_valid(iso: Path, stamp: dict) -> bool:
         return False
 
 
-def _neutral_shell_real_path(iso: Path, relative: Path) -> Path:
+def _iso_cleanup_path(iso: Path, relative: Path) -> Path:
     """Reject a symlink anywhere between the iso root and a cleanup target.
 
     Checking only the leaf is not enough: a symlinked ancestor (iso/Plugins ->
-    /external) leaves the leaf looking like an ordinary directory, and the
-    rmtree below would then delete the external tree instead of iso content.
+    /external) leaves the leaf looking like an ordinary file or directory, and
+    the unlink or rmtree would then delete external content instead of iso
+    content.
     """
     path = iso / relative
     current = iso
@@ -2377,7 +2401,7 @@ def _neutral_shell_real_path(iso: Path, relative: Path) -> Path:
         current = current / part
         if current.is_symlink():
             raise BuildFailure(
-                f"neutral-shell cleanup path crosses a symlink: {current}")
+                f"ISO cleanup path crosses a symlink: {current}")
     return path
 
 
@@ -2389,7 +2413,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
             # staging shell or a non-empty staging root, so a process killed
             # mid-generation would otherwise make EVERY retry fail forever.
             NEUTRAL_SHELL_STAGING_ROOT):
-        path = _neutral_shell_real_path(iso, relative)
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             shutil.rmtree(path)
         else:
@@ -2397,7 +2421,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
     for relative in (
             NEUTRAL_SHELL_DENIED_READ_RECEIPT,
             NEUTRAL_SHELL_OUTPUT_IDENTITY_RECEIPT):
-        path = _neutral_shell_real_path(iso, relative)
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             raise BuildFailure(
                 f"neutral-shell receipt slot is unexpectedly a directory: {path}")
@@ -2407,7 +2431,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
 def _prepare_import_generated_outputs(iso: Path) -> None:
     """Restore import_all's exact no-replace output slots after a failed run."""
     for relative in IMPORT_GENERATED_OUTPUTS:
-        path = iso / relative
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             raise BuildFailure(
                 f"generated import output slot is unexpectedly a directory: {path}")

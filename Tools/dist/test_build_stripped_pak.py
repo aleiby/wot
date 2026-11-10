@@ -569,6 +569,70 @@ class SeedReleaseCommitTests(unittest.TestCase):
             bs.stage_seed(self.iso)
         self.assertTrue((outside / "WoTOnboarding" / "keep.txt").is_file())
 
+    def other_checkout_maps(self) -> Path:
+        maps = self.repo.parent / "other-checkout" / "Content" / "WoT" / "Maps"
+        maps.mkdir(parents=True)
+        (maps / "WoTBootstrap.umap").write_bytes(b"other checkout's map")
+        return maps
+
+    def test_guarded_seed_refuses_a_content_link_out_of_the_repo(self):
+        # The ISO copy of the link would point at the other checkout, and the
+        # seed's own bootstrap-map unlink would delete that checkout's map.
+        maps = self.other_checkout_maps()
+        (self.repo / "Content" / "WoT").mkdir(parents=True, exist_ok=True)
+        (self.repo / "Content" / "WoT" / "Maps").symlink_to(
+            maps, target_is_directory=True)
+        with self.assertRaisesRegex(bs.BuildFailure, "symlink that leaves"):
+            bs.stage_seed(self.iso, guarded=True)
+        self.assertEqual((maps / "WoTBootstrap.umap").read_bytes(),
+                         b"other checkout's map")
+
+    def test_seed_refuses_a_relative_link_that_climbs_out_of_its_tree(self):
+        maps = self.other_checkout_maps()
+        (self.repo / "Content" / "Maps").symlink_to(
+            os.path.relpath(maps, self.repo / "Content"),
+            target_is_directory=True)
+        with self.assertRaisesRegex(bs.BuildFailure, "symlink that leaves"):
+            bs.stage_seed(self.iso)
+
+    def test_seed_refuses_an_absolute_link_even_into_its_own_tree(self):
+        # Copied verbatim, the ISO link would point back into the repo.
+        real = self.repo / "Content" / "Real"
+        real.mkdir()
+        (self.repo / "Content" / "Alias").symlink_to(
+            real, target_is_directory=True)
+        with self.assertRaisesRegex(bs.BuildFailure, "symlink that leaves"):
+            bs.stage_seed(self.iso)
+
+    def test_seed_keeps_a_relative_link_inside_its_tree(self):
+        real = self.repo / "Content" / "Real"
+        real.mkdir()
+        (real / "a.uasset").write_bytes(b"a")
+        (self.repo / "Content" / "Alias").symlink_to(
+            "Real", target_is_directory=True)
+        self.assertEqual(bs.stage_seed(self.iso), "ran")
+        alias = self.iso / "Content" / "Alias"
+        self.assertTrue(alias.is_symlink())
+        self.assertEqual(os.readlink(alias), "Real")
+        self.assertEqual((alias / "a.uasset").read_bytes(), b"a")
+
+    def test_seed_refuses_tools_and_plugin_links_out_of_the_repo(self):
+        outside = self.repo.parent / "outside.txt"
+        outside.write_text("outside\n")
+        plugin = self.write_repo_plugin()
+        for link in (self.repo / "Tools" / "linked.py",
+                     plugin / "Linked.txt",
+                     plugin / "Source" / "Linked.txt"):
+            with self.subTest(link=link.relative_to(self.repo)):
+                link.symlink_to(outside)
+                try:
+                    with self.assertRaisesRegex(
+                            bs.BuildFailure, "symlink that leaves"):
+                        bs.stage_seed(self.iso)
+                finally:
+                    link.unlink()
+        self.assertEqual(bs.stage_seed(self.iso), "ran")
+
     def test_human_version_change_invalidates_seed_and_downstream_steps(self):
         self.assertEqual(bs.stage_seed(self.iso), "ran")
         bs._write_stamp(self.iso, "import", {"success_marker": "complete"})
@@ -1661,6 +1725,21 @@ class GuardedModeTests(unittest.TestCase):
             (iso / bs.NEUTRAL_SHELL_DENIED_READ_RECEIPT).exists())
         self.assertFalse(
             (iso / bs.NEUTRAL_SHELL_OUTPUT_IDENTITY_RECEIPT).exists())
+
+    def test_import_retry_refuses_to_delete_through_a_symlinked_ancestor(self):
+        # iso/Content/WoT/Maps -> another checkout's maps: an unguarded retry
+        # would delete that checkout's bootstrap map.
+        iso = self.root / "iso"
+        (iso / "Content" / "WoT").mkdir(parents=True)
+        external = self.root / "other-checkout-maps"
+        external.mkdir()
+        canary = external / "WoTBootstrap.umap"
+        canary.write_bytes(b"other checkout's map")
+        (iso / "Content" / "WoT" / "Maps").symlink_to(
+            external, target_is_directory=True)
+        with self.assertRaisesRegex(bs.BuildFailure, "crosses a symlink"):
+            bs._prepare_import_generated_outputs(iso)
+        self.assertEqual(canary.read_bytes(), b"other checkout's map")
 
     def test_guarded_clean_cook_is_limited_to_disposable_outputs(self):
         iso = self.root / "iso"
