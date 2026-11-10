@@ -3622,12 +3622,15 @@ bool FWoTParityFix18HelpWholePixelScaleSpec::RunTest(const FString&)
 	Fonts->Title = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30);
 	Fonts->List = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
 	Fonts->Generation = Generation;
+	// Where the 640x480 window would draw at 1x (under 1280x960), Help now
+	// fills the screen at 2x with its page reflowed (SP3 PR 7, the Steam Deck
+	// legibility pass): still a whole-number scale, still on screen.
 	struct FCase { FVector2D PhysicalSize; float Dpi; float ExpectedScale; };
 	const FCase Cases[] = {
 		{FVector2D(1920.0f, 1080.0f), 1.0f, 2.0f},
-		{FVector2D(1280.0f, 720.0f), 1.0f, 1.0f},
+		{FVector2D(1280.0f, 720.0f), 1.0f, 2.0f},
 		{FVector2D(3840.0f, 2160.0f), 2.0f, 2.0f},
-		{FVector2D(1366.0f, 768.0f), 1.0f, 1.0f}};
+		{FVector2D(1366.0f, 768.0f), 1.0f, 2.0f}};
 	for (const FCase& Case : Cases)
 	{
 		const TSharedRef<SWoTHelpOverlay> Help = SNew(SWoTHelpOverlay)
@@ -3680,7 +3683,14 @@ bool FWoTParityFix18HelpWholePixelScaleSpec::RunTest(const FString&)
 			TestTrue(FString::Printf(TEXT("%s draws the help window at %g screen pixels per unit (actual %g)"),
 				*Label, Case.ExpectedScale, Scale),
 				FMath::IsNearlyEqual(Scale, Case.ExpectedScale, 0.001f));
-			const FVector2D Drawn = Canvases[0].GetLocalSize() * Scale + FVector2D(128.0f, 48.0f) * Scale;
+			// The text clip plus the frame's padding: the retail window's
+			// 64x24 a side, or the reflowed full-screen window's.
+			const FVector2D Padding = Help->IsReflowedForTesting()
+				? 2.0 * FVector2D(SWoTHelpOverlay::ReflowPaddingX, SWoTHelpOverlay::ReflowPaddingY)
+				: FVector2D(128.0f, 48.0f);
+			TestEqual(Label + TEXT(" reflows exactly where the window would draw at 1x"),
+				Help->IsReflowedForTesting(), SWoTHelpOverlay::ReflowsOn(Case.PhysicalSize));
+			const FVector2D Drawn = Canvases[0].GetLocalSize() * Scale + Padding * Scale;
 			TestTrue(Label + TEXT(" keeps the whole window on screen"),
 				Drawn.X <= Case.PhysicalSize.X + 0.5f && Drawn.Y <= Case.PhysicalSize.Y + 0.5f);
 			// Each line sits at its retail position by its top-left corner: the

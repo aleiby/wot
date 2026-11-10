@@ -638,8 +638,8 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 	SlateApp.Tick();
 
 	const FVector2D Sizes[] = {
-		FVector2D(1280.0f, 720.0f), FVector2D(1920.0f, 1080.0f),
-		FVector2D(640.0f, 480.0f)};
+		FVector2D(1280.0f, 800.0f), FVector2D(1280.0f, 720.0f),
+		FVector2D(1920.0f, 1080.0f), FVector2D(640.0f, 480.0f)};
 	for (const FVector2D Size : Sizes)
 	{
 		UWoTBootstrapSubsystem* Bootstrap = UpdateBannerBootstrap();
@@ -651,8 +651,13 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 			.ClientSize(Size).CreateTitleBar(false)
 			.SupportsMaximize(false).SupportsMinimize(false)[Root];
 		SlateApp.AddWindow(Window, false);
+		// The game layer's own scale for this viewport (the UI DPI curve), so
+		// the banner meets the canvas it gets on each screen: about 1080
+		// units tall everywhere (SP3 PR 7 lays the Deck sizes out as the game
+		// does).
+		const float Dpi = FWoTMenuStyle::ViewportDpiScale(Size);
 		const FGeometry RootGeometry = FGeometry::MakeRoot(
-			Size, FSlateLayoutTransform(1.0f));
+			Size / Dpi, FSlateLayoutTransform(Dpi));
 		const auto SettleLayout = [&]()
 		{
 			// Exercise six complete frames so a desired-size/allocation feedback
@@ -660,7 +665,7 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 			for (int32 Pass = 0; Pass < 6; ++Pass)
 			{
 				Root->Tick(RootGeometry, 0.0, 0.0f);
-				Window->SlatePrepass(1.0f);
+				Window->SlatePrepass(Dpi);
 				FHittestGrid HitTestGrid;
 				FSlateWindowElementList DrawElements(Window);
 				const FPaintArgs PaintArgs(&Window.Get(), HitTestGrid,
@@ -726,6 +731,9 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 				->GetCachedGeometry().GetLayoutBoundingRect();
 			const FSlateRect RootBounds =
 				Root->GetCachedGeometry().GetLayoutBoundingRect();
+			AddInfo(FString::Printf(TEXT("%sbanner %.1f-%.1f, menu %.1f-%.1f, screen %.1f"),
+				*StatePrefix, Banner.Top, Banner.Bottom, MenuBounds.Top, MenuBounds.Bottom,
+				RootBounds.Bottom));
 			TestTrue(StatePrefix + TEXT("banner does not intersect the menu list"),
 				Banner.Top >= MenuBounds.Bottom - 1.0f);
 			TestTrue(StatePrefix + TEXT("banner remains inside the supported client"),
@@ -794,6 +802,17 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 				}
 				const FVector2D SingleLine = FWoTMenuLayout::MeasureText(
 					TextWidget->GetText(), TextWidget->GetFont());
+				if (Size.X >= 1280.0f)
+				{
+					// The Steam Deck legibility pass: from 1280x720 up the
+					// banner never drops to the 14-pixel face; it wraps.
+					TestTrue(FString::Printf(TEXT("%sbanner text draws the 2x body face (%.2f)"),
+						*StatePrefix, TextWidget->GetFont().Size),
+						TextWidget->GetFont().FontObject
+							== Root->LargeBodyFontForTesting().FontObject
+						&& FMath::IsNearlyEqual(TextWidget->GetFont().Size,
+							Root->LargeBodyFontForTesting().Size, 0.01f));
+				}
 				if (Size.X >= 1280.0f && Text == Presentation.PrimaryLine)
 				{
 					TestTrue(StatePrefix + TEXT("primary text stays on one line"),
@@ -802,14 +821,20 @@ bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 				if (Text == Presentation.ReasonLine && !Text.IsEmpty()
 					&& Size.X >= 1280.0f)
 				{
-					const float MaximumLines = Size.X >= 1920.0f ? 1.0f : 2.0f;
+					// A long reason wraps to a second line at every width: the
+					// 1920-pixel case no longer drops to the 14-pixel face to
+					// stay on one (SP3 PR 7).
+					const float MaximumLines = 2.0f;
+					// Half a line of slack: under a fractional layout scale
+					// Slate snaps each line to whole pixels, so two lines can
+					// measure a pixel over twice the unscaled line.
 					TestTrue(FString::Printf(
 						TEXT("%slong reason obeys its line limit (actual=%.2f line=%.2f max=%.0f text-width=%.2f allotted=%.2f)"),
 						*StatePrefix, TextWidget->GetDesiredSize().Y,
 						SingleLine.Y, MaximumLines, SingleLine.X,
 						Bounds.Right - Bounds.Left),
 						TextWidget->GetDesiredSize().Y
-							<= SingleLine.Y * MaximumLines + 1.0f);
+							< SingleLine.Y * (MaximumLines + 0.5f));
 				}
 			}
 			if (Presentation.Action != EWoTUpdateBannerAction::None)

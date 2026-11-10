@@ -761,6 +761,9 @@ private:
 		InGameMenuPresentationAuthority;
 	TSharedPtr<SWoTInGameMenuOverlay> InGameMenuWidget;
 	TWeakObjectPtr<UGameViewportClient> InGameMenuViewport;
+	/** The chat line's and the item info window's crisp whole-number font
+	 * strikes on Deck-class screens (FWoTMenuStyle::LegibleStrikeFont). */
+	TSharedPtr<FWoTFrontEndPresentationAuthority> ChatInputPresentationAuthority;
 	TSharedPtr<SWoTChatInputOverlay> ChatInputWidget;
 	TWeakObjectPtr<UGameViewportClient> ChatInputViewport;
 	FString ChatInputText;
@@ -780,6 +783,7 @@ private:
 	float NextTauntTime = 0.0f;
 	FName LastTauntSlotForTesting = NAME_None;
 	TWeakObjectPtr<AWoTInventory> ItemInfoItem;
+	TSharedPtr<FWoTFrontEndPresentationAuthority> ItemInfoPresentationAuthority;
 	TSharedPtr<SWoTItemInfoOverlay> ItemInfoWidget;
 	TWeakObjectPtr<UGameViewportClient> ItemInfoViewport;
 	bool bItemInfoOpen = false;

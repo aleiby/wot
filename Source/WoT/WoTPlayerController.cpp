@@ -3223,9 +3223,14 @@ void AWoTPlayerController::CreateChatInputWidget()
 	}
 
 	ChatInputViewport = GEngine->GameViewport;
+	FVector2D ChatViewportSize = FVector2D::ZeroVector;
+	ChatInputViewport->GetViewportSize(ChatViewportSize);
+	ChatInputPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ChatInputWidget = SNew(SWoTChatInputOverlay)
 		.PlayerController(this)
-		.InitialText(ChatInputText);
+		.InitialText(ChatInputText)
+		.InitialPhysicalSize(ChatViewportSize)
+		.PresentationAuthority(ChatInputPresentationAuthority);
 	ChatInputViewport->AddViewportWidgetContent(
 		ChatInputWidget.ToSharedRef(), /*ZOrder*/ 2200);
 
@@ -3429,6 +3434,7 @@ void AWoTPlayerController::RemoveChatInputWidget(bool bRestoreGameInput)
 		}
 		ChatInputWidget.Reset();
 	}
+	ChatInputPresentationAuthority.Reset();
 	ChatInputViewport.Reset();
 	bChatTyping = false;
 	ChatInputText.Reset();
@@ -4055,10 +4061,12 @@ void AWoTPlayerController::CreateItemInfoWidget(AWoTInventory* Item)
 	ItemInfoViewport = GEngine->GameViewport;
 	FVector2D ItemInfoViewportSize = FVector2D::ZeroVector;
 	ItemInfoViewport->GetViewportSize(ItemInfoViewportSize);
+	ItemInfoPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ItemInfoWidget = SNew(SWoTItemInfoOverlay)
 		.PlayerController(this)
 		.Item(Item)
-		.InitialPhysicalSize(ItemInfoViewportSize);
+		.InitialPhysicalSize(ItemInfoViewportSize)
+		.PresentationAuthority(ItemInfoPresentationAuthority);
 	ItemInfoViewport->AddViewportWidgetContent(
 		ItemInfoWidget.ToSharedRef(), /*ZOrder*/ 1900);
 }
@@ -4073,6 +4081,7 @@ void AWoTPlayerController::RemoveItemInfoWidget(bool bCloseWindow)
 		}
 		ItemInfoWidget.Reset();
 	}
+	ItemInfoPresentationAuthority.Reset();
 	ItemInfoViewport.Reset();
 	ItemInfoItem.Reset();
 	if (bCloseWindow)
