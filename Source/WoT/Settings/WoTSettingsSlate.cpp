@@ -1,5 +1,6 @@
 #include "WoTSettingsSlate.h"
 
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -7,6 +8,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
@@ -60,6 +62,20 @@ FString ResolutionLabel(uint16 Width, uint16 Height)
 FText Literal(const TCHAR* Text)
 {
 	return FText::FromString(Text);
+}
+
+/** The "Save changes?" prompt's panel: the menus' charcoal with a gold-brown
+ * edge, as the keyboard panel draws it. */
+const FSlateBrush* WoTSettings_ConfirmBrush()
+{
+	static const FSlateRoundedBoxBrush Brush(FLinearColor(0.035f, 0.035f, 0.04f, 0.97f), 8.0f,
+		FLinearColor(0.48f, 0.34f, 0.13f, 1.0f), 2.0f);
+	return &Brush;
+}
+
+FLinearColor WoTSettings_ConfirmTitleColor()
+{
+	return FLinearColor::FromSRGBColor(FColor(240, 196, 92));
 }
 } // namespace
 
@@ -212,15 +228,77 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SNew(SBox).Padding(24.0f)
+		SNew(SOverlay)
+		+ SOverlay::Slot()
 		[
-			SNew(SBorder)
-			.BorderImage(PresentationAuthority.IsValid() && PresentationAuthority->BrowserStyle()
-				? PresentationAuthority->BrowserStyle()->WindowFrame()
-				: FCoreStyle::Get().GetBrush("NoBorder"))
-			.Padding(14.0f)
+			// The page behind the "Save changes?" prompt is disabled while it is
+			// open, so neither the D-pad nor a click can reach it. The prompt
+			// sets this and its own visibility directly, so both hold at once
+			// for the focus moves that open and close it.
+			SAssignNew(PageHost, SBox).Padding(24.0f)
 			[
-				Panel
+				SNew(SBorder)
+				.BorderImage(PresentationAuthority.IsValid() && PresentationAuthority->BrowserStyle()
+					? PresentationAuthority->BrowserStyle()->WindowFrame()
+					: FCoreStyle::Get().GetBrush("NoBorder"))
+				.Padding(14.0f)
+				[
+					Panel
+				]
+			]
+		]
+		+ SOverlay::Slot()
+		[
+			// The back action with unsaved changes asks first (the owner's Steam
+			// Deck session, 2026-11-09): the menus' dark charcoal, ivory and gold.
+			SAssignNew(ConfirmPrompt, SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+			.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.55f))
+			.Padding(0.0f)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			.Visibility(EVisibility::Collapsed)
+			[
+				SNew(SBorder)
+				.BorderImage(WoTSettings_ConfirmBrush())
+				.Padding(FMargin(36.0f, 28.0f))
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					.Padding(0.0f, 0.0f, 0.0f, 22.0f)
+					[
+						SNew(STextBlock)
+						.Text(Literal(TEXT("Save changes?")))
+						.Font(this, &SWoTSettingsScreen::Heading)
+						.ColorAndOpacity(WoTSettings_ConfirmTitleColor())
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0.0f, 0.0f, 12.0f, 0.0f)
+						[
+							SAssignNew(ConfirmSaveButton, SWoTMenuButton)
+							.ContentPadding(FMargin(18.0f, 8.0f))
+							.OnClicked(this, &SWoTSettingsScreen::ConfirmSave)
+							[
+								SNew(STextBlock).Text(Literal(TEXT("Save")))
+								.Font(this, &SWoTSettingsScreen::Body)
+								.ColorAndOpacity(FSlateColor::UseForeground())
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[
+							SAssignNew(ConfirmDiscardButton, SWoTMenuButton)
+							.ContentPadding(FMargin(18.0f, 8.0f))
+							.OnClicked(this, &SWoTSettingsScreen::ConfirmDiscard)
+							[
+								SNew(STextBlock).Text(Literal(TEXT("Discard")))
+								.Font(this, &SWoTSettingsScreen::Body)
+								.ColorAndOpacity(FSlateColor::UseForeground())
+							]
+						]
+					]
+				]
 			]
 		]
 	];
@@ -232,6 +310,9 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 	// The video confirmation strip keeps focus until Keep or Revert.
 	const TArray<TSharedPtr<SWidget>> StripButtons = {KeepButton, RevertButton};
 	WoTWrapHorizontalNavigation(StripButtons, /*bHoldVertical*/ true);
+	// So does the "Save changes?" prompt, until Save, Discard or B.
+	const TArray<TSharedPtr<SWidget>> ConfirmButtons = {ConfirmSaveButton, ConfirmDiscardButton};
+	WoTWrapHorizontalNavigation(ConfirmButtons, /*bHoldVertical*/ true);
 	// Registered above the host window's entry: B cancels a live key capture
 	// first, and on the video strip B reverts and returns focus to Save.
 	CaptureBackEntry = FWoTBackStack::Get().Register(AsShared(),
@@ -245,6 +326,14 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 			FocusSaveAfterStrip(/*bAlways*/ true);
 			return true;
 		});
+	// Topmost: B on the "Save changes?" prompt returns to editing.
+	ConfirmBackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return bConfirmingUnsaved; },
+		[this]()
+		{
+			CloseSaveConfirm(/*bRestoreFocus*/ true);
+			return true;
+		});
 }
 
 TSharedPtr<SWidget> SWoTSettingsScreen::InitialControllerFocusWidget() const
@@ -255,6 +344,10 @@ TSharedPtr<SWidget> SWoTSettingsScreen::InitialControllerFocusWidget() const
 
 TArray<FWoTButtonPrompt> SWoTSettingsScreen::ControllerPrompts() const
 {
+	if (bConfirmingUnsaved)
+	{
+		return FWoTButtonPromptSets::SaveChanges();
+	}
 	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
 	{
 		return FWoTButtonPromptSets::Dropdown();
@@ -611,8 +704,9 @@ void SWoTSettingsScreen::BuildControlsBody()
 	];
 	NavigationRows.Add({ControllerInvertCheckBox});
 	// Text fields by Steam's own keyboard (spec r3 section 3): offered only
-	// where it can open, a Steam Deck under Proton. Off by default until the
-	// Deck probe passes; the keyboard panel stays the fallback either way.
+	// where it can open, a Steam Deck under Proton. On by default (the owner's
+	// Deck session, 2026-11-09), and a stored choice wins; the keyboard panel
+	// stays the fallback either way.
 	if (FWoTTextEntry::IsSteamKeyboardAvailable())
 	{
 		Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 12.0f)
@@ -1098,6 +1192,11 @@ FReply SWoTSettingsScreen::RevertVideo()
 	return FReply::Handled();
 }
 
+bool SWoTSettingsScreen::HasUnsavedChanges() const
+{
+	return !(Draft == Confirmed) || bSteamKeyboardDraft != bSteamKeyboardConfirmed;
+}
+
 bool SWoTSettingsScreen::HandleBack()
 {
 	if (IsCapturingBinding())
@@ -1105,6 +1204,100 @@ bool SWoTSettingsScreen::HandleBack()
 		CancelCapture();
 		return true;
 	}
+	if (bConfirmingUnsaved)
+	{
+		// B or Escape on the prompt: back to editing, nothing lost.
+		CloseSaveConfirm(/*bRestoreFocus*/ true);
+		return true;
+	}
+	// The video Keep/Revert strip is its own confirmation: back reverts the
+	// preview and leaves, as it always has.
+	const bool bVideoStrip = VideoConfirmDeadline > 0.0 || bVideoPreviewLive;
+	if (!bVideoStrip && HasUnsavedChanges())
+	{
+		OpenSaveConfirm();
+		return true;
+	}
+	LeaveDiscardingDraft();
+	return true;
+}
+
+void SWoTSettingsScreen::SetConfirmShown(bool bShown)
+{
+	bConfirmingUnsaved = bShown;
+	if (PageHost.IsValid())
+	{
+		PageHost->SetEnabled(!bShown);
+	}
+	if (ConfirmPrompt.IsValid())
+	{
+		ConfirmPrompt->SetVisibility(bShown ? EVisibility::Visible : EVisibility::Collapsed);
+	}
+}
+
+void SWoTSettingsScreen::OpenSaveConfirm()
+{
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication& SlateApp = FSlateApplication::Get();
+		FocusBeforeConfirm = SlateApp.GetKeyboardFocusedWidget();
+		SetConfirmShown(true);
+		// The prompt opens on Save, for a controller and a keyboard alike.
+		if (ConfirmSaveButton.IsValid())
+		{
+			SlateApp.SetKeyboardFocus(ConfirmSaveButton, EFocusCause::SetDirectly);
+		}
+		return;
+	}
+	SetConfirmShown(true);
+}
+
+void SWoTSettingsScreen::CloseSaveConfirm(bool bRestoreFocus)
+{
+	if (!bConfirmingUnsaved)
+	{
+		return;
+	}
+	SetConfirmShown(false);
+	const TSharedPtr<SWidget> Previous = FocusBeforeConfirm.Pin();
+	FocusBeforeConfirm.Reset();
+	if (!bRestoreFocus || !FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	// Back where the player was editing; else the page's first control.
+	TSharedPtr<SWidget> Target = Previous;
+	if (!WoTIsNavigable(Target))
+	{
+		Target = InitialControllerFocusWidget();
+	}
+	if (!WoTIsNavigable(Target))
+	{
+		Target = AsShared();
+	}
+	FSlateApplication::Get().SetKeyboardFocus(Target, EFocusCause::SetDirectly);
+}
+
+FReply SWoTSettingsScreen::ConfirmSave()
+{
+	// Saving may close the screen: keep it alive to the end of the click.
+	const TSharedRef<SWidget> KeepAlive = AsShared();
+	CloseSaveConfirm(/*bRestoreFocus*/ true);
+	// Exactly the Save button: applies and leaves (a display change on the
+	// Hardware page still waits for Keep).
+	return Save();
+}
+
+FReply SWoTSettingsScreen::ConfirmDiscard()
+{
+	const TSharedRef<SWidget> KeepAlive = AsShared();
+	CloseSaveConfirm(/*bRestoreFocus*/ false);
+	// Exactly the Back button: drops the draft and leaves.
+	return Back();
+}
+
+void SWoTSettingsScreen::LeaveDiscardingDraft()
+{
 	const bool bBrightnessPreviewLive =
 		!FMath::IsNearlyEqual(Draft.Brightness, Confirmed.Brightness);
 	const bool bRevertVideoPreview =
@@ -1125,12 +1318,18 @@ bool SWoTSettingsScreen::HandleBack()
 	Draft = Confirmed;
 	bSteamKeyboardDraft = bSteamKeyboardConfirmed;
 	OnBack.ExecuteIfBound();
-	return true;
 }
 
 FReply SWoTSettingsScreen::Back()
 {
-	HandleBack();
+	// The Back button leaves at once and drops the draft, as it always has;
+	// only the back action (B, View, Escape) asks first.
+	if (IsCapturingBinding())
+	{
+		CancelCapture();
+		return FReply::Handled();
+	}
+	LeaveDiscardingDraft();
 	return FReply::Handled();
 }
 

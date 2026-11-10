@@ -284,8 +284,8 @@ bool FWoTTextEntry::Begin(const FWoTTextEntryRequest& Request, const TSharedRef<
 	FWoTTextEntrySession& Session = *WoTTextEntryGlobals().Session;
 	FWoTControllerUIInput::SetTextEntryActive(true);
 	// Above every screen and overlay entry: on Steam's route B cancels the
-	// entry; on the panel B and View reach the panel itself (Backspace and
-	// Cancel), so this entry only keeps them from backing the screen.
+	// entry; on the panel B and View reach the panel itself (B cancels, View
+	// does nothing), so this entry only keeps them from backing the screen.
 	Session.BackEntry = FWoTBackStack::Get().Register(Layer.ToSharedRef(),
 		[]() { return FWoTTextEntry::IsActive(); },
 		[]()
@@ -582,23 +582,30 @@ bool FWoTTextEntry::IsSteamKeyboardAvailable()
 	return WoTIsRunningUnderWine() && IsSteamDeck();
 }
 
-bool FWoTTextEntry::ParseToggle(TConstArrayView<uint8> Bytes)
+TOptional<bool> FWoTTextEntry::ParseToggle(TConstArrayView<uint8> Bytes)
 {
 	if (Bytes.IsEmpty() || Bytes.Num() > 64)
 	{
-		return false;
+		return {};
 	}
 	FString Text;
 	for (const uint8 Byte : Bytes)
 	{
 		if (Byte == 0 || Byte > 0x7f)
 		{
-			return false;
+			return {};
 		}
 		Text.AppendChar(static_cast<TCHAR>(Byte));
 	}
 	Text.TrimEndInline();
-	return Text.Equals(FormatToggle(true), ESearchCase::CaseSensitive);
+	for (const bool bStored : {true, false})
+	{
+		if (Text.Equals(FormatToggle(bStored), ESearchCase::CaseSensitive))
+		{
+			return bStored;
+		}
+	}
+	return {};
 }
 
 FString FWoTTextEntry::FormatToggle(bool bEnabled)
@@ -617,21 +624,21 @@ bool FWoTTextEntry::IsSteamKeyboardEnabled()
 #endif
 	// The toggle lives in a preferences side file, not GameUserSettings: in
 	// guarded player builds the engine patch resets the GameUserSettings ini
-	// path, so a [WoT.TextEntry] section there would never reach disk. Missing
-	// or invalid means off; it stays off by default until the Task 0 Deck
-	// probe passes.
+	// path, so a [WoT.TextEntry] section there would never reach disk. A
+	// stored "on" or "off" is the player's choice; a missing or invalid file
+	// is no choice, so the default (on) applies.
 	if (!WoTTextEntry_SideFileAllowed())
 	{
-		return false;
+		return SteamKeyboardDefault;
 	}
 	FString Path;
 	TArray<uint8> Bytes;
 	if (!UWoTPreferencesSubsystem::SideFilePath(ToggleSideFileName, Path)
 		|| !UWoTPreferencesSubsystem::LoadSideFileBytes(Path, 64, Bytes))
 	{
-		return false;
+		return SteamKeyboardDefault;
 	}
-	return ParseToggle(Bytes);
+	return ParseToggle(Bytes).Get(SteamKeyboardDefault);
 }
 
 bool FWoTTextEntry::SetSteamKeyboardEnabled(bool bEnabled)

@@ -297,6 +297,8 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 				// its draft; the prompt strip stays drawn above it.
 				SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
 				.Font(this, &SWoTFrontEndRoot::PromptFont)
+				// The dark strip behind the prompt strip below (10 under it).
+				.PromptBarMargin(FMargin(0.0f, 10.0f, 0.0f, 10.0f))
 				[
 					SAssignNew(ScreenHost, SBox)
 					.HAlign(HAlign_Fill)

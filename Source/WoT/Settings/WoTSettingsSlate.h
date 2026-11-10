@@ -54,10 +54,18 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SWoTSettingsScreen() override;
 
-	/** Escape/back: cancels a live key capture first, then reverts an
-	 * unconfirmed video preview, then leaves the screen. Always handled. */
+	/** The back action (B, View or Escape): cancels a live key capture first;
+	 * closes an open "Save changes?" prompt, back to editing; with the video
+	 * Keep/Revert strip up, reverts the preview and leaves, as before; with
+	 * unsaved changes, opens the "Save changes?" prompt (the owner's Steam
+	 * Deck session, 2026-11-09); else leaves the screen. Always handled. The
+	 * Back button keeps leaving at once and dropping the draft. */
 	bool HandleBack();
 	bool IsCapturingBinding() const { return CaptureAction.IsSet(); }
+	/** The draft (the Steam keyboard choice included) differs from what is saved. */
+	bool HasUnsavedChanges() const;
+	/** The "Save changes?" prompt is open. */
+	bool IsConfirmingUnsaved() const { return bConfirmingUnsaved; }
 	/** The first control of the page: initial focus in Controller mode. */
 	TSharedPtr<SWidget> InitialControllerFocusWidget() const;
 	/** The prompt strip's set for this page now (spec r3 section 1a): the
@@ -94,6 +102,11 @@ public:
 	bool IsAwaitingVideoConfirmationForTesting() const { return VideoConfirmDeadline > 0.0; }
 	double VideoConfirmDeadlineForTesting() const { return VideoConfirmDeadline; }
 	FReply SaveForTesting() { return Save(); }
+	/** The Back button's click: leaves at once, dropping the draft. */
+	FReply BackForTesting() { return Back(); }
+	TSharedPtr<SWidget> ConfirmSaveButtonForTesting() const { return ConfirmSaveButton; }
+	TSharedPtr<SWidget> ConfirmDiscardButtonForTesting() const { return ConfirmDiscardButton; }
+	TSharedPtr<SWidget> ConfirmPromptForTesting() const { return ConfirmPrompt; }
 	FReply KeepVideoForTesting() { return KeepVideo(); }
 	FReply RevertVideoForTesting() { return RevertVideo(); }
 	FReply ResetBindingsForTesting() { return ResetBindings(); }
@@ -150,6 +163,17 @@ private:
 	FReply ResetBindings();
 	FReply Save();
 	FReply Back();
+	/** Drops the draft (restoring any live preview) and leaves the screen. */
+	void LeaveDiscardingDraft();
+	void OpenSaveConfirm();
+	/** Closes the prompt; with bRestoreFocus, focus returns where it was. */
+	void CloseSaveConfirm(bool bRestoreFocus);
+	/** Shows or hides the prompt and disables or enables the page behind it. */
+	void SetConfirmShown(bool bShown);
+	/** The prompt's Save: exactly the Save button. */
+	FReply ConfirmSave();
+	/** The prompt's Discard: exactly the Back button. */
+	FReply ConfirmDiscard();
 	FReply KeepVideo();
 	FReply RevertVideo();
 	bool CommitDraft();
@@ -184,9 +208,20 @@ private:
 	TSharedPtr<SScrollBox> BodyScroll;
 	/** The focus graph's rows: body rows, then Save and Back. */
 	TArray<TArray<TSharedPtr<SWidget>>> NavigationRows;
-	/** B cancels a live capture; B on the video strip reverts. */
+	/** B cancels a live capture; B on the video strip reverts; B on the
+	 * "Save changes?" prompt closes it. */
 	TSharedPtr<FWoTBackStackEntryHandle> CaptureBackEntry;
 	TSharedPtr<FWoTBackStackEntryHandle> VideoStripBackEntry;
+	TSharedPtr<FWoTBackStackEntryHandle> ConfirmBackEntry;
+	/** The "Save changes?" prompt over the page, its two buttons, and the
+	 * page's host, disabled while the prompt is open. */
+	TSharedPtr<SWidget> ConfirmPrompt;
+	TSharedPtr<SWidget> PageHost;
+	TSharedPtr<SWidget> ConfirmSaveButton;
+	TSharedPtr<SWidget> ConfirmDiscardButton;
+	/** Where focus was when the prompt opened; it returns there on B. */
+	TWeakPtr<SWidget> FocusBeforeConfirm;
+	bool bConfirmingUnsaved = false;
 	TSharedPtr<SWidget> WindowModeLabel;
 	TSharedPtr<SWidget> WindowModeControl;
 	TSharedPtr<SWidget> ControllerSensitivitySlider;

@@ -437,7 +437,8 @@ bool FWoTSettingsControlsCaptureSpec::RunTest(const FString&)
 		EWoTSettingsPage::Controls, Fixture.Owner, Authority, BackCallbacks);
 	Second->BeginCaptureForTesting(EWoTManagedBinding::ShowScores, EWoTBindingSlot::Primary);
 	Second->OnPreviewKeyDown(FGeometry(), KeyEvent(EKeys::F9));
-	TestTrue(TEXT("Back handled"), Second->HandleBack());
+	// The Back button drops a dirty draft at once (B and Escape ask first).
+	TestTrue(TEXT("Back handled"), Second->BackForTesting().IsEventHandled());
 	TestEqual(TEXT("Back navigates"), BackCallbacks.BackCount, 1);
 	TestTrue(TEXT("Back discarded the pending rebind"),
 		Fixture.Owner->GetGameSettings().FindBinding(EWoTManagedBinding::ShowScores)->Primary == EKeys::F4);
@@ -599,7 +600,7 @@ bool FWoTSettingsHardwareConfirmationSpec::RunTest(const FString&)
 	FWoTGameSettingsAdapter::ApplyBrightness(BrightnessDraft.Brightness);
 	ProjectedBrightness.Reset();
 	TestTrue(TEXT("Back handles a live brightness preview"),
-		BrightnessScreen->HandleBack());
+		BrightnessScreen->BackForTesting().IsEventHandled());
 	TestEqual(TEXT("Back reapplies brightness once"), ProjectedBrightness.Num(), 1);
 	if (ProjectedBrightness.Num() == 1)
 	{

@@ -1,5 +1,6 @@
 #include "UI/SWoTButtonPrompts.h"
 
+#include "Brushes/SlateColorBrush.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
@@ -53,10 +54,15 @@ const FSlateBrush* WoTPromptGlyph_Bar()
 	return &Brush;
 }
 
-const FSlateBrush* WoTPromptGlyph_Frame()
+const FSlateBrush* WoTPromptGlyph_Edge()
 {
-	static const FSlateRoundedBoxBrush Brush(FLinearColor::Transparent, 4.0f,
-		FLinearColor::White, 1.5f);
+	// A plain fill for a frame's edges. FSlateDrawElement::MakeBox colours a
+	// box, rounded or not, with its tint argument and never the brush's own
+	// tint (SlateCore DrawElementTypes.cpp, MakeBoxInternal's SetTint(InTint);
+	// ElementBatcher.cpp fills with the element's tint), so a "transparent"
+	// rounded frame drawn with an opaque tint is a solid box. A hollow frame is
+	// therefore drawn as four edge bars.
+	static const FSlateColorBrush Brush(FLinearColor::White);
 	return &Brush;
 }
 
@@ -106,6 +112,16 @@ public:
 		const EWoTPromptButton Which = Button.Get(EWoTPromptButton::A);
 		const FLinearColor Light(0.92f, 0.90f, 0.85f, 1.0f);
 		const FLinearColor Dim(0.45f, 0.43f, 0.40f, 1.0f);
+		// A hollow frame: four edge bars, so the lines inside stay visible.
+		auto Frame = [&](float X, float Y, float W, float H, int32 Layer)
+		{
+			const float Edge = FMath::Clamp(Side * 0.06f, 1.0f, FMath::Min(W, H) * 0.5f);
+			Box(X, Y, W, Edge, WoTPromptGlyph_Edge(), Light, Layer);
+			Box(X, Y + H - Edge, W, Edge, WoTPromptGlyph_Edge(), Light, Layer);
+			Box(X, Y + Edge, Edge, H - 2.0f * Edge, WoTPromptGlyph_Edge(), Light, Layer);
+			Box(X + W - Edge, Y + Edge, Edge, H - 2.0f * Edge, WoTPromptGlyph_Edge(),
+				Light, Layer);
+		};
 		if (const TCHAR* Letter = WoTPromptGlyph_Letter(Which))
 		{
 			Box(0.0f, 0.0f, Side, Side, WoTPromptGlyph_Disc(),
@@ -131,20 +147,16 @@ public:
 		{
 		case EWoTPromptButton::View:
 		{
-			// A small rounded frame with two overlapping windows.
-			Box(Side * 0.08f, Side * 0.2f, Side * 0.84f, Side * 0.6f,
-				WoTPromptGlyph_Frame(), Light, LayerId);
-			Box(Side * 0.26f, Side * 0.32f, Side * 0.3f, Side * 0.22f,
-				WoTPromptGlyph_Frame(), Light, LayerId + 1);
-			Box(Side * 0.42f, Side * 0.44f, Side * 0.3f, Side * 0.22f,
-				WoTPromptGlyph_Frame(), Light, LayerId + 1);
+			// A small frame with two overlapping windows.
+			Frame(Side * 0.08f, Side * 0.2f, Side * 0.84f, Side * 0.6f, LayerId);
+			Frame(Side * 0.26f, Side * 0.32f, Side * 0.3f, Side * 0.22f, LayerId + 1);
+			Frame(Side * 0.42f, Side * 0.44f, Side * 0.3f, Side * 0.22f, LayerId + 1);
 			return LayerId + 1;
 		}
 		case EWoTPromptButton::Menu:
 		{
-			// A small rounded frame with three lines.
-			Box(Side * 0.08f, Side * 0.2f, Side * 0.84f, Side * 0.6f,
-				WoTPromptGlyph_Frame(), Light, LayerId);
+			// A small frame with three lines.
+			Frame(Side * 0.08f, Side * 0.2f, Side * 0.84f, Side * 0.6f, LayerId);
 			for (int32 Line = 0; Line < 3; ++Line)
 			{
 				Box(Side * 0.28f, Side * (0.33f + 0.13f * Line), Side * 0.44f,
@@ -278,18 +290,24 @@ TArray<FWoTButtonPrompt> FWoTButtonPromptSets::Capture()
 
 TArray<FWoTButtonPrompt> FWoTButtonPromptSets::KeyboardPanel()
 {
+	// The owner's Steam Deck ruling (2026-11-09); View is deliberately absent.
 	return {{EWoTPromptButton::A, LOCTEXT("Type", "Type")},
-		{EWoTPromptButton::B, LOCTEXT("Backspace", "Backspace")},
-		{EWoTPromptButton::X, LOCTEXT("Space", "Space")},
-		{EWoTPromptButton::Y, LOCTEXT("Shift", "Shift")},
-		{EWoTPromptButton::Menu, LOCTEXT("Done", "Done")},
-		{EWoTPromptButton::View, LOCTEXT("Cancel", "Cancel")}};
+		{EWoTPromptButton::B, LOCTEXT("Cancel", "Cancel")},
+		{EWoTPromptButton::X, LOCTEXT("Backspace", "Backspace")},
+		{EWoTPromptButton::Y, LOCTEXT("Space", "Space")},
+		{EWoTPromptButton::Menu, LOCTEXT("Done", "Done")}};
 }
 
 TArray<FWoTButtonPrompt> FWoTButtonPromptSets::SteamKeyboard()
 {
 	return {{EWoTPromptButton::Y, LOCTEXT("KeyboardPanel", "Keyboard panel")},
 		{EWoTPromptButton::B, LOCTEXT("Cancel", "Cancel")}};
+}
+
+TArray<FWoTButtonPrompt> FWoTButtonPromptSets::SaveChanges()
+{
+	return {{EWoTPromptButton::A, LOCTEXT("Select", "Select")},
+		{EWoTPromptButton::B, LOCTEXT("KeepEditing", "Keep Editing")}};
 }
 
 // ---------------------------------------------------------------------------
@@ -325,8 +343,7 @@ void SWoTButtonPrompts::Construct(const FArguments& InArgs)
 				})
 				.Size_Lambda([this]()
 				{
-					// About the label's cap height plus its ascender room.
-					return FMath::Max(14.0f, LabelFont().Size * 1.4f);
+					return GlyphSizeFor(LabelFont());
 				})
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -375,10 +392,52 @@ TArray<FWoTButtonPrompt> SWoTButtonPrompts::GetShownPrompts() const
 
 FSlateFontInfo SWoTButtonPrompts::LabelFont() const
 {
-	const FSlateFontInfo Bound = Font.Get(FSlateFontInfo());
-	// An empty face would fall back to the last-resort font.
-	return Bound.HasValidFont() ? Bound : FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+	// The prepass hands every widget its accumulated layout scale (the game
+	// viewport's DPI scale included) before its children measure their text.
+	return LegibleLabelFont(Font.Get(FSlateFontInfo()), GetPrepassLayoutScaleMultiplier());
 }
+
+FSlateFontInfo SWoTButtonPrompts::LegibleLabelFont(const FSlateFontInfo& InFont,
+	float LayoutScale)
+{
+	// An empty face would fall back to the last-resort font.
+	FSlateFontInfo Result = InFont.HasValidFont()
+		? InFont : FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+	const float PixelsPerPoint = static_cast<float>(FontConstants::RenderDPI) / 72.0f
+		* FMath::Max(LayoutScale, 0.01f);
+	// The tolerance keeps a size that lands exactly on the floor from rounding
+	// up a whole point through float error.
+	const float Floor = FMath::CeilToFloat(
+		MinimumLabelPixels / PixelsPerPoint - UE_KINDA_SMALL_NUMBER);
+	Result.Size = FMath::Max(Result.Size, Floor);
+	return Result;
+}
+
+float SWoTButtonPrompts::GlyphSizeFor(const FSlateFontInfo& InLabelFont)
+{
+	return FMath::Max(14.0f, InLabelFont.Size * GlyphSizePerPoint);
+}
+
+float SWoTButtonPrompts::BarHeightFor(const FSlateFontInfo& InFont, float LayoutScale)
+{
+	const FSlateFontInfo Label = LegibleLabelFont(InFont, LayoutScale);
+	float LineHeight = Label.Size * static_cast<float>(FontConstants::RenderDPI) / 72.0f;
+	if (FSlateApplication::IsInitialized())
+	{
+		if (FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer())
+		{
+			LineHeight = Renderer->GetFontMeasureService()->GetMaxCharacterHeight(Label);
+		}
+	}
+	return FMath::Max(GlyphSizeFor(Label), LineHeight);
+}
+
+#if WITH_AUTOMATION_TESTS
+TSharedRef<SWidget> SWoTButtonPrompts::MakeGlyphForTesting(EWoTPromptButton Button, float Size)
+{
+	return SNew(SWoTPromptGlyph).Button(Button).Size(Size);
+}
+#endif
 
 EVisibility SWoTButtonPrompts::PromptVisibility(int32 Index) const
 {

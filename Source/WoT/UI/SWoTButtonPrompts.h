@@ -70,11 +70,14 @@ struct WOT_API FWoTButtonPromptSets
 	static TArray<FWoTButtonPrompt> Taunts();
 	/** A live key capture on the Controls page: B Cancel. */
 	static TArray<FWoTButtonPrompt> Capture();
-	/** The on-screen keyboard panel (spec r3 section 3): A Type, B Backspace,
-	 * X Space, Y Shift, Menu Done, View Cancel. */
+	/** The on-screen keyboard panel (spec r3 section 3, as the owner's Steam
+	 * Deck session ruled, 2026-11-09): A Type, B Cancel, X Backspace, Y Space,
+	 * Menu Done. View does nothing there, and Shift is only the on-screen key. */
 	static TArray<FWoTButtonPrompt> KeyboardPanel();
 	/** Typing with Steam's keyboard: Y Keyboard panel, B Cancel. */
 	static TArray<FWoTButtonPrompt> SteamKeyboard();
+	/** The settings screens' "Save changes?" prompt: A Select, B Keep Editing. */
+	static TArray<FWoTButtonPrompt> SaveChanges();
 };
 
 /**
@@ -82,7 +85,9 @@ struct WOT_API FWoTButtonPromptSets
  * each followed by its label. It shows only while the last input came from a
  * controller and is collapsed otherwise, so keyboard and mouse players see
  * the screen exactly as before. The host binds Prompts to its current window
- * (spec r3 section 1a). Exported so plugin windows can use it.
+ * (spec r3 section 1a). Labels draw in the bound face, raised where needed to
+ * MinimumLabelPixels at the strip's own layout scale, so every host's strip
+ * is legible on a Steam Deck. Exported so plugin windows can use it.
  */
 class WOT_API SWoTButtonPrompts : public SCompoundWidget
 {
@@ -105,6 +110,33 @@ public:
 
 	/** Prompts past this many are not drawn. */
 	static constexpr int32 MaxPrompts = 6;
+	/** The labels' floor: at least this many physical pixels tall at the
+	 * strip's live layout scale (the owner's Steam Deck session, 2026-11-09:
+	 * the chat line's prompts were far too small at 1280x800). */
+	static constexpr float MinimumLabelPixels = 16.0f;
+	/** A glyph's side per point of its label's size: about 1.7 times the
+	 * label's cap height. */
+	static constexpr float GlyphSizePerPoint = 1.6f;
+
+	/** InFont raised to the smallest whole point size whose text is at least
+	 * MinimumLabelPixels tall under LayoutScale (Size x 96/72 x LayoutScale,
+	 * as Slate draws it); InFont itself where it already is. An invalid face
+	 * becomes the engine's default face. */
+	static FSlateFontInfo LegibleLabelFont(const FSlateFontInfo& InFont, float LayoutScale);
+	/** A glyph's side, in layout units, beside a label in InLabelFont. */
+	static float GlyphSizeFor(const FSlateFontInfo& InLabelFont);
+	/** The strip's height, in layout units, for labels bound to InFont under
+	 * LayoutScale: the taller of a glyph and a label line. */
+	static float BarHeightFor(const FSlateFontInfo& InFont, float LayoutScale);
+
+#if WITH_AUTOMATION_TESTS
+	/** One glyph widget as the strip draws it, for paint specs. */
+	static TSharedRef<SWidget> MakeGlyphForTesting(EWoTPromptButton Button, float Size);
+	/** The label face the strip draws now, the floor applied. */
+	FSlateFontInfo LabelFontForTesting() const { return LabelFont(); }
+	/** The face the host binds, before the floor. */
+	FSlateFontInfo BoundFontForTesting() const { return Font.Get(FSlateFontInfo()); }
+#endif
 
 private:
 	TArray<FWoTButtonPrompt> CurrentPrompts() const;

@@ -85,8 +85,8 @@ enum class EWoTTextEntryRoute : uint8
  *
  * While a session runs, keyboard keys never flip the last input to Pointer
  * (FWoTControllerUIInput::SetTextEntryActive), and a back-stack entry sits on
- * top: on the panel B is Backspace and View cancels; on Steam's route B
- * cancels the entry.
+ * top: on the panel B cancels and View does nothing (the owner's Steam Deck
+ * ruling, 2026-11-09); on Steam's route B cancels the entry.
  *
  * The panel is shown by the nearest SWoTTextEntryLayer around the field, so a
  * host screen wraps its content in one. Exported for plugin windows.
@@ -143,14 +143,18 @@ public:
 	static bool IsSteamDeck();
 	/** Steam's keyboard can be opened: under Wine (Proton) with SteamDeck=1. */
 	static bool IsSteamKeyboardAvailable();
-	/** The player's toggle (default off until the Task 0 Deck probe passes). */
+	/** The toggle for a player who never set it: on (the owner's Steam Deck
+	 * session, 2026-11-09). */
+	static constexpr bool SteamKeyboardDefault = true;
+	/** The player's toggle: their stored choice, else SteamKeyboardDefault. */
 	static bool IsSteamKeyboardEnabled();
 	/** Stores the toggle in its side file. False when it could not be saved. */
 	static bool SetSteamKeyboardEnabled(bool bEnabled);
 	/** Steam's keyboard when available and enabled, else the panel. */
 	static EWoTTextEntryRoute ChooseRoute();
-	/** The side file's one ASCII line; a missing or invalid file means off. */
-	static bool ParseToggle(TConstArrayView<uint8> Bytes);
+	/** The side file's one ASCII line: the stored choice, or unset when the
+	 * file is empty or invalid (no explicit choice, so the default applies). */
+	static TOptional<bool> ParseToggle(TConstArrayView<uint8> Bytes);
 	static FString FormatToggle(bool bEnabled);
 	/** The last error the launcher reported (empty when it opened). */
 	static FString GetLastLaunchError();
