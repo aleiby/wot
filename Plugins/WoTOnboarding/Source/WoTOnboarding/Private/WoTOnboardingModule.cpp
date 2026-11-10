@@ -512,8 +512,8 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 	UWoTAngrealGuide* Guide = ResolveGuide();
 	if (!Guide || Guide->Rows.IsEmpty())
 	{
-		// A tree whose import pipeline has not run carries no guide; the aid
-		// quietly does nothing (the asset loader already logged it once).
+		// Compiled rows that fail to parse leave no guide; the aid quietly
+		// does nothing (the loader already logged it once).
 		return;
 	}
 	// The card's suggestion followed: the guide opens at the card's item.

@@ -1,20 +1,20 @@
 HintKey,Template
-AirBurst,{title} - a close-range gust; {counter} turns air weaves aside.
-Balefire,{title} - no shield stops it and walls do not block it; spread out and strike first.
-Dart,{title} - {counter} stops the dart stream.
-Decay,{title} - {counter} wards off its draining seeker.
-EarthTremor,{title} - {counter} holds firm against the tremor.
-Fireball,{title} - {counter} absorbs fire weaves.
-Lightning,{title} - {counter} turns the bolt aside.
-Seeker,{title} - {counter} sends it hunting its own caster.
-SoulBarb,{title} - {counter} wards spirit weaves.
-Taint,{title} - {counter} lifts the curse from your angreal.
-Target,{title} - {counter} breaks the caster's mark on you.
-Whirlwind,{title} - {counter} keeps the winds off you.
-Alarm,{title} - touching or striking it raises an alarm that alerts nearby defenders.
-FireWall,{title} - a line of burning logs that blocks the way and burns anyone who touches it.
-Pit,{title} - {counter} reveals the drop before you step in.
-Portcullis,{title} - {counter} reveals the gate before it falls.
-Spear,{title} - {counter} reveals it before it springs.
-Staircase,{title} - {counter} reveals conjured stonework ahead.
-Wall,{title} - {counter} reveals conjured walls ahead.
+AirBurst,A close-range gust; {counter:AngrealInvAirShield} turns air weaves aside.
+Balefire,No shield stops it and walls do not block it; spread out and strike first.
+Dart,{counter:AngrealInvAirShield} stops the dart stream.
+Decay,{counter:AngrealInvSpiritShield} wards off its draining seeker.
+EarthTremor,{counter:AngrealInvEarthShield} holds firm against the tremor.
+Fireball,{counter:AngrealInvFireShield} absorbs fire weaves.
+Lightning,{counter:AngrealInvAirShield} turns the bolt aside.
+Seeker,{counter:AngrealInvReflect} sends it hunting its own caster.
+SoulBarb,{counter:AngrealInvSpiritShield} wards spirit weaves.
+Taint,{counter:AngrealInvRemoveCurse} lifts the curse from your angreal.
+Target,{counter:AngrealInvAirShield} breaks the caster's mark on you.
+Whirlwind,{counter:AngrealInvAirShield} keeps the winds off you.
+Alarm,Touching or striking it raises an alarm that alerts nearby defenders.
+FireWall,A line of burning logs that blocks the way and burns anyone who touches it.
+Pit,{counter:AngrealInvTrapDetect} reveals the drop before you step in.
+Portcullis,{counter:AngrealInvTrapDetect} reveals the gate before it falls.
+Spear,{counter:AngrealInvTrapDetect} reveals it before it springs.
+Staircase,{counter:AngrealInvTrapDetect} reveals conjured stonework ahead.
+Wall,{counter:AngrealInvTrapDetect} reveals conjured walls ahead.

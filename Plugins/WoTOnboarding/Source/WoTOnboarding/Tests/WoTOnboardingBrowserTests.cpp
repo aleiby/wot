@@ -6,11 +6,12 @@
 #include "WoTAngrealGuide.h"
 
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
 
 // The guide browser (plan Task 5). Synthetic fixtures with invented names and
-// invented prose; the real imported asset is touched only by the final spec,
+// invented prose; the real compiled rows are touched only by the final spec,
 // which asserts construction and navigation, never retail prose. Helper names
 // carry the WoTOnboardingBrowser prefix for the shared unity translation unit.
 
@@ -29,7 +30,7 @@ UWoTAngrealGuide* WoTOnboardingBrowserMakeGuide()
 	CinderJet.Roles = {FName(TEXT("Combat")), FName(TEXT("Offensive"))};
 	CinderJet.MaxInitialCharges = 3;
 	CinderJet.MaxCharges = 8;
-	CinderJet.HintText = TEXT("{title} - {counter} quells it.");
+	CinderJet.HintText = TEXT("{counter:CinderWarden} quells it.");
 	Guide->Rows.Add(CinderJet);
 
 	FWoTAngrealGuideRow MistVeil;
@@ -193,7 +194,7 @@ bool FWoTOnboardingBrowserDeepLinkSpec::RunTest(const FString&)
 	TestTrue(TEXT("the detail pane resolves the quote"),
 		Texts.Contains(TEXT("An invented flavor line.")));
 	TestTrue(TEXT("the hint line resolves through the shared resolver"),
-		Texts.Contains(TEXT("Cinder Jet Rod - Cinder Warden Disc quells it.")));
+		Texts.Contains(TEXT("Cinder Warden Disc quells it.")));
 
 	// The countered-by row deep-links: clicking it selects the counter.
 	const TSharedPtr<SButton> CounterRow = WoTOnboardingBrowserFindButton(
@@ -245,7 +246,7 @@ bool FWoTOnboardingBrowserFactsOnlySpec::RunTest(const FString&)
 	TestTrue(TEXT("the facts render: roles"),
 		Texts.Contains(TEXT("Combat, Offensive")));
 	TestTrue(TEXT("the hint still renders from spaced names"),
-		Texts.Contains(TEXT("Cinder Jet - Cinder Warden quells it.")));
+		Texts.Contains(TEXT("Cinder Warden quells it.")));
 	TestFalse(TEXT("no description pane without resolved text"),
 		Texts.Contains(TEXT("An invented rod of embers.")));
 	TestFalse(TEXT("no quote pane without resolved text"),
@@ -258,30 +259,26 @@ bool FWoTOnboardingBrowserFactsOnlySpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserRealAssetSpec,
-	"WoT.Onboarding.BrowserRealAsset", WoTOnboardingBrowserFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserCompiledRowsSpec,
+	"WoT.Onboarding.BrowserCompiledRows", WoTOnboardingBrowserFlags)
 
-bool FWoTOnboardingBrowserRealAssetSpec::RunTest(const FString&)
+bool FWoTOnboardingBrowserCompiledRowsSpec::RunTest(const FString&)
 {
-	// Skip semantics mirror GuideAssetLoad: a tree whose import pipeline has
-	// not run carries no asset, and that is a pass.
-	UWoTAngrealGuide* Guide = UWoTAngrealGuide::Load();
-	if (!Guide)
+	// The compiled rows ship in every build, so this never skips.
+	const TStrongObjectPtr<UWoTAngrealGuide> Guide(UWoTAngrealGuide::Load());
+	if (!TestNotNull(TEXT("the compiled rows parse"), Guide.Get()))
 	{
-		AddInfo(FString::Printf(
-			TEXT("%s is not imported in this tree; skipping the browser pins."),
-			UWoTAngrealGuide::AssetPath()));
-		return true;
+		return false;
 	}
 	// The default seam resolver: whatever retail text this box resolves is
 	// drawn, and whatever does not resolve falls back to facts-only. Both
 	// are correct renders, so the spec asserts structure, never prose.
 	const TSharedRef<SWoTGuideBrowser> Browser =
-		SNew(SWoTGuideBrowser).Guide(Guide);
+		SNew(SWoTGuideBrowser).Guide(Guide.Get());
 	Browser->SlatePrepass(1.0f);
 	TArray<FString> Texts;
 	WoTOnboardingBrowserCollectText(Browser, Texts);
-	TestTrue(TEXT("the imported roster renders a list"), Texts.Num() > 10);
+	TestTrue(TEXT("the compiled roster renders a list"), Texts.Num() > 10);
 	for (const FWoTAngrealGuideRow& Row : Guide->Rows)
 	{
 		Browser->SelectRow(Row.ClassName);

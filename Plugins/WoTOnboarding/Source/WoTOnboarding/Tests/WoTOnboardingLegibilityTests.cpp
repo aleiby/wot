@@ -70,7 +70,7 @@ UWoTAngrealGuide* WoTOnboardingLegibilityMakeGuide()
 	Spark.Roles = {FName(TEXT("Combat")), FName(TEXT("Offensive"))};
 	Spark.MaxInitialCharges = 4;
 	Spark.MaxCharges = 10;
-	Spark.HintText = TEXT("{title} - {counter} smothers it.");
+	Spark.HintText = TEXT("{counter:DamperDisc} smothers it.");
 	Spark.Counters = {FName(TEXT("SnareCrate"))};
 	Guide->Rows.Add(Spark);
 
@@ -263,7 +263,7 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 			TEXT("TRAPS"), TEXT("COUNTERS"), TEXT("COUNTERED BY"),
 			TEXT("[ON] FIRE"), TEXT("[--] EARTH"), TEXT("Combat, Offensive"),
 			TEXT("An invented flail of sparks."), TEXT("An invented line of verse."),
-			TEXT("Spark Flail - Damper Disc smothers it.")})
+			TEXT("Damper Disc smothers it.")})
 		{
 			TestTrue(FString::Printf(TEXT("%s: the browser shows \"%s\""),
 				Case.Name, Expected), Texts.Contains(FString(Expected)));

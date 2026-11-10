@@ -3,14 +3,16 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "WoTAngrealGuide.h"
+#include "WoTOnboardingHints.h"
 
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 
 #include <initializer_list>
 
 // Synthetic fixtures throughout: invented class names and invented titles
 // only (the same fixture vocabulary as test_import_angreal_guide.py). The
-// real imported asset is touched solely by the load spec below, which asserts
+// real compiled rows are touched solely by the load spec below, which asserts
 // identifiers and counts, never retail prose.
 
 namespace
@@ -40,7 +42,7 @@ UWoTAngrealGuide* WoTOnboardingMakeFixtureGuide()
 	EmberLob.Roles = {FName(TEXT("Combat")), FName(TEXT("Offensive"))};
 	EmberLob.MaxInitialCharges = 4;
 	EmberLob.MaxCharges = 9;
-	EmberLob.HintText = TEXT("{title} - {counter} quenches it.");
+	EmberLob.HintText = TEXT("{counter:CinderWard} quenches it.");
 	Guide->Rows.Add(EmberLob);
 	Guide->Rows.Add(WoTOnboardingMakeRow(TEXT("EmberLobGreater"), {}));
 	Guide->Rows.Add(WoTOnboardingMakeRow(TEXT("CinderWard"),
@@ -72,7 +74,7 @@ bool FWoTOnboardingGuideFindByClassNameSpec::RunTest(const FString&)
 	TestEqual(TEXT("initial charges"), Row->MaxInitialCharges, 4);
 	TestEqual(TEXT("max charges"), Row->MaxCharges, 9);
 	TestEqual(TEXT("hint text"), Row->HintText,
-		FString(TEXT("{title} - {counter} quenches it.")));
+		FString(TEXT("{counter:CinderWard} quenches it.")));
 	TestNull(TEXT("unknown class finds nothing"),
 		Guide->FindByClassName(FName(TEXT("NeverARow"))));
 	TestNull(TEXT("NAME_None finds nothing"),
@@ -104,29 +106,57 @@ bool FWoTOnboardingGuideCounteredBySpec::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideAssetLoadSpec,
-	"WoT.Onboarding.GuideAssetLoad", WoTOnboardingGuideFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideCompiledRowsSpec,
+	"WoT.Onboarding.GuideCompiledRows", WoTOnboardingGuideFlags)
 
-bool FWoTOnboardingGuideAssetLoadSpec::RunTest(const FString&)
+bool FWoTOnboardingGuideCompiledRowsSpec::RunTest(const FString&)
 {
-	// Skip semantics: a tree whose import pipeline has not run carries no
-	// guide package, and Load() answers null quietly. That is a pass: the
-	// spec pins the asset only where it exists.
-	UWoTAngrealGuide* Guide = UWoTAngrealGuide::Load();
-	if (!Guide)
+	// No skip: the rows are compiled into the plugin, so every build (the
+	// guarded one included) carries them. The pins mirror the generator's
+	// (test_import_angreal_guide.py): the roster floor and the Fireball row.
+	const TStrongObjectPtr<UWoTAngrealGuide> Guide(UWoTAngrealGuide::Load());
+	if (!TestNotNull(TEXT("the compiled rows parse"), Guide.Get()))
 	{
-		AddInfo(FString::Printf(
-			TEXT("%s is not imported in this tree; skipping the content pins."),
-			UWoTAngrealGuide::AssetPath()));
-		return true;
+		return false;
 	}
-	TestTrue(TEXT("imported guide carries the roster"), Guide->Rows.Num() >= 25);
-	TestNotNull(TEXT("imported guide resolves the fireball row"),
-		Guide->FindByClassName(FName(TEXT("AngrealInvFireball"))));
-	return true;
+	TestTrue(TEXT("the compiled guide carries the roster"),
+		Guide->Rows.Num() >= 25);
+	const TStrongObjectPtr<UWoTAngrealGuide> Second(UWoTAngrealGuide::Load());
+	TestTrue(TEXT("each load is a fresh object"),
+		Second.IsValid() && Second.Get() != Guide.Get());
+	const FWoTAngrealGuideRow* Fireball =
+		Guide->FindByClassName(FName(TEXT("AngrealInvFireball")));
+	if (!TestNotNull(TEXT("the compiled guide resolves the fireball row"),
+		Fireball))
+	{
+		return false;
+	}
+	TestEqual(TEXT("fireball's C++ class"), Fireball->CppClass,
+		FName(TEXT("WoTAngrealInvFireball")));
+	TestEqual(TEXT("fireball is fire"), Fireball->Elements,
+		TArray<FName>{FName(TEXT("Fire"))});
+	TestEqual(TEXT("fireball is common"), Fireball->Rarity,
+		FName(TEXT("Common")));
+	TestEqual(TEXT("fireball's starting charges"), Fireball->MaxInitialCharges,
+		20);
+	TestEqual(TEXT("fireball's charge cap"), Fireball->MaxCharges, 35);
+	const FWoTAngrealGuideRow* Counter =
+		WoTOnboardingHints::HintCounter(*Guide, *Fireball);
+	if (TestNotNull(TEXT("fireball's hint names a counter the rows back"),
+		Counter))
+	{
+		TestTrue(TEXT("that counter counters fireball"),
+			Counter->Counters.Contains(Fireball->ClassName));
+	}
+	const TStrongObjectPtr<UWoTAngrealGuide> Reparsed(
+		NewObject<UWoTAngrealGuide>(GetTransientPackage()));
+	const FString Exported = Guide->ExportRowsAsJson();
+	TestEqual(TEXT("the compiled rows re-parse from their own export"),
+		Reparsed->ImportRowsFromJson(Exported), FString());
+	TestEqual(TEXT("and re-export identically"),
+		Reparsed->ExportRowsAsJson(), Exported);
+	return !HasAnyErrors();
 }
-
-#if WITH_EDITOR
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideImportJsonRoundTripSpec,
 	"WoT.Onboarding.GuideImportJsonRoundTrip", WoTOnboardingGuideFlags)
@@ -139,7 +169,7 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 		 "roles":["Combat","Offensive"],
 		 "max_initial_charges":4,"max_charges":9,
 		 "counters":[],
-		 "hint_text":"{title} - {counter} quenches it."},
+		 "hint_text":"{counter:CinderWard} quenches it."},
 		{"class_name":"PitSnare","cpp_class":"FxPitSnare",
 		 "elements":[],"rarity":"",
 		 "roles":[],
@@ -159,14 +189,13 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 	TestEqual(TEXT("cpp"), Ember.CppClass, FName(TEXT("FxEmberLob")));
 	TestEqual(TEXT("charges"), Ember.MaxCharges, 9);
 	TestEqual(TEXT("hint keeps placeholders literal"), Ember.HintText,
-		FString(TEXT("{title} - {counter} quenches it.")));
+		FString(TEXT("{counter:CinderWard} quenches it.")));
 	TestTrue(TEXT("empty rarity folds to NAME_None"),
 		Guide->Rows[1].Rarity.IsNone());
 	TestEqual(TEXT("counters land"), Guide->Rows[1].Counters.Num(), 1);
 
-	// Export -> import into a second object -> identical export: the seam
-	// round-trips losslessly, which is what the importer's change detection
-	// and post-save verification compare on.
+	// Export -> import into a second object -> identical export: the JSON
+	// form round-trips losslessly.
 	const FString Exported = Guide->ExportRowsAsJson();
 	UWoTAngrealGuide* Second = NewObject<UWoTAngrealGuide>(GetTransientPackage());
 	TestEqual(TEXT("re-import succeeds"), Second->ImportRowsFromJson(Exported),
@@ -220,7 +249,5 @@ bool FWoTOnboardingGuideImportJsonRejectsSpec::RunTest(const FString&)
 		Guide->Rows[0].ClassName, FName(TEXT("KeepMe")));
 	return true;
 }
-
-#endif // WITH_EDITOR
 
 #endif // WITH_AUTOMATION_TESTS

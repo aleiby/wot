@@ -4,53 +4,23 @@
 
 namespace
 {
-/** The pinned preference order, lowest first. */
-enum class EWoTOnboardingCounterTier : uint8
-{
-	Dedicated,
-	ReflectFamily,
-	ElementShield,
-};
+const TCHAR* const WoTOnboardingHintCounterPrefix = TEXT("counter:");
 
-EWoTOnboardingCounterTier WoTOnboardingClassifyCounter(
-	const UWoTAngrealGuide& Guide, const FWoTAngrealGuideRow& Counterer)
+/** The row Name, when the guide carries it and it counters Row. */
+const FWoTAngrealGuideRow* WoTOnboardingBackedCounter(
+	const UWoTAngrealGuide& Guide, const FWoTAngrealGuideRow& Row, FName Name)
 {
-	if (Counterer.Counters.Num() == 1)
-	{
-		return EWoTOnboardingCounterTier::Dedicated;
-	}
-	// An element shield's derived edges all carry the shield's element, so the
-	// countered rows share at least one; the Reflect family's edges span the
-	// projectile roster and share none. Rows the asset does not carry (an edge
-	// into a pruned roster) contribute nothing either way.
-	TSet<FName> SharedElements;
-	bool bAnyCounteredRow = false;
-	for (const FName& Countered : Counterer.Counters)
-	{
-		const FWoTAngrealGuideRow* CounteredRow =
-			Guide.FindByClassName(Countered);
-		if (!CounteredRow)
-		{
-			continue;
-		}
-		TSet<FName> Elements(CounteredRow->Elements);
-		if (!bAnyCounteredRow)
-		{
-			SharedElements = MoveTemp(Elements);
-			bAnyCounteredRow = true;
-		}
-		else
-		{
-			SharedElements = SharedElements.Intersect(Elements);
-		}
-		if (SharedElements.IsEmpty())
-		{
-			break;
-		}
-	}
-	return bAnyCounteredRow && !SharedElements.IsEmpty()
-		? EWoTOnboardingCounterTier::ElementShield
-		: EWoTOnboardingCounterTier::ReflectFamily;
+	const FWoTAngrealGuideRow* Counter = Guide.FindByClassName(Name);
+	return Counter && Counter->Counters.Contains(Row.ClassName)
+		? Counter : nullptr;
+}
+
+FString WoTOnboardingTitleOf(const FWoTAngrealGuideRow& Row,
+	TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle)
+{
+	FString Title = ResolveTitle(Row);
+	return Title.IsEmpty()
+		? WoTOnboardingHints::SpacedClassName(Row.ClassName) : Title;
 }
 } // namespace
 
@@ -79,60 +49,76 @@ FString WoTOnboardingHints::SpacedClassName(FName ClassName)
 	return Spaced;
 }
 
-const FWoTAngrealGuideRow* WoTOnboardingHints::SelectCounter(
+const FWoTAngrealGuideRow* WoTOnboardingHints::HintCounter(
 	const UWoTAngrealGuide& Guide, const FWoTAngrealGuideRow& Row)
 {
-	const TArray<const FWoTAngrealGuideRow*> Counterers =
-		Guide.CounteredBy(Row.ClassName);
-	const FWoTAngrealGuideRow* Best = nullptr;
-	EWoTOnboardingCounterTier BestTier = EWoTOnboardingCounterTier::ElementShield;
-	for (const FWoTAngrealGuideRow* Counterer : Counterers)
+	const FString& Text = Row.HintText;
+	const FString Token = FString(TEXT("{")) + WoTOnboardingHintCounterPrefix;
+	const int32 Start = Text.Find(Token, ESearchCase::CaseSensitive);
+	if (Start == INDEX_NONE)
 	{
-		const EWoTOnboardingCounterTier Tier =
-			WoTOnboardingClassifyCounter(Guide, *Counterer);
-		// Strictly-better only: within a tier the first counterer in Rows
-		// order stays (the documented tie-break).
-		if (!Best || Tier < BestTier)
-		{
-			Best = Counterer;
-			BestTier = Tier;
-		}
-		if (BestTier == EWoTOnboardingCounterTier::Dedicated)
-		{
-			break;
-		}
+		return nullptr;
 	}
-	return Best;
+	const int32 NameStart = Start + Token.Len();
+	const int32 End = Text.Find(TEXT("}"), ESearchCase::CaseSensitive,
+		ESearchDir::FromStart, NameStart);
+	if (End == INDEX_NONE || End == NameStart)
+	{
+		return nullptr;
+	}
+	return WoTOnboardingBackedCounter(Guide, Row,
+		FName(*Text.Mid(NameStart, End - NameStart)));
 }
 
 FString WoTOnboardingHints::ResolveHintLine(const UWoTAngrealGuide& Guide,
 	const FWoTAngrealGuideRow& Row,
 	TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle)
 {
-	if (Row.HintText.IsEmpty())
+	const FString& Template = Row.HintText;
+	FString Line;
+	Line.Reserve(Template.Len() + 16);
+	int32 Index = 0;
+	while (Index < Template.Len())
 	{
-		return FString();
-	}
-	FString Line = Row.HintText;
-	if (Line.Contains(TEXT("{counter}")))
-	{
-		const FWoTAngrealGuideRow* Counter = SelectCounter(Guide, Row);
-		if (!Counter)
+		const int32 Open = Template.Find(TEXT("{"), ESearchCase::CaseSensitive,
+			ESearchDir::FromStart, Index);
+		if (Open == INDEX_NONE)
 		{
-			// The template claims a counter the data does not back: no line.
+			Line += Template.Mid(Index);
+			break;
+		}
+		const int32 Close = Template.Find(TEXT("}"), ESearchCase::CaseSensitive,
+			ESearchDir::FromStart, Open + 1);
+		if (Close == INDEX_NONE)
+		{
+			// An unterminated brace is not ours to guess at: no line.
 			return FString();
 		}
-		FString CounterTitle = ResolveTitle(*Counter);
-		if (CounterTitle.IsEmpty())
+		Line += Template.Mid(Index, Open - Index);
+		const FString Inner = Template.Mid(Open + 1, Close - Open - 1);
+		if (Inner == TEXT("title"))
 		{
-			CounterTitle = SpacedClassName(Counter->ClassName);
+			Line += WoTOnboardingTitleOf(Row, ResolveTitle);
 		}
-		Line = Line.Replace(TEXT("{counter}"), *CounterTitle);
+		else if (Inner.StartsWith(WoTOnboardingHintCounterPrefix,
+			ESearchCase::CaseSensitive))
+		{
+			const FWoTAngrealGuideRow* Counter = WoTOnboardingBackedCounter(
+				Guide, Row, FName(*Inner.Mid(FCString::Strlen(
+					WoTOnboardingHintCounterPrefix))));
+			if (!Counter)
+			{
+				// The template names a counter the data does not back: no
+				// line, rather than advice the game does not support.
+				return FString();
+			}
+			Line += WoTOnboardingTitleOf(*Counter, ResolveTitle);
+		}
+		else
+		{
+			return FString();
+		}
+		Index = Close + 1;
 	}
-	FString Title = ResolveTitle(Row);
-	if (Title.IsEmpty())
-	{
-		Title = SpacedClassName(Row.ClassName);
-	}
-	return Line.Replace(TEXT("{title}"), *Title);
+	return Line;
 }

@@ -1,15 +1,14 @@
 #include "WoTAngrealGuide.h"
 
-#include "Misc/PackageName.h"
-
-#if WITH_EDITOR
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#endif
+#include "UObject/Package.h"
+
+#include "Generated/WoTAngrealGuideRows.inl"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWoTOnboarding, Log, All);
 
@@ -46,28 +45,35 @@ TArray<const FWoTAngrealGuideRow*> UWoTAngrealGuide::CounteredBy(
 
 UWoTAngrealGuide* UWoTAngrealGuide::Load()
 {
-	// A tree whose import pipeline has not run carries no package at all;
-	// answer null quietly then (LoadObject would log load errors) so callers
-	// can treat "no guide" as the ordinary degraded state.
-	const FString PackageName =
-		FPackageName::ObjectPathToPackageName(FString(AssetPath()));
-	if (!FPackageName::DoesPackageExist(PackageName))
+	UWoTAngrealGuide* Guide = NewObject<UWoTAngrealGuide>(GetTransientPackage());
+	const FString Error = Guide->ImportRowsFromJson(CompiledRowsJson());
+	if (!Error.IsEmpty())
 	{
-		UE_LOG(LogWoTOnboarding, Log,
-			TEXT("Angreal guide package %s is not present; the onboarding "
-			     "aids run without a guide until the importer publishes it."),
-			*PackageName);
+		// The generator and its check refuse malformed rows before a build,
+		// so this means a hand-edited include; run without a guide.
+		UE_LOG(LogWoTOnboarding, Error,
+			TEXT("The compiled angreal guide rows do not parse (%s); the "
+			     "onboarding aids run without a guide."), *Error);
 		return nullptr;
 	}
-	return LoadObject<UWoTAngrealGuide>(nullptr, AssetPath());
+	return Guide;
 }
 
-const TCHAR* UWoTAngrealGuide::AssetPath()
+FString UWoTAngrealGuide::CompiledRowsJson()
 {
-	return TEXT("/Game/WoT/UI/Guide/DA_WoTAngrealGuide.DA_WoTAngrealGuide");
+	FString Json = TEXT("{\"rows\":[");
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(WoTAngrealGuideGenerated::RowsJson);
+		++Index)
+	{
+		if (Index > 0)
+		{
+			Json += TEXT(",");
+		}
+		Json += WoTAngrealGuideGenerated::RowsJson[Index];
+	}
+	Json += TEXT("]}");
+	return Json;
 }
-
-#if WITH_EDITOR
 
 namespace
 {
@@ -253,5 +259,3 @@ FString UWoTAngrealGuide::ExportRowsAsJson() const
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 	return Out;
 }
-
-#endif // WITH_EDITOR

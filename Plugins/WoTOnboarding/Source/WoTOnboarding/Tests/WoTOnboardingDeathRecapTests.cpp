@@ -36,22 +36,22 @@ FWoTAngrealGuideRow WoTOnboardingRecapRow(const TCHAR* ClassName,
 	return Row;
 }
 
-/** EmberLob has a counter (CinderWard counters it alone); VoidLance's line
-    needs none; FrostPin's line wants a counter nothing provides; GustWard
-    carries no line at all. */
+/** EmberLob's line names its counter (CinderWard counters it alone);
+    VoidLance's line needs none; FrostPin's line names a counter that does
+    not counter it; GustWard carries no line at all. */
 UWoTAngrealGuide* WoTOnboardingRecapMakeGuide()
 {
 	UWoTAngrealGuide* Guide = NewObject<UWoTAngrealGuide>(GetTransientPackage());
 	Guide->Rows.Add(WoTOnboardingRecapRow(TEXT("EmberLob"), TEXT("Fire"),
-		TEXT("{title} - {counter} quenches it.")));
+		TEXT("{counter:CinderWard} quenches it.")));
 	FWoTAngrealGuideRow Ward =
 		WoTOnboardingRecapRow(TEXT("CinderWard"), TEXT("Fire"), TEXT(""));
 	Ward.Counters = {FName(TEXT("EmberLob"))};
 	Guide->Rows.Add(Ward);
 	Guide->Rows.Add(WoTOnboardingRecapRow(TEXT("VoidLance"), TEXT("Spirit"),
-		TEXT("{title} - nothing turns it; strike first.")));
+		TEXT("{title} cannot be turned; strike first.")));
 	Guide->Rows.Add(WoTOnboardingRecapRow(TEXT("FrostPin"), TEXT("Water"),
-		TEXT("{title} - {counter} melts it.")));
+		TEXT("{counter:CinderWard} melts it.")));
 	Guide->Rows.Add(WoTOnboardingRecapRow(TEXT("GustWard"), TEXT("Air"), TEXT("")));
 	return Guide;
 }
@@ -182,7 +182,7 @@ bool FWoTOnboardingDeathRecapTextSpec::RunTest(const FString&)
 	TestEqual(TEXT("the title names the killing item"), Ember.Title,
 		FString(TEXT("Killed by Ember Lob")));
 	TestEqual(TEXT("the line names its counter"), Ember.Summary,
-		FString(TEXT("Ember Lob - Cinder Ward quenches it.")));
+		FString(TEXT("Cinder Ward quenches it.")));
 	TestEqual(TEXT("the key line reads the guide binding"), Ember.KeyHint,
 		FString(TEXT("Press F3 for the field guide")));
 
@@ -191,7 +191,7 @@ bool FWoTOnboardingDeathRecapTextSpec::RunTest(const FString&)
 	TestEqual(TEXT("an unresolved title falls back to the spaced class name"),
 		Void.Title, FString(TEXT("Killed by Void Lance")));
 	TestEqual(TEXT("in the line as well"), Void.Summary,
-		FString(TEXT("Void Lance - nothing turns it; strike first.")));
+		FString(TEXT("Void Lance cannot be turned; strike first.")));
 	TestTrue(TEXT("an unbound guide key leaves no key line"), Void.KeyHint.IsEmpty());
 
 	const FWoTPickupCardText Frost = ComposeText(*Guide,

@@ -61,14 +61,14 @@ project policy separates retail parity from improvements.
 |---|---|---|
 | `Tools/import/data/angreal_guide_facts.csv` | generated, **checked in** | one row per item: `Class, CppClass, Elements, Rarity, Roles, MaxInitialCharges, MaxCharges, Counters, HintKey`; facts only, no prose |
 | `Tools/import/data/angreal_counter_overrides.csv` | authored | `Class, Field, Value, Supersedes, Citation`; every edge removed or added by hand carries an `exports/script/...` citation |
-| `Tools/import/data/angreal_guide_hints.csv` | authored | `HintKey, Template`: our own counter-hint templates (`{title}`/`{counter}` resolved at runtime; no retail text) |
+| `Tools/import/data/angreal_guide_hints.csv` | authored | `HintKey, Template`: our own counter-hint templates (`{title}`/`{counter:<Class>}` resolved at runtime; no retail text) |
+| `Plugins/WoTOnboarding/Source/WoTOnboarding/Private/Generated/WoTAngrealGuideRows.inl` | generated, **checked in** | the facts plus resolved hint templates, one JSON row per line, compiled into the plugin (since 2026-11-09; see the status log) |
 
 `Tools/import/import_angreal_guide.py` derives the facts CSV from the exported
-script (`$WOT_REFERENCE_ROOT`), and, run under the editor's python commandlet,
-builds `/Game/WoT/UI/Guide/DA_WoTAngrealGuide` from the three CSVs, the same
-parse → deterministic CSV → data-asset pattern as
-`Tools/import/import_menu_strings.py`, including the `Saved/…_result.json`
-completion record.
+script (`$WOT_REFERENCE_ROOT`). As first planned it also built
+`/Game/WoT/UI/Guide/DA_WoTAngrealGuide` under the editor's python commandlet;
+since 2026-11-09 it renders the generated include above instead, because the
+guarded build cooks no project data assets.
 
 **Counter derivation rules** (edges come only from these; everything else is
 hint text):
@@ -430,3 +430,42 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
     killing item, as it does for a card. A row with no hint line (Guardian,
     Swap Places) shows no recap.
   - The PORT_NOTES entry now covers the recap.
+- 2026-11-09: review fixes. Decisions:
+  - Each hint template names the counter its sentence was written for, by
+    class (`{counter:AngrealInvFireShield}`), and the line shows only while
+    that row counters the hinted row: the generator fails a template whose
+    named counter does not, and the runtime drops the line if the data stops
+    backing it. A bare `{counter}` is refused. This replaces the 2026-11-08
+    structural rule, which ranked Fork in the Reflect family and so put Fork
+    into six lines written for a shield or for Reflect ("Fork absorbs fire
+    weaves"); Fork's own text says the attacks that get through its shield
+    still hit you.
+  - Hint lines no longer repeat the item's name: the card, the recap and the
+    guide all show the name right above the line. `{title}` still resolves.
+  - The guide rows ship compiled into the plugin. The guarded build cooks
+    only the neutral maps and the pinned support assets, so
+    `/Game/WoT/UI/Guide/DA_WoTAngrealGuide` never reached a release and every
+    aid would have stayed silent there. `import_angreal_guide.py` now renders
+    the facts and hints CSVs into
+    `Plugins/WoTOnboarding/Source/WoTOnboarding/Private/Generated/WoTAngrealGuideRows.inl`
+    (the controller layout's pattern), `UWoTAngrealGuide::Load()` parses it
+    into a transient guide, and the data asset, its editor importer half and
+    the result file are gone. `--rows-only` re-renders from the checked-in
+    CSVs without the reference export, and `--check` (run by the python
+    tests) fails a stale include. Dev and shipped builds read the same rows.
+  - The guarded release lane packages the plugin. Three parts of it knew
+    nothing of project code plugins, so any guarded package since the plugin
+    was enabled would have failed:
+    - The ISO seed never copied `Plugins/`, and UBT refuses a project whose
+      enabled plugin it cannot find. The seed now copies each
+      `SEED_CODE_PLUGINS` entry without its `Intermediate`, and the source
+      snapshot binds the plugin's source.
+    - The Win64 build root mirrored all of `Plugins/` but transferred only
+      products under `Binaries/Win64`. A plugin's `Binaries` and
+      `Intermediate` are now UBT-owned like the project's, and its editor
+      modules transfer into the ISO.
+    - UBT stages the `.uplugin` of every plugin that links a module, and
+      both `build_stripped_pak.py` and `run_first_run_funnel.py` refused any
+      project descriptor but the neutral shells'. The exact path is allowed
+      at most once and never required, so a build with the plugin off still
+      passes.

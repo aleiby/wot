@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import tempfile
@@ -447,9 +448,9 @@ BASE_ROSTER = (
 )
 
 BASE_HINTS = {
-    "EmberLob": "{title} - {counter} snuffs the embers.",
-    "GustLob": "{title} - {counter} stills the gust.",
-    "EmberPuff": "{title} - {counter} smothers the puff.",
+    "EmberLob": "{counter:BounceWard} snuffs the embers.",
+    "GustLob": "{counter:BounceWard} stills the gust.",
+    "EmberPuff": "{counter:CinderWard} smothers the puff.",
 }
 
 CITED = "exports/script/FixtureDerive/Invented.uc:1 (synthetic citation)"
@@ -541,7 +542,7 @@ class TrapDetectionDerivationTests(DeriveFixtureMixin, unittest.TestCase):
                      for name in self.TRAPS]
         hints = dict(BASE_HINTS)
         for name in self.TRAPS:
-            hints[name[:-len("Inventory")]] = "{title} - mind your step."
+            hints[name[:-len("Inventory")]] = "Mind your step."
         return self.build(roster=roster, overrides=overrides, hints=hints)
 
     def test_detection_follows_the_detector_table(self):
@@ -620,25 +621,40 @@ class OverrideAndHintEnforcementTests(DeriveFixtureMixin, unittest.TestCase):
         self.assertIn("not in the hints CSV", str(caught.exception))
 
     def test_unused_hint_fails(self):
-        hints = dict(BASE_HINTS, Stray="{title} - never used.")
+        hints = dict(BASE_HINTS, Stray="Never used.")
         with self.assertRaises(GenerationError) as caught:
             self.build(hints=hints)
         self.assertIn("Stray", str(caught.exception))
 
-    def test_counter_placeholder_requires_a_countered_row(self):
-        # Nothing counters the trap in this roster, so its template must not
-        # say {counter}; {title}-only wording passes (the Balefire shape).
+    def test_named_counter_must_counter_the_row(self):
+        # Nothing counters the trap in this roster, so its template may not
+        # name a counter; counter-free wording passes (the Balefire shape).
         snared = BASE_ROSTER + (
             RosterEntry("SnareInventory", "FxSnareInventory", is_trap=True),)
         rarity_fill = Override("SnareInventory", "Rarity", "", False, CITED,
                                "test")
-        bad = dict(BASE_HINTS, Snare="{title} - {counter} shows the snare.")
-        with self.assertRaises(GenerationError) as caught:
-            self.build(roster=snared, overrides=[rarity_fill], hints=bad)
-        self.assertIn("nothing counters the row", str(caught.exception))
-        good = dict(BASE_HINTS, Snare="{title} - tread wide of it.")
+        for template, message in (
+                ("{counter:CinderWard} shows the snare.",
+                 "does not counter the row"),
+                ("{counter:NoSuchWard} shows the snare.",
+                 "not a guide row")):
+            bad = dict(BASE_HINTS, Snare=template)
+            with self.assertRaises(GenerationError, msg=template) as caught:
+                self.build(roster=snared, overrides=[rarity_fill], hints=bad)
+            self.assertIn(message, str(caught.exception))
+        good = dict(BASE_HINTS, Snare="Tread wide of it.")
         rows = self.build(roster=snared, overrides=[rarity_fill], hints=good)
         self.assertEqual(rows["SnareInventory"].hint_key, "Snare")
+
+    def test_named_counter_follows_an_edge_override(self):
+        # Stripping the edge a template relies on fails the build, so a data
+        # change cannot leave a hint naming a counter that no longer works.
+        with self.assertRaises(GenerationError) as caught:
+            self.build(overrides=[
+                Override("CinderWard", "Counters", "-EmberPuff", True, CITED,
+                         "test")])
+        self.assertIn("EmberPuff", str(caught.exception))
+        self.assertIn("does not counter the row", str(caught.exception))
 
     def test_hint_keys_stay_one_per_row(self):
         with self.assertRaises(GenerationError) as caught:
@@ -713,13 +729,17 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
                 import_angreal_guide.load_overrides_csv(write(name, text))
             self.assertIn(message, str(caught.exception))
         hints = write("hints.csv",
-                      "HintKey,Template\nSnare,{title} - fine.\n")
+                      "HintKey,Template\nSnare,{title} - fine.\n"
+                      "Lob,{counter:FxWard} turns it.\n")
         self.assertEqual(import_angreal_guide.load_hints_csv(hints),
-                         {"Snare": "{title} - fine."})
+                         {"Snare": "{title} - fine.",
+                          "Lob": "{counter:FxWard} turns it."})
         for name, text, message in (
                 ("hd.csv", "HintKey,Template\nA,{title} - x.\nA,{title} - y.\n",
                  "duplicate"),
                 ("hp.csv", "HintKey,Template\nA,{title} {boom} x.\n",
+                 "placeholder"),
+                ("hb.csv", "HintKey,Template\nA,{counter} x.\n",
                  "placeholder"),
                 ("ha.csv", "HintKey,Template\nA,{title} \u2014 x.\n",
                  "ASCII")):
@@ -728,8 +748,8 @@ class CsvRoundTripTests(DeriveFixtureMixin, unittest.TestCase):
             self.assertIn(message, str(caught.exception))
 
 
-class AssetPayloadTests(unittest.TestCase):
-    """The editor half's pure layer: CSV read-back, hints onto rows, pins."""
+class PayloadTests(unittest.TestCase):
+    """CSV read-back, hints onto rows, pins, and the compiled-rows render."""
 
     @staticmethod
     def synthetic_rows():
@@ -748,8 +768,8 @@ class AssetPayloadTests(unittest.TestCase):
                  max_charges="", counters=[], hint_key="Snare"),
         ]
 
-    HINTS = {"EmberLob": "{title} - {counter} quenches it.",
-             "Snare": "{title} - watch the floor."}
+    HINTS = {"EmberLob": "{counter:CinderWard} quenches it.",
+             "Snare": "Watch the floor."}
 
     def write(self, name, text):
         tree = tempfile.TemporaryDirectory()
@@ -777,8 +797,8 @@ class AssetPayloadTests(unittest.TestCase):
             import_angreal_guide.load_facts_csv(empty)
         self.assertIn("empty Class", str(caught.exception))
 
-    def test_asset_rows_resolve_hints_and_charges(self):
-        payload = import_angreal_guide.asset_rows(self.synthetic_rows(),
+    def test_payload_rows_resolve_hints_and_charges(self):
+        payload = import_angreal_guide.payload_rows(self.synthetic_rows(),
                                                   dict(self.HINTS))
         by_class = {row["class_name"]: row for row in payload}
         self.assertEqual(by_class["EmberLob"]["hint_text"],
@@ -792,64 +812,129 @@ class AssetPayloadTests(unittest.TestCase):
         self.assertEqual(by_class["SnareInventory"]["max_charges"], 0)
         self.assertEqual(by_class["CinderWard"]["counters"], ["EmberLob"])
 
-    def test_asset_rows_reject_unknown_hints_and_bad_charges(self):
+    def test_payload_rows_reject_unknown_hints_and_bad_charges(self):
         with self.assertRaises(GenerationError) as caught:
-            import_angreal_guide.asset_rows(self.synthetic_rows(), {})
+            import_angreal_guide.payload_rows(self.synthetic_rows(), {})
         self.assertIn("hints CSV", str(caught.exception))
         broken = self.synthetic_rows()
         broken[1].max_charges = "many"
         with self.assertRaises(GenerationError) as caught:
-            import_angreal_guide.asset_rows(broken, dict(self.HINTS))
+            import_angreal_guide.payload_rows(broken, dict(self.HINTS))
         self.assertIn("not an integer", str(caught.exception))
 
-    def test_payload_json_round_trips(self):
-        payload = [{
-            "class_name": "FixtureLob", "cpp_class": "FxFixtureLob",
-            "elements": ["Fire"], "rarity": "", "roles": [],
-            "max_initial_charges": 0, "max_charges": 9,
-            "counters": ["FixtureWard"], "hint_text": "{title} - x.",
-        }]
-        text = import_angreal_guide.payload_json(payload)
-        self.assertEqual(import_angreal_guide.payload_from_json(text), payload)
+    FIXTURE_PAYLOAD = [{
+        "class_name": "FixtureLob", "cpp_class": "FxFixtureLob",
+        "elements": ["Fire"], "rarity": "", "roles": [],
+        "max_initial_charges": 0, "max_charges": 9,
+        "counters": ["FixtureWard"],
+        "hint_text": 'Say "{title}" twice; a \\ stays put.',
+    }, {
+        "class_name": "FixtureWard", "cpp_class": "FxFixtureWard",
+        "elements": [], "rarity": "Rare", "roles": ["Defensive"],
+        "max_initial_charges": 3, "max_charges": 5,
+        "counters": [], "hint_text": "",
+    }]
 
-    def test_payload_from_json_requires_a_rows_array(self):
-        for bad in ("{}", "[]", '{"rows": 7}'):
-            with self.assertRaises(import_angreal_guide.GenerationError):
-                import_angreal_guide.payload_from_json(bad)
+    def test_compiled_rows_round_trip_quotes_and_backslashes(self):
+        text = import_angreal_guide.render_compiled_rows(
+            self.FIXTURE_PAYLOAD, "facts\n", "hints\n")
+        # JSON escapes the quote and the backslash once, the C++ literal
+        # escapes every backslash and quote again.
+        self.assertIn(r'Say \\\"{title}\\\" twice', text)
+        self.assertIn(r"a \\\\ stays", text)
+        self.assertEqual(import_angreal_guide.parse_compiled_rows(text),
+                         self.FIXTURE_PAYLOAD)
+        # One row per line, and the same input renders the same bytes.
+        self.assertEqual(text.count('\tTEXT("'), len(self.FIXTURE_PAYLOAD))
+        self.assertEqual(text, import_angreal_guide.render_compiled_rows(
+            self.FIXTURE_PAYLOAD, "facts\n", "hints\n"))
+        self.assertNotIn("\r", text)
+        self.assertTrue(text.endswith("} // namespace WoTAngrealGuideGenerated\n"))
+
+    def test_compiled_rows_header_names_the_sources_and_their_hashes(self):
+        text = import_angreal_guide.render_compiled_rows(
+            self.FIXTURE_PAYLOAD, "facts\n", "hints\n")
+        header = text.split("#pragma once")[0]
+        self.assertIn("// Source: Tools/import/data/angreal_guide_facts.csv",
+                      header)
+        self.assertIn("// Source: Tools/import/data/angreal_guide_hints.csv",
+                      header)
+        for source in ("facts\n", "hints\n"):
+            self.assertIn(hashlib.sha256(source.encode("utf-8")).hexdigest(),
+                          header)
+
+    def test_compiled_rows_refuse_empty_and_non_ascii_payloads(self):
+        with self.assertRaises(GenerationError):
+            import_angreal_guide.render_compiled_rows([], "", "")
+        accented = json.loads(json.dumps(self.FIXTURE_PAYLOAD))
+        accented[0]["hint_text"] = "caf\u00e9"
+        # json.dumps escapes non-ASCII, so the literal stays ASCII and the
+        # text survives the round trip.
+        text = import_angreal_guide.render_compiled_rows(accented, "", "")
+        self.assertTrue(text.isascii())
+        self.assertEqual(import_angreal_guide.parse_compiled_rows(text),
+                         accented)
+
+    def test_parse_refuses_unknown_escapes_and_an_empty_include(self):
+        with self.assertRaises(GenerationError):
+            import_angreal_guide.parse_compiled_rows(
+                '\tTEXT("{\\n}"),\n')
+        with self.assertRaises(GenerationError):
+            import_angreal_guide.parse_compiled_rows("// nothing here\n")
+
+    def test_render_from_csvs_enforces_the_pins(self):
+        # The synthetic CSVs carry no Fireball row, so the pins refuse them.
+        facts = self.write("facts.csv", import_angreal_guide.render_facts_csv(
+            self.synthetic_rows()))
+        hints = self.write("hints.csv", "HintKey,Template\n"
+                           "EmberLob,{counter:CinderWard} quenches it.\n"
+                           "Snare,Watch the floor.\n")
+        with self.assertRaises(GenerationError) as caught:
+            import_angreal_guide.compiled_rows_from_csvs(facts, hints)
+        self.assertIn("fireball_present", str(caught.exception))
 
     def test_verify_pins_the_fireball_row_and_the_roster_floor(self):
-        payload = import_angreal_guide.asset_rows(
+        payload = import_angreal_guide.payload_rows(
             import_angreal_guide.load_facts_csv(),
             import_angreal_guide.load_hints_csv())
-        ok, pins, counts = import_angreal_guide.verify_asset_payload(
+        ok, pins, counts = import_angreal_guide.verify_payload(
             payload, payload)
         self.assertTrue(ok, pins)
         self.assertTrue(all(pins.values()), pins)
         self.assertGreaterEqual(counts["rows"],
-                                import_angreal_guide.MIN_ASSET_ROWS)
+                                import_angreal_guide.MIN_GUIDE_ROWS)
         self.assertEqual(counts["rows"], counts["unique_classes"])
 
     def test_verify_fails_on_drift_tamper_and_shortfall(self):
-        payload = import_angreal_guide.asset_rows(
+        payload = import_angreal_guide.payload_rows(
             import_angreal_guide.load_facts_csv(),
             import_angreal_guide.load_hints_csv())
         drifted = json.loads(json.dumps(payload))
         drifted[0]["cpp_class"] = "FxTampered"
-        ok, _, _ = import_angreal_guide.verify_asset_payload(drifted, payload)
+        ok, _, _ = import_angreal_guide.verify_payload(drifted, payload)
         self.assertFalse(ok)
         tampered = json.loads(json.dumps(payload))
         for row in tampered:
             if row["class_name"] == import_angreal_guide.FIREBALL_CLASS:
                 row["rarity"] = "Rare"
-        ok, pins, _ = import_angreal_guide.verify_asset_payload(
+        ok, pins, _ = import_angreal_guide.verify_payload(
             tampered, tampered)
         self.assertFalse(ok)
         self.assertFalse(pins["fireball_rarity"])
+        misnamed = json.loads(json.dumps(payload))
+        for row in misnamed:
+            if row["class_name"] == import_angreal_guide.FIREBALL_CLASS:
+                # Earth Shield does not counter Fireball.
+                row["hint_text"] = "{counter:AngrealInvEarthShield} stops it."
+        ok, pins, _ = import_angreal_guide.verify_payload(
+            misnamed, misnamed)
+        self.assertFalse(ok)
+        self.assertFalse(pins["fireball_hint_names_a_backed_counter"])
         short = payload[:3]
-        ok, pins, _ = import_angreal_guide.verify_asset_payload(short, short)
+        ok, pins, _ = import_angreal_guide.verify_payload(short, short)
         self.assertFalse(ok)
         self.assertFalse(pins["row_count_at_least_%d"
-                              % import_angreal_guide.MIN_ASSET_ROWS])
+                              % import_angreal_guide.MIN_GUIDE_ROWS])
 
 
 class InTreeGuideDataTests(unittest.TestCase):
@@ -924,6 +1009,25 @@ class InTreeGuideDataTests(unittest.TestCase):
                           override.source)
             if override.value.startswith(("+", "-")):
                 self.assertTrue(override.supersedes, override.source)
+
+    def test_compiled_rows_are_current_with_the_csvs(self):
+        # The plugin compiles this include; a stale one ships stale rows.
+        self.assertTrue(import_angreal_guide.check(),
+                        "run Tools/import/import_angreal_guide.py --rows-only")
+        self.assertEqual(import_angreal_guide.main(["--check"]), 0)
+
+    def test_compiled_rows_hold_the_pins(self):
+        text = import_angreal_guide.COMPILED_ROWS_PATH.read_bytes().decode(
+            "utf-8")
+        self.assertNotIn("\r", text)
+        self.assertTrue(text.isascii())
+        payload = import_angreal_guide.payload_rows(
+            import_angreal_guide.load_facts_csv(),
+            import_angreal_guide.load_hints_csv())
+        ok, pins, counts = import_angreal_guide.verify_payload(
+            import_angreal_guide.parse_compiled_rows(text), payload)
+        self.assertTrue(ok, pins)
+        self.assertEqual(counts["rows"], len(self.facts))
 
 
 @unittest.skipUnless(import_angreal_guide.reference_root_available(),

@@ -10,5 +10,6 @@ EnginePatches/** -text
 Tools/dist/fixtures/** -text
 Tools/dist/neutral-support-assets-v1.json -text
 Source/**/Generated/** -text
+Plugins/**/Generated/** -text
 *.schema.json -text
 Build/WoTRelease/** -text
