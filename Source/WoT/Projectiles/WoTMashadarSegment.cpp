@@ -8,6 +8,9 @@
 #include "../WoTVertexAnimComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/Texture2D.h"
+#if !WOT_GUARDED_BOOTSTRAP
+#include "../RetailData/WoTDevRetailFamilies.h"
+#endif
 
 #include "WoTMashadarGuide.h"
 
@@ -226,13 +229,24 @@ void AWoTMashadarSegment::BindDisplay()
 	if (DisplayMesh->SetVertexMesh(
 		FName(bIsHead ? TEXT("MashTip") : TEXT("MashSeg"))))
 	{
-		DisplayMesh->SetRelativeScale3D(FVector(BaseDrawScale));
-		// Hidden, but still ticking: the mesh supplies the live morph pose and
-		// authored actor-scale transform used by the vertex cloud.
+		// UnMesh.cpp:433,574 uses scale 1 for bParticles vertex positions.
+		// DrawScale belongs only to the icons (UnMeshRn.cpp:443-444), otherwise
+		// each cloud collapses between the 42/48-unit trailer joints.
+		DisplayMesh->SetRelativeScale3D(
+			UWoTMeshParticleRenderer::PoseDriverScale(true, BaseDrawScale));
+		// Hidden, but still ticking: this supplies the current mesh-local pose.
 		DisplayMesh->SetVisibility(false);
 		DisplayMesh->SetComponentTickEnabled(true);
 		DisplayMesh->LoopAnim(FName(TEXT("All")), WoTRandom::FRandRange(0.01f, 0.03f));
 	}
+#if !WOT_GUARDED_BOOTSTRAP
+	if (bIsHead)
+	{
+		// Triangle-based MashTip imports omit a moving source vertex. Read its
+		// ten authored frames once; do not invent a stationary mote at the origin.
+		WoTDevRetailUnreferencedMeshFrames(TEXT("WoTPawns.MashTip"), UnreferencedVertexFrames);
+	}
+#endif
 	FadeIn();
 }
 
@@ -255,15 +269,6 @@ void AWoTMashadarSegment::FadeIn()
 	const bool bRamp = GetNetMode() == NM_Standalone;
 	Fade = bRamp ? EFade::In : EFade::Hold;
 	ScaleGlow = bRamp ? 0.0f : DesiredScaleGlow;
-	ApplyGlow();
-}
-
-void AWoTMashadarSegment::ApplyGlow()
-{
-	if (DisplayMesh && DrawScaleNow != BaseDrawScale)
-	{
-		DisplayMesh->SetRelativeScale3D(FVector(DrawScaleNow));
-	}
 }
 
 float AWoTMashadarSegment::ComputeRetailParticleColor(
@@ -275,14 +280,26 @@ float AWoTMashadarSegment::ComputeRetailParticleColor(
 
 void AWoTMashadarSegment::UpdateParticleQuads()
 {
-	// MashTip has 17 FrameVerts, but logical vertex zero is unreferenced by its
-	// triangles and therefore absent from the deduplicated render pose. UE1's
-	// bParticles branch still emits it; restore that head-only mote at local zero.
-	const FVector MissingHeadVertex = FVector::ZeroVector;
+	TConstArrayView<FVector> AdditionalVertices;
+#if !WOT_GUARDED_BOOTSTRAP
+	// Runtime SourcePositions already contains every FrameVert. Only the asset
+	// path needs the triangle-unreferenced vertices (UnMeshRn.cpp bParticles).
+	if (!DisplayMesh->HasCompleteSourceVertexPose() && !UnreferencedVertexFrames.IsEmpty())
+	{
+		const float Frame = DisplayMesh->GetAnimFrame() * UnreferencedVertexFrames.Num();
+		const int32 FrameA = FMath::FloorToInt(Frame) % UnreferencedVertexFrames.Num();
+		const int32 FrameB = (FrameA + 1) % UnreferencedVertexFrames.Num();
+		const float Alpha = FMath::Frac(Frame);
+		UnreferencedPose.SetNumUninitialized(UnreferencedVertexFrames[FrameA].Num());
+		for (int32 Vertex = 0; Vertex < UnreferencedPose.Num(); ++Vertex)
+			UnreferencedPose[Vertex] = FMath::Lerp(UnreferencedVertexFrames[FrameA][Vertex],
+				UnreferencedVertexFrames[FrameB][Vertex], Alpha);
+		AdditionalVertices = UnreferencedPose;
+	}
+#endif
 	if (UWoTMeshParticleRenderer* Renderer = GetParticleRenderer())
 	{
-		Renderer->UpdateParticleQuads(DrawScaleNow, ScaleGlow, 0,
-			MakeArrayView(&MissingHeadVertex, bIsHead ? 1 : 0));
+		Renderer->UpdateParticleQuads(DrawScaleNow, ScaleGlow, 0, AdditionalVertices);
 	}
 }
 
@@ -322,12 +339,10 @@ void AWoTMashadarSegment::Tick(float DeltaTime)
 				ScaleGlow = DesiredScaleGlow;
 				Fade = EFade::Hold;
 			}
-			ApplyGlow();
 			break;
 		case EFade::Away:
 			ScaleGlow -= 0.02f * Step30;
 			DrawScaleNow += 0.01f * Step30;
-			ApplyGlow();
 			if (ScaleGlow <= 0.0f && HasAuthority())
 			{
 				Destroy();

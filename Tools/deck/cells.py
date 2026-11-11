@@ -1,9 +1,18 @@
-"""Judge Steam Deck test cells from the game's bootstrap heartbeat events."""
+"""Judge Steam Deck test cells from the game's bootstrap heartbeat events.
+
+Every cell here launches the game with its LAN installer receiver switched off
+(deck.LAN_RECEIVER_OFF_ENV), so a WoT Reborn sharing the installer elsewhere on
+the network cannot feed a cell that judges where the installer came from. Only
+Test builds read that switch, so these cells need a Test build.
+"""
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+
+# The existing cells all judge installs fed from Downloads or already set up.
+CELLS_RECEIVER_OFF = True
 
 
 @dataclass(frozen=True)
@@ -82,7 +91,8 @@ def run_first_run_cells(target, runner, remote_dir: str, app_id: int,
     if cleared.returncode != 0:
         raise deck.DeckError("could not clear old heartbeats: "
                              + cleared.stderr.decode(errors="replace"))
-    deck.launch_hidden(target, runner, remote_dir, unit, app_id)
+    deck.launch_hidden(target, runner, remote_dir, unit, app_id,
+                       lan_receiver_off=CELLS_RECEIVER_OFF)
     try:
         try:
             deck.wait_for_event(target, runner, data_dir, "update-check-result",
@@ -189,12 +199,14 @@ def run_launcher_lock_cell(target, runner, remote_dir: str, app_id: int,
         return launcher_skips_while_running(before, before)
     _require(deck, deck.ssh(target, runner, _clear_heartbeats(data_dir)), "clear heartbeats")
     try:
-        deck.launch_game_direct(target, runner, remote_dir, "wotgame", app_id)
+        deck.launch_game_direct(target, runner, remote_dir, "wotgame", app_id,
+                                lan_receiver_off=CELLS_RECEIVER_OFF)
         try:
             deck.wait_for_event(target, runner, data_dir, "frontend-handoff", timeout, poll)
         except deck.DeckTimeout:
             return Verdict(False, "the game never reached frontend-handoff")
-        deck.launch_hidden(target, runner, remote_dir, "wotlaunch2", app_id)
+        deck.launch_hidden(target, runner, remote_dir, "wotlaunch2", app_id,
+                           lan_receiver_off=CELLS_RECEIVER_OFF)
         time.sleep(settle)
         during = update_snapshot(target, runner, remote_dir)
     finally:
@@ -240,7 +252,8 @@ def run_staged_update_cell(target, runner, remote_dir: str, app_id: int,
         raise deck.DeckError(f"the candidate's release_sequence must be positive: {sequence!r}")
     staged = update_snapshot(target, runner, remote_dir)
     try:
-        deck.launch_hidden(target, runner, remote_dir, "wotdeck", app_id)
+        deck.launch_hidden(target, runner, remote_dir, "wotdeck", app_id,
+                           lan_receiver_off=CELLS_RECEIVER_OFF)
         try:
             deck.wait_for_event(target, runner, data_dir, "frontend-handoff", timeout, poll)
         except deck.DeckTimeout:

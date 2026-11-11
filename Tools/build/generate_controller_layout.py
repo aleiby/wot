@@ -42,12 +42,13 @@ ACTIONS = STICK_ACTIONS + ("Fire", "Jump", "EditCitadel", "Drop", "DropTainted",
                            "NextHand", "ViewUp", "ViewDown", "RandomTaunt",
                            "WalkToggle", "CenterView", "Scoreboard", "Menu",
                            "TurnAround", "JoinTeam1", "JoinTeam2", "JoinTeam3",
-                           "JoinTeam4")
+                           "JoinTeam4", "Chat", "TeamChat")
 TRIGGERS = {"": "Press", "Tap": "Tap", "Hold": "Hold"}
 REQUIRED_ACTIONS = ("Move", "Look", "Menu")
-# FWoTGamepadTuning's field order.
+# FWoTGamepadTuning's field order. HoldSeconds times every Tap/Hold pair
+# (FaceLeft drop / drop tainted, D-pad up chat / team chat).
 TUNING = ("OuterZone", "MoveGain", "YawRate", "PitchRate", "LookExponent",
-          "DropHoldSeconds", "TurnAroundSeconds")
+          "HoldSeconds", "TurnAroundSeconds")
 # The largest dead zone the settings accept (FWoTGameSettings::Validate).
 MAX_DEAD_ZONE = 0.35
 
@@ -135,7 +136,7 @@ def parse_tuning(text: str) -> Dict[str, float]:
         raise LayoutError(f"tuning: OuterZone must be above {MAX_DEAD_ZONE} and at most 1")
     if values["MoveGain"] < 1.0 or values["LookExponent"] < 1.0:
         raise LayoutError("tuning: MoveGain and LookExponent must be at least 1")
-    for name in ("YawRate", "PitchRate", "DropHoldSeconds", "TurnAroundSeconds"):
+    for name in ("YawRate", "PitchRate", "HoldSeconds", "TurnAroundSeconds"):
         if values[name] <= 0.0:
             raise LayoutError(f"tuning: {name} must be positive")
     return values

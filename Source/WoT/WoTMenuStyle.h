@@ -294,8 +294,53 @@ public:
 	 * Callers must hide/drop dependent widgets instead of constructing an empty
 	 * FSlateFontInfo, because pinned Slate maps empty infos to last resort. */
 	TOptional<FWoTRequiredMenuFonts> ResolveRequiredFonts() const;
+	/** The base small face at its retail size 8. Its one user, the item-info
+	 * element gems, draws it through LegibleSmallFont instead. */
 	const FSlateFontInfo& SmallFont() const { return Small; }
 	const FSlateFontInfo& ItalicFont() const { return Italic; }
+
+	/** Steam Deck verification, Display > Text Legibility: no on-screen
+	 * character under 9 physical pixels at 1280x800. */
+	static constexpr float MinimumLegiblePixels = 9.0f;
+	/** The layout scale the game viewport applies at PhysicalSize pixels: the
+	 * engine's UI DPI curve (UUserInterfaceSettings, ShortestSide). */
+	static float ViewportDpiScale(const FVector2D& PhysicalSize);
+	/** Physical pixels of Slate text of Size points under LayoutScale:
+	 * Size x 96/72 x LayoutScale. */
+	static float PhysicalTextPixels(float Size, float LayoutScale);
+	/** The smallest whole point size, never below Size, whose text is at least
+	 * MinimumLegiblePixels tall under LayoutScale. */
+	static float LegibleFontSize(float Size, float LayoutScale);
+	/** SmallFont raised to the legibility floor under LayoutScale (10 at
+	 * 1280x800, 11 at 1280x720, unchanged 8 from 1080p up). The style is built
+	 * once, so callers pass their live layout scale on every draw and a resize
+	 * never leaves a stale size. */
+	FSlateFontInfo LegibleSmallFont(float LayoutScale) const;
+
+	/** The game's own text-size targets (the Steam Deck legibility pass, SP3
+	 * PR 7), in physical pixels of a face's line height: every text at least
+	 * FloorLegiblePixels, and text players read during play (HUD messages,
+	 * team select, scoreboards, Help, chat, item info, prompts) at least
+	 * PrimaryLegiblePixels. MinimumLegiblePixels is Valve's hard floor. */
+	static constexpr float FloorLegiblePixels = 12.0f;
+	static constexpr float PrimaryLegiblePixels = 16.0f;
+	/** The line height, in pixels at 1x, of a retail bitmap face the menus
+	 * draw (F_WOTReg08 8, F_WOTReg14 and F_WOTIta14 14, F_WOTReg30 30,
+	 * Tahoma20 24); 14 for any other face. */
+	static int32 RetailFaceLineHeight(FName Face);
+	/** The whole-number strike (1 or 2) at which Face reaches
+	 * PrimaryLegiblePixels: 2 for the 14-pixel faces, 1 for F_WOTReg30. */
+	static int32 LegibleStrikeScale(FName Face);
+	/** Deck-class screens: the UI DPI curve is under 1 (shorter than 1080
+	 * pixels). Larger screens keep their desktop text exactly. */
+	static bool IsCompactScreen(float DpiScale) { return DpiScale < 1.0f - UE_KINDA_SMALL_NUMBER; }
+	/** Face at its LegibleStrikeScale, sized so the strike lands 1:1 on screen
+	 * pixels under LayoutScale: the authenticated integer strike when
+	 * Authority is ready, else Fallback (whose Size is the face's 1x line
+	 * height, as the runtime font owner reports it) resized the same way. */
+	static FSlateFontInfo LegibleStrikeFont(
+		const FWoTFrontEndPresentationAuthority* Authority, FName Face,
+		const FSlateFontInfo& Fallback, float LayoutScale);
 
 	const FSlateBrush* Background() const { return &BackgroundBrush; }
 	const FSlateBrush* Blackout() const { return &BlackoutBrush; }
@@ -362,6 +407,12 @@ public:
 	 * package (which ships no menu strings), so specs see what players see. */
 	void SetEditorMenuStringsHiddenForTesting(bool bHidden)
 		{ bEditorMenuStringsHiddenForTesting = bHidden; }
+	/** The editor's small face is its offline F_WOTReg08 asset, which Slate
+	 * cannot shape (it draws LastResort boxes); specs that measure layout swap
+	 * in the face a guarded build resolves. */
+	void SetSmallFontForTesting(const FSlateFontInfo& Font) { Small = Font; }
+	/** The same for the italic face (the item info window's quote). */
+	void SetItalicFontForTesting(const FSlateFontInfo& Font) { Italic = Font; }
 #endif
 
 private:
@@ -589,8 +640,9 @@ public:
 		SLATE_ARGUMENT(float, StepSize)
 		// Knob stops across the full MinValue..MinValue+8*StepSize range. The
 		// retail menuWOT.DrawSlider has 8 (one per cell); a value the retail
-		// menu stepped one unit at a time (time limit 0-60) uses one stop per unit.
-		SLATE_ARGUMENT(int32, Positions)
+		// menu stepped one unit at a time (time limit 0-60) uses one stop per unit,
+		// and a range that depends on other settings binds its live stop count.
+		SLATE_ATTRIBUTE(int32, Positions)
 		SLATE_EVENT(FOnFloatValueChanged, OnValueChanged)
 	SLATE_END_ARGS()
 
@@ -602,17 +654,28 @@ public:
 	// The knob's left edge for the current value: flush with the left cap at
 	// the first stop and flush with the right cap at the last.
 	float KnobLeft(float AllottedWidth) const;
+	// All four arrows, Home and End step it for the keyboard; D-pad Left and
+	// Right step it too, and D-pad Up/Down move focus (spec r3 section 2).
 	virtual FReply OnKeyDown(
 		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	// Left/Right navigation from a controller (the stick, held-D-pad repeats)
+	// steps the slider instead of moving focus.
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
 	virtual FReply OnMouseButtonDown(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+#if WITH_AUTOMATION_TESTS
+	/** The 1-based stop the knob shows for the current value. */
+	int32 KnobStopForTesting() const { return ValueCell(); }
+#endif
 
 private:
 	FSlateColor SelectionColor() const;
+	int32 PositionCount() const;
 	int32 ValueCell() const;
 	int32 CellFromMouse(const FGeometry& MyGeometry, const FVector2D& ScreenPosition) const;
 	void CommitCell(int32 CellIndex);
@@ -621,7 +684,7 @@ private:
 	FOnFloatValueChanged OnValueChanged;
 	float MinValue = 0.0f;
 	float StepSize = 0.125f;
-	int32 Positions = 8;
+	TAttribute<int32> Positions;
 	bool bDragging = false;
 };
 
