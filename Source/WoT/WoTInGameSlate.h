@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Settings/WoTGameSettings.h"
 #include "UI/SWoTButtonPrompts.h"
+#include "UI/WoTTextEntry.h"
 #include "WoTFrontEnd.h"
 #include "Styling/SlateBrush.h"
 #include "Widgets/SCompoundWidget.h"
@@ -16,6 +17,8 @@ class SBox;
 class SEditableText;
 class SWoTMenuButton;
 class SWoTSettingsScreen;
+class SWoTTextEntryLayer;
+class SWoTTextFieldActivator;
 class UTexture2D;
 class UWoTPreferencesSubsystem;
 struct FWoTRequiredMenuFonts;
@@ -24,6 +27,13 @@ enum class EWoTSettingsPage : uint8;
 // Engine.Console Typing-state projection: a bottom-screen prompt and focused
 // editable line. The controller owns lifetime and command parsing; this widget
 // never exposes the UE console.
+//
+// Talk and TeamTalk's "Say " / "TeamSay " prefill shows as a "Say:" or
+// "Team say:" label before the typed text (owner ruling 2026-11-08); the line
+// is unchanged: GetText is the prefix plus the typed text, and Backspace on an
+// empty line turns the label back into editable text, as retail's Backspace
+// over the prefill did. A controller's A on the line opens the keyboard panel
+// (spec r3 section 3).
 class SWoTChatInputOverlay : public SCompoundWidget
 {
 public:
@@ -39,14 +49,31 @@ public:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry,
 		const FKeyEvent& InKeyEvent) override;
 	TSharedPtr<SWidget> TextWidget() const;
+	/** The whole line: the label's prefix plus the typed text. */
 	FString GetText() const;
 	void SetText(const FString& Text);
+	/** The visible label: "Say:", "Team say:", or empty for a bare line. */
+	FText GetLabel() const;
+	/** Opens the keyboard panel (or Steam's keyboard) for the line, as A does. */
+	bool BeginTextEntry(int32 UserIndex = 0);
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayer() const { return EntryLayer; }
+#if WITH_AUTOMATION_TESTS
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+#endif
 
 private:
 	FReply HandleKey(const FKey& Key);
+	/** The typed text after the label's prefix. */
+	FString TypedText() const;
+	FWoTTextEntryRequest MakeEntryRequest();
 	TWeakObjectPtr<AWoTPlayerController> PlayerController;
 	TSharedPtr<SEditableText> Input;
+	TSharedPtr<SWoTTextFieldActivator> Activator;
+	TSharedPtr<SWoTTextEntryLayer> EntryLayer;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	TSharedPtr<const FWoTRequiredMenuFonts> RequiredFonts;
+	/** "Say ", "TeamSay " or empty: shown as the label, sent with the line. */
+	FString Prefix;
 };
 
 // Controller-owned, code-only gameplay overlay. It never owns session or world
@@ -115,6 +142,8 @@ public:
 		{ return SelectedMainMenuIndex; }
 	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
 	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
+	TSharedPtr<SWidget> PlayerNameInputForTesting() const;
+	const FString& PendingPlayerNameForTesting() const { return PendingPlayerName; }
 #endif
 
 private:
@@ -156,6 +185,8 @@ private:
 	TSharedPtr<SBox> ContentHost;
 	TSharedPtr<SWoTSettingsScreen> ActiveSettingsScreen;
 	TSharedPtr<SEditableText> PlayerNameInput;
+	/** Hosts the keyboard panel over every page (spec r3 section 3). */
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayer;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> PresentationAuthority;
 	TSharedPtr<const FWoTRequiredMenuFonts> RequiredFonts;
 	/** B/View: as Escape on every page (spec r3 section 1a, in-game menu). */

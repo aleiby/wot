@@ -46,6 +46,7 @@
 #include "Traps/WoTPortcullis.h"
 #include "Traps/WoTStaircase.h"
 #include "Traps/WoTTrap.h"
+#include "UI/WoTTextEntry.h"
 
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
@@ -93,6 +94,10 @@ public:
 	virtual bool HandleKeyUpEvent(FSlateApplication&,
 		const FKeyEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		return Dispatch(Event.GetKey(), IE_Released, 0.0f,
 			Event.GetUserIndex());
 	}
@@ -100,6 +105,10 @@ public:
 	virtual bool HandleAnalogInputEvent(FSlateApplication&,
 		const FAnalogInputEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		return Dispatch(Event.GetKey(), IE_Axis, Event.GetAnalogValue(),
 			Event.GetUserIndex());
 	}
@@ -110,7 +119,7 @@ public:
 	{
 		// Gestures are Slate input in this port. A physical wheel follows
 		// FSceneViewport::OnMouseWheel, except retail Typing eats its press.
-		if (GestureEvent || WheelEvent.GetUserIndex() != UserIndex
+		if (bSuspended || GestureEvent || WheelEvent.GetUserIndex() != UserIndex
 			|| !Controller.IsValid())
 		{
 			return false;
@@ -137,13 +146,13 @@ public:
 		// Console Typing consumes every press. A mouse press must therefore reach
 		// neither gameplay nor the editable Slate projection; releases and axes
 		// keep following the gameplay route below.
-		return Event.GetUserIndex() == UserIndex && Controller.IsValid();
+		return !bSuspended && Event.GetUserIndex() == UserIndex && Controller.IsValid();
 	}
 
 	virtual bool HandleMouseButtonDoubleClickEvent(FSlateApplication&,
 		const FPointerEvent& Event) override
 	{
-		return Event.GetUserIndex() == UserIndex && Controller.IsValid();
+		return !bSuspended && Event.GetUserIndex() == UserIndex && Controller.IsValid();
 	}
 
 	virtual bool HandleMotionDetectedEvent(FSlateApplication&,
@@ -151,7 +160,7 @@ public:
 	{
 		// Motion is axis input: Typing passes every non-press action through,
 		// so forward it as FSceneViewport::OnMotionDetected would.
-		if (Event.GetUserIndex() != UserIndex || !Controller.IsValid())
+		if (bSuspended || Event.GetUserIndex() != UserIndex || !Controller.IsValid())
 		{
 			return false;
 		}
@@ -164,7 +173,7 @@ public:
 	virtual bool HandleMouseMoveEvent(FSlateApplication&,
 		const FPointerEvent& Event) override
 	{
-		if (Event.GetUserIndex() != UserIndex || !Controller.IsValid())
+		if (bSuspended || Event.GetUserIndex() != UserIndex || !Controller.IsValid())
 		{
 			return false;
 		}
@@ -183,6 +192,10 @@ public:
 	virtual bool HandleMouseButtonUpEvent(FSlateApplication& Slate,
 		const FPointerEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		if (Event.IsTouchEvent())
 		{
 			return Event.GetUserIndex() == UserIndex && Controller.IsValid();
@@ -213,6 +226,26 @@ public:
 	void MarkGameplayMouseCaptureRetained()
 	{
 		bGameplayMouseCaptureRetained = true;
+	}
+
+	/**
+	 * The keyboard panel is open over chat: the router passes everything to
+	 * Slate, so the panel takes presses and gameplay sees nothing. The held
+	 * gameplay buttons were flushed, so none is awaited any more.
+	 */
+	void SetSuspended(FSlateApplication& Slate, bool bInSuspended)
+	{
+		if (bInSuspended)
+		{
+			ReleaseGameplayMouseCapture(Slate);
+			HeldGameplayMouseButtons.Reset();
+		}
+		bSuspended = bInSuspended;
+	}
+
+	bool IsSuspended() const
+	{
+		return bSuspended;
 	}
 
 	void ReleaseGameplayMouseCapture(FSlateApplication& Slate)
@@ -255,6 +288,7 @@ private:
 	uint32 UserIndex;
 	TWeakPtr<SViewport> ViewportWidget;
 	bool bGameplayMouseCaptureRetained = false;
+	bool bSuspended = false;
 };
 
 namespace
@@ -3162,9 +3196,19 @@ void AWoTPlayerController::CreateChatInputWidget()
 		}
 	}
 
-	bShowMouseCursor = false;
 	const bool bRetainMouseCapture = ChatInputPreProcessor.IsValid()
 		&& ChatInputPreProcessor->HasHeldGameplayMouseButton();
+	ApplyChatInputMode(bRetainMouseCapture, ViewportWidget, SlateUserIndex);
+}
+
+void AWoTPlayerController::ApplyChatInputMode(bool bRetainMouseCapture,
+	const TSharedPtr<SViewport>& ViewportWidget, uint32 SlateUserIndex)
+{
+	if (!ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	bShowMouseCursor = false;
 	FInputModeGameAndUI InputMode;
 	InputMode.SetWidgetToFocus(ChatInputWidget->TextWidget());
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -3177,8 +3221,11 @@ void AWoTPlayerController::CreateChatInputWidget()
 		InputSettings->bShouldFlushPressedKeysOnViewportFocusLost;
 	InputSettings->bShouldFlushPressedKeysOnViewportFocusLost = false;
 	SetInputMode(InputMode);
-	ChatInputViewport->SetIgnoreInput(true);
-	ChatInputViewport->SetMouseCaptureMode(EMouseCaptureMode::NoCapture);
+	if (UGameViewportClient* Viewport = ChatInputViewport.Get())
+	{
+		Viewport->SetIgnoreInput(true);
+		Viewport->SetMouseCaptureMode(EMouseCaptureMode::NoCapture);
+	}
 	if (FSlateApplication::IsInitialized())
 	{
 		FSlateApplication& Slate = FSlateApplication::Get();
@@ -3206,8 +3253,84 @@ void AWoTPlayerController::CreateChatInputWidget()
 		bPreviouslyFlushOnFocusLost;
 }
 
+void AWoTPlayerController::SuspendChatInputForTextEntry(const TSharedRef<SWidget>& Panel)
+{
+	if (!bChatTyping || bChatInputSuspended || !ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	bChatInputSuspended = true;
+	// Controller chat is not a parity path (spec r3 [I7]): every held gameplay
+	// key is released here, so no release is owed while the panel has input.
+	FlushPressedKeys();
+	if (ChatInputPreProcessor.IsValid() && FSlateApplication::IsInitialized())
+	{
+		ChatInputPreProcessor->SetSuspended(FSlateApplication::Get(), true);
+	}
+	// UI-only: the panel takes keys, taps and clicks; the viewport ignores
+	// input. The pointer shows for touch and mouse; a controller's cursor lease
+	// hides it again in Controller mode.
+	bShowMouseCursor = true;
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(Panel);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(InputMode);
+}
+
+void AWoTPlayerController::ResumeChatInputAfterTextEntry()
+{
+	if (!bChatInputSuspended)
+	{
+		return;
+	}
+	bChatInputSuspended = false;
+	if (ChatInputPreProcessor.IsValid() && FSlateApplication::IsInitialized())
+	{
+		ChatInputPreProcessor->SetSuspended(FSlateApplication::Get(), false);
+	}
+	if (!bChatTyping || !ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	// Exactly as CreateChatInputWidget set it; nothing is held after the flush,
+	// so no gameplay mouse capture is retained.
+	uint32 SlateUserIndex = 0;
+	if (FSlateApplication::IsInitialized())
+	{
+		SlateUserIndex = static_cast<uint32>(
+			FSlateApplication::Get().GetUserIndexForKeyboard());
+		if (const ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
+		{
+			if (const TSharedPtr<const FSlateUser> SlateUser = LocalPlayer->GetSlateUser())
+			{
+				SlateUserIndex = static_cast<uint32>(SlateUser->GetUserIndex());
+			}
+		}
+	}
+	const UGameViewportClient* Viewport = ChatInputViewport.Get();
+	ApplyChatInputMode(/*bRetainMouseCapture*/ false,
+		Viewport ? Viewport->GetGameViewportWidget() : nullptr, SlateUserIndex);
+}
+
+#if WITH_AUTOMATION_TESTS
+bool AWoTPlayerController::IsChatInputRouterActiveForTesting() const
+{
+	return ChatInputPreProcessor.IsValid() && !ChatInputPreProcessor->IsSuspended();
+}
+#endif
+
 void AWoTPlayerController::RemoveChatInputWidget(bool bRestoreGameInput)
 {
+	if (ChatInputWidget.IsValid())
+	{
+		// The chat line is going away: so is any keyboard panel over it.
+		FWoTTextEntry::AbandonWithin(ChatInputWidget.ToSharedRef());
+	}
+	if (bChatInputSuspended)
+	{
+		bChatInputSuspended = false;
+		bShowMouseCursor = false;
+	}
 	const bool bHadWidget = ChatInputWidget.IsValid();
 	if (ChatInputPreProcessor.IsValid())
 	{

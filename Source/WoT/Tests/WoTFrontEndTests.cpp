@@ -2039,7 +2039,24 @@ bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 		StaticCastSharedRef<SWoTButtonPrompts>(ColumnChildren->GetChildAt(1))
 			->GetShownPrompts().IsEmpty());
 	FWoTControllerUIInput::ResetForTesting();
-	const TSharedRef<SWidget> RootChild = ColumnChildren->GetChildAt(0);
+	// Controller sub-project 3, PR 3: the content host sits in the text entry
+	// layer, which hosts the keyboard panel over every screen (its overlay's
+	// first slot is the content; the backdrop and the panel follow).
+	const TSharedRef<SWidget> EntryLayer = ColumnChildren->GetChildAt(0);
+	if (!TestEqual(TEXT("the content column starts with the text entry layer"),
+		EntryLayer->GetType(), FName(TEXT("SWoTTextEntryLayer"))))
+	{
+		return false;
+	}
+	FChildren* EntryLayerChildren = EntryLayer->GetChildren();
+	FChildren* EntryOverlayChildren = EntryLayerChildren && EntryLayerChildren->Num() == 1
+		? EntryLayerChildren->GetChildAt(0)->GetChildren() : nullptr;
+	if (!TestTrue(TEXT("the text entry layer holds the content, its backdrop and its panel"),
+		EntryOverlayChildren != nullptr && EntryOverlayChildren->Num() == 3))
+	{
+		return false;
+	}
+	const TSharedRef<SWidget> RootChild = EntryOverlayChildren->GetChildAt(0);
 	if (!TestEqual(TEXT("front-end root child is a transparent content host"),
 		RootChild->GetType(), FName(TEXT("SBox"))))
 	{

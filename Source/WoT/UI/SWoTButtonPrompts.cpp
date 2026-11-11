@@ -270,6 +270,22 @@ TArray<FWoTButtonPrompt> FWoTButtonPromptSets::Capture()
 	return {{EWoTPromptButton::B, LOCTEXT("Cancel", "Cancel")}};
 }
 
+TArray<FWoTButtonPrompt> FWoTButtonPromptSets::KeyboardPanel()
+{
+	return {{EWoTPromptButton::A, LOCTEXT("Type", "Type")},
+		{EWoTPromptButton::B, LOCTEXT("Backspace", "Backspace")},
+		{EWoTPromptButton::X, LOCTEXT("Space", "Space")},
+		{EWoTPromptButton::Y, LOCTEXT("Shift", "Shift")},
+		{EWoTPromptButton::Menu, LOCTEXT("Done", "Done")},
+		{EWoTPromptButton::View, LOCTEXT("Cancel", "Cancel")}};
+}
+
+TArray<FWoTButtonPrompt> FWoTButtonPromptSets::SteamKeyboard()
+{
+	return {{EWoTPromptButton::Y, LOCTEXT("KeyboardPanel", "Keyboard panel")},
+		{EWoTPromptButton::B, LOCTEXT("Cancel", "Cancel")}};
+}
+
 // ---------------------------------------------------------------------------
 // The strip
 

@@ -179,12 +179,17 @@ public:
 	static FWoTLastInputChangedEvent& OnLastInputChanged();
 
 	/**
-	 * Stub for the PR 3 text entry: while an entry is active, keyboard keys
-	 * (physical typing into the panel, Steam's keyboard) do not flip the
-	 * last input to Pointer.
+	 * Set by FWoTTextEntry for as long as a text entry session runs: while
+	 * one is active, keyboard keys (physical typing into the panel, Steam's
+	 * keyboard) do not flip the last input to Pointer (spec r3 [I8]).
 	 */
 	static void SetTextEntryActive(bool bActive);
 	static bool IsTextEntryActive();
+
+	/** The navigation repeat's clock: the registered preprocessor's (specs
+	 * inject one), else the platform clock. The keyboard panel's own A/B
+	 * repeat runs on it too (spec r3 section 3 [N5]). */
+	static double CurrentTime();
 
 	/** Hold for as long as a modal UI surface is shown. */
 	[[nodiscard]] static TSharedRef<FWoTCursorLease> AcquireCursorLease();

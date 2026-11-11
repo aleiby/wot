@@ -68,6 +68,11 @@ struct WOT_API FWoTButtonPromptSets
 	static TArray<FWoTButtonPrompt> Close();
 	/** A live key capture on the Controls page: B Cancel. */
 	static TArray<FWoTButtonPrompt> Capture();
+	/** The on-screen keyboard panel (spec r3 section 3): A Type, B Backspace,
+	 * X Space, Y Shift, Menu Done, View Cancel. */
+	static TArray<FWoTButtonPrompt> KeyboardPanel();
+	/** Typing with Steam's keyboard: Y Keyboard panel, B Cancel. */
+	static TArray<FWoTButtonPrompt> SteamKeyboard();
 };
 
 /**

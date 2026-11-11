@@ -16,6 +16,7 @@
 #include "../UI/WoTBackStack.h"
 #include "../UI/WoTControllerUIInput.h"
 #include "../UI/WoTMenuNavigation.h"
+#include "../UI/WoTTextEntry.h"
 
 namespace
 {
@@ -81,6 +82,11 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 		Confirmed = FWoTGameSettings::Defaults();
 	}
 	Draft = Confirmed;
+	// The Steam keyboard toggle lives in its own side file (FWoTTextEntry),
+	// outside the versioned settings, and follows the page's Save and Back.
+	bSteamKeyboardConfirmed = Page == EWoTSettingsPage::Controls
+		&& FWoTTextEntry::IsSteamKeyboardEnabled();
+	bSteamKeyboardDraft = bSteamKeyboardConfirmed;
 	// The page itself holds focus only during a key capture; the binding's
 	// "Press a key..." is the cue, so no outline is drawn around the page.
 	AddMetadata<FWoTSelfDrawnFocusMetaData>(MakeShared<FWoTSelfDrawnFocusMetaData>());
@@ -604,6 +610,29 @@ void SWoTSettingsScreen::BuildControlsBody()
 		]
 	];
 	NavigationRows.Add({ControllerInvertCheckBox});
+	// Text fields by Steam's own keyboard (spec r3 section 3): offered only
+	// where it can open, a Steam Deck under Proton. Off by default until the
+	// Deck probe passes; the keyboard panel stays the fallback either way.
+	if (FWoTTextEntry::IsSteamKeyboardAvailable())
+	{
+		Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 12.0f)
+		[
+			SAssignNew(SteamKeyboardCheckBox, SCheckBox)
+			.Style(&BodyCheckBoxStyle)
+			.IsChecked_Lambda([this]()
+			{
+				return bSteamKeyboardDraft ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+			})
+			.OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+			{
+				bSteamKeyboardDraft = State == ECheckBoxState::Checked;
+			})
+			[
+				BuildLabel(Literal(TEXT("Use Steam Keyboard on Steam Deck")))
+			]
+		];
+		NavigationRows.Add({SteamKeyboardCheckBox});
+	}
 	TSharedPtr<SWidget> ViewBobSlider;
 	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[8]")))];
 	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f)
@@ -992,6 +1021,15 @@ bool SWoTSettingsScreen::CommitDraft()
 		return false;
 	}
 	Confirmed = Draft;
+	if (bSteamKeyboardDraft != bSteamKeyboardConfirmed)
+	{
+		if (!FWoTTextEntry::SetSteamKeyboardEnabled(bSteamKeyboardDraft))
+		{
+			SetError(Literal(TEXT("The Steam keyboard choice could not be saved. Try again.")));
+			return false;
+		}
+		bSteamKeyboardConfirmed = bSteamKeyboardDraft;
+	}
 	SetError(FText::GetEmpty());
 	return true;
 }
@@ -1085,6 +1123,7 @@ bool SWoTSettingsScreen::HandleBack()
 		FWoTGameSettingsAdapter::ApplyAudio(Confirmed);
 	}
 	Draft = Confirmed;
+	bSteamKeyboardDraft = bSteamKeyboardConfirmed;
 	OnBack.ExecuteIfBound();
 	return true;
 }

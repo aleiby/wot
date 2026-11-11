@@ -33,8 +33,11 @@
 #include "Settings/WoTSettingsSlate.h"
 #include "UI/SWoTFocusOutline.h"
 #include "UI/SWoTListCombo.h"
+#include "UI/SWoTOnScreenKeyboard.h"
+#include "UI/SWoTTextFieldActivator.h"
 #include "UI/WoTBackStack.h"
 #include "UI/WoTControllerUIInput.h"
+#include "UI/WoTTextEntry.h"
 #include "GameFramework/PlayerState.h"
 
 namespace
@@ -92,6 +95,26 @@ namespace
 			return EWoTPlayerFaction::Whitecloak;
 		}
 		return EWoTPlayerFaction::AesSedai;
+	}
+
+	// Talk's and TeamTalk's retail prefills (UE1 Console.Talk / TeamTalk).
+	const TCHAR* const WoTInGameSlate_SayPrefix = TEXT("Say ");
+	const TCHAR* const WoTInGameSlate_TeamSayPrefix = TEXT("TeamSay ");
+
+	/** Splits a chat line into its Say/TeamSay prefix and the typed text. */
+	FString WoTInGameSlate_SplitChatPrefix(const FString& Line, FString& OutPrefix)
+	{
+		for (const TCHAR* Candidate : {WoTInGameSlate_SayPrefix, WoTInGameSlate_TeamSayPrefix})
+		{
+			if (Line.StartsWith(Candidate, ESearchCase::IgnoreCase))
+			{
+				const int32 Length = FCString::Strlen(Candidate);
+				OutPrefix = Line.Left(Length);
+				return Line.Mid(Length);
+			}
+		}
+		OutPrefix.Reset();
+		return Line;
 	}
 
 	FText WoTInGameSlate_SkinLabel(EWoTPlayerSkinColor Current, int32 Offset)
@@ -158,46 +181,177 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 		RequiredFonts = Fallback;
 	}
 
+	// The Say/TeamSay prefill shows as a label; the line keeps it (GetText).
+	const FString Typed = WoTInGameSlate_SplitChatPrefix(InArgs._InitialText, Prefix);
+
 	// UE5 action delegates run after the platform has delivered the key's
 	// character event, so the T/Y opener cannot arrive at this newly focused
 	// widget. Accept the first event unconditionally; a timing heuristic would
 	// instead discard a fast user's first actual message character.
 	TSharedRef<SEditableText> Editable = SNew(SEditableText)
-		.Text(FText::FromString(InArgs._InitialText))
+		.Text(FText::FromString(Typed))
 		.Font(RequiredFonts->List)
 		.ColorAndOpacity(FLinearColor::White)
 		.IsCaretMovedWhenGainFocus(true)
-		.SelectAllTextWhenFocused(false);
+		.SelectAllTextWhenFocused(false)
+		.OnKeyCharHandler_Lambda([this](const FGeometry&, const FCharacterEvent& Event)
+		{
+			// Backspace on an empty line takes the label back into the text,
+			// as retail's Backspace over the "Say " prefill did ("Say").
+			if (Event.GetCharacter() == TCHAR(8) && !Prefix.IsEmpty() && Input.IsValid()
+				&& Input->GetText().IsEmpty())
+			{
+				const FString Unfolded = Prefix.LeftChop(1);
+				Prefix.Reset();
+				Input->SetText(FText::FromString(Unfolded));
+				Input->GoTo(ETextLocation::EndOfDocument);
+				return FReply::Handled();
+			}
+			return FReply::Unhandled();
+		});
 	Editable->GoTo(ETextLocation::EndOfDocument);
 	Input = Editable;
+	const FSlateFontInfo LineFont = RequiredFonts->List;
 
 	ChildSlot
 	[
 		SNew(SOverlay)
 		+ SOverlay::Slot()
-		.VAlign(VAlign_Bottom)
-		.Padding(2.0f)
 		[
-			SNew(SBorder)
-			.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-			.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
-			.Padding(FMargin(3.0f, 1.0f))
+			// Hosts the keyboard panel over chat (spec r3 section 3 [I7]).
+			SAssignNew(EntryLayer, SWoTTextEntryLayer)
+			.Font(LineFont)
+			.PanelPadding(FMargin(16.0f, 16.0f, 16.0f, 44.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				SNew(SOverlay)
+				+ SOverlay::Slot()
+				.VAlign(VAlign_Bottom)
+				.Padding(2.0f)
 				[
-					SNew(STextBlock)
-					.Text(WoTInGameSlate_Text(TEXT("(> ")))
-					.Font(RequiredFonts->List)
-					.ColorAndOpacity(FLinearColor::White)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					Editable
+					SNew(SBorder)
+					.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+					.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
+					.Padding(FMargin(3.0f, 1.0f))
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+						[
+							SNew(STextBlock)
+							.Text(WoTInGameSlate_Text(TEXT("(> ")))
+							.Font(LineFont)
+							.ColorAndOpacity(FLinearColor::White)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+						[
+							// "Say:" / "Team say:" (owner ruling 2026-11-08).
+							SNew(STextBlock)
+							.Text(this, &SWoTChatInputOverlay::GetLabel)
+							.Visibility_Lambda([this]()
+							{
+								return Prefix.IsEmpty() ? EVisibility::Collapsed
+									: EVisibility::HitTestInvisible;
+							})
+							.Font(LineFont)
+							.ColorAndOpacity(FLinearColor(0.94f, 0.77f, 0.36f, 1.0f))
+						]
+						+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+						[
+							SAssignNew(Activator, SWoTTextFieldActivator)
+							.Request(MakeEntryRequest())
+							[
+								Editable
+							]
+						]
+					]
 				]
 			]
 		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(0.0f, 0.0f, 16.0f, 8.0f))
+		[
+			// The keyboard's prompts while it is open over chat.
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts_Lambda([this]()
+			{
+				return FWoTTextEntry::IsActiveWithin(AsShared())
+					? FWoTTextEntry::ControllerPrompts() : TArray<FWoTButtonPrompt>();
+			})
+			.Font(LineFont)
+		]
 	];
+}
+
+FText SWoTChatInputOverlay::GetLabel() const
+{
+	if (Prefix.Equals(WoTInGameSlate_SayPrefix, ESearchCase::IgnoreCase))
+	{
+		return WoTInGameSlate_Text(TEXT("Say:"));
+	}
+	if (Prefix.Equals(WoTInGameSlate_TeamSayPrefix, ESearchCase::IgnoreCase))
+	{
+		return WoTInGameSlate_Text(TEXT("Team say:"));
+	}
+	return FText::GetEmpty();
+}
+
+FWoTTextEntryRequest SWoTChatInputOverlay::MakeEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = TAttribute<FText>::CreateLambda([this]()
+	{
+		const FText Label = GetLabel();
+		return Label.IsEmpty() ? WoTInGameSlate_Text(TEXT("Chat"))
+			: FText::FromString(Label.ToString().LeftChop(1));
+	});
+	// The typed text after the prefix; the line sent keeps the prefix.
+	Request.MaxLength = AWoTPlayerController::MaxChatMessageLength;
+	Request.GetText = [this]() { return TypedText(); };
+	Request.SetText = [this](const FString& Text)
+	{
+		if (Input.IsValid())
+		{
+			Input->SetText(FText::FromString(Text));
+			Input->GoTo(ETextLocation::EndOfDocument);
+		}
+	};
+	const TWeakObjectPtr<AWoTPlayerController> WeakController = PlayerController;
+	Request.Commit = [this, WeakController]()
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->SubmitChatInput(GetText());
+		}
+	};
+	// Controller chat is not a parity path: the panel suspends chat's input
+	// router and routes UI-only; closing restores chat's input mode [I7].
+	Request.OnPanelOpened = [WeakController](const TSharedRef<SWidget>& Panel)
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->SuspendChatInputForTextEntry(Panel);
+		}
+	};
+	Request.OnPanelClosed = [WeakController]()
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->ResumeChatInputAfterTextEntry();
+		}
+	};
+	return Request;
+}
+
+bool SWoTChatInputOverlay::BeginTextEntry(int32 UserIndex)
+{
+	return Activator.IsValid() && Activator->BeginEntry(UserIndex);
+}
+
+FString SWoTChatInputOverlay::TypedText() const
+{
+	return Input.IsValid() ? Input->GetText().ToString() : FString();
 }
 
 FReply SWoTChatInputOverlay::HandleKey(const FKey& Key)
@@ -224,6 +378,16 @@ FReply SWoTChatInputOverlay::HandleKey(const FKey& Key)
 FReply SWoTChatInputOverlay::OnPreviewKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel (or Steam's keyboard) takes the keys; Escape
+		// cancels it first and chat stays open (spec r3 [M3]).
+		if (InKeyEvent.GetKey() == EKeys::Escape && FWoTTextEntry::CancelWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+	}
 	const FReply Reply = HandleKey(InKeyEvent.GetKey());
 	return Reply.IsEventHandled() ? Reply
 		: SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
@@ -232,6 +396,10 @@ FReply SWoTChatInputOverlay::OnPreviewKeyDown(
 FReply SWoTChatInputOverlay::OnKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+	}
 	const FReply Reply = HandleKey(InKeyEvent.GetKey());
 	return Reply.IsEventHandled() ? Reply
 		: SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
@@ -244,14 +412,15 @@ TSharedPtr<SWidget> SWoTChatInputOverlay::TextWidget() const
 
 FString SWoTChatInputOverlay::GetText() const
 {
-	return Input.IsValid() ? Input->GetText().ToString() : FString();
+	return Prefix + TypedText();
 }
 
 void SWoTChatInputOverlay::SetText(const FString& Text)
 {
 	if (Input.IsValid())
 	{
-		Input->SetText(FText::FromString(Text));
+		Input->SetText(FText::FromString(WoTInGameSlate_SplitChatPrefix(Text, Prefix)));
+		Input->GoTo(ETextLocation::EndOfDocument);
 	}
 }
 
@@ -322,7 +491,8 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 		[this]() { return BackOneLevel(); });
 
 	// The focus outline layer draws the controller focus outline on every
-	// page; the prompt strip shows in Controller mode only.
+	// page; the prompt strip shows in Controller mode only. The text entry
+	// layer hosts the keyboard panel over the pages, under the prompt strip.
 	ChildSlot
 	[
 		SNew(SWoTFocusOutlineLayer)
@@ -340,18 +510,14 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 			.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.72f))
 		]
 		+ SOverlay::Slot()
-		.HAlign(HAlign_Right)
-		.VAlign(VAlign_Bottom)
-		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
 		[
-			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
-			.Prompts(this, &SWoTInGameMenuOverlay::ControllerPrompts)
+			SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
 			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
-		]
-		+ SOverlay::Slot()
-		.HAlign(HAlign_Center)
-		.VAlign(VAlign_Center)
-		[
+			[
+			SNew(SBox)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
 			SNew(SBorder)
 			.BorderImage(FWoTMenuStyle::Get().Background())
 			[
@@ -371,7 +537,18 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 					SAssignNew(ContentHost, SBox)
 				]
 			]
+			]
+			]
+			]
 		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(this, &SWoTInGameMenuOverlay::ControllerPrompts)
+			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
 		]
 		]
 	];
@@ -508,15 +685,41 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildPlayerConfigPage()
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f)
 			[
-				SAssignNew(PlayerNameInput, SEditableText)
-				.Text(FText::FromString(PendingPlayerName))
-				.Font(this, &SWoTInGameMenuOverlay::ItemFont)
-				.ColorAndOpacity(FSlateColor::UseForeground())
-				.OnTextChanged_Lambda([this](const FText& Text)
+				SNew(SWoTTextFieldActivator)
+				.Request([this]()
 				{
-					PendingPlayerName =
-						FWoTFrontEndModel::FilterPlayerNameInput(Text.ToString());
-				})
+					// The page's Save path commits the pending name, as for
+					// keyboard typing (spec r3 section 3).
+					FWoTTextEntryRequest Request;
+					Request.Title = ResolveRetailText(FName(TEXT("menuPlayer.MenuList[1]")));
+					Request.MaxLength = 20;
+					Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PlayerNameInput); };
+					Request.GetText = [this]() { return PendingPlayerName; };
+					Request.SetText = [this](const FString& Text)
+					{
+						PendingPlayerName = FWoTFrontEndModel::FilterPlayerNameInput(Text);
+						if (PlayerNameInput.IsValid())
+						{
+							PlayerNameInput->SetText(FText::FromString(PendingPlayerName));
+						}
+					};
+					Request.Filter = [](const FString& Text)
+					{
+						return FWoTFrontEndModel::FilterPlayerNameInput(Text);
+					};
+					return Request;
+				}())
+				[
+					SAssignNew(PlayerNameInput, SEditableText)
+					.Text(FText::FromString(PendingPlayerName))
+					.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+					.ColorAndOpacity(FSlateColor::UseForeground())
+					.OnTextChanged_Lambda([this](const FText& Text)
+					{
+						PendingPlayerName =
+							FWoTFrontEndModel::FilterPlayerNameInput(Text.ToString());
+					})
+				]
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 5.0f)
@@ -823,6 +1026,10 @@ void SWoTInGameMenuOverlay::Tick(
 
 TArray<FWoTButtonPrompt> SWoTInGameMenuOverlay::ControllerPrompts() const
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		return FWoTTextEntry::ControllerPrompts();
+	}
 	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
 	{
 		return FWoTButtonPromptSets::Dropdown();
@@ -853,6 +1060,16 @@ void SWoTInGameMenuOverlay::FocusResumeButton()
 FReply SWoTInGameMenuOverlay::OnKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel owns every key; Escape cancels it first [M3].
+		if (InKeyEvent.GetKey() == EKeys::Escape)
+		{
+			FWoTTextEntry::CancelWithin(AsShared());
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+	}
 	if (IsHelpKey(InKeyEvent.GetKey())
 		&& (!ActiveSettingsScreen.IsValid()
 			|| !ActiveSettingsScreen->IsCapturingBinding()))
@@ -879,6 +1096,17 @@ FReply SWoTInGameMenuOverlay::OnKeyDown(
 FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel owns every key: physical typing never opens Help.
+		// Escape cancels the panel first, and the page stays (spec r3 [M3]).
+		if (InKeyEvent.GetKey() == EKeys::Escape)
+		{
+			FWoTTextEntry::CancelWithin(AsShared());
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+	}
 	if (IsHelpKey(InKeyEvent.GetKey())
 		&& (!ActiveSettingsScreen.IsValid()
 			|| !ActiveSettingsScreen->IsCapturingBinding()))
@@ -1153,6 +1381,11 @@ FReply SWoTInGameMenuOverlay::ActivateScoreboardForTesting()
 FReply SWoTInGameMenuOverlay::ActivateHelpForTesting()
 {
 	return ActivateHelp();
+}
+
+TSharedPtr<SWidget> SWoTInGameMenuOverlay::PlayerNameInputForTesting() const
+{
+	return PlayerNameInput;
 }
 
 FReply SWoTInGameMenuOverlay::ActivateCitadelForTesting()

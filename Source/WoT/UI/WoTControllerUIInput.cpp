@@ -312,6 +312,12 @@ bool FWoTControllerUIInput::IsTextEntryActive()
 	return WoTControllerUIGlobals().bTextEntryActive;
 }
 
+double FWoTControllerUIInput::CurrentTime()
+{
+	const TSharedPtr<FWoTControllerUIInput>& Registered = WoTControllerUIGlobals().Registered;
+	return Registered.IsValid() ? Registered->Now() : FPlatformTime::Seconds();
+}
+
 TSharedRef<FWoTCursorLease> FWoTControllerUIInput::AcquireCursorLease()
 {
 	++WoTControllerUIGlobals().LeaseCount;
