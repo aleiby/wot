@@ -960,9 +960,16 @@ bool FWoTInstallerShareSettingsRowSpec::RunTest(const FString&)
 	TestTrue(TEXT("the row shows checked"), Box->IsChecked());
 	Box->ToggleCheckedState();
 	TestFalse(TEXT("toggling changes the draft"), Screen->SharingDraftForTesting());
-	TestTrue(TEXT("Back discards the change"),
-		Screen->HandleBack() && Screen->SharingDraftForTesting());
-	TestTrue(TEXT("Back wrote nothing"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+	TestTrue(TEXT("the sharing change counts as unsaved"), Screen->HasUnsavedChanges());
+	// The back action asks "Save changes?" first (the Deck session feedback);
+	// Discard, like the Back button, then leaves and drops the draft.
+	TestTrue(TEXT("Back asks before leaving"),
+		Screen->HandleBack() && Screen->IsConfirmingUnsaved());
+	TestFalse(TEXT("asking keeps the change"), Screen->SharingDraftForTesting());
+	Screen->BackForTesting();
+	TestTrue(TEXT("leaving without saving discards the change"),
+		Screen->SharingDraftForTesting());
+	TestTrue(TEXT("and writes nothing"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
 
 	UWoTInstallerSharingSubsystem* Sharing =
 		NewObject<UWoTInstallerSharingSubsystem>(Fixture.Instance);
