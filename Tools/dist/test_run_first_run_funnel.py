@@ -1573,6 +1573,35 @@ class FunnelHarnessTests(unittest.TestCase):
             ):
                 funnel._resolve_release(release)
 
+    def test_stale_source_snapshot_is_reported_before_cooked_path_rules(self):
+        release = self.make_release()
+        manifest = json.loads(release.read_text(encoding="utf-8"))
+        wrapper = manifest["cooked_container_inventory"]
+        receipt = wrapper["receipt"]
+        receipt["paths"] = sorted(
+            receipt["paths"] + ["../../../WoT/Plugins/Other/Other.uplugin"])
+        receipt["path_count"] = len(receipt["paths"])
+        receipt["containers"][0]["entry_count"] = len(receipt["paths"])
+        wrapper["path_count"] = receipt["path_count"]
+        wrapper["receipt_sha256"] = self._sha(
+            funnel._pretty_json_bytes(receipt))
+        release.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._resolve_release(release, require_current_source=False)
+
+        current = {
+            "format": funnel.SOURCE_SNAPSHOT_FORMAT,
+            "git_commit": "different",
+            "sha256": "f" * 64,
+        }
+        with mock.patch.object(
+            funnel, "_current_source_snapshot", return_value=current
+        ):
+            with self.assertRaisesRegex(
+                funnel.FunnelFailure, "build_stripped_pak.py --guarded"
+            ):
+                funnel._resolve_release(release)
+
     def test_development_source_drift_override_only_relaxes_snapshot_check(self):
         release = self.make_release()
         args = mock.Mock(

@@ -1436,6 +1436,16 @@ def _resolve_release(
     ):
         raise FunnelFailure("release source-snapshot receipt is malformed")
     _validate_digest(source.get("sha256"), "source-snapshot digest")
+    # Checked before the receipts below, whose rules may have changed since
+    # the release was built: a stale release needs a rebuild, not a diagnosis.
+    if require_current_source:
+        current = _current_source_snapshot()
+        if source != current:
+            raise FunnelFailure(
+                "release Source/Tools snapshot differs from the current tree; "
+                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
+                f"(release {source.get('sha256')}, current {current['sha256']})"
+            )
     neutral_support = _validate_neutral_support_proof(
         manifest.get("neutral_support_authority"))
     products = manifest.get("products")
@@ -1566,14 +1576,6 @@ def _resolve_release(
     _validate_zen_lifetime_proof(
         manifest.get("zen_lifetime"), manifest["platform"])
 
-    if require_current_source:
-        current = _current_source_snapshot()
-        if source != current:
-            raise FunnelFailure(
-                "release Source/Tools snapshot differs from the current tree; "
-                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
-                f"(release {source.get('sha256')}, current {current['sha256']})"
-            )
     authority_path = REPO / neutral_support["authority_relative_path"]
     if (not authority_path.is_file()
             or _sha256_file(authority_path)
