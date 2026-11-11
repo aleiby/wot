@@ -265,6 +265,12 @@ TArray<FWoTButtonPrompt> FWoTButtonPromptSets::Close()
 	return {{EWoTPromptButton::B, LOCTEXT("Close", "Close")}};
 }
 
+TArray<FWoTButtonPrompt> FWoTButtonPromptSets::Taunts()
+{
+	return {{EWoTPromptButton::A, LOCTEXT("Taunt", "Taunt")},
+		{EWoTPromptButton::B, LOCTEXT("Back", "Back")}};
+}
+
 TArray<FWoTButtonPrompt> FWoTButtonPromptSets::Capture()
 {
 	return {{EWoTPromptButton::B, LOCTEXT("Cancel", "Cancel")}};

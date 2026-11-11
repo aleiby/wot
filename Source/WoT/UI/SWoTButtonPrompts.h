@@ -66,6 +66,8 @@ struct WOT_API FWoTButtonPromptSets
 	static TArray<FWoTButtonPrompt> Dropdown();
 	/** Help: B Close. */
 	static TArray<FWoTButtonPrompt> Close();
+	/** The in-game menu's Taunts page: A Taunt, B Back. */
+	static TArray<FWoTButtonPrompt> Taunts();
 	/** A live key capture on the Controls page: B Cancel. */
 	static TArray<FWoTButtonPrompt> Capture();
 	/** The on-screen keyboard panel (spec r3 section 3): A Type, B Backspace,

@@ -66,14 +66,29 @@ private:
 	/** The typed text after the label's prefix. */
 	FString TypedText() const;
 	FWoTTextEntryRequest MakeEntryRequest();
+	void RegisterControllerBack();
 	TWeakObjectPtr<AWoTPlayerController> PlayerController;
 	TSharedPtr<SEditableText> Input;
 	TSharedPtr<SWoTTextFieldActivator> Activator;
 	TSharedPtr<SWoTTextEntryLayer> EntryLayer;
 	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	TSharedPtr<const FWoTRequiredMenuFonts> RequiredFonts;
+	/** B/View on the bare chat line close chat (the keyboard closes first). */
+	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
 	/** "Say ", "TeamSay " or empty: shown as the label, sent with the line. */
 	FString Prefix;
+};
+
+/**
+ * The in-game menu's entries. The menu shows them in this order, with Edit
+ * Citadel only during a citadel edit phase; Chat, Team Chat and Taunts sit
+ * after Help and before any onboarding seam rows and Quit (spec r3 section 4).
+ * Positions come from the runtime list, never from these values.
+ */
+enum class EWoTInGameMenuEntry : uint8
+{
+	Resume, Scoreboard, Help, Chat, TeamChat, Taunts, EditCitadel, PlayerConfig,
+	Controls, Hardware, Quit
 };
 
 // Controller-owned, code-only gameplay overlay. It never owns session or world
@@ -140,6 +155,18 @@ public:
 			? MainMenuButtons[EntryIndex] : nullptr; }
 	int32 SelectedMainMenuIndexForTesting() const
 		{ return SelectedMainMenuIndex; }
+	/** The entry's position in the rendered menu, or INDEX_NONE. */
+	int32 MainMenuIndexForTesting(EWoTInGameMenuEntry Entry) const
+		{ return MainMenuEntryIds.IndexOfByKey(static_cast<uint8>(Entry)); }
+	FReply OpenTauntsForTesting() { return OpenTaunts(); }
+	bool IsShowingTauntsForTesting() const { return bShowingTaunts; }
+	TArray<FString> TauntLabelsForTesting() const { return TauntLabels; }
+	TSharedPtr<SWoTMenuButton> TauntButtonForTesting(int32 EntryIndex) const
+		{ return TauntButtons.IsValidIndex(EntryIndex)
+			? TauntButtons[EntryIndex] : nullptr; }
+	int32 SelectedTauntIndexForTesting() const { return SelectedTauntIndex; }
+	/** Runs a Taunts page entry's action, as A on it does. */
+	FReply ActivateTauntEntryForTesting(int32 EntryIndex);
 	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
 	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
 	TSharedPtr<SWidget> PlayerNameInputForTesting() const;
@@ -150,8 +177,17 @@ private:
 	TSharedRef<SWidget> BuildMainMenu();
 	TSharedRef<SWidget> BuildSettingsPage(EWoTSettingsPage Page);
 	TSharedRef<SWidget> BuildPlayerConfigPage();
+	TSharedRef<SWidget> BuildTauntsPage();
 	FReply OpenSettings(EWoTSettingsPage Page);
 	FReply OpenPlayerConfig();
+	/** The Taunts page: Taunt 1..6 and Random (spec r3 section 4). */
+	FReply OpenTaunts();
+	/** Chat or Team Chat: the menu closes and chat opens (spec r3 section 4). */
+	FReply ActivateChat(bool bTeam);
+	/** A Taunts page entry: the menu closes and PlayTaunt(TauntIndex) runs. */
+	FReply ActivateTaunt(int32 TauntIndex);
+	bool MoveTauntSelection(int32 Direction);
+	void SelectTauntEntry(int32 EntryIndex);
 	FReply SavePlayerConfig();
 	void ReturnToMainMenu();
 	FReply Resume();
@@ -202,6 +238,11 @@ private:
 	FString PendingPlayerName;
 	EWoTPlayerSkinColor PendingSkinColor = EWoTPlayerSkinColor::Base;
 	bool bShowingPlayerConfig = false;
+	/** The Taunts page is showing; its seven entries, one highlighted. */
+	bool bShowingTaunts = false;
+	TArray<TSharedPtr<SWoTMenuButton>> TauntButtons;
+	TArray<FString> TauntLabels;
+	int32 SelectedTauntIndex = INDEX_NONE;
 #if WITH_AUTOMATION_TESTS
 	TOptional<FWoTGameSettings> GameSettingsForTesting;
 #endif

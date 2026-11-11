@@ -28,9 +28,11 @@ void UWoTGamepadLayer::Initialize(AWoTPlayerController& InController, UEnhancedI
 		Action->ValueType = WoTGamepadActionIsStick(Id)
 			? EInputActionValueType::Axis2D : EInputActionValueType::Boolean;
 		// Mirrors the legacy bindings' bExecuteWhenPaused: a paused game still
-		// takes the menu, the respawn jump and the weave release.
+		// takes the menu, the respawn jump, the weave release and chat (Talk
+		// and TeamTalk).
 		Action->bTriggerWhenPaused = Id == EWoTGamepadAction::Menu
-			|| Id == EWoTGamepadAction::Jump || Id == EWoTGamepadAction::Fire;
+			|| Id == EWoTGamepadAction::Jump || Id == EWoTGamepadAction::Fire
+			|| Id == EWoTGamepadAction::Chat || Id == EWoTGamepadAction::TeamChat;
 		Actions[Index] = Action;
 	}
 	const int32 NumContexts = static_cast<int32>(EWoTGamepadContext::Count);
@@ -50,13 +52,13 @@ void UWoTGamepadLayer::Initialize(AWoTPlayerController& InController, UEnhancedI
 		if (Row.Trigger == EWoTGamepadTrigger::Tap)
 		{
 			UInputTriggerTap* Tap = NewObject<UInputTriggerTap>(Context);
-			Tap->TapReleaseTimeThreshold = Tuning.DropHoldSeconds;
+			Tap->TapReleaseTimeThreshold = Tuning.HoldSeconds;
 			Mapping.Triggers.Add(Tap);
 		}
 		else if (Row.Trigger == EWoTGamepadTrigger::Hold)
 		{
 			UInputTriggerHold* Hold = NewObject<UInputTriggerHold>(Context);
-			Hold->HoldTimeThreshold = Tuning.DropHoldSeconds;
+			Hold->HoldTimeThreshold = Tuning.HoldSeconds;
 			Hold->bIsOneShot = true;
 			Mapping.Triggers.Add(Hold);
 		}
@@ -95,7 +97,8 @@ void UWoTGamepadLayer::BindButtons(UEnhancedInputComponent& Input)
 		EWoTGamepadAction::NextItem, EWoTGamepadAction::PrevHand, EWoTGamepadAction::NextHand,
 		EWoTGamepadAction::ViewUp, EWoTGamepadAction::ViewDown, EWoTGamepadAction::RandomTaunt,
 		EWoTGamepadAction::Menu, EWoTGamepadAction::JoinTeam1, EWoTGamepadAction::JoinTeam2,
-		EWoTGamepadAction::JoinTeam3, EWoTGamepadAction::JoinTeam4})
+		EWoTGamepadAction::JoinTeam3, EWoTGamepadAction::JoinTeam4,
+		EWoTGamepadAction::Chat, EWoTGamepadAction::TeamChat})
 	{
 		// A plain press acts on its press edge; a tap or hold acts once when its
 		// trigger completes (Started would fire a tap on the press).
@@ -330,6 +333,9 @@ void UWoTGamepadLayer::OnButton(EWoTGamepadAction Action)
 	case EWoTGamepadAction::ViewDown: PC->ViewDown(); break;
 	case EWoTGamepadAction::RandomTaunt: PC->PlayTaunt(-1); break;
 	case EWoTGamepadAction::Menu: PC->ToggleInGameMenu(); break;
+	// D-pad up: Talk or TeamTalk, as T and Y run them, with the text entry.
+	case EWoTGamepadAction::Chat: PC->ChatByController(/*bTeam*/ false); break;
+	case EWoTGamepadAction::TeamChat: PC->ChatByController(/*bTeam*/ true); break;
 	// The number keys' team choice (BattleHUD.KeyEvent), on the D-pad.
 	case EWoTGamepadAction::JoinTeam1:
 	case EWoTGamepadAction::JoinTeam2:

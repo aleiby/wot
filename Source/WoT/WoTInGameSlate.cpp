@@ -47,16 +47,30 @@ namespace
 		return FText::FromString(Text);
 	}
 
-	enum class EWoTInGameMenuEntry : uint8
-	{
-		Resume, Scoreboard, Help, EditCitadel, PlayerConfig, Controls, Hardware, Quit
-	};
-
 	struct FWoTInGameMenuEntry
 	{
 		EWoTInGameMenuEntry Id;
 		FString Label;
 	};
+
+	/** The Taunts page: PlayTaunt's argument per entry (-1 picks at random). */
+	struct FWoTInGameTauntEntry
+	{
+		const TCHAR* Label;
+		int32 TauntIndex;
+	};
+	const FWoTInGameTauntEntry WoTInGameSlate_TauntEntries[] = {
+		{TEXT("Taunt 1"), 1}, {TEXT("Taunt 2"), 2}, {TEXT("Taunt 3"), 3},
+		{TEXT("Taunt 4"), 4}, {TEXT("Taunt 5"), 5}, {TEXT("Taunt 6"), 6},
+		{TEXT("Random"), -1}
+	};
+
+	/** One wrapping step through a list of Count entries. */
+	int32 WoTInGameSlate_WrapStep(int32 Current, int32 Count, int32 Direction)
+	{
+		const int32 From = Current >= 0 && Current < Count ? Current : 0;
+		return (From + (Direction < 0 ? -1 : 1) + Count) % Count;
+	}
 
 	FString WoTInGameSlate_KeyLabel(const FWoTGameSettings& Settings,
 		EWoTManagedBinding Binding)
@@ -144,7 +158,12 @@ namespace
 			{EWoTInGameMenuEntry::Scoreboard, FString::Printf(TEXT("Scoreboard (%s)"),
 				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowScores))},
 			{EWoTInGameMenuEntry::Help, FString::Printf(TEXT("Help (%s)"),
-				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowHelp))}
+				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowHelp))},
+			// Chat and taunts by menu (spec r3 section 4): after Help, before
+			// any onboarding seam rows and Quit [I9].
+			{EWoTInGameMenuEntry::Chat, TEXT("Chat")},
+			{EWoTInGameMenuEntry::TeamChat, TEXT("Team Chat")},
+			{EWoTInGameMenuEntry::Taunts, TEXT("Taunts")}
 		};
 		if (Controller && Controller->CanRequestCitadelEdit())
 		{
@@ -272,16 +291,36 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 		.VAlign(VAlign_Bottom)
 		.Padding(FMargin(0.0f, 0.0f, 16.0f, 8.0f))
 		[
-			// The keyboard's prompts while it is open over chat.
+			// The keyboard's prompts while it is open over chat; on the bare
+			// line, A types and B closes chat.
 			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
 			.Prompts_Lambda([this]()
 			{
 				return FWoTTextEntry::IsActiveWithin(AsShared())
-					? FWoTTextEntry::ControllerPrompts() : TArray<FWoTButtonPrompt>();
+					? FWoTTextEntry::ControllerPrompts() : FWoTButtonPromptSets::Password();
 			})
 			.Font(LineFont)
 		]
 	];
+	RegisterControllerBack();
+}
+
+void SWoTChatInputOverlay::RegisterControllerBack()
+{
+	// A controller backs out of chat one level per press, as Escape does from
+	// the keyboard: the on-screen keyboard closes first (its own session entry
+	// sits above this one), then B or View on the bare line closes chat
+	// without sending anything.
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return !FWoTTextEntry::IsActiveWithin(AsShared()); },
+		[WeakController = PlayerController]()
+		{
+			if (AWoTPlayerController* Controller = WeakController.Get())
+			{
+				Controller->CancelChatInput();
+			}
+			return true;
+		});
 }
 
 FText SWoTChatInputOverlay::GetLabel() const
@@ -835,6 +874,127 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildPlayerConfigPage()
 		];
 }
 
+TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildTauntsPage()
+{
+	TSharedRef<SVerticalBox> Entries = SNew(SVerticalBox);
+	TauntButtons.Reset();
+	TauntLabels.Reset();
+	const int32 EntryCount = static_cast<int32>(UE_ARRAY_COUNT(WoTInGameSlate_TauntEntries));
+	for (int32 EntryIndex = 0; EntryIndex < EntryCount; ++EntryIndex)
+	{
+		const FWoTInGameTauntEntry& Entry = WoTInGameSlate_TauntEntries[EntryIndex];
+		const int32 TauntIndex = Entry.TauntIndex;
+		TauntLabels.Add(Entry.Label);
+		TSharedPtr<SWoTMenuButton> Button;
+		Entries->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+		[
+			SAssignNew(Button, SWoTMenuButton)
+			.IsEnabled_Lambda([this]() { return CanInteract(); })
+			.ContentPadding(FMargin(28.0f, 0.0f))
+			.HAlign(HAlign_Center)
+			.IsSelected_Lambda([this, EntryIndex]()
+			{
+				return SelectedTauntIndex == EntryIndex;
+			})
+			.OnSelected_Lambda([this, EntryIndex]()
+			{
+				SelectTauntEntry(EntryIndex);
+			})
+			.OnClicked_Lambda([this, TauntIndex]()
+			{
+				return ActivateTaunt(TauntIndex);
+			})
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Entry.Label))
+				.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+				.ColorAndOpacity(FSlateColor::UseForeground())
+			]
+		];
+		TauntButtons.Add(Button);
+	}
+	SelectedTauntIndex = TauntButtons.IsEmpty() ? INDEX_NONE : 0;
+
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 24.0f)
+		[
+			SNew(STextBlock)
+			.Text(WoTInGameSlate_Text(TEXT("Taunts")))
+			.Font(this, &SWoTInGameMenuOverlay::HeadingFont)
+			.ColorAndOpacity(FSlateColor::UseForeground())
+			.Justification(ETextJustify::Center)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			Entries
+		];
+}
+
+FReply SWoTInGameMenuOverlay::OpenTaunts()
+{
+	if (!CanInteract() || !ContentHost.IsValid()) return FReply::Handled();
+	ActiveSettingsScreen.Reset();
+	PlayerNameInput.Reset();
+	bShowingPlayerConfig = false;
+	bShowingTaunts = true;
+	ResumeButton.Reset();
+	ContentHost->SetContent(BuildTauntsPage());
+	Invalidate(EInvalidateWidgetReason::Layout);
+	// Taunt 1 first (spec r3 section 1a) for every input: a new page has no
+	// earlier focus to keep, and the arrows need a focused entry.
+	if (FSlateApplication::IsInitialized() && TauntButtons.IsValidIndex(0))
+	{
+		SelectTauntEntry(0);
+		FSlateApplication::Get().SetKeyboardFocus(
+			TauntButtons[0], EFocusCause::SetDirectly);
+	}
+	return FReply::Handled();
+}
+
+FReply SWoTInGameMenuOverlay::ActivateChat(bool bTeam)
+{
+	if (AWoTPlayerController* Controller = PlayerController.Get())
+	{
+		Controller->ChatFromInGameMenu(bTeam);
+	}
+	return FReply::Handled();
+}
+
+FReply SWoTInGameMenuOverlay::ActivateTaunt(int32 TauntIndex)
+{
+	if (AWoTPlayerController* Controller = PlayerController.Get())
+	{
+		Controller->TauntFromInGameMenu(TauntIndex);
+	}
+	return FReply::Handled();
+}
+
+bool SWoTInGameMenuOverlay::MoveTauntSelection(int32 Direction)
+{
+	if (!CanInteract() || TauntButtons.IsEmpty() || Direction == 0)
+	{
+		return false;
+	}
+	const int32 NewIndex = WoTInGameSlate_WrapStep(
+		SelectedTauntIndex, TauntButtons.Num(), Direction);
+	SelectTauntEntry(NewIndex);
+	if (FSlateApplication::IsInitialized() && TauntButtons[NewIndex].IsValid())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(
+			TauntButtons[NewIndex], EFocusCause::Navigation);
+	}
+	return true;
+}
+
+void SWoTInGameMenuOverlay::SelectTauntEntry(int32 EntryIndex)
+{
+	if (TauntButtons.IsValidIndex(EntryIndex))
+	{
+		SelectedTauntIndex = EntryIndex;
+	}
+}
+
 FReply SWoTInGameMenuOverlay::OpenPlayerConfig()
 {
 	if (!CanInteract() || !ContentHost.IsValid()) return FReply::Handled();
@@ -851,6 +1011,8 @@ FReply SWoTInGameMenuOverlay::OpenPlayerConfig()
 				: Preferences->GetPreferences().SelectedSkinColor)
 		: EWoTPlayerSkinColor::Base;
 	ActiveSettingsScreen.Reset();
+	bShowingTaunts = false;
+	TauntButtons.Reset();
 	bShowingPlayerConfig = true;
 	ResumeButton.Reset();
 	ContentHost->SetContent(BuildPlayerConfigPage());
@@ -929,6 +1091,8 @@ FReply SWoTInGameMenuOverlay::OpenSettings(EWoTSettingsPage Page)
 	if (CanInteract() && ContentHost.IsValid())
 	{
 		ResumeButton.Reset();
+		bShowingTaunts = false;
+		TauntButtons.Reset();
 		ContentHost->SetContent(BuildSettingsPage(Page));
 		if (FSlateApplication::IsInitialized() && ActiveSettingsScreen.IsValid())
 		{
@@ -955,6 +1119,10 @@ void SWoTInGameMenuOverlay::ReturnToMainMenu()
 	ActiveSettingsScreen.Reset();
 	PlayerNameInput.Reset();
 	bShowingPlayerConfig = false;
+	bShowingTaunts = false;
+	TauntButtons.Reset();
+	TauntLabels.Reset();
+	SelectedTauntIndex = INDEX_NONE;
 	ContentHost->SetContent(BuildMainMenu());
 	Invalidate(EInvalidateWidgetReason::Layout);
 	FocusResumeButton();
@@ -975,7 +1143,7 @@ void SWoTInGameMenuOverlay::Tick(
 	const float PreviousViewportScale = LiveViewportScale;
 	LiveViewportScale = FMath::Max(
 		AllottedGeometry.GetAccumulatedLayoutTransform().GetScale(), 0.01f);
-	if (ActiveSettingsScreen.IsValid() || bShowingPlayerConfig)
+	if (ActiveSettingsScreen.IsValid() || bShowingPlayerConfig || bShowingTaunts)
 	{
 		if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale))
 		{
@@ -1037,6 +1205,10 @@ TArray<FWoTButtonPrompt> SWoTInGameMenuOverlay::ControllerPrompts() const
 	if (ActiveSettingsScreen.IsValid())
 	{
 		return ActiveSettingsScreen->ControllerPrompts();
+	}
+	if (bShowingTaunts)
+	{
+		return FWoTButtonPromptSets::Taunts();
 	}
 	return FWoTButtonPromptSets::SelectBack();
 }
@@ -1114,13 +1286,14 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 		return ActivateHelp();
 	}
 	const FKey Key = InKeyEvent.GetKey();
-	if (IsShowingMainMenu()
+	if ((IsShowingMainMenu() || bShowingTaunts)
 		&& (Key == EKeys::Up || Key == EKeys::Down
 			|| Key == EKeys::Gamepad_DPad_Up || Key == EKeys::Gamepad_DPad_Down))
 	{
 		const int32 Direction = Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up ? -1 : 1;
-		return MoveMainMenuSelection(Direction)
-			? FReply::Handled() : FReply::Unhandled();
+		const bool bMoved = bShowingTaunts
+			? MoveTauntSelection(Direction) : MoveMainMenuSelection(Direction);
+		return bMoved ? FReply::Handled() : FReply::Unhandled();
 	}
 	if (Key == EKeys::Escape)
 	{
@@ -1143,8 +1316,9 @@ bool SWoTInGameMenuOverlay::BackOneLevel()
 		Screen->HandleBack();
 		return true;
 	}
-	if (bShowingPlayerConfig)
+	if (bShowingPlayerConfig || bShowingTaunts)
 	{
+		// Escape, B and View on the Taunts page return to the menu [M3].
 		ReturnToMainMenu();
 		return true;
 	}
@@ -1161,18 +1335,21 @@ FNavigationReply SWoTInGameMenuOverlay::OnNavigation(
 	// The stick navigates by analog events rather than keys; it moves the same
 	// wrapping selection as the arrows and the D-pad.
 	const EUINavigation Direction = InNavigationEvent.GetNavigationType();
-	if (IsShowingMainMenu()
-		&& (Direction == EUINavigation::Up || Direction == EUINavigation::Down)
-		&& MoveMainMenuSelection(Direction == EUINavigation::Up ? -1 : 1))
+	if (Direction == EUINavigation::Up || Direction == EUINavigation::Down)
 	{
-		return FNavigationReply::Stop();
+		const int32 Step = Direction == EUINavigation::Up ? -1 : 1;
+		if ((IsShowingMainMenu() && MoveMainMenuSelection(Step))
+			|| (bShowingTaunts && MoveTauntSelection(Step)))
+		{
+			return FNavigationReply::Stop();
+		}
 	}
 	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
 }
 
 bool SWoTInGameMenuOverlay::IsShowingMainMenu() const
 {
-	return !ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig;
+	return !ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig && !bShowingTaunts;
 }
 
 FReply SWoTInGameMenuOverlay::Resume()
@@ -1221,6 +1398,9 @@ FReply SWoTInGameMenuOverlay::ActivateMainMenuEntryById(uint8 EntryId)
 	case EWoTInGameMenuEntry::Resume: return Resume();
 	case EWoTInGameMenuEntry::Scoreboard: return ActivateScoreboard();
 	case EWoTInGameMenuEntry::Help: return ActivateHelp();
+	case EWoTInGameMenuEntry::Chat: return ActivateChat(/*bTeam*/ false);
+	case EWoTInGameMenuEntry::TeamChat: return ActivateChat(/*bTeam*/ true);
+	case EWoTInGameMenuEntry::Taunts: return OpenTaunts();
 	case EWoTInGameMenuEntry::EditCitadel: return ActivateCitadel();
 	case EWoTInGameMenuEntry::PlayerConfig: return OpenPlayerConfig();
 	case EWoTInGameMenuEntry::Controls:
@@ -1365,7 +1545,15 @@ void SWoTInGameMenuOverlay::OpenSettingsForTesting(EWoTSettingsPage Page)
 bool SWoTInGameMenuOverlay::IsShowingMainMenuForTesting() const
 {
 	return ContentHost.IsValid() && !ActiveSettingsScreen.IsValid()
-		&& !bShowingPlayerConfig;
+		&& !bShowingPlayerConfig && !bShowingTaunts;
+}
+
+FReply SWoTInGameMenuOverlay::ActivateTauntEntryForTesting(int32 EntryIndex)
+{
+	const int32 EntryCount = static_cast<int32>(UE_ARRAY_COUNT(WoTInGameSlate_TauntEntries));
+	return bShowingTaunts && EntryIndex >= 0 && EntryIndex < EntryCount
+		? ActivateTaunt(WoTInGameSlate_TauntEntries[EntryIndex].TauntIndex)
+		: FReply::Handled();
 }
 
 TArray<FString> SWoTInGameMenuOverlay::MenuLabelsForTesting() const
