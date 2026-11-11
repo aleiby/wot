@@ -254,7 +254,7 @@ void AWoTMeshEffect::Configure(FName Config, const FWoTMeshEffectRow& Row,
 	Mesh->bMeshCurvy = Row.bMeshCurvy;
 	if (Mesh->SetVertexMesh(Row.MeshName))
 	{
-		Mesh->SetRelativeScale3D(FVector(CurrentDrawScale));
+		SetEffectDrawScale(CurrentDrawScale);
 	}
 	if (bParticles)
 	{
@@ -362,7 +362,11 @@ void AWoTMeshEffect::Configure(FName Config, const FWoTMeshEffectRow& Row,
 void AWoTMeshEffect::SetEffectDrawScale(float DrawScale)
 {
 	CurrentDrawScale = DrawScale;
-	if (Mesh) { Mesh->SetRelativeScale3D(FVector(DrawScale)); }
+	if (Mesh)
+	{
+		Mesh->SetRelativeScale3D(
+			UWoTMeshParticleRenderer::PoseDriverScale(bParticles, DrawScale));
+	}
 }
 
 void AWoTMeshEffect::SetEffectGlow(float Glow)
@@ -523,8 +527,7 @@ void AWoTMeshEffect::Tick(float DeltaSeconds)
 	}
 	if (GrowRate != 0.0f)
 	{
-		CurrentDrawScale += GrowRate * DeltaSeconds;
-		Mesh->SetRelativeScale3D(FVector(CurrentDrawScale));
+		SetEffectDrawScale(CurrentDrawScale + GrowRate * DeltaSeconds);
 	}
 	if (ActiveRow.bRandomSkinEachTick && ActiveRow.SkinNames.Num() > 1)
 	{
