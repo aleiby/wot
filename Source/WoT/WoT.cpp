@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Inventory/WoTInventory.h"
+#include "Payload/WoTFrontEndFontOwner.h"
 #include "Updater/WoTGameBootstrapWorker.h"
 #include "Updater/WoTReleaseIdentity.h"
 #if PLATFORM_MAC
@@ -50,6 +51,10 @@
 	fflush(stderr);
 }
 #endif
+
+static_assert(FWoTOnboardingMenuChrome::MaxPixelScale
+	<= FWoTFrontEndFontOwner::MaxIntegerStrike,
+	"Onboarding bitmap strikes must be supported by the font owner");
 
 namespace
 {
@@ -149,8 +154,8 @@ public:
 				FWoTOnboardingMenuChrome Chrome;
 				Chrome.PixelFont = [Authority](FName Face, int32 PixelScale)
 				{
-					return Authority->MultiplayerFont(
-						Face, static_cast<float>(PixelScale));
+					return Authority->MultiplayerStrike(
+						Face, PixelScale, static_cast<float>(PixelScale));
 				};
 				Chrome.BindWidget = [Authority](const TSharedRef<SWidget>& Widget)
 				{

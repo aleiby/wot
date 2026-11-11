@@ -6,6 +6,7 @@
 #include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingSeams.h"
+#include "WoTOnboardingChrome.h"
 
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
@@ -445,7 +446,7 @@ bool FWoTOnboardingBrowserChargeFacesSpec::RunTest(const FString&)
 			CountBlock.IsValid()))
 		{
 			TestEqual(TEXT("counts use the published charge face"),
-				CountBlock->GetFont().Size, 17.0f);
+				CountBlock->GetFont().Size, 17.0f * Browser->ReadingStepForTesting() / Browser->WindowScaleForTesting(), 0.001f);
 		}
 	}
 	for (const TCHAR* BodyText : {TEXT("Charges:"), TEXT("/")})
@@ -456,7 +457,7 @@ bool FWoTOnboardingBrowserChargeFacesSpec::RunTest(const FString&)
 			BodyBlock.IsValid()))
 		{
 			TestEqual(TEXT("the label and slash use the published body face"),
-				BodyBlock->GetFont().Size, 13.0f);
+				BodyBlock->GetFont().Size, 13.0f * Browser->ReadingStepForTesting() / Browser->WindowScaleForTesting(), 0.001f);
 		}
 	}
 	return !HasAnyErrors();
@@ -467,6 +468,20 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserHeaderOffsetsSpec,
 
 bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
 {
+	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const auto SavedResolver = Seams.ResolveMenuChrome;
+	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
+	Seams.ResolveMenuChrome = []() -> TOptional<FWoTOnboardingMenuChrome>
+	{
+		FWoTOnboardingMenuChrome Chrome;
+		Chrome.PixelFont = [](FName FaceName, int32)
+		{
+			const float Height = FaceName == FName(TEXT("F_WOTReg30")) ? 30.0f
+				: FaceName == FName(TEXT("F_Element")) ? 19.0f : 14.0f;
+			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), Height * 0.75f);
+		};
+		return Chrome;
+	};
 	const TSharedRef<SWoTGuideBrowser> Browser =
 		WoTOnboardingBrowserMake(WoTOnboardingBrowserMakeGuide(), true);
 	for (const FName RowName : {FName(TEXT("CinderJet")), FName(TEXT("SnareBox"))})
@@ -481,7 +496,14 @@ bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
 		{
 			return false;
 		}
-		Detail->SlatePrepass(1.0f);
+		for (const bool bScaled : {false, true})
+		{
+		const float RenderScale = bScaled ? 2.9925f : 1.0f;
+		Browser->FacesForTesting()->RefreshGuide(bScaled ? 3 : 1, bScaled ? 5 : 1, RenderScale);
+		const double BaseRatio = bScaled ? 3.0 / RenderScale : 1.0;
+		const double ReadingRatio = bScaled ? 5.0 / RenderScale : 1.0;
+		const double TitleShift = 30.0 * (BaseRatio - 1.0);
+		Detail->SlatePrepass(RenderScale);
 		TArray<FArrangedWidget> ArrangedWidgets;
 		WoTOnboardingBrowserArrangeTree(Detail.ToSharedRef(),
 			FGeometry::MakeRoot(FVector2D(422.0f, 600.0f), FSlateLayoutTransform()),
@@ -514,10 +536,10 @@ bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
 		const double TitleTop = TitleWidget->Geometry.GetAbsolutePosition().Y;
 		const double IconTop = IconWidget->Geometry.GetAbsolutePosition().Y;
 		const double FactsTop = FactsWidget->Geometry.GetAbsolutePosition().Y;
-		TestEqual(TEXT("the icon starts 28 units below the title"), IconTop - TitleTop, 28.0);
+		TestEqual(TEXT("the icon starts 28 units below the title"), IconTop - TitleTop, 28.0 + TitleShift, 0.001);
 		TestEqual(TEXT("the icon box is 64 units high"),
 			static_cast<double>(IconWidget->Geometry.GetLocalSize().Y), 64.0);
-		TestEqual(TEXT("the facts start 48 units below the title"), FactsTop - TitleTop, 48.0);
+		TestEqual(TEXT("the facts start 48 units below the title"), FactsTop - TitleTop, 55.0 + TitleShift - 7.0 * ReadingRatio, 0.001);
 		TestTrue(TEXT("the facts are beside the icon within its vertical span"),
 			FactsTop >= IconTop
 			&& FactsTop < IconTop + IconWidget->Geometry.GetLocalSize().Y);
@@ -528,8 +550,9 @@ bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
 		else if (TestNotNull(TEXT("the gem bar art is arranged"), GemWidget))
 		{
 			TestEqual(TEXT("the gem bar art starts 96 units below the title"),
-				static_cast<double>(GemWidget->Geometry.GetAbsolutePosition().Y) - TitleTop, 96.0);
+				static_cast<double>(GemWidget->Geometry.GetAbsolutePosition().Y) - TitleTop, 96.0 + TitleShift + 19.0 * (BaseRatio - 1.0), 0.001);
 		}
+	}
 	}
 	return !HasAnyErrors();
 }
@@ -599,7 +622,7 @@ bool FWoTOnboardingBrowserAndCardDefaultSizeSpec::RunTest(const FString&)
 			AfterTick[0].Geometry.GetAccumulatedLayoutTransform().GetScale(),
 			WindowWidget == Browser ? 1.9f : 2.0f, 0.01f);
 		TestEqual(TEXT("the first geometry update selects the 2x font strike"),
-			Heading->GetFont().Size, 26.0f);
+			Heading->GetFont().Size, WindowWidget == Browser ? 26.0f * 2.0f / 1.9f : 26.0f, 0.001f);
 	}
 	return !HasAnyErrors();
 }

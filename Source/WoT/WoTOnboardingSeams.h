@@ -43,11 +43,14 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FWoTCloseClientWindows, FName /*Keeper*/);
     answering unset means "draw with your own fallback". */
 struct FWoTOnboardingMenuChrome
 {
-	/** One of the original game's bitmap faces (F_WOTReg30, F_WOTReg14,
-	    F_WOTIta14, F_Element) as an exact PixelScale strike (1 or 2), sized
-	    for a widget that draws PixelScale screen pixels per unit, so every
-	    glyph lands on whole screen pixels. Answering a font without a face
-	    means "draw this face with your own fallback". */
+	static constexpr int32 MaxPixelScale = 8;
+
+	/** One of the original game's bitmap faces as the exact PixelScale strike,
+	    from 1 to MaxPixelScale, sized to draw 1:1 where one Slate unit covers
+	    PixelScale screen pixels. Size is the face's native line height times
+	    72/96 points, whatever the strike. A consumer drawing at another scale
+	    rescales Size itself. Answering a font without a face means "draw this
+	    face with your own fallback". */
 	TFunction<FSlateFontInfo(FName /*Face*/, int32 /*PixelScale*/)> PixelFont;
 	/** Ties a widget drawing these faces to their revocable generation (the
 	    widget collapses if the payload is revoked). */

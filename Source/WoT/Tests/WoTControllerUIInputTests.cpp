@@ -4796,6 +4796,9 @@ bool FWoTInGameMenuTauntsSpec::RunTest(const FString&)
 	}
 
 	// A on an entry: the menu closes and PlayTaunt gets that entry's argument.
+	// This fixture has no input preprocessor, so restore Controller mode after
+	// the pointer-mode Escape check before sending synthetic D-pad presses.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
 	Overlay->OpenTauntsForTesting();
 	Shown.Settle();
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);

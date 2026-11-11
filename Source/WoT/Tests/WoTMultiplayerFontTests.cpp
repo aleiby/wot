@@ -17,6 +17,8 @@
 #include "Rendering/SlateRenderer.h"
 #include "Widgets/Text/STextBlock.h"
 
+#include <limits>
+
 #if WITH_AUTOMATION_TESTS
 void WoTFrontEndFontOwner_SetForceIntegerVariantFailureForTesting(bool bForce);
 #endif
@@ -193,8 +195,56 @@ bool FWoTMultiplayerNativeBitmapSpec::RunTest(const FString&)
 		static_cast<float>(NativeBodyGlyph.LineHeight * 2));
 	TestTrue(TEXT("doubled face has separate transient font object"),
 		DoubledBody.GetValue().FontObject.Get() != Body->Font());
-	TestTrue(TEXT("unsupported pixel scale is rejected"),
-		Fonts->ResolveIntegerScaled(FName(TEXT("F_WOTReg14")), 3).IsError());
+	TSet<const UObject*> IntegerStrikeFonts;
+	IntegerStrikeFonts.Add(NativeBody.GetValue().FontObject.Get());
+	IntegerStrikeFonts.Add(DoubledBody.GetValue().FontObject.Get());
+	for (int32 Strike = 3; Strike <= 8; ++Strike)
+	{
+		const FString StrikeLabel = FString::Printf(TEXT("strike %d "), Strike);
+		auto ScaledBody = Fonts->ResolveIntegerScaled(FName(TEXT("F_WOTReg14")), Strike);
+		if (!TestFalse(StrikeLabel + TEXT("resolves"), ScaledBody.IsError())) return false;
+		const FSlateFontInfo& StrikeInfo = ScaledBody.GetValue();
+		TestEqual(StrikeLabel + TEXT("reports its integer line height"),
+			StrikeInfo.Size, static_cast<float>(BodySource.LineHeight * Strike));
+		TestTrue(StrikeLabel + TEXT("has a separate transient font object"),
+			StrikeInfo.FontObject.Get() != Body->Font()
+			&& !IntegerStrikeFonts.Contains(StrikeInfo.FontObject.Get()));
+		IntegerStrikeFonts.Add(StrikeInfo.FontObject.Get());
+		auto CachedBody = Fonts->ResolveIntegerScaled(FName(TEXT("F_WOTReg14")), Strike);
+		if (TestFalse(StrikeLabel + TEXT("resolves again"), CachedBody.IsError()))
+			TestTrue(StrikeLabel + TEXT("reuses its cached font object"),
+				CachedBody.GetValue().FontObject.Get() == StrikeInfo.FontObject.Get());
+	}
+	for (const int32 InvalidStrike : {0, 9})
+	{
+		auto Rejected = Fonts->ResolveIntegerScaled(FName(TEXT("F_WOTReg14")), InvalidStrike);
+		if (TestTrue(TEXT("out-of-range integer strike is rejected"), Rejected.IsError()))
+			TestTrue(TEXT("out-of-range integer strike reports SizeLimit"),
+				Rejected.GetError().Code == EWoTBootstrapError::SizeLimit);
+		TestFalse(TEXT("authority rejects out-of-range strike"),
+			Authority->MultiplayerStrike(FName(TEXT("F_WOTReg14")), InvalidStrike, 1.0f)
+				.HasValidFont());
+	}
+	for (const float InvalidRenderScale : {0.0f, -1.0f,
+		std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})
+		TestFalse(TEXT("authority rejects invalid render scale"),
+			Authority->MultiplayerStrike(FName(TEXT("F_WOTReg14")), 5, InvalidRenderScale)
+				.HasValidFont());
+	constexpr float GuideRenderScale = 2.9925f;
+	const FSlateFontInfo GuideInfo = Authority->MultiplayerStrike(
+		FName(TEXT("F_WOTReg14")), 5, GuideRenderScale);
+	TestTrue(TEXT("exact strike size compensates for the fractional render scale"),
+		FMath::IsNearlyEqual(GuideInfo.Size, 52.5f / GuideRenderScale, 0.001f));
+	TSharedRef<STextBlock> GuideProbe = SNew(STextBlock).Font(GuideInfo);
+	CheckNativeBitmapGlyph(*this, TEXT("fractional guide scale 5x probe"),
+		*GuideProbe, GuideRenderScale, 5, *Body);
+	const FSlateFontInfo CappedMultiplayerInfo = Authority->MultiplayerFont(
+		FName(TEXT("F_WOTReg14")), 3.0f);
+	TestTrue(TEXT("multiplayer retains its two-strike cap at viewport scale three"),
+		CappedMultiplayerInfo.FontObject.Get() == DoubledBody.GetValue().FontObject.Get());
+	TSharedRef<STextBlock> CappedMultiplayerProbe = SNew(STextBlock).Font(CappedMultiplayerInfo);
+	CheckNativeBitmapGlyph(*this, TEXT("multiplayer capped 2x probe"),
+		*CappedMultiplayerProbe, 3.0f, 2, *Body);
 	struct FScaleCase { float Scale; int32 IntegerScale; };
 	const FScaleCase Scales[] = {{2.0f / 3.0f, 1}, {1.0f, 1},
 		{1.25f, 1}, {2.0f, 2}};

@@ -66,6 +66,13 @@ public:
 	    icons use). Unknown names leave the selection unchanged. */
 	void SelectRow(FName ClassName);
 	FName SelectedRowForTesting() const { return SelectedClassName; }
+	int32 BaseStepForTesting() const;
+	int32 ReadingStepForTesting() const;
+	float WindowScaleForTesting() const;
+	TSharedRef<FWoTOnboardingFaces> FacesForTesting() const { return Faces.ToSharedRef(); }
+	FVector2D MeasureDetailForTesting(FName ClassName);
+	static float DetailPaneHeightForTesting();
+	int32 FitChecksForTesting() const { return FitChecks; }
 
 	/** The grid's entries in navigation order: the groups in rarity order,
 	    traps last, each in guide order. */
@@ -97,7 +104,9 @@ private:
 	FString DisplayTitle(const FWoTAngrealGuideRow& Row) const;
 	TSharedRef<SWidget> BuildGrid();
 	TSharedRef<SWidget> BuildGridCell(FName ClassName);
-	TSharedRef<SWidget> BuildDetail(const FWoTAngrealGuideRow& Row);
+	TSharedRef<SWidget> BuildDetail(const FWoTAngrealGuideRow& Row,
+		TSharedPtr<SWidget>* OutFactsLeft = nullptr, TSharedPtr<SWidget>* OutFactsRight = nullptr);
+	void FitReadingStep();
 	TSharedRef<SWidget> BuildGemBar(const FWoTAngrealGuideRow& Row);
 	/** A labelled run of icons that each open their row; nothing for no
 	    targets. TagPrefix names the icons' buttons. Returns whether it added
@@ -129,4 +138,7 @@ private:
 	TSharedPtr<SBox> WindowBox;
 	TSharedPtr<SBox> DetailHost;
 	FName SelectedClassName;
+	double LastScaleChangeTime = 0.0;
+	bool bReadingFitPending = false;
+	int32 FitChecks = 0;
 };

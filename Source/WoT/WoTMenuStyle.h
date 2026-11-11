@@ -222,6 +222,9 @@ public:
 	virtual bool IsReady() const override;
 	bool IsReadyForFeedback() const { return IsReady(); }
 	const FWoTRequiredMenuFonts* RequiredFonts() const;
+	/** Face as the exact PixelScale strike (1 to FWoTFrontEndFontOwner::MaxIntegerStrike),
+	 * sized to draw 1:1 where one Slate unit covers RenderScale screen pixels. */
+	FSlateFontInfo MultiplayerStrike(FName Face, int32 PixelScale, float RenderScale) const;
 	FSlateFontInfo MultiplayerFont(FName Face, float ViewportScale,
 		int32 MinimumPixelScale = 1) const;
 	FText Text(FName Id) const;

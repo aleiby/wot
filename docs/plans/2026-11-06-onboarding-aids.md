@@ -307,12 +307,23 @@ files, at the whole-number scale the game's windows use:
   icons, the 40 px counter icons and the selection frame are not whole
   multiples of their 64 px art, so they sample bilinearly.
 - **Type.** `F_WOTReg30` titles, `F_WOTReg14` body, `F_WOTIta14` quotes,
-  `F_Element` gem labels, each as an exact 1x or 2x strike, so every glyph
-  lands on whole screen pixels. Labels draw at the menus' unselected grey.
-- **Scale.** The largest whole number (1 or 2) at which a 960x540 window
-  fits the screen; below 960x540 the window shrinks to fit. The card and the
-  recap use the same scale. At 1280x800 (the Deck) the scale is 1 and the
-  smallest face is 14 px tall, above the 12 px floor.
+  `F_Element` gem labels, each drawn as an exact bitmap strike at a whole
+  step from 1x to 8x, so every glyph lands on whole screen pixels. The card
+  and the recap use the 1x or 2x strike for their scale. The guide draws its
+  title, labels and gem labels at the step nearest its scale, so they keep
+  about their original size, and the detail pane's reading text (rarity,
+  charges, description, quote, hint and the counter-row labels) at about
+  1.5x: the largest step at which every entry fits the pane without
+  scrolling, and at least one step above the labels. On a screen too small
+  for a 1x guide the text keeps its 1x size (1.5x for reading text) without
+  whole pixels. Labels draw at the menus' unselected grey.
+- **Scale.** The card and the recap draw at the largest whole number (1 or
+  2) at which a 960x540 window fits the screen; below 960x540 they shrink to
+  fit. The guide fills 95% of the largest 960x540 window that fits, at any
+  fraction, and keeps its glyphs whole through the type steps above. At
+  1280x800 (the Deck) the cards draw at 1 and the guide at about 1.27, with
+  its labels at 1x and its reading text at 2x; the smallest face is 14 px
+  tall, above the 12 px floor.
 - **Guide** (960x540, centred): "FIELD GUIDE" and "Esc Close" across the
   top; on the left an icon grid in the four groups, 8 columns of 50 px icons
   at a 56 px pitch; on the right the item-info window's content for the

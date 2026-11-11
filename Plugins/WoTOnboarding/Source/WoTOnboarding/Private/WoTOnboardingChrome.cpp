@@ -80,6 +80,37 @@ FSlateFontInfo WoTOnboardingResolveFace(const FWoTOnboardingMenuChrome& Chrome,
 	return Font;
 }
 
+FSlateFontInfo WoTOnboardingResolveGuideFace(const FWoTOnboardingMenuChrome& Chrome,
+	WoTOnboardingChrome::EFace Face, int32 Step, float WindowScale,
+	WoTOnboardingChrome::ETextRole Role, bool& bOutPublished)
+{
+	using namespace WoTOnboardingChrome;
+	const float SafeScale = FMath::IsFinite(WindowScale) && WindowScale > 0.0f
+		? WindowScale : 1.0f;
+	const bool bSmallWindow = SafeScale < 1.0f;
+	int32 ActualStep = bSmallWindow ? 1 : FMath::Clamp(Step, 1, MaxPixelScale);
+	const float SmallTextScale = Role == WoTOnboardingChrome::ETextRole::Reading ? ReadingTextScale : 1.0f;
+	FSlateFontInfo Result;
+	bOutPublished = false;
+	if (Chrome.PixelFont)
+	{
+		for (; ActualStep <= MaxPixelScale; ++ActualStep)
+		{
+			Result = Chrome.PixelFont(WoTOnboardingFaceName(Face), ActualStep);
+			bOutPublished = Result.HasValidFont();
+			if (!bOutPublished) break;
+			Result.Size *= bSmallWindow ? SmallTextScale : ActualStep / SafeScale;
+			if (bSmallWindow || PhysicalPixels(Result, SafeScale) >= DeckMinimumTextPixels
+				|| ActualStep == MaxPixelScale) return Result;
+		}
+	}
+	Result = WoTOnboardingEngineFace(Face);
+	Result.Size *= bSmallWindow ? SmallTextScale : FMath::Clamp(Step, 1, MaxPixelScale) / SafeScale;
+	Result.Size = FMath::Max(Result.Size, DeckMinimumTextPixels * 72.0f
+		/ (static_cast<float>(FontConstants::RenderDPI) * SafeScale));
+	return Result;
+}
+
 float WoTOnboardingFit(const FVector2D& PhysicalSize)
 {
 	return FMath::Min(PhysicalSize.X / WoTOnboardingChrome::WindowWidth,
@@ -104,6 +135,31 @@ int32 WoTOnboardingChrome::PixelScaleFor(const FVector2D& PhysicalSize)
 {
 	const float Fit = WoTOnboardingFit(PhysicalSize);
 	return Fit > 0.0f ? FMath::Clamp(FMath::FloorToInt(Fit), 1, 2) : 1;
+}
+
+int32 WoTOnboardingChrome::BaseStepFor(float WindowScale)
+{
+	return FMath::IsFinite(WindowScale)
+		? FMath::RoundToInt(FMath::Clamp(WindowScale, 1.0f, static_cast<float>(MaxPixelScale))) : 1;
+}
+
+void WoTOnboardingChrome::ReadingStepsFor(float WindowScale, int32& OutLowest, int32& OutHighest)
+{
+	if (!FMath::IsFinite(WindowScale) || WindowScale < 1.0f)
+	{
+		OutLowest = OutHighest = 1;
+		return;
+	}
+	OutLowest = FMath::Min(BaseStepFor(WindowScale) + 1, MaxPixelScale);
+	OutHighest = FMath::Clamp(FMath::CeilToInt(FMath::Min(
+		ReadingTextScale * WindowScale - 0.001f, static_cast<float>(MaxPixelScale))), OutLowest, MaxPixelScale);
+}
+
+FSlateFontInfo WoTOnboardingChrome::GuideFont(const FWoTOnboardingMenuChrome& Chrome,
+	EFace Face, int32 Step, float WindowScale, ETextRole Role)
+{
+	bool bWasPublished = false;
+	return WoTOnboardingResolveGuideFace(Chrome, Face, Step, WindowScale, Role, bWasPublished);
 }
 
 float WoTOnboardingChrome::WindowScaleFor(const FVector2D& PhysicalSize,
@@ -159,14 +215,16 @@ FLinearColor WoTOnboardingChrome::LabelColor(EFace Face)
 
 TSharedRef<STextBlock> WoTOnboardingChrome::MakeText(
 	const TSharedRef<FWoTOnboardingFaces>& Faces, const FString& Text, EFace Face,
-	const FLinearColor& Color, ETextJustify::Type Justification, bool bWrap)
+	const FLinearColor& Color, ETextJustify::Type Justification, bool bWrap,
+	ETextRole Role, float FixedWrapWidth)
 {
 	return SNew(STextBlock)
 		.Text(FText::FromString(Text))
-		.Font_Lambda([Faces, Face]() { return Faces->Get(Face); })
+		.Font_Lambda([Faces, Face, Role]() { return Faces->Get(Face, Role); })
 		.ColorAndOpacity(Color)
 		.Justification(Justification)
-		.AutoWrapText(bWrap);
+		.AutoWrapText(bWrap && FixedWrapWidth <= 0.0f)
+		.WrapTextAt(FixedWrapWidth);
 }
 
 void FWoTOnboardingWindowScale::Initialize(const FVector2D& PhysicalSize,
@@ -179,6 +237,7 @@ void FWoTOnboardingWindowScale::Initialize(const FVector2D& PhysicalSize,
 	DpiScale = FMath::Max(InDpiScale, 0.01f);
 	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
 	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize, Rule);
+	ReportedWindowScale = WindowScale;
 }
 
 bool FWoTOnboardingWindowScale::Update(const FGeometry& AllottedGeometry)
@@ -190,7 +249,15 @@ bool FWoTOnboardingWindowScale::Update(const FGeometry& AllottedGeometry)
 	const int32 PreviousPixelScale = PixelScale;
 	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
 	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize, Rule);
-	return PixelScale != PreviousPixelScale;
+	// Measured from the scale last reported, not the last frame's, so a slow
+	// drag still reports once its small steps add up.
+	if (PixelScale == PreviousPixelScale && FMath::Abs(WindowScale - ReportedWindowScale)
+		<= FMath::Abs(ReportedWindowScale) * 1.e-4f)
+	{
+		return false;
+	}
+	ReportedWindowScale = WindowScale;
+	return true;
 }
 
 FWoTOnboardingFaces::FWoTOnboardingFaces(const FWoTOnboardingMenuChrome& InChrome)
@@ -207,5 +274,20 @@ void FWoTOnboardingFaces::Refresh(int32 PixelScale)
 		Fonts[Index] = WoTOnboardingResolveFace(Chrome,
 			static_cast<WoTOnboardingChrome::EFace>(Index), PixelScale,
 			bPublished[Index]);
+	}
+}
+
+void FWoTOnboardingFaces::RefreshGuide(int32 InBaseStep, int32 InReadingStep, float InWindowScale)
+{
+	BaseStep = InBaseStep;
+	ReadingStep = InReadingStep;
+	WindowScale = InWindowScale;
+	for (int32 Index = 0; Index < static_cast<int32>(WoTOnboardingChrome::EFace::Count); ++Index)
+	{
+		const auto FaceKind = static_cast<WoTOnboardingChrome::EFace>(Index);
+		Fonts[Index] = WoTOnboardingResolveGuideFace(Chrome, FaceKind, BaseStep,
+			WindowScale, WoTOnboardingChrome::ETextRole::Base, bPublished[Index]);
+		ReadingFonts[Index] = WoTOnboardingResolveGuideFace(Chrome, FaceKind, ReadingStep,
+			WindowScale, WoTOnboardingChrome::ETextRole::Reading, bReadingPublished[Index]);
 	}
 }

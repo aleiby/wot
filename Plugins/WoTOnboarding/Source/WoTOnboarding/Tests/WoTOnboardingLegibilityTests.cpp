@@ -151,10 +151,12 @@ TArray<FWoTOnboardingLegibilityChromeCase> WoTOnboardingLegibilityChromeCases()
 /** Errors for every line under the Deck minimum; returns the line count. */
 int32 WoTOnboardingLegibilityExpectLines(FAutomationTestBase& Test,
 	const FString& Context, const TSharedRef<SWidget>& Widget,
-	TArray<FString>& OutTexts)
+	TArray<FString>& OutTexts, bool bGuide = false)
 {
-	const float DeckScale = WoTOnboardingChrome::WindowScaleAt(1280, 800);
-	const float WideScale = WoTOnboardingChrome::WindowScaleAt(1280, 720);
+	const float DeckScale = bGuide ? WoTOnboardingChrome::WindowScaleFor(FVector2D(1280, 800),
+		WoTOnboardingChrome::EWindowScaleRule::GuideFill) : WoTOnboardingChrome::WindowScaleAt(1280, 800);
+	const float WideScale = bGuide ? WoTOnboardingChrome::WindowScaleFor(FVector2D(1280, 720),
+		WoTOnboardingChrome::EWindowScaleRule::GuideFill) : WoTOnboardingChrome::WindowScaleAt(1280, 720);
 	TArray<FWoTOnboardingLegibilityLine> Lines;
 	WoTOnboardingLegibilityCollect(Widget, Lines);
 	for (const FWoTOnboardingLegibilityLine& Line : Lines)
@@ -198,11 +200,25 @@ bool FWoTOnboardingLegibilityFillTrackingSpec::RunTest(const FString&)
 	TestEqual(TEXT("the guide uses the 2x strike"), FillScale.GetPixelScale(), 2);
 	TestEqual(TEXT("the guide fills 1080p"), FillScale.GetWindowScale(), 1.9f, 0.01f);
 	TestEqual(TEXT("the guide removes UI DPI from its Slate scale"), FillScale.SlateScale(), 1.266667f, 0.01f);
-	TestFalse(TEXT("resizing within a strike does not refresh faces"), FillScale.Update(
+	TestTrue(TEXT("resizing within a strike refreshes faces"), FillScale.Update(
 		FGeometry::MakeRoot(FVector2D(2560.0, 1440.0), FSlateLayoutTransform())));
 	TestEqual(TEXT("the fill scale still changes"), FillScale.GetWindowScale(), 2.533333f, 0.01f);
 	FillScale.Initialize(FVector2D::ZeroVector, 3.0f);
 	TestEqual(TEXT("a zero viewport keeps the fill scale"), FillScale.GetWindowScale(), 2.533333f, 0.01f);
+
+	// A slow drag on a very large viewport: each one-pixel step moves the
+	// scale by less than the report threshold, but the steps add up.
+	FWoTOnboardingWindowScale SlowScale(WoTOnboardingChrome::EWindowScaleRule::GuideFill);
+	SlowScale.Initialize(FVector2D(12000.0, 7200.0), 1.0f);
+	int32 Reports = 0;
+	for (int32 Width = 11999; Width >= 11000; --Width)
+	{
+		Reports += SlowScale.Update(FGeometry::MakeRoot(
+			FVector2D(static_cast<double>(Width), 7200.0), FSlateLayoutTransform())) ? 1 : 0;
+	}
+	TestTrue(TEXT("a slow drag still reports its change"), Reports > 0);
+	TestEqual(TEXT("the drag ends at the smaller fill scale"), SlowScale.GetWindowScale(),
+		0.95f * 11000.0f / 960.0f, 0.001f);
 	return !HasAnyErrors();
 }
 
@@ -331,6 +347,20 @@ bool FWoTOnboardingLegibilityFloorSpec::RunTest(const FString&)
 		WoTOnboardingChrome::Font(Fallback, EFace::Title, 1).Size, 18.0f);
 	TestEqual(TEXT("the stand-in body keeps its size"),
 		WoTOnboardingChrome::Font(Fallback, EFace::Body, 1).Size, 10.0f);
+	const float GuideScale = WoTOnboardingChrome::WindowScaleFor(FVector2D(1280, 800),
+		WoTOnboardingChrome::EWindowScaleRule::GuideFill);
+	const FWoTOnboardingMenuChrome Tiny = WoTOnboardingLegibilityTinyChrome().GetValue();
+	const FSlateFontInfo TinyGuide = WoTOnboardingChrome::GuideFont(Tiny, EFace::Body, 1, GuideScale);
+	TestEqual(TEXT("undersized guide face advances to whole step two"), TinyGuide.Size,
+		6.0f * 2.0f / GuideScale, 0.001f);
+	TestEqual(TEXT("undersized guide face draws sixteen screen pixels"),
+		WoTOnboardingChrome::PhysicalPixels(TinyGuide, GuideScale), 16.0f, 0.001f);
+	const FSlateFontInfo StandInGuide = WoTOnboardingChrome::GuideFont(Fallback, EFace::Element, 1, GuideScale);
+	TestEqual(TEXT("stand-in is lifted to twelve screen pixels"),
+		WoTOnboardingChrome::PhysicalPixels(StandInGuide, GuideScale), 12.0f, 0.001f);
+	const FSlateFontInfo SmallStandIn = WoTOnboardingChrome::GuideFont(Fallback, EFace::Body, 1, 0.5f);
+	TestEqual(TEXT("small-window stand-in is lifted by size"), SmallStandIn.Size, 18.0f, 0.001f);
+
 	return !HasAnyErrors();
 }
 
@@ -359,10 +389,10 @@ bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 			.TextResolver(&WoTOnboardingLegibilityText);
 		TArray<FString> Texts;
 		int32 Lines = WoTOnboardingLegibilityExpectLines(*this,
-			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts);
+			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts, true);
 		Browser->SelectRow(TEXT("DamperDisc"));
 		Lines += WoTOnboardingLegibilityExpectLines(*this,
-			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts);
+			FString::Printf(TEXT("%s, browser"), Case.Name), Browser, Texts, true);
 		TestTrue(FString::Printf(TEXT("%s: the browser drew text"), Case.Name),
 			Lines >= 20);
 		// The labels, the gem names, the charge counts (drawn in the charge
@@ -427,7 +457,9 @@ bool FWoTOnboardingTextFaceGoldSpec::RunTest(const FString&)
 				: FaceName == FName(TEXT("F_WOTIta14")) ? 15
 				: FaceName == FName(TEXT("F_Element")) ? 16
 				: FaceName == FName(TEXT("F_Charge")) ? 17 : 23;
-			return FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), FaceSize);
+			FSlateFontInfo Result = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), FaceSize);
+			Result.TypefaceFontName = FaceName;
+			return Result;
 		};
 		Chrome.BindWidget = [](const TSharedRef<SWidget>&) {};
 		return Chrome;
@@ -448,7 +480,12 @@ bool FWoTOnboardingTextFaceGoldSpec::RunTest(const FString&)
 			const FString Message = FString::Printf(TEXT("%s: %s"), Context, *Line.Text);
 			const bool bLabel = Labels.Contains(Line.Text);
 			FLinearColor Expected;
-			switch (static_cast<int32>(Line.Font.Size))
+			const int32 FaceId = Line.Font.TypefaceFontName == FName(TEXT("F_WOTReg30")) ? 19
+				: Line.Font.TypefaceFontName == FName(TEXT("F_WOTReg14")) ? 13
+				: Line.Font.TypefaceFontName == FName(TEXT("F_WOTIta14")) ? 15
+				: Line.Font.TypefaceFontName == FName(TEXT("F_Element")) ? 16
+				: Line.Font.TypefaceFontName == FName(TEXT("F_Charge")) ? 17 : 0;
+			switch (FaceId)
 			{
 			case 19:
 				Expected = FLinearColor(FColor(255, 212, 68, 255));
@@ -472,14 +509,14 @@ bool FWoTOnboardingTextFaceGoldSpec::RunTest(const FString&)
 			}
 			if (bLabel)
 			{
-				TestEqual(Message + TEXT(" label uses Body"), Line.Font.Size, 13.0f);
+				TestEqual(Message + TEXT(" label uses Body"), FaceId, 13);
 			}
 			TestTrue(Message + TEXT(" has its face's gold at its draw level"),
 				Line.Color == Expected);
 			TestFalse(Message + TEXT(" is not white or neutral grey"),
 				Line.Color.R == Line.Color.G && Line.Color.G == Line.Color.B);
 			SeenTexts.AddUnique(Line.Text);
-			SeenFaces.AddUnique(static_cast<int32>(Line.Font.Size));
+			SeenFaces.AddUnique(FaceId);
 		}
 		return Lines.Num();
 	};
