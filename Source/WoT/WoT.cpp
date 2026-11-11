@@ -9,6 +9,7 @@
 #include "WoTBootstrapHeartbeat.h"
 #include "WoTNetVersion.h"
 #include "WoTMacUninstall.h"
+#include "WoTMetalLayerRefresh.h"
 #include "WoTOnboardingSeams.h"
 #include "WoTRandom.h"
 #include "WoTRetailText.h"
@@ -50,6 +51,7 @@ public:
 	virtual void StartupModule() override
 	{
 		FDefaultGameModuleImpl::StartupModule();
+		WoTInstallMetalLayerRefresh();
 		WoTRandom::InitializeFromTime();
 		WoTNetVersion::Bind();
 		// Onboarding seam: the plugin asks for retail display text by
@@ -205,6 +207,7 @@ public:
 
 	virtual void ShutdownModule() override
 	{
+		WoTShutdownMetalLayerRefresh();
 	#if PLATFORM_MAC && WOT_GUARDED_BOOTSTRAP && !WITH_EDITOR && !IS_PROGRAM
 		WoTMacApplyRememberedUpdateAtQuit();
 		WoTShutdownMacUninstallMenuItem();

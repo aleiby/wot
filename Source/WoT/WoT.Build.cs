@@ -148,6 +148,8 @@ public class WoT : ModuleRules
 			PublicFrameworks.Add("Security");
 			PublicFrameworks.Add("AppKit");
 			PublicFrameworks.Add("UniformTypeIdentifiers");
+			// Replace the game's Metal layer when window resizes exhaust its drawables.
+			PublicFrameworks.Add("QuartzCore");
 		}
 
 		bool bWithEOS =
