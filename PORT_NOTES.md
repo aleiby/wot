@@ -361,7 +361,7 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Mashadar growth and retraction
 - **Original:** New tail segments are seeded by re-linking the chain every frame, and retracting walks the chain in reverse.
-- **Port:** A replicated chain phase and counters drive growth and retraction by distance. The chain length tracks reach divided by segment spacing, up to 100 segments; it spans guide to lair, grows with range and pulls back when idle.
+- **Port:** A replicated chain phase and counters drive growth and retraction by distance. Growth appends as many joints as needed in one tick until the tail reaches the lair, with 48-unit head spacing and 42-unit body spacing. Authority begins full retraction after the body count exceeds 100; the original's separate 150-segment client safety cap is not implemented.
 - **Why:** The choreography only moved segments nobody can see, and this form replicates reliably. Damage and collision behave the same.
 
 ### Mashadar chasing a Personal Illusion
@@ -635,6 +635,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** World translucent materials use one opacity value, taken from the strongest channel. This is exact for grey effects and over black backgrounds, and slightly darker on strongly colored ones. Sky sheets over visible geometry use an exact per-channel blend.
 - **Why:** UE5's alpha-composite blending cannot apply a separate factor per channel, and a scene-color alternative would break stacked translucent layers.
 
+### Mesh-particle translucency
+- **Original:** Mesh `bParticles` draws every current source vertex with screen-aligned texture UVs. Vertex positions ignore actor DrawScale; only each icon's width and height use it (`UnMesh.cpp:433,574`, `UnMeshRn.cpp:384-460`). Translucency blends each color channel as `Src + Dst*(1-Src)` (`und3d.cpp:1261-1265`).
+- **Port:** Mashadar and the mesh-effect particle clouds (including all five elemental shields) preserve that vertex space at spawn and through scale changes; growth changes icon size only. Mashadar includes the animated unreferenced tip vertex on both asset and runtime paths; editor recovery caches the decoded frames per retail identity. Its MyTex2 texture is a live WetTexture on both paths. Runtime mesh resolution remains guarded in production; automation uses an explicit test entry point. The shared mesh-particle renderer still uses a single additive pass, `Src + Dst`, making overlap/background contributions brighter than retail.
+- **Why:** An exact replacement must preserve per-particle ordering of background attenuation and addition. Adding one pooled modulation pass before the pooled additive pass is not equivalent for overlapping puffs. A contained follow-up should implement and visually verify ordered per-channel screen blending; this difference is not corrected by changing cloud density, sprite size or glow.
+
 ### Volumetric fog
 - **Original:** Fog maps are drawn per surface and screen-blended over the frame per color channel, only on opaque surfaces in fog zones and only while the viewer stands in a fog zone.
 - **Port:** Each fog light draws as a sphere that reproduces the same per-channel screen blend, with the fog amount worked out per pixel. It also covers pixels behind the sphere, including translucent ones, and the pass is gated on the camera being inside a fog zone's bounding box.
@@ -685,10 +690,10 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Each rotator seeds its randomness from its actor name, so every client and every run shares the same phases without replication.
 - **Why:** The motion is visual only, and the result looks the same with no network traffic.
 
-### Sprite animation at a fixed 30 Hz
-- **Original:** Animated sprite textures, including the Earth Tremor, Decay and Swap Places rings, advance one frame per rendered frame, in sync across the whole engine. Mashadar fades also run per rendered frame.
-- **Port:** Sprites cycle per actor at a fixed 30 Hz, and Mashadar fades use the same rates at a fixed 30 Hz equivalent.
-- **Why:** Frame-rate independence. At modern frame rates the original rule would play them two to eight times too fast.
+### Mashadar fade cadence
+- **Original:** Mashadar fades run per rendered frame.
+- **Port:** Mashadar fades use a fixed 30 Hz equivalent. Fade swell changes icon size without moving the vertex cloud, as retail does. Sprite texture animation is separately shared by retail identity and advances on observed draws.
+- **Why:** Frame-rate independence for the fade; modern frame rates would otherwise shorten its duration.
 
 ### Lightning beams draw straight
 - **Original:** Lightning streaks can bend through navigation points around obstacles.
@@ -914,8 +919,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Mashadar and Legion voices
 - **Original:** Mashadar breathes when more than two segments grow in one tick. A dying Legion's hidden pawn hums beside its carcass.
-- **Port:** Mashadar breathes on the third growth within one second, because the port grows one segment per tick. The pawn's hum stops when the carcass appears.
-- **Why:** A different growth cadence, and no doubled hum.
+- **Port:** Mashadar breathes on the third growth within one second. Growth can append multiple segments per tick, but the sound counter retains its one-second window. The pawn's hum stops when the carcass appears.
+- **Why:** The sound counter differs from the original per-tick counter, and the port avoids a doubled hum.
 
 ### SoundDispatcher extras
 - **Original:** A SoundDispatcher can choose a mixing slot per actor and look sounds up from a sound table.
