@@ -6,6 +6,7 @@
 #include "UI/WoTTextEntry.h"
 #include "WoTFrontEnd.h"
 #include "Styling/SlateBrush.h"
+#include "Types/SlateStructs.h"
 #include "Widgets/SCompoundWidget.h"
 
 class AWoTPlayerController;
@@ -170,6 +171,8 @@ public:
 	FReply ActivateTauntEntryForTesting(int32 EntryIndex);
 	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
 	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
+	TSharedPtr<SWidget> MenuBackgroundForTesting() const { return MenuBackground; }
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayerForTesting() const { return TextEntryLayer; }
 	TSharedPtr<SWidget> PlayerNameInputForTesting() const;
 	const FString& PendingPlayerNameForTesting() const { return PendingPlayerName; }
 #endif
@@ -206,6 +209,13 @@ private:
 	bool IsHelpKey(const FKey& Key) const;
 	int32 MainMenuEntryCount() const;
 	FMargin EntryPadding(int32 EntryIndex) const;
+	/** The main menu's room for its heading and entries, in layout units: the
+	 * screen less a margin above and below and the menu's chrome. */
+	float MainMenuContentRoom() const;
+	/** The menu box's height limit: the room above for the main menu, and the
+	 * pages' 620-unit panel within it. Unbounded for the main menu before the
+	 * first Tick. */
+	FOptionalSize PageMaxHeight() const;
 	FSlateFontInfo HeadingFont() const;
 	FSlateFontInfo ItemFont() const;
 	FText ResolveRetailText(FName Id) const;
@@ -232,6 +242,10 @@ private:
 	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	bool bUsingFallbackFonts = false;
 	float LiveViewportScale = 1.0f;
+	/** The screen's height in layout units (0 before the first Tick). */
+	float LiveScreenHeight = 0.0f;
+	/** The menu's background: it must enclose every entry, on screen. */
+	TSharedPtr<SWidget> MenuBackground;
 	float EntryHeight = 0.0f;
 	float EntrySpacing = 0.0f;
 	float ListHeight = 0.0f;

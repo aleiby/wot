@@ -28,6 +28,8 @@
 #include "../WoTInGameSlate.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
+#include "../WoTBattleInfo.h"
+#include "../WoTCharacter.h"
 #include "../WoTPlayerController.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../WoTSessionSubsystem.h"
@@ -41,6 +43,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
+#include "Input/HittestGrid.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/Internationalization.h"
 #include "Misc/App.h"
@@ -49,6 +52,7 @@
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
 #include "Styling/WidgetStyle.h"
+#include "Types/PaintArgs.h"
 #include "Types/NavigationMetaData.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SCheckBox.h"
@@ -2379,8 +2383,16 @@ bool FWoTUIWidgetsSettingsDropdownSpec::RunTest(const FString&)
 	TestEqual(TEXT("A previews the picked brightness"), Applied.Num(), 1);
 	TestTrue(TEXT("the draft takes the picked step"), FMath::IsNearlyEqual(
 		Screen->DraftForTesting().Brightness, static_cast<float>(Expected) / 10.0f));
+	// B on the closed dropdown is the page's back action: with the picked
+	// brightness unsaved it asks first (the owner's Steam Deck session,
+	// 2026-11-09), and Discard backs the page.
 	Press(EKeys::Gamepad_FaceButton_Right);
-	TestTrue(TEXT("B on the closed dropdown backs the page"),
+	TestTrue(TEXT("B on the closed dropdown asks before dropping the pick"),
+		Screen->IsConfirmingUnsaved()
+		&& Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Hardware);
+	Press(EKeys::Gamepad_DPad_Right);
+	Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("and Discard backs the page"),
 		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
 	return !HasAnyErrors();
 }
@@ -3012,23 +3024,30 @@ bool FWoTUITextEntryPanelSpec::RunTest(const FString&)
 	TestEqual(TEXT("the panel opens on q (spec r3 section 1a)"), Panel->GetHighlightedLabel(),
 		FString(TEXT("q")));
 
-	// Every button: A types the highlighted key, X is Space, B is Backspace,
-	// Y toggles Shift, Menu is Done and View cancels.
+	// Every button (the owner's Steam Deck ruling, 2026-11-09): A types the
+	// highlighted key, Y is Space, X is Backspace, Menu is Done, B cancels and
+	// View does nothing. Shift has no button: it is the on-screen Shift key.
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
 	TestEqual(TEXT("A types the highlighted key"), Panel->GetDraft(), FString(TEXT("q")));
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Right);
 	TestEqual(TEXT("the D-pad moves the highlight"), Panel->GetHighlightedLabel(), FString(TEXT("w")));
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Top);
-	TestTrue(TEXT("Y turns Shift on"), Panel->IsShifted());
+	TestEqual(TEXT("Y is Space"), Panel->GetDraft(), FString(TEXT("q ")));
+	TestFalse(TEXT("Y never toggles Shift"), Panel->IsShifted());
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
+	TestEqual(TEXT("X is Backspace"), Panel->GetDraft(), FString(TEXT("q")));
+	const FIntPoint ShiftKey = SWoTOnScreenKeyboard::FindKey(TEXT("Shift"));
+	Panel->SetHighlight(ShiftKey.Y, ShiftKey.X);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("A on the Shift key turns Shift on"), Panel->IsShifted());
+	Panel->SetHighlight(1, 1);
 	TestEqual(TEXT("Shift shows capitals"), Panel->GetHighlightedLabel(), FString(TEXT("W")));
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Top);
-	TestFalse(TEXT("Y turns Shift off"), Panel->IsShifted());
 	TestEqual(TEXT("a capital was typed"), Panel->GetDraft(), FString(TEXT("qW")));
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
-	TestEqual(TEXT("X is Space"), Panel->GetDraft(), FString(TEXT("qW ")));
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
-	TestEqual(TEXT("B is Backspace"), Panel->GetDraft(), FString(TEXT("qW")));
+	Panel->SetHighlight(ShiftKey.Y, ShiftKey.X);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestFalse(TEXT("A on the Shift key turns Shift off"), Panel->IsShifted());
+	Panel->SetHighlight(1, 1);
 	for (int32 Press = 0; Press < 6; ++Press)
 	{
 		WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
@@ -3036,8 +3055,14 @@ bool FWoTUITextEntryPanelSpec::RunTest(const FString&)
 	TestEqual(TEXT("MaxLength stops the draft"), Panel->GetDraft(), FString(TEXT("qWwwww")));
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Right);
 	TestEqual(TEXT("Menu is Done"), Dones, 1);
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
-	TestEqual(TEXT("View cancels"), Cancels, 1);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
+	TestEqual(TEXT("B cancels"), Cancels, 1);
+	TestTrue(TEXT("View is handled"), WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left));
+	TestTrue(TEXT("and does nothing"), Dones == 1 && Cancels == 1
+		&& Panel->GetDraft() == TEXT("qWwwww") && !Panel->IsShifted());
+	TestEqual(TEXT("the panel's prompts name that map, without View"),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::KeyboardPanel()),
+		FString(TEXT("A Type | B Cancel | X Backspace | Y Space | Menu Done")));
 
 	// The grid wraps; Up and Down land on the nearest key of the next row.
 	Panel->SetHighlight(1, 0);
@@ -3145,22 +3170,31 @@ bool FWoTUITextEntryPanelRepeatSpec::RunTest(const FString&)
 	TestEqual(TEXT("the release ends the repeat"), Panel->GetDraft(), FString(TEXT("qqqq")));
 	TestFalse(TEXT("nothing is held"), Panel->IsRepeating());
 
-	// A held B backspaces repeatedly the same way.
-	Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Right));
-	Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Right, true));
+	// A held X (Backspace) deletes repeatedly the same way.
+	Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Left));
+	Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Left, true));
 	Shown.Settle();
-	TestEqual(TEXT("B deletes once, its native repeat nothing"), Panel->GetDraft(),
+	TestEqual(TEXT("X deletes once, its native repeat nothing"), Panel->GetDraft(),
 		FString(TEXT("qqq")));
 	*Scope.Time += 0.36;
 	Shown.Settle();
-	TestEqual(TEXT("a held B repeats at 0.35 s"), Panel->GetDraft(), FString(TEXT("qq")));
+	TestEqual(TEXT("a held X repeats at 0.35 s"), Panel->GetDraft(), FString(TEXT("qq")));
 	*Scope.Time += 0.08;
 	Shown.Settle();
 	TestEqual(TEXT("and every 0.08 s"), Panel->GetDraft(), FString(TEXT("q")));
-	Slate.ProcessKeyUpEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Right));
+	Slate.ProcessKeyUpEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Left));
 	*Scope.Time += 1.0;
 	Shown.Settle();
 	TestEqual(TEXT("its release ends it"), Panel->GetDraft(), FString(TEXT("q")));
+
+	// A held Y (Space) types one space; it never repeats.
+	Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Top));
+	*Scope.Time += 1.0;
+	Shown.Settle();
+	TestEqual(TEXT("a held Y types one space"), Panel->GetDraft(), FString(TEXT("q ")));
+	TestFalse(TEXT("and arms no repeat"), Panel->IsRepeating());
+	Slate.ProcessKeyUpEvent(WoTUITest_Key(EKeys::Gamepad_FaceButton_Top));
+	Shown.Settle();
 
 	// A held A on Shift or Done never repeats it.
 	const FIntPoint Shift = SWoTOnScreenKeyboard::FindKey(TEXT("Shift"));
@@ -3221,13 +3255,16 @@ bool FWoTUITextEntrySessionSpec::RunTest(const FString&)
 		EWoTLastInput::Controller);
 	TestEqual(TEXT("the field is untouched while the panel edits"), Field.Text, FString(TEXT("abc")));
 
-	// B on the panel is Backspace, never a back.
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
-	TestEqual(TEXT("B is Backspace"), Panel->GetDraft(), FString(TEXT("abc")));
+	// X on the panel is Backspace; View does nothing and is never a back.
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
+	TestEqual(TEXT("X is Backspace"), Panel->GetDraft(), FString(TEXT("abc")));
 	TestTrue(TEXT("and the entry stays"), FWoTTextEntry::IsActive());
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	TestTrue(TEXT("View leaves the entry open"), FWoTTextEntry::IsActive());
+	TestEqual(TEXT("and its draft as it was"), Panel->GetDraft(), FString(TEXT("abc")));
 
 	// Done runs Validate: Reject keeps the panel open with the message.
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Top);
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Right);
 	TestTrue(TEXT("a rejected Done keeps the entry"), FWoTTextEntry::IsActive());
 	TestEqual(TEXT("and shows the rule"), Panel->GetMessage().ToString(), FString(TEXT("No spaces.")));
@@ -3235,7 +3272,7 @@ bool FWoTUITextEntrySessionSpec::RunTest(const FString&)
 	TestEqual(TEXT("the field keeps its text"), Field.Text, FString(TEXT("abc")));
 
 	// Accept sets the text and commits.
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
 	WoTEntryTest_Type(Shown, TEXT("e"));
 	TestTrue(TEXT("an edit clears the message"), Panel->GetMessage().IsEmpty());
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Right);
@@ -3252,8 +3289,9 @@ bool FWoTUITextEntrySessionSpec::RunTest(const FString&)
 	Field.Calls.Reset();
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
 	WoTEntryTest_Type(Shown, TEXT("zz"));
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
-	TestFalse(TEXT("View cancels the entry"), FWoTTextEntry::IsActive());
+	TestTrue(TEXT("B on the panel is handled"),
+		WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B cancels the entry"), FWoTTextEntry::IsActive());
 	TestEqual(TEXT("a cancel keeps the field's text"), Field.Text, FString(TEXT("abce")));
 	TestEqual(TEXT("and only reports the cancel"), Field.Calls, TArray<FString>{TEXT("Cancel")});
 
@@ -3394,7 +3432,7 @@ bool FWoTUITextEntrySteamSpec::RunTest(const FString&)
 			FString(TEXT("No spaces.")));
 		TestEqual(TEXT("and continues from Steam's text"), Panel->GetDraft(), FString(TEXT("abcx ")));
 	}
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
 	TestEqual(TEXT("cancelling it restores the text from before the entry"), Field.Text,
 		FString(TEXT("abcx")));
 
@@ -3418,7 +3456,7 @@ bool FWoTUITextEntrySteamSpec::RunTest(const FString&)
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Top);
 	TestTrue(TEXT("Y opens the panel"), FWoTTextEntry::GetPanel().IsValid());
 	TestEqual(TEXT("without Steam's keyboard"), Steam.Launched.Num(), LaunchesBefore);
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
 
 	// A launcher error falls back to the panel and is kept for diagnosis.
 	Steam.LaunchError = TEXT("ShellExecute failed (2)");
@@ -3427,7 +3465,7 @@ bool FWoTUITextEntrySteamSpec::RunTest(const FString&)
 		FWoTTextEntry::GetPanel().IsValid() && Field.Layer->IsPanelShown());
 	TestEqual(TEXT("and the error is captured"), FWoTTextEntry::GetLastLaunchError(),
 		FString(TEXT("ShellExecute failed (2)")));
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
 	Steam.LaunchError.Reset();
 
 	// Focus moving to another control keeps what Steam typed, like a physical
@@ -3470,7 +3508,7 @@ bool FWoTUITextEntrySteamSpec::RunTest(const FString&)
 	}
 	TestTrue(TEXT("with the toggle off a tap opens the panel"),
 		FWoTTextEntry::GetPanel().IsValid() && Field.Layer->IsPanelShown());
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
 	FWoTTextEntry::SetSteamDeckEnvironmentForTesting(false);
 	Slate.SetKeyboardFocus(Field.Other, EFocusCause::SetDirectly);
 	Shown.Settle();
@@ -3491,22 +3529,33 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUITextEntryToggleSpec,
 bool FWoTUITextEntryToggleSpec::RunTest(const FString&)
 {
 	FWoTEntryTest_Guard EntryGuard;
+	// The stored line is the player's explicit choice; anything else is no
+	// choice, so the default applies (on: the owner's Steam Deck session).
+	TestTrue(TEXT("the default is on"), FWoTTextEntry::SteamKeyboardDefault);
 	auto Parse = [](const ANSICHAR* Text)
 	{
 		return FWoTTextEntry::ParseToggle(WoTUITest_Utf8(Text));
 	};
-	TestFalse(TEXT("an empty file is off"), FWoTTextEntry::ParseToggle(TArray<uint8>()));
-	TestTrue(TEXT("the on line"), Parse("WoTTextEntry-v1 steam-keyboard=on"));
-	TestTrue(TEXT("with its newline"), Parse("WoTTextEntry-v1 steam-keyboard=on\n"));
-	TestTrue(TEXT("or a Windows newline"), Parse("WoTTextEntry-v1 steam-keyboard=on\r\n"));
-	TestFalse(TEXT("the off line"), Parse("WoTTextEntry-v1 steam-keyboard=off\n"));
-	TestFalse(TEXT("another case is invalid, so off"), Parse("WoTTextEntry-v1 steam-keyboard=ON"));
-	TestFalse(TEXT("another version is invalid"), Parse("WoTTextEntry-v2 steam-keyboard=on"));
-	TestFalse(TEXT("leading space is invalid"), Parse(" WoTTextEntry-v1 steam-keyboard=on"));
-	TestFalse(TEXT("non-ASCII is invalid"), Parse("WoTTextEntry-v1 steam-keyboard=on\xC3\xA9"));
+	auto Is = [](const TOptional<bool>& Stored, bool bValue)
+	{
+		return Stored.IsSet() && Stored.GetValue() == bValue;
+	};
+	TestFalse(TEXT("an empty file is no choice"),
+		FWoTTextEntry::ParseToggle(TArray<uint8>()).IsSet());
+	TestTrue(TEXT("the on line"), Is(Parse("WoTTextEntry-v1 steam-keyboard=on"), true));
+	TestTrue(TEXT("with its newline"), Is(Parse("WoTTextEntry-v1 steam-keyboard=on\n"), true));
+	TestTrue(TEXT("or a Windows newline"), Is(Parse("WoTTextEntry-v1 steam-keyboard=on\r\n"), true));
+	TestTrue(TEXT("the off line is an explicit off"),
+		Is(Parse("WoTTextEntry-v1 steam-keyboard=off\n"), false));
+	TestFalse(TEXT("another case is invalid, so no choice"),
+		Parse("WoTTextEntry-v1 steam-keyboard=ON").IsSet());
+	TestFalse(TEXT("another version is invalid"), Parse("WoTTextEntry-v2 steam-keyboard=on").IsSet());
+	TestFalse(TEXT("leading space is invalid"), Parse(" WoTTextEntry-v1 steam-keyboard=on").IsSet());
+	TestFalse(TEXT("non-ASCII is invalid"),
+		Parse("WoTTextEntry-v1 steam-keyboard=on\xC3\xA9").IsSet());
 	TestFalse(TEXT("a long file is invalid"),
 		Parse("WoTTextEntry-v1 steam-keyboard=on                                        "
-			"                                "));
+			"                                ").IsSet());
 	TestEqual(TEXT("the line it writes"), FWoTTextEntry::FormatToggle(true),
 		FString(TEXT("WoTTextEntry-v1 steam-keyboard=on")));
 
@@ -3519,12 +3568,14 @@ bool FWoTUITextEntryToggleSpec::RunTest(const FString&)
 			Touched.Add(Path);
 			return false;
 		});
-	TestFalse(TEXT("off without a test preference path"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	TestTrue(TEXT("the default without a test preference path"),
+		FWoTTextEntry::IsSteamKeyboardEnabled());
 	TestFalse(TEXT("and never saved"), FWoTTextEntry::SetSteamKeyboardEnabled(true));
 	TestTrue(TEXT("the player's side file is never touched"), Touched.IsEmpty());
 	UWoTPreferencesSubsystem::SetSideFileAccessHookForTesting({});
 
-	// A test profile: missing is off, and the toggle round-trips its line.
+	// A test profile: missing is the default (on), and an explicit choice,
+	// either way, round-trips its line and wins.
 	const FString Directory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Automation"),
 		FString(TEXT("TextEntry-")) + FGuid::NewGuid().ToString());
 	const FString Leaf = FPaths::Combine(Directory, TEXT("WoTUserPreferences"));
@@ -3539,18 +3590,20 @@ bool FWoTUITextEntryToggleSpec::RunTest(const FString&)
 	TestTrue(TEXT("the side file resolves"),
 		UWoTPreferencesSubsystem::SideFilePath(FWoTTextEntry::ToggleSideFileName, Path));
 	TestEqual(TEXT("as the TextEntry side file"), Path, Leaf + TEXT(".TextEntry"));
-	TestFalse(TEXT("a missing file is off (the default)"), FWoTTextEntry::IsSteamKeyboardEnabled());
-	TestTrue(TEXT("the toggle saves"), FWoTTextEntry::SetSteamKeyboardEnabled(true));
+	TestTrue(TEXT("a missing file is on (the default)"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	TestTrue(TEXT("off saves"), FWoTTextEntry::SetSteamKeyboardEnabled(false));
 	FString Written;
+	FFileHelper::LoadFileToString(Written, *Path);
+	TestEqual(TEXT("as its off line"), Written, FString(TEXT("WoTTextEntry-v1 steam-keyboard=off\n")));
+	TestFalse(TEXT("and an explicit off wins over the default"),
+		FWoTTextEntry::IsSteamKeyboardEnabled());
+	TestTrue(TEXT("the toggle saves on"), FWoTTextEntry::SetSteamKeyboardEnabled(true));
 	FFileHelper::LoadFileToString(Written, *Path);
 	TestEqual(TEXT("one ASCII line"), Written, FString(TEXT("WoTTextEntry-v1 steam-keyboard=on\n")));
 	TestTrue(TEXT("and reads back on"), FWoTTextEntry::IsSteamKeyboardEnabled());
-	TestTrue(TEXT("off saves"), FWoTTextEntry::SetSteamKeyboardEnabled(false));
-	FFileHelper::LoadFileToString(Written, *Path);
-	TestEqual(TEXT("as its off line"), Written, FString(TEXT("WoTTextEntry-v1 steam-keyboard=off\n")));
-	TestFalse(TEXT("and reads back off"), FWoTTextEntry::IsSteamKeyboardEnabled());
-	FFileHelper::SaveStringToFile(FString(TEXT("steam-keyboard=on")), *Path);
-	TestFalse(TEXT("an invalid file is off"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	FFileHelper::SaveStringToFile(FString(TEXT("steam-keyboard=off")), *Path);
+	TestTrue(TEXT("an invalid file is no choice: the default, on"),
+		FWoTTextEntry::IsSteamKeyboardEnabled());
 	return !HasAnyErrors();
 }
 
@@ -3593,21 +3646,33 @@ bool FWoTSettingsSteamKeyboardToggleSpec::RunTest(const FString&)
 	TestTrue(TEXT("next to the controller options, in the focus graph"),
 		Rows.IsValidIndex(InvertRow + 1) && Rows[InvertRow + 1].Num() == 1
 		&& Rows[InvertRow + 1][0] == Toggle);
-	TestFalse(TEXT("it starts off"), Toggle->IsChecked());
-	Toggle->ToggleCheckedState();
-	TestTrue(TEXT("a toggle changes the draft"), Controls->SteamKeyboardDraftForTesting());
-	TestFalse(TEXT("nothing is stored before Save"), FWoTTextEntry::IsSteamKeyboardEnabled());
-	Controls->SaveForTesting();
-	TestTrue(TEXT("Save stores it in its side file"), FWoTTextEntry::IsSteamKeyboardEnabled());
-	TestTrue(TEXT("and the route follows it"),
+	// On by default for a player who never set it (the owner's Steam Deck
+	// session, 2026-11-09); a stored choice wins.
+	TestTrue(TEXT("it starts on, with nothing stored"), Toggle->IsChecked());
+	TestTrue(TEXT("and the route is Steam's keyboard"),
 		FWoTTextEntry::ChooseRoute() == EWoTTextEntryRoute::SteamKeyboard);
+	TestFalse(TEXT("an untouched page has nothing to save"), Controls->HasUnsavedChanges());
+	Toggle->ToggleCheckedState();
+	TestFalse(TEXT("a toggle changes the draft"), Controls->SteamKeyboardDraftForTesting());
+	TestTrue(TEXT("which is an unsaved change"), Controls->HasUnsavedChanges());
+	TestTrue(TEXT("nothing is stored before Save"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	Controls->SaveForTesting();
+	TestFalse(TEXT("Save stores the off choice in its side file"),
+		FWoTTextEntry::IsSteamKeyboardEnabled());
+	TestTrue(TEXT("and the route follows it"),
+		FWoTTextEntry::ChooseRoute() == EWoTTextEntryRoute::Panel);
 	TSharedRef<SWoTSettingsScreen> Reopened = MakeControls();
-	TestTrue(TEXT("the page reopens with it on"),
+	TestTrue(TEXT("the page reopens with it off: the stored choice wins"),
 		Reopened->SteamKeyboardCheckBoxForTesting().IsValid()
-		&& Reopened->SteamKeyboardCheckBoxForTesting()->IsChecked());
+		&& !Reopened->SteamKeyboardCheckBoxForTesting()->IsChecked());
 	Reopened->SteamKeyboardCheckBoxForTesting()->ToggleCheckedState();
-	Reopened->HandleBack();
-	TestTrue(TEXT("Back discards the change"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	// The Back button drops the draft at once, as it always has.
+	Reopened->BackForTesting();
+	TestFalse(TEXT("Back discards the change"), FWoTTextEntry::IsSteamKeyboardEnabled());
+	TSharedRef<SWoTSettingsScreen> Third = MakeControls();
+	Third->SteamKeyboardCheckBoxForTesting()->ToggleCheckedState();
+	Third->SaveForTesting();
+	TestTrue(TEXT("an explicit on is stored too"), FWoTTextEntry::IsSteamKeyboardEnabled());
 	return !HasAnyErrors();
 }
 
@@ -3894,17 +3959,19 @@ bool FWoTFrontEndTextEntryBackSpec::RunTest(const FString&)
 	TestEqual(TEXT("nothing rebuilds"), Root->ScreenRebuildCountForTesting(), Rebuilds);
 	TestTrue(TEXT("focus returns to the field"), Root->ServerNameTextBoxForTesting()->HasKeyboardFocus());
 
-	// B and View on the panel: Backspace and Cancel, never a back.
+	// On the panel View does nothing, X deletes and B cancels; none of them is
+	// ever a screen back (the owner's Steam Deck ruling, 2026-11-09).
 	Panel = WoTEntryTest_BeginOn(FrontEnd, Root->ServerNameTextBoxForTesting());
 	if (Panel.IsValid())
 	{
 		Panel->SetDraft(TEXT("ab"));
-		FrontEnd.Press(EKeys::Gamepad_FaceButton_Right);
-		TestEqual(TEXT("B is Backspace on the panel"), Panel->GetDraft(), FString(TEXT("a")));
-		TestTrue(TEXT("and stays on Play"), Screen() == EWoTFrontEndScreen::Play
-			&& FWoTTextEntry::IsActive());
 		FrontEnd.Press(EKeys::Gamepad_Special_Left);
-		TestFalse(TEXT("View cancels the panel"), FWoTTextEntry::IsActive());
+		TestTrue(TEXT("View leaves the panel open on Play"), Screen() == EWoTFrontEndScreen::Play
+			&& FWoTTextEntry::IsActive() && Panel->GetDraft() == TEXT("ab"));
+		FrontEnd.Press(EKeys::Gamepad_FaceButton_Left);
+		TestEqual(TEXT("X is Backspace on the panel"), Panel->GetDraft(), FString(TEXT("a")));
+		FrontEnd.Press(EKeys::Gamepad_FaceButton_Right);
+		TestFalse(TEXT("B cancels the panel"), FWoTTextEntry::IsActive());
 		TestTrue(TEXT("still on Play"), Screen() == EWoTFrontEndScreen::Play);
 	}
 
@@ -3984,8 +4051,10 @@ bool FWoTFrontEndTextEntryInGameSpec::RunTest(const FString&)
 	TestEqual(TEXT("the game menu's strip shows the panel's prompts"),
 		WoTEntryTest_Prompts(Overlay->ControllerPromptsForTesting()),
 		WoTEntryTest_Prompts(FWoTButtonPromptSets::KeyboardPanel()));
-	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right);
-	TestEqual(TEXT("B is Backspace"), Panel->GetDraft(), FString(TEXT("Aver")));
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Left);
+	TestEqual(TEXT("X is Backspace"), Panel->GetDraft(), FString(TEXT("Aver")));
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_Special_Left);
+	TestTrue(TEXT("View does nothing on the panel"), FWoTTextEntry::IsActive());
 	TestFalse(TEXT("not a page back"), Overlay->IsShowingMainMenuForTesting());
 	WoTWidgetTest_Press(Shown, EKeys::Escape);
 	TestFalse(TEXT("Escape cancels the panel first"), FWoTTextEntry::IsActive());
@@ -4255,8 +4324,8 @@ bool FWoTChatTextEntrySpec::RunTest(const FString&)
 
 	// Cancel: chat's input mode comes back exactly, and chat stays open.
 	Fixture.Type(TEXT("xy"));
-	Fixture.Press(EKeys::Gamepad_Special_Left);
-	TestFalse(TEXT("View cancels the panel"), FWoTTextEntry::IsActive());
+	Fixture.Press(EKeys::Gamepad_FaceButton_Right);
+	TestFalse(TEXT("B cancels the panel"), FWoTTextEntry::IsActive());
 	TestTrue(TEXT("chat stays open"), Controller->IsChatTyping());
 	TestFalse(TEXT("chat input resumes"), Controller->IsChatInputSuspendedForTextEntry());
 	TestTrue(TEXT("its router runs again"), Controller->IsChatInputRouterActiveForTesting());
@@ -4537,7 +4606,8 @@ bool FWoTChatControllerInGameMenuSpec::RunTest(const FString&)
 	TestEqual(TEXT("the line is TeamTalk's"), Controller->GetLastSubmittedChatLineForTesting(),
 		FString(TEXT("TeamSay gg")));
 
-	// Controller mode Chat: Talk's line and the panel; View cancels only the panel.
+	// Controller mode Chat: Talk's line and the panel; B cancels only the
+	// panel, and View on the panel does nothing.
 	Controller->ToggleInGameMenu();
 	Overlay->ActivateVisibleMainMenuEntryForTesting(ChatIndex);
 	Fixture.Settle();
@@ -4546,7 +4616,10 @@ bool FWoTChatControllerInGameMenuSpec::RunTest(const FString&)
 		Chat.IsValid() && Chat->GetLabel().ToString() == TEXT("Say:")
 		&& FWoTTextEntry::GetPanel().IsValid());
 	Fixture.Press(EKeys::Gamepad_Special_Left);
-	TestFalse(TEXT("View cancels the panel"), FWoTTextEntry::IsActive());
+	TestTrue(TEXT("View on the panel does nothing"),
+		FWoTTextEntry::IsActive() && Controller->IsChatTyping());
+	Fixture.Press(EKeys::Gamepad_FaceButton_Right);
+	TestFalse(TEXT("B cancels the panel"), FWoTTextEntry::IsActive());
 	TestTrue(TEXT("and chat stays open"), Controller->IsChatTyping());
 	// On the bare line the prompts say how to type or leave.
 	if (const TSharedPtr<SWoTChatInputOverlay> Bare = Controller->GetChatInputWidget())
@@ -4568,8 +4641,9 @@ bool FWoTChatControllerInGameMenuSpec::RunTest(const FString&)
 	Fixture.Settle();
 	TestTrue(TEXT("chat reopens with the panel"),
 		Controller->IsChatTyping() && FWoTTextEntry::IsActive());
-	Fixture.Press(EKeys::Gamepad_Special_Left);
-	TestFalse(TEXT("View closes the panel"), FWoTTextEntry::IsActive());
+	Fixture.Press(EKeys::Gamepad_FaceButton_Right);
+	TestFalse(TEXT("B closes the panel"), FWoTTextEntry::IsActive());
+	TestTrue(TEXT("and chat stays"), Controller->IsChatTyping());
 	Fixture.Press(EKeys::Gamepad_FaceButton_Right);
 	TestFalse(TEXT("then B closes chat"), Controller->IsChatTyping());
 	TestTrue(TEXT("still nothing sent"), Controller->GetLastSubmittedChatLineForTesting().IsEmpty());
@@ -4713,6 +4787,768 @@ bool FWoTInGameMenuTauntsSpec::RunTest(const FString&)
 	TestTrue(TEXT("Taunt 1..6 call PlayTaunt(1..6) and Random PlayTaunt(-1)"),
 		Controller->GetPlayTauntRequestsForTesting()
 			== TArray<int32>({3, 1, 2, 3, 4, 5, 6, -1}));
+	return !HasAnyErrors();
+}
+
+// ---------------------------------------------------------------------------
+// Controller sub-project 3, PR 6: the owner's first Steam Deck session
+// (2026-11-09): the prompt glyphs and sizes, the keyboard panel's size and
+// its dark strip, the settings' "Save changes?" prompt and the game menu's
+// fit. Layouts are measured as the game viewport draws them: at each
+// resolution's UI DPI scale (UUserInterfaceSettings::GetDPIScaleBasedOnSize).
+
+namespace
+{
+// The Steam Deck, its 720p dock and TV output, and the 1080p desktop baseline.
+const FVector2D WoTDeckTest_Resolutions[] = {
+	FVector2D(1280.0, 800.0), FVector2D(1280.0, 720.0), FVector2D(1920.0, 1080.0)};
+
+FString WoTDeckTest_Label(const FVector2D& Resolution)
+{
+	return FString::Printf(TEXT("%gx%g"), Resolution.X, Resolution.Y);
+}
+
+/** Every visible widget of Type under Widget (Widget included). */
+void WoTDeckTest_Collect(const TSharedRef<SWidget>& Widget, FName Type,
+	TArray<TSharedRef<SWidget>>& Out)
+{
+	if (!Widget->GetVisibility().IsVisible())
+	{
+		return;
+	}
+	if (Widget->GetType() == Type)
+	{
+		Out.Add(Widget);
+	}
+	FChildren* Children = Widget->GetChildren();
+	for (int32 Index = 0; Children != nullptr && Index < Children->Num(); ++Index)
+	{
+		WoTDeckTest_Collect(Children->GetChildAt(Index), Type, Out);
+	}
+}
+
+/**
+ * A host laid out as the game viewport lays it out at Resolution: its UI DPI
+ * scale, in a real window, ticked and painted (painting arranges every widget,
+ * so cached geometry is in physical pixels).
+ */
+struct FWoTDeckTest_Screen
+{
+	TSharedRef<SWidget> Root;
+	FVector2D Resolution;
+	float Dpi = 1.0f;
+	TSharedRef<SWindow> Window;
+	FGeometry Geometry;
+
+	FWoTDeckTest_Screen(const TSharedRef<SWidget>& InRoot, const FVector2D& InResolution)
+		: Root(InRoot)
+		, Resolution(InResolution)
+		, Dpi(FWoTMenuStyle::ViewportDpiScale(InResolution))
+		, Window(SNew(SWindow)
+			.ClientSize(InResolution)
+			.CreateTitleBar(false)
+			.SupportsMaximize(false)
+			.SupportsMinimize(false)
+			[InRoot])
+		, Geometry(FGeometry::MakeRoot(InResolution / Dpi, FSlateLayoutTransform(Dpi)))
+	{
+		FSlateApplication::Get().AddWindow(Window, false);
+		Settle();
+	}
+
+	~FWoTDeckTest_Screen()
+	{
+		FSlateApplication::Get().RequestDestroyWindow(Window);
+		FSlateApplication::Get().Tick();
+	}
+
+	void Settle(int32 Passes = 4)
+	{
+		for (int32 Pass = 0; Pass < Passes; ++Pass)
+		{
+			Root->Tick(Geometry, FApp::GetCurrentTime(), 0.0f);
+			Root->SlatePrepass(Dpi);
+			FHittestGrid Grid;
+			FSlateWindowElementList Elements(Window);
+			const FPaintArgs Args(&Window.Get(), Grid, FVector2f::ZeroVector,
+				FApp::GetCurrentTime(), 0.0f);
+			Root->Paint(Args, Geometry, Geometry.GetLayoutBoundingRect(), Elements, 0,
+				FWidgetStyle(), true);
+		}
+	}
+
+	/** A widget's rectangle on screen, in physical pixels. */
+	static FSlateRect Rect(const TSharedPtr<SWidget>& Widget)
+	{
+		return Widget.IsValid() ? Widget->GetCachedGeometry().GetLayoutBoundingRect()
+			: FSlateRect(0.0f, 0.0f, 0.0f, 0.0f);
+	}
+
+	bool Contains(const FSlateRect& Inner, float Margin = 0.0f) const
+	{
+		return Inner.Left >= Margin - 0.5f && Inner.Top >= Margin - 0.5f
+			&& Inner.Right <= Resolution.X - Margin + 0.5f
+			&& Inner.Bottom <= Resolution.Y - Margin + 0.5f;
+	}
+};
+
+FString WoTDeckTest_RectText(const FSlateRect& Rect)
+{
+	return FString::Printf(TEXT("(%.0f,%.0f)-(%.0f,%.0f)"), Rect.Left, Rect.Top, Rect.Right,
+		Rect.Bottom);
+}
+
+/** One host's prompt strip on screen: labels at least 16 physical pixels,
+ * glyphs at least 1.5 cap heights (Roboto's cap height is 0.72 em), and the
+ * strip inside the screen. Logs the sizes before and after the floor. */
+void WoTDeckTest_CheckStrip(FAutomationTestBase& Test, const FString& Label,
+	const TSharedPtr<SWoTButtonPrompts>& Strip, const FWoTDeckTest_Screen& Screen)
+{
+	if (!Test.TestTrue(Label + TEXT(": the prompt strip shows"), Strip.IsValid()
+		&& Strip->GetVisibility().IsVisible() && !Strip->GetShownPrompts().IsEmpty()))
+	{
+		return;
+	}
+	TArray<TSharedRef<SWidget>> Texts;
+	TArray<TSharedRef<SWidget>> Glyphs;
+	WoTDeckTest_Collect(Strip.ToSharedRef(), FName(TEXT("STextBlock")), Texts);
+	WoTDeckTest_Collect(Strip.ToSharedRef(), FName(TEXT("SWoTPromptGlyph")), Glyphs);
+	const int32 Shown = Strip->GetShownPrompts().Num();
+	Test.TestEqual(Label + TEXT(": one label per prompt"), Texts.Num(), Shown);
+	Test.TestEqual(Label + TEXT(": one glyph per prompt"), Glyphs.Num(), Shown);
+	float SmallestLabel = TNumericLimits<float>::Max();
+	float LargestEm = 0.0f;
+	for (const TSharedRef<SWidget>& Text : Texts)
+	{
+		const float Scale = Text->GetCachedGeometry().GetAccumulatedLayoutTransform().GetScale();
+		const float Pixels = FWoTMenuStyle::PhysicalTextPixels(
+			StaticCastSharedRef<STextBlock>(Text)->GetFont().Size, Scale);
+		SmallestLabel = FMath::Min(SmallestLabel, Pixels);
+		LargestEm = FMath::Max(LargestEm, Pixels);
+	}
+	float SmallestGlyph = TNumericLimits<float>::Max();
+	for (const TSharedRef<SWidget>& Glyph : Glyphs)
+	{
+		const FSlateRect Rect = FWoTDeckTest_Screen::Rect(Glyph);
+		SmallestGlyph = FMath::Min(SmallestGlyph,
+			FMath::Min(Rect.GetSize().X, Rect.GetSize().Y));
+	}
+	Test.TestTrue(FString::Printf(TEXT("%s: labels are at least %g physical pixels (%.2f)"),
+		*Label, SWoTButtonPrompts::MinimumLabelPixels, SmallestLabel),
+		SmallestLabel >= SWoTButtonPrompts::MinimumLabelPixels - 0.01f);
+	Test.TestTrue(FString::Printf(
+		TEXT("%s: glyphs are at least 1.5 label cap heights (%.1f px for %.1f px text)"),
+		*Label, SmallestGlyph, LargestEm), SmallestGlyph >= 1.5f * 0.72f * LargestEm - 0.5f);
+	const FSlateRect StripRect = FWoTDeckTest_Screen::Rect(Strip);
+	Test.TestTrue(FString::Printf(TEXT("%s: the strip stays on screen %s"), *Label,
+		*WoTDeckTest_RectText(StripRect)), Screen.Contains(StripRect));
+	// What the strip drew before PR 6: the bound face unfloored, 1.4 per point.
+	const float Scale = Strip->GetCachedGeometry().GetAccumulatedLayoutTransform().GetScale();
+	const FSlateFontInfo Bound = Strip->BoundFontForTesting();
+	const float BoundSize = Bound.HasValidFont() ? Bound.Size : 14.0f;
+	Test.AddInfo(FString::Printf(
+		TEXT("%s: prompt labels %.1f px (were %.1f px), glyphs %.1f px (were %.1f px), strip %s"),
+		*Label, SmallestLabel, FWoTMenuStyle::PhysicalTextPixels(BoundSize, Scale), SmallestGlyph,
+		FMath::Max(14.0f, BoundSize * 1.4f) * Scale, *WoTDeckTest_RectText(StripRect)));
+}
+
+/** The keyboard panel open in a host: full doubled size where it fits, inside
+ * the screen with a margin, directly above a full-width dark strip that holds
+ * the host's prompt strip, labels at least 16 physical pixels, and the draft
+ * visible however long it grows. */
+void WoTDeckTest_CheckPanel(FAutomationTestBase& Test, const FString& Label,
+	FWoTDeckTest_Screen& Screen, const TSharedPtr<SWoTTextEntryLayer>& Layer,
+	const TSharedPtr<SWoTButtonPrompts>& Prompts)
+{
+	const TSharedPtr<SWoTOnScreenKeyboard> Panel = FWoTTextEntry::GetPanel();
+	if (!Test.TestTrue(Label + TEXT(": the panel shows in the host's layer"),
+		Panel.IsValid() && Layer.IsValid() && Layer->IsPanelShown()))
+	{
+		return;
+	}
+	const FVector2D Resolution = Screen.Resolution;
+	const float Dpi = Screen.Dpi;
+	constexpr float Margin = 8.0f;
+	const FSlateRect PanelRect = FWoTDeckTest_Screen::Rect(Panel);
+	const FSlateRect StripRect = FWoTDeckTest_Screen::Rect(Layer->BottomStripForTesting());
+	const FIntPoint Q = SWoTOnScreenKeyboard::FindKey(TEXT("q"));
+	const FSlateRect KeyRect = FWoTDeckTest_Screen::Rect(Panel->GetKeyWidget(Q.Y, Q.X));
+	// The layer's fit: 1 is the panel's full (doubled) size.
+	const float Fit = PanelRect.GetSize().X / (SWoTOnScreenKeyboard::PanelWidth() * Dpi);
+	const float LabelPixels = FWoTMenuStyle::PhysicalTextPixels(Panel->KeyFontForTesting().Size,
+		Panel->GetCachedGeometry().GetAccumulatedLayoutTransform().GetScale());
+	Test.AddInfo(FString::Printf(TEXT("%s: UI DPI scale %.4f; panel %.0f x %.0f px at %.3f of its ")
+		TEXT("doubled size; keys %.1f x %.1f px (first layout %.1f x %.1f); key labels %.1f px; ")
+		TEXT("dark strip %.1f px"), *Label, Dpi, PanelRect.GetSize().X, PanelRect.GetSize().Y, Fit,
+		KeyRect.GetSize().X, KeyRect.GetSize().Y, 56.0f * Dpi, 50.0f * Dpi, LabelPixels,
+		StripRect.GetSize().Y));
+	if (Resolution.X >= 1280.0)
+	{
+		Test.TestTrue(FString::Printf(TEXT("%s: the panel keeps its full doubled size (%.3f)"),
+			*Label, Fit), FMath::IsNearlyEqual(Fit, 1.0f, 0.01f));
+		Test.TestTrue(FString::Printf(TEXT("%s: keys are twice the first layout's (%.1f px tall)"),
+			*Label, KeyRect.GetSize().Y),
+			FMath::IsNearlyEqual(KeyRect.GetSize().Y, 2.0f * 50.0f * Dpi, 1.0f)
+			&& FMath::IsNearlyEqual(KeyRect.GetSize().X, 2.0f * 56.0f * Dpi, 1.0f));
+	}
+	Test.TestTrue(FString::Printf(TEXT("%s: the panel fits the screen with a margin %s"), *Label,
+		*WoTDeckTest_RectText(PanelRect)), Screen.Contains(PanelRect, Margin));
+	Test.TestTrue(FString::Printf(TEXT("%s: key labels are at least 16 physical pixels (%.2f)"),
+		*Label, LabelPixels), LabelPixels >= 16.0f - 0.01f);
+
+	// The dark strip: full width along the screen's bottom, near opaque, with
+	// the panel directly above it and the host's prompts on it.
+	Test.TestTrue(FString::Printf(TEXT("%s: the dark strip spans the screen's bottom %s"), *Label,
+		*WoTDeckTest_RectText(StripRect)),
+		StripRect.Left <= 0.5f && StripRect.Right >= Resolution.X - 0.5f
+		&& FMath::IsNearlyEqual(StripRect.Bottom, static_cast<float>(Resolution.Y), 0.5f)
+		&& StripRect.GetSize().Y > 0.0f);
+	Test.TestTrue(TEXT("the dark strip is at least 90% opaque"),
+		SWoTTextEntryLayer::BottomStripColor().A >= 0.9f);
+	Test.TestTrue(FString::Printf(TEXT("%s: the panel sits directly above the strip (%.1f px gap)"),
+		*Label, StripRect.Top - PanelRect.Bottom),
+		PanelRect.Bottom <= StripRect.Top + 0.5f
+		&& StripRect.Top - PanelRect.Bottom <= 8.0f * Dpi + 1.0f);
+	if (Test.TestTrue(Label + TEXT(": the host's prompts show the panel's set"), Prompts.IsValid()
+		&& FWoTButtonPrompt::Describe(Prompts->GetShownPrompts())
+			== FWoTButtonPrompt::Describe(FWoTButtonPromptSets::KeyboardPanel())))
+	{
+		const FSlateRect PromptRect = FWoTDeckTest_Screen::Rect(Prompts);
+		Test.TestTrue(FString::Printf(TEXT("%s: the prompts lie on the strip %s in %s"), *Label,
+			*WoTDeckTest_RectText(PromptRect), *WoTDeckTest_RectText(StripRect)),
+			PromptRect.Top >= StripRect.Top - 0.5f && PromptRect.Bottom <= StripRect.Bottom + 0.5f
+			&& Screen.Contains(PromptRect));
+		WoTDeckTest_CheckStrip(Test, Label + TEXT(" keyboard prompts"), Prompts, Screen);
+	}
+
+	// The draft stays visible: a full-length draft wraps inside the panel,
+	// which keeps its width and stays on screen.
+	const TSharedPtr<SWidget> Preview = Panel->PreviewForTesting();
+	Test.TestTrue(Label + TEXT(": the draft's preview is on the panel"),
+		FWoTDeckTest_Screen::Rect(Preview).GetSize().Y > 0.0f
+		&& FWoTDeckTest_Screen::Rect(Preview).Top >= PanelRect.Top - 0.5f);
+	const int32 Longest = Panel->GetMaxLength() > 0 ? Panel->GetMaxLength() : 64;
+	Panel->SetDraft(FString::ChrN(Longest, TEXT('W')));
+	Screen.Settle();
+	const FSlateRect LongPanel = FWoTDeckTest_Screen::Rect(Panel);
+	const FSlateRect LongPreview = FWoTDeckTest_Screen::Rect(Preview);
+	Test.TestTrue(FString::Printf(TEXT("%s: a %d-character draft keeps the panel's width and the ")
+		TEXT("screen %s"), *Label, Longest, *WoTDeckTest_RectText(LongPanel)),
+		FMath::IsNearlyEqual(LongPanel.GetSize().X, PanelRect.GetSize().X, 1.0f)
+		&& Screen.Contains(LongPanel, Margin));
+	Test.TestTrue(FString::Printf(TEXT("%s: and wraps inside the panel %s"), *Label,
+		*WoTDeckTest_RectText(LongPreview)),
+		LongPreview.Left >= LongPanel.Left - 0.5f && LongPreview.Right <= LongPanel.Right + 0.5f
+		&& LongPreview.Top >= LongPanel.Top - 0.5f && LongPreview.Bottom <= LongPanel.Bottom + 0.5f);
+}
+
+/** A Battle citadel edit phase: the game menu's longest entry list. */
+AWoTBattleInfo* WoTDeckTest_SpawnEditPhase(UWorld* World)
+{
+	AWoTBattleInfo* Battle = World->SpawnActorDeferred<AWoTBattleInfo>(
+		AWoTBattleInfo::StaticClass(), FTransform::Identity);
+	if (Battle == nullptr)
+	{
+		return nullptr;
+	}
+	Battle->NumTeams = 2;
+	Battle->TeamClass[0] = AWoTCharacter::StaticClass();
+	Battle->TeamClass[1] = AWoTCharacter::StaticClass();
+	Battle->FinishSpawning(FTransform::Identity);
+	Battle->bTeleportersDisabled = true;
+	return Battle;
+}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckPromptGlyphFramesSpec,
+	"WoT.UI.ButtonPrompts.GlyphFrames", WoTUITest_Flags)
+
+bool FWoTDeckPromptGlyphFramesSpec::RunTest(const FString&)
+{
+	// On the Deck the Menu and View glyphs drew as solid white boxes:
+	// FSlateDrawElement::MakeBox fills a rounded box with its tint argument,
+	// never the brush's own tint, so the frame's "transparent" fill came out
+	// opaque over the lines inside. Each glyph is painted headless here and
+	// what it drew is read back from the element list.
+	const float Side = 48.0f;
+	const TSharedRef<SWindow> Window = SNew(SWindow).ClientSize(FVector2D(128.0f, 128.0f));
+	struct FDrawn
+	{
+		FSlateRect Rect;
+		float Alpha = 0.0f;
+	};
+	auto Paint = [&](EWoTPromptButton Button)
+	{
+		const TSharedRef<SWidget> Glyph = SWoTButtonPrompts::MakeGlyphForTesting(Button, Side);
+		const FGeometry Geometry = FGeometry::MakeRoot(FVector2D(Side, Side), FSlateLayoutTransform());
+		Glyph->SlatePrepass(1.0f);
+		FHittestGrid Grid;
+		FSlateWindowElementList Elements(Window);
+		const FPaintArgs Args(&Window.Get(), Grid, FVector2f::ZeroVector, FApp::GetCurrentTime(), 0.0f);
+		Glyph->Paint(Args, Geometry, Geometry.GetLayoutBoundingRect(), Elements, 0,
+			FWidgetStyle(), true);
+		TArray<FDrawn> Drawn;
+		auto Collect = [&Drawn](const auto& Array)
+		{
+			for (const auto& Element : Array)
+			{
+				const FVector2f Size = Element.GetLocalSize();
+				const FVector2f TopLeft = Element.GetRenderTransform().TransformPoint(FVector2f::ZeroVector);
+				const FVector2f BottomRight = Element.GetRenderTransform().TransformPoint(Size);
+				FDrawn& Entry = Drawn.AddDefaulted_GetRef();
+				Entry.Rect = FSlateRect(TopLeft.X, TopLeft.Y, BottomRight.X, BottomRight.Y);
+				Entry.Alpha = Element.GetTint().A;
+			}
+		};
+		const FSlateDrawElementMap& Map = Elements.GetUncachedDrawElements();
+		Collect(Map.Get<(uint8)EElementType::ET_Box>());
+		Collect(Map.Get<(uint8)EElementType::ET_RoundedBox>());
+		return Drawn;
+	};
+	auto Area = [](const FSlateRect& Rect) { return Rect.GetSize().X * Rect.GetSize().Y; };
+
+	// The control: A's disc is one filled shape over its whole face.
+	const TArray<FDrawn> A = Paint(EWoTPromptButton::A);
+	TestTrue(TEXT("the capture sees A's filled disc"), A.ContainsByPredicate(
+		[&](const FDrawn& Drawn) { return Drawn.Alpha > 0.5f && Area(Drawn.Rect) >= 0.8f * Side * Side; }));
+
+	// Menu and View: a hollow frame of four edges, the lines or windows inside
+	// it, and no opaque shape over the frame's whole area.
+	const FSlateRect Frame(Side * 0.08f, Side * 0.2f, Side * 0.92f, Side * 0.8f);
+	for (const EWoTPromptButton Button : {EWoTPromptButton::Menu, EWoTPromptButton::View})
+	{
+		const FString Name = FWoTButtonPrompt::ButtonName(Button);
+		const TArray<FDrawn> Drawn = Paint(Button);
+		int32 Inside = 0;
+		for (const FDrawn& Shape : Drawn)
+		{
+			const bool bCovers = Shape.Alpha > 0.1f && Area(Shape.Rect) >= 0.5f * Area(Frame);
+			TestFalse(FString::Printf(TEXT("%s: no opaque shape covers the frame %s (alpha %.2f)"),
+				*Name, *WoTDeckTest_RectText(Shape.Rect), Shape.Alpha), bCovers);
+			const bool bInterior = Shape.Rect.Left > Frame.Left + 1.0f && Shape.Rect.Right < Frame.Right - 1.0f
+				&& Shape.Rect.Top > Frame.Top + 1.0f && Shape.Rect.Bottom < Frame.Bottom - 1.0f;
+			Inside += bInterior && Shape.Alpha > 0.5f ? 1 : 0;
+		}
+		TestTrue(FString::Printf(TEXT("%s: the frame and what is inside it draw (%d shapes)"),
+			*Name, Drawn.Num()), Drawn.Num() >= 7);
+		TestTrue(FString::Printf(TEXT("%s: its inner shapes are drawn inside the frame (%d)"),
+			*Name, Inside), Inside >= 3);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckPromptLegibilitySpec,
+	"WoT.UI.ButtonPrompts.Legibility", WoTUITest_Flags)
+
+bool FWoTDeckPromptLegibilitySpec::RunTest(const FString&)
+{
+	// Every prompt strip's host, as the game lays it out at the Deck's
+	// 1280x800, its 720p output and 1080p.
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTEntryTest_Guard EntryGuard;
+	UWorld* World = WoTUITest_CreateWorld();
+	if (!TestNotNull(TEXT("world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTUITest_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	for (const FVector2D& Resolution : WoTDeckTest_Resolutions)
+	{
+		const FString Res = WoTDeckTest_Label(Resolution);
+		const float Dpi = FWoTMenuStyle::ViewportDpiScale(Resolution);
+		{
+			const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+			const TSharedRef<SWoTFrontEndRoot> Root = WoTUITest_MakeRoot(Authority);
+			FWoTDeckTest_Screen Screen(Root, Resolution);
+			WoTDeckTest_CheckStrip(*this, Res + TEXT(" front end"), Root->ButtonPromptsForTesting(),
+				Screen);
+		}
+		{
+			const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+				.PlayerController(Controller)
+				.RequiredFontsForTesting(WoTUITest_Fonts());
+			FWoTDeckTest_Screen Screen(Overlay, Resolution);
+			WoTDeckTest_CheckStrip(*this, Res + TEXT(" game menu"), Overlay->ButtonPromptsForTesting(),
+				Screen);
+		}
+		{
+			FWoTHelpContent Content;
+			Content.Title = TEXT("Help");
+			const TSharedRef<SWoTHelpOverlay> Help = SNew(SWoTHelpOverlay)
+				.Content(Content)
+				.InitialPhysicalSize(Resolution)
+				.InitialDpiScale(Dpi)
+				.RequiredFontsForTesting(WoTUITest_Fonts());
+			FWoTDeckTest_Screen Screen(Help, Resolution);
+			WoTDeckTest_CheckStrip(*this, Res + TEXT(" Help"), Help->ButtonPromptsForTesting(), Screen);
+		}
+		{
+			// The chat line, on the bare line and with Steam's keyboard typing
+			// (the "Keyboard panel" and "Cancel" prompts the owner saw).
+			const TSharedRef<SWoTChatInputOverlay> Chat = SNew(SWoTChatInputOverlay)
+				.PlayerController(nullptr)
+				.InitialText(TEXT("Say "));
+			FWoTDeckTest_Screen Screen(Chat, Resolution);
+			WoTDeckTest_CheckStrip(*this, Res + TEXT(" chat line"), Chat->ButtonPromptsForTesting(),
+				Screen);
+			FWoTEntryTest_Steam Steam;
+			if (TestTrue(Res + TEXT(": Steam's keyboard opens on the chat line"),
+				Chat->BeginTextEntry(0)
+				&& FWoTTextEntry::GetActiveRoute() == TOptional<EWoTTextEntryRoute>(
+					EWoTTextEntryRoute::SteamKeyboard)))
+			{
+				Screen.Settle();
+				TestEqual(Res + TEXT(": the chat line's Steam prompts"),
+					FWoTButtonPrompt::Describe(Chat->ButtonPromptsForTesting()->GetShownPrompts()),
+					FWoTButtonPrompt::Describe(FWoTButtonPromptSets::SteamKeyboard()));
+				WoTDeckTest_CheckStrip(*this, Res + TEXT(" chat line with Steam's keyboard"),
+					Chat->ButtonPromptsForTesting(), Screen);
+			}
+			FWoTTextEntry::ResetForTesting();
+		}
+		{
+			const TSharedRef<SWoTBootstrapScreen> Bootstrap = SNew(SWoTBootstrapScreen)
+				.Snapshot(FWoTBootstrapSnapshot());
+			FWoTDeckTest_Screen Screen(Bootstrap, Resolution);
+			WoTDeckTest_CheckStrip(*this, Res + TEXT(" setup screen"),
+				Bootstrap->ButtonPromptsForTesting(), Screen);
+		}
+	}
+	// The floor itself: 16 physical pixels at the live scale, never smaller
+	// than the bound face, a whole point size.
+	for (const FVector2D& Resolution : WoTDeckTest_Resolutions)
+	{
+		const float Dpi = FWoTMenuStyle::ViewportDpiScale(Resolution);
+		const FSlateFontInfo Small = SWoTButtonPrompts::LegibleLabelFont(
+			FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 8), Dpi);
+		TestTrue(WoTDeckTest_Label(Resolution) + TEXT(": a small face is raised to the floor"),
+			FWoTMenuStyle::PhysicalTextPixels(Small.Size, Dpi) >= 16.0f
+			&& FWoTMenuStyle::PhysicalTextPixels(Small.Size - 1.0f, Dpi) < 16.0f);
+		TestEqual(WoTDeckTest_Label(Resolution) + TEXT(": a large face is kept"),
+			SWoTButtonPrompts::LegibleLabelFont(
+				FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 40), Dpi).Size, 40.0f);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckKeyboardPanelFitSpec,
+	"WoT.UI.TextEntry.PanelFit", WoTUITest_Flags)
+
+bool FWoTDeckKeyboardPanelFitSpec::RunTest(const FString&)
+{
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTEntryTest_Guard EntryGuard;
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	for (const FVector2D& Resolution : WoTDeckTest_Resolutions)
+	{
+		const FString Res = WoTDeckTest_Label(Resolution);
+		{
+			// The front end's Play screen, where the owner saw the join list's
+			// text through the prompts.
+			const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+			const TSharedRef<SWoTFrontEndRoot> Root = WoTUITest_MakeRoot(Authority);
+			FWoTDeckTest_Screen Screen(Root, Resolution);
+			Root->ActivateMainMenuEntryForTesting(0);
+			Screen.Settle();
+			const TSharedPtr<SWidget> Field = Root->ServerNameTextBoxForTesting();
+			FString Text;
+			FWoTTextEntryRequest Request;
+			Request.Title = FText::FromString(TEXT("Server Name"));
+			Request.MaxLength = 32;
+			Request.GetText = [&Text]() { return Text; };
+			Request.SetText = [&Text](const FString& Value) { Text = Value; };
+			if (TestTrue(Res + TEXT(": the panel opens over Play"), Field.IsValid()
+				&& FWoTTextEntry::Begin(Request, Field.ToSharedRef(), 0, EWoTTextEntryRoute::Panel)))
+			{
+				Screen.Settle();
+				WoTDeckTest_CheckPanel(*this, Res + TEXT(" front end"), Screen,
+					Root->TextEntryLayerForTesting(), Root->ButtonPromptsForTesting());
+			}
+			FWoTTextEntry::ResetForTesting();
+		}
+		{
+			// The chat line: the smallest host face, and the longest draft.
+			const TSharedRef<SWoTChatInputOverlay> Chat = SNew(SWoTChatInputOverlay)
+				.PlayerController(nullptr)
+				.InitialText(TEXT("Say "));
+			FWoTDeckTest_Screen Screen(Chat, Resolution);
+			if (TestTrue(Res + TEXT(": the panel opens over chat"), Chat->BeginTextEntry(0)))
+			{
+				Screen.Settle();
+				WoTDeckTest_CheckPanel(*this, Res + TEXT(" chat line"), Screen,
+					Chat->TextEntryLayer(), Chat->ButtonPromptsForTesting());
+			}
+			FWoTTextEntry::ResetForTesting();
+		}
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckSettingsSaveChangesSpec,
+	"WoT.Settings.SaveChangesPrompt", WoTUITest_Flags)
+
+bool FWoTDeckSettingsSaveChangesSpec::RunTest(const FString&)
+{
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_SettingsRowsGuard RowsGuard;
+	FWoTUITest_Preferences Fixture;
+	if (!TestTrue(TEXT("a test preferences owner"), Fixture.bReady))
+	{
+		return false;
+	}
+	FSlateApplication& Slate = FSlateApplication::Get();
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
+	FWoTUITest_FrontEnd FrontEnd(Authority,
+		WoTUITest_MakeRoot(Authority, nullptr, false, Fixture.Owner), FVector2D(1280.0f, 720.0f));
+	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
+	auto Screen = [&Root]() { return Root->CurrentScreenForTesting(); };
+	auto OpenControls = [&Root, &FrontEnd]()
+	{
+		Root->ActivateMainMenuEntryForTesting(1);
+		FrontEnd.Settle();
+		return Root->SettingsScreenForTesting();
+	};
+	auto Focused = [&Slate]() { return Slate.GetKeyboardFocusedWidget(); };
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+
+	// With nothing changed, B leaves at once, as before.
+	TSharedPtr<SWoTSettingsScreen> Controls = OpenControls();
+	if (!TestTrue(TEXT("Controls opens"), Controls.IsValid()
+		&& Screen() == EWoTFrontEndScreen::Controls))
+	{
+		return false;
+	}
+	TestFalse(TEXT("an untouched page has no unsaved changes"), Controls->HasUnsavedChanges());
+	TestTrue(TEXT("B is handled"), FrontEnd.Press(EKeys::Gamepad_FaceButton_Right));
+	TestTrue(TEXT("with nothing changed, B leaves Controls at once"),
+		Screen() == EWoTFrontEndScreen::Main);
+	TestFalse(TEXT("and asks nothing"), Controls->IsConfirmingUnsaved());
+
+	// With an unsaved change, B asks first.
+	const FWoTGameSettings Saved = Fixture.Owner->GetGameSettings();
+	Controls = OpenControls();
+	FWoTGameSettings Changed = Controls->DraftForTesting();
+	Changed.bInvertMouseY = !Changed.bInvertMouseY;
+	Controls->SetDraftForTesting(Changed);
+	const TSharedPtr<SWidget> Editing = Controls->NavigationRowsForTesting().IsValidIndex(1)
+		? Controls->NavigationRowsForTesting()[1][0] : nullptr;
+	Slate.SetKeyboardFocus(Editing, EFocusCause::SetDirectly);
+	FrontEnd.Settle();
+	TestTrue(TEXT("an edit is an unsaved change"), Controls->HasUnsavedChanges());
+	TestTrue(TEXT("B is handled"), FrontEnd.Press(EKeys::Gamepad_FaceButton_Right));
+	TestTrue(TEXT("B with unsaved changes opens \"Save changes?\""), Controls->IsConfirmingUnsaved());
+	TestTrue(TEXT("and stays on Controls"), Screen() == EWoTFrontEndScreen::Controls);
+	TestTrue(TEXT("the prompt shows over the page"),
+		Controls->ConfirmPromptForTesting()->GetVisibility().IsVisible());
+	TestTrue(TEXT("focus opens on its Save"), Focused() == Controls->ConfirmSaveButtonForTesting());
+	TestFalse(TEXT("the page behind is out of the D-pad's reach"), WoTIsNavigable(Editing));
+	TestEqual(TEXT("the prompt strip shows the prompt's own set"),
+		FWoTButtonPrompt::Describe(Root->ButtonPromptsForTesting()->GetShownPrompts()),
+		FWoTButtonPrompt::Describe(FWoTButtonPromptSets::SaveChanges()));
+	TestTrue(TEXT("Right moves to Discard"),
+		WoTUITest_Navigate(Controls->ConfirmSaveButtonForTesting(), EUINavigation::Right)
+			== Controls->ConfirmDiscardButtonForTesting());
+	TestTrue(TEXT("Up cannot leave the prompt"),
+		WoTUITest_Navigate(Controls->ConfirmSaveButtonForTesting(), EUINavigation::Up) == nullptr);
+
+	// B on the prompt: back to editing, nothing lost.
+	TestTrue(TEXT("B on the prompt is handled"), FrontEnd.Press(EKeys::Gamepad_FaceButton_Right));
+	TestFalse(TEXT("B closes the prompt"), Controls->IsConfirmingUnsaved());
+	TestTrue(TEXT("still on Controls"), Screen() == EWoTFrontEndScreen::Controls);
+	TestTrue(TEXT("with the edit kept"), Controls->DraftForTesting() == Changed);
+	TestTrue(TEXT("and focus back where the player was"), Focused() == Editing);
+
+	// Escape is the same back action, on the page and on the prompt.
+	FrontEnd.Press(EKeys::Escape);
+	TestTrue(TEXT("Escape with unsaved changes asks too"), Controls->IsConfirmingUnsaved());
+	FrontEnd.Press(EKeys::Escape);
+	TestFalse(TEXT("Escape on the prompt keeps editing"), Controls->IsConfirmingUnsaved());
+	TestTrue(TEXT("on Controls"), Screen() == EWoTFrontEndScreen::Controls);
+
+	// Discard drops the draft and leaves, as the Back button does.
+	FrontEnd.Press(EKeys::Gamepad_FaceButton_Right);
+	FrontEnd.Press(EKeys::Gamepad_DPad_Right);
+	TestTrue(TEXT("the D-pad reaches Discard"), Focused() == Controls->ConfirmDiscardButtonForTesting());
+	FrontEnd.Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("Discard leaves Controls"), Screen() == EWoTFrontEndScreen::Main);
+	TestTrue(TEXT("and saves nothing"), Fixture.Owner->GetGameSettings() == Saved);
+
+	// Save applies and leaves, as the Save button does.
+	Controls = OpenControls();
+	Controls->SetDraftForTesting(Changed);
+	FrontEnd.Press(EKeys::Gamepad_FaceButton_Right);
+	TestTrue(TEXT("the prompt opens again"), Controls->IsConfirmingUnsaved()
+		&& Focused() == Controls->ConfirmSaveButtonForTesting());
+	FrontEnd.Press(EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("Save leaves Controls"), Screen() == EWoTFrontEndScreen::Main);
+	TestTrue(TEXT("having saved the change"),
+		Fixture.Owner->GetGameSettings().bInvertMouseY == Changed.bInvertMouseY);
+
+	// Mouse clicks on the page's own Save and Back are unchanged.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	auto Click = [&Slate, &FrontEnd](const TSharedPtr<SWidget>& Widget)
+	{
+		const FVector2D At = FrontEnd.Shown.ScreenCenter(Widget);
+		// A real pointer: over the button first, then down and up.
+		Slate.ProcessMouseMoveEvent(WoTUITest_MouseMove(At, At + FVector2D(1.0, 1.0)), false);
+		Slate.ProcessMouseButtonDownEvent(nullptr, WoTUITest_MouseDown(At));
+		Slate.ProcessMouseButtonUpEvent(WoTWidgetTest_MouseUp(At));
+		FrontEnd.Settle();
+	};
+	const FWoTGameSettings SavedAgain = Fixture.Owner->GetGameSettings();
+	FWoTGameSettings Reverted = SavedAgain;
+	Reverted.bInvertMouseY = !Reverted.bInvertMouseY;
+	Controls = OpenControls();
+	Controls->SetDraftForTesting(Reverted);
+	Click(Controls->BackButtonForTesting());
+	TestFalse(TEXT("a click on Back asks nothing"), Controls->IsConfirmingUnsaved());
+	TestTrue(TEXT("it leaves at once"), Screen() == EWoTFrontEndScreen::Main);
+	TestTrue(TEXT("dropping the draft"), Fixture.Owner->GetGameSettings() == SavedAgain);
+	Controls = OpenControls();
+	Controls->SetDraftForTesting(Reverted);
+	Click(Controls->SaveButtonForTesting());
+	TestTrue(TEXT("a click on Save saves and leaves"), Screen() == EWoTFrontEndScreen::Main
+		&& Fixture.Owner->GetGameSettings().bInvertMouseY == Reverted.bInvertMouseY);
+
+	// The game menu's settings pages take the same back action (Escape here).
+	UWorld* World = WoTUITest_CreateWorld();
+	if (!TestNotNull(TEXT("world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTUITest_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+		.PlayerController(Controller)
+		.Preferences(Fixture.Owner)
+		.RequiredFontsForTesting(WoTUITest_Fonts());
+	FWoTUITest_Window Shown(Overlay);
+	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1024.0f, 768.0f), FSlateLayoutTransform()), 0.0, 0.0f);
+	Shown.Settle();
+	Overlay->OpenSettingsForTesting(EWoTSettingsPage::Controls);
+	Shown.Settle();
+	const TSharedPtr<SWoTSettingsScreen> Page = Overlay->SettingsScreenForTesting();
+	if (!TestTrue(TEXT("the game menu's Controls opens"), Page.IsValid()))
+	{
+		return false;
+	}
+	FWoTGameSettings InGame = Page->DraftForTesting();
+	InGame.bLookSpring = !InGame.bLookSpring;
+	Page->SetDraftForTesting(InGame);
+	WoTWidgetTest_Press(Shown, EKeys::Escape);
+	TestTrue(TEXT("the game menu: Escape with unsaved changes asks"), Page->IsConfirmingUnsaved()
+		&& Overlay->SettingsScreenForTesting() == Page);
+	WoTWidgetTest_Press(Shown, EKeys::Escape);
+	TestTrue(TEXT("the game menu: Escape again keeps editing"), !Page->IsConfirmingUnsaved()
+		&& Overlay->SettingsScreenForTesting() == Page);
+	TestTrue(TEXT("the game menu: B asks too"),
+		WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Right) && Page->IsConfirmingUnsaved());
+	Slate.SetKeyboardFocus(Page->ConfirmDiscardButtonForTesting(), EFocusCause::SetDirectly);
+	WoTWidgetTest_Press(Shown, EKeys::Gamepad_FaceButton_Bottom);
+	TestTrue(TEXT("the game menu: Discard returns to the menu"), Overlay->IsShowingMainMenuForTesting());
+	TestTrue(TEXT("the game menu: and saves nothing"),
+		Fixture.Owner->GetGameSettings().bLookSpring != InGame.bLookSpring);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckInGameMenuFitsSpec,
+	"WoT.InGame.MenuFits", WoTUITest_Flags)
+
+bool FWoTDeckInGameMenuFitsSpec::RunTest(const FString&)
+{
+	// In a Battle edit phase the game menu's background stopped short of its
+	// entries and "Quit to Main Menu" hung off the bottom of the Deck's screen.
+	FWoTUITest_ModeGuard ModeGuard;
+	UWorld* World = WoTUITest_CreateWorld();
+	if (!TestNotNull(TEXT("world exists"), World))
+	{
+		return false;
+	}
+	ON_SCOPE_EXIT { WoTUITest_DestroyWorld(World); };
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("controller exists"), Controller))
+	{
+		return false;
+	}
+	Controller->ToggleInGameMenu();
+	for (const bool bBattle : {false, true})
+	{
+		if (bBattle && !TestNotNull(TEXT("a Battle edit phase"), WoTDeckTest_SpawnEditPhase(World)))
+		{
+			return false;
+		}
+		const TCHAR* Mode = bBattle ? TEXT("Battle edit phase") : TEXT("Arena");
+		for (const FVector2D& Resolution : WoTDeckTest_Resolutions)
+		{
+			const FString Label = FString::Printf(TEXT("%s %s"), *WoTDeckTest_Label(Resolution), Mode);
+			const TSharedRef<SWoTInGameMenuOverlay> Overlay = SNew(SWoTInGameMenuOverlay)
+				.PlayerController(Controller)
+				.RequiredFontsForTesting(WoTUITest_Fonts());
+			FWoTDeckTest_Screen Screen(Overlay, Resolution);
+			const int32 Count = Overlay->RenderedMainMenuEntryCountForTesting();
+			TestEqual(Label + TEXT(": every entry"), Count, bBattle ? 11 : 10);
+			TestEqual(Label + TEXT(": Quit is last"),
+				Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit), Count - 1);
+			const FSlateRect Background = FWoTDeckTest_Screen::Rect(Overlay->MenuBackgroundForTesting());
+			const FSlateRect First = FWoTDeckTest_Screen::Rect(Overlay->MainMenuButtonForTesting(0));
+			const FSlateRect Last = FWoTDeckTest_Screen::Rect(Overlay->MainMenuButtonForTesting(Count - 1));
+			AddInfo(FString::Printf(TEXT("%s: background %s, first entry %s, last entry %s"), *Label,
+				*WoTDeckTest_RectText(Background), *WoTDeckTest_RectText(First),
+				*WoTDeckTest_RectText(Last)));
+			TestTrue(Label + TEXT(": the last entry ends inside the background"),
+				Last.GetSize().Y > 0.0f && Last.Bottom <= Background.Bottom + 0.5f);
+			TestTrue(Label + TEXT(": the first entry starts inside it"), First.Top >= Background.Top - 0.5f);
+			TestTrue(Label + TEXT(": the entries lie within its width"),
+				First.Left >= Background.Left - 0.5f && First.Right <= Background.Right + 0.5f);
+			TestTrue(Label + TEXT(": the background ends on screen"),
+				Background.Bottom <= Resolution.Y + 0.5f);
+			TestTrue(Label + TEXT(": and starts on screen"), Background.Top >= -0.5f);
+			// The text is never shrunk to fit: the 2x strike of the 14-pixel
+			// face, 28 physical pixels, as before.
+			TestTrue(FString::Printf(TEXT("%s: entries keep their 28-pixel text (%.2f)"), *Label,
+				FWoTMenuStyle::PhysicalTextPixels(Overlay->ItemFontForTesting().Size, Screen.Dpi)),
+				FMath::IsNearlyEqual(FWoTMenuStyle::PhysicalTextPixels(
+					Overlay->ItemFontForTesting().Size, Screen.Dpi), 28.0f, 0.05f));
+			TArray<TSharedRef<SWidget>> Texts;
+			WoTDeckTest_Collect(Overlay->MainMenuButtonForTesting(Count - 1).ToSharedRef(),
+				FName(TEXT("STextBlock")), Texts);
+			if (TestEqual(Label + TEXT(": the last entry has its label"), Texts.Num(), 1))
+			{
+				const FSlateRect Text = FWoTDeckTest_Screen::Rect(Texts[0]);
+				TestTrue(Label + TEXT(": its label lies inside the background"),
+					Text.Left >= Background.Left - 0.5f && Text.Right <= Background.Right + 0.5f
+					&& Text.Bottom <= Background.Bottom + 0.5f);
+			}
+		}
+	}
 	return !HasAnyErrors();
 }
 

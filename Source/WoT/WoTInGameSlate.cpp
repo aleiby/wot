@@ -47,6 +47,17 @@ namespace
 		return FText::FromString(Text);
 	}
 
+	// The game menu's chrome around its pages: the background border's padding
+	// (SBorder's default, written out) and the frame's.
+	constexpr float WoTInGameMenu_BorderPadding = 2.0f;
+	constexpr float WoTInGameMenu_FramePadding = 36.0f;
+	// The least room kept between the menu and the screen's top and bottom.
+	constexpr float WoTInGameMenu_ScreenMargin = 24.0f;
+	// The settings, player and taunt pages' panel height, as before.
+	constexpr float WoTInGameMenu_PageHeight = 620.0f;
+	// The heading's gap above the entries.
+	constexpr float WoTInGameMenu_HeadingGap = 24.0f;
+
 	struct FWoTInGameMenuEntry
 	{
 		EWoTInGameMenuEntry Id;
@@ -240,7 +251,9 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 			// Hosts the keyboard panel over chat (spec r3 section 3 [I7]).
 			SAssignNew(EntryLayer, SWoTTextEntryLayer)
 			.Font(LineFont)
-			.PanelPadding(FMargin(16.0f, 16.0f, 16.0f, 44.0f))
+			// The dark strip behind the prompt strip below: its 8-unit
+			// bottom padding, and as much again above it.
+			.PromptBarMargin(FMargin(0.0f, 8.0f, 0.0f, 8.0f))
 			[
 				SNew(SOverlay)
 				+ SOverlay::Slot()
@@ -552,26 +565,39 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 		[
 			SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
 			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+			// The dark strip behind the prompt strip below (24 under it).
+			.PromptBarMargin(FMargin(0.0f, 12.0f, 0.0f, 24.0f))
 			[
 			SNew(SBox)
 			.HAlign(HAlign_Center)
 			.VAlign(VAlign_Center)
 			[
-			SNew(SBorder)
+			SAssignNew(MenuBackground, SBorder)
 			.BorderImage(FWoTMenuStyle::Get().Background())
+			.Padding(WoTInGameMenu_BorderPadding)
 			[
 			SNew(SBorder)
 			.BorderImage(FWoTMenuStyle::Get().Frame())
 			.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-			.Padding(36.0f)
+			.Padding(WoTInGameMenu_FramePadding)
 			[
+				// The main menu sizes to its entries, which Tick fits to the
+				// screen; the pages keep their fixed panel.
 				SNew(SBox)
 				.WidthOverride_Lambda([this]()
 				{
 					return ActiveSettingsScreen.IsValid() || bShowingPlayerConfig
-						? 760.0f : 420.0f;
+						? FOptionalSize(760.0f) : FOptionalSize();
 				})
-				.MaxDesiredHeight(620.0f)
+				.MinDesiredWidth_Lambda([this]()
+				{
+					return ActiveSettingsScreen.IsValid() || bShowingPlayerConfig
+						? FOptionalSize() : FOptionalSize(420.0f);
+				})
+				.MaxDesiredHeight_Lambda([this]()
+				{
+					return FOptionalSize(PageMaxHeight());
+				})
 				[
 					SAssignNew(ContentHost, SBox)
 				]
@@ -665,7 +691,7 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildMainMenu()
 
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()
-		.Padding(0.0f, 0.0f, 0.0f, 24.0f)
+		.Padding(0.0f, 0.0f, 0.0f, WoTInGameMenu_HeadingGap)
 		[
 			SNew(STextBlock)
 			.Text(WoTInGameSlate_Text(TEXT("Game Menu")))
@@ -1141,11 +1167,14 @@ void SWoTInGameMenuOverlay::Tick(
 		return;
 	}
 	const float PreviousViewportScale = LiveViewportScale;
+	const float PreviousScreenHeight = LiveScreenHeight;
 	LiveViewportScale = FMath::Max(
 		AllottedGeometry.GetAccumulatedLayoutTransform().GetScale(), 0.01f);
+	LiveScreenHeight = AllottedGeometry.GetLocalSize().Y;
 	if (ActiveSettingsScreen.IsValid() || bShowingPlayerConfig || bShowingTaunts)
 	{
-		if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale))
+		if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale)
+			|| !FMath::IsNearlyEqual(PreviousScreenHeight, LiveScreenHeight))
 		{
 			Invalidate(EInvalidateWidgetReason::Layout);
 		}
@@ -1177,13 +1206,19 @@ void SWoTInGameMenuOverlay::Tick(
 		FWoTMenuLayout::MeasureFontHeight(ItemFont());
 	const float TitleArea =
 		FWoTMenuLayout::MeasureFontHeight(HeadingFont())
-		+ 24.0f;
+		+ WoTInGameMenu_HeadingGap;
 	const int32 EntryCount = MainMenuEntryCount();
+	// menuWOT's spacing over the room the entries really have: the screen
+	// less its margins, the menu's chrome and the heading. Where the ideal
+	// spacing does not fit (a Battle edit phase has the most entries), the
+	// spacing compacts and the text keeps its size, so the background always
+	// encloses the last entry on screen.
 	EntrySpacing = FWoTMenuLayout::CalculateSpacing(
-		EntryCount, EntryHeight, AllottedGeometry.GetLocalSize().Y - TitleArea);
+		EntryCount, EntryHeight, MainMenuContentRoom() - TitleArea);
 	ListHeight = FWoTMenuLayout::CalculateListHeight(
 		EntryCount, EntryHeight, EntrySpacing);
 	if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale)
+		|| !FMath::IsNearlyEqual(PreviousScreenHeight, LiveScreenHeight)
 		|| !FMath::IsNearlyEqual(PreviousEntryHeight, EntryHeight)
 		|| !FMath::IsNearlyEqual(PreviousSpacing, EntrySpacing)
 		|| !FMath::IsNearlyEqual(PreviousListHeight, ListHeight))
@@ -1475,6 +1510,25 @@ int32 SWoTInGameMenuOverlay::MainMenuEntryCount() const
 	return MainMenuEntryIds.Num();
 }
 
+float SWoTInGameMenuOverlay::MainMenuContentRoom() const
+{
+	// The screen less a margin top and bottom and the menu's chrome.
+	constexpr float Chrome = 2.0f * (WoTInGameMenu_BorderPadding + WoTInGameMenu_FramePadding);
+	return FMath::Max(0.0f, LiveScreenHeight - 2.0f * WoTInGameMenu_ScreenMargin - Chrome);
+}
+
+FOptionalSize SWoTInGameMenuOverlay::PageMaxHeight() const
+{
+	const bool bPage = ActiveSettingsScreen.IsValid() || bShowingPlayerConfig || bShowingTaunts;
+	if (LiveScreenHeight <= 0.0f)
+	{
+		// Before the first Tick: the pages' panel, the main menu unbounded.
+		return bPage ? FOptionalSize(WoTInGameMenu_PageHeight) : FOptionalSize();
+	}
+	const float Room = MainMenuContentRoom();
+	return FOptionalSize(bPage ? FMath::Min(WoTInGameMenu_PageHeight, Room) : Room);
+}
+
 FMargin SWoTInGameMenuOverlay::EntryPadding(int32 EntryIndex) const
 {
 	const float HalfSpacing = EntrySpacing * 0.5f;
@@ -1602,7 +1656,7 @@ FSlateFontInfo SWoTInGameMenuOverlay::ItemFontForTesting() const
 float SWoTInGameMenuOverlay::MainMenuDesiredHeightForTesting() const
 {
 	return FWoTMenuLayout::MeasureFontHeight(HeadingFont())
-		+ 24.0f + ListHeight;
+		+ WoTInGameMenu_HeadingGap + ListHeight;
 }
 #endif
 
