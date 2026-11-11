@@ -59,10 +59,10 @@ namespace
 	// The heading's gap above the entries.
 	constexpr float WoTInGameMenu_HeadingGap = 24.0f;
 
-	// Seam extension rows (FWoTOnboardingSeams::MenuRows) append after the
-	// retail entries; their ids carry the row index offset past the retail
-	// enum, so the Tick snapshot/live comparison treats them like any other
-	// entry and rebuilds when the registry changes under the open menu.
+	// Seam extension rows (FWoTOnboardingSeams::MenuRows) sit after the other
+	// entries, just above Quit; their ids carry the row index offset past the
+	// retail enum, so the Tick snapshot/live comparison treats them like any
+	// other entry and rebuilds when the registry changes under the open menu.
 	constexpr uint8 WoTInGameSlate_ExtensionIdBase = 0x80;
 
 	struct FWoTInGameMenuEntry
@@ -193,13 +193,13 @@ namespace
 		Entries.Append({
 			{EWoTInGameMenuEntry::PlayerConfig, TEXT("Player Config")},
 			{EWoTInGameMenuEntry::Controls, TEXT("Controls")},
-			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")},
-			{EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")}
+			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")}
 		});
-		// Seam extension rows, appended at the end; an empty registry appends
-		// nothing, so a build without the onboarding plugin renders exactly
-		// the list above. Labels resolve here (snapshot time) so Tick's
-		// live/snapshot comparison follows label changes too.
+		// Seam extension rows, just above Quit, which stays last [I9]; an
+		// empty registry adds nothing, so a build without the onboarding
+		// plugin renders exactly the retail list. Labels resolve here
+		// (snapshot time) so Tick's live/snapshot comparison follows label
+		// changes too.
 		const TArray<FWoTOnboardingRow>& ExtensionRows =
 			FWoTOnboardingSeams::Get().MenuRows;
 		const int32 ExtensionCapacity = 0xFF - WoTInGameSlate_ExtensionIdBase;
@@ -212,6 +212,7 @@ namespace
 					WoTInGameSlate_ExtensionIdBase + RowIndex),
 				Row.Label ? Row.Label() : FString()});
 		}
+		Entries.Add({EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")});
 		return Entries;
 	}
 }
