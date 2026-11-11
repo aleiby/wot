@@ -12,6 +12,7 @@ class SCheckBox;
 class SScrollBox;
 class STextBlock;
 class UWoTPreferencesSubsystem;
+class UWoTInstallerSharingSubsystem;
 
 enum class EWoTSettingsPage : uint8
 {
@@ -136,6 +137,14 @@ public:
 	TSharedPtr<SCheckBox> SteamKeyboardCheckBoxForTesting() const
 		{ return SteamKeyboardCheckBox; }
 	bool SteamKeyboardDraftForTesting() const { return bSteamKeyboardDraft; }
+	bool SharingDraftForTesting() const { return bSharingDraft; }
+	bool SharingConfirmedForTesting() const { return bSharingConfirmed; }
+	TSharedPtr<SCheckBox> SharingCheckBoxForTesting() const
+		{ return SharingCheckBox; }
+	bool IsSharingHintVisibleForTesting() const { return IsSharingHintVisible(); }
+	TSharedPtr<STextBlock> SharingHintForTesting() const { return SharingHint; }
+	/** The game instance's sharing subsystem, for a screen built outside one. */
+	void SetSharingSubsystemForTesting(UWoTInstallerSharingSubsystem* Sharing);
 #endif
 
 private:
@@ -177,6 +186,10 @@ private:
 	FReply KeepVideo();
 	FReply RevertVideo();
 	bool CommitDraft();
+	/** Persists a changed sharing switch and tells the sharer. */
+	bool CommitSharingDraft();
+	UWoTInstallerSharingSubsystem* ResolveSharing() const;
+	bool IsSharingHintVisible() const;
 	bool VideoDiffersFromConfirmed() const;
 	void RevertDraftVideoToConfirmed();
 	void SetError(const FText& Text);
@@ -200,6 +213,10 @@ private:
 	double VideoConfirmDeadline = 0.0;
 	double LastTickTime = 0.0;
 	bool bVideoPreviewLive = false;
+	/** "Share the original installer on this network" (Hardware > NETWORK):
+	 * a preferences side file, saved with the rest of the page. */
+	bool bSharingConfirmed = true;
+	bool bSharingDraft = true;
 
 	TSharedPtr<SWidget> SaveButton;
 	TSharedPtr<SWidget> BackButton;
@@ -230,6 +247,11 @@ private:
 	TSharedPtr<SCheckBox> SteamKeyboardCheckBox;
 	bool bSteamKeyboardConfirmed = false;
 	bool bSteamKeyboardDraft = false;
+	TSharedPtr<SCheckBox> SharingCheckBox;
+	TSharedPtr<STextBlock> SharingHint;
+#if WITH_AUTOMATION_TESTS
+	TWeakObjectPtr<UWoTInstallerSharingSubsystem> SharingForTesting;
+#endif
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;

@@ -9,6 +9,9 @@
 #include "../WoTMenuStyle.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
+#include "../Online/WoTInstallerSharingSubsystem.h"
+#include "../Online/WoTLocalNetworkAccess.h"
+#include "../Updater/WoTLocalInstallerForSharing.h"
 #include "WoTFrontEndTestData.h"
 
 #include "Framework/Application/SlateApplication.h"
@@ -829,6 +832,170 @@ bool FWoTParityFix18SettingsLabelsSpec::RunTest(const FString&)
 				HasText(Texts, Label));
 		}
 	}
+	return !HasAnyErrors();
+}
+
+namespace
+{
+/** A sharer source that never finds an installer. */
+class FSettingsNothingToShareSource final : public IWoTInstallerShareSource
+{
+public:
+	virtual FString Find() override { return FString(); }
+	virtual TUniquePtr<IWoTInstallerShareReader> Open() override { return nullptr; }
+};
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareSettingsRowSpec,
+	"WoT.InstallerShare.SettingsRow", ScreenFlags)
+
+bool FWoTInstallerShareSettingsRowSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	TestTrue(TEXT("sharing is on by default"), Screen->SharingDraftForTesting());
+	const TSharedPtr<SCheckBox> Box = Screen->SharingCheckBoxForTesting();
+	if (!TestTrue(TEXT("the Hardware page has the sharing row"), Box.IsValid())) return false;
+	TestTrue(TEXT("the row shows checked"), Box->IsChecked());
+	Box->ToggleCheckedState();
+	TestFalse(TEXT("toggling changes the draft"), Screen->SharingDraftForTesting());
+	TestTrue(TEXT("Back discards the change"),
+		Screen->HandleBack() && Screen->SharingDraftForTesting());
+	TestTrue(TEXT("Back wrote nothing"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+
+	UWoTInstallerSharingSubsystem* Sharing =
+		NewObject<UWoTInstallerSharingSubsystem>(Fixture.Instance);
+	Sharing->AddToRoot();
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT
+	{
+		Sharing->ApplySharingSwitch(false);
+		Sharing->RemoveFromRoot();
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
+	};
+	FWoTInstallerSharingTestConfig Config;
+	Config.IsBootstrapReady = []() { return true; };
+	Config.SharerConfig.Label = TEXT("a Windows PC");
+	Config.SharerConfig.Size = 8;
+	Config.MakeDependencies = []()
+	{
+		FWoTInstallerSharer::FDependencies Dependencies;
+		Dependencies.Source = MakeShared<FSettingsNothingToShareSource>();
+		return Dependencies;
+	};
+	Sharing->ConfigureForTesting(MoveTemp(Config), true);
+	Sharing->EvaluateForTesting();
+	Sharing->PumpForTesting();
+	TestTrue(TEXT("the sharer searched and found nothing"), Sharing->HasNothingToShare());
+
+	FScreenCallbacks SaveCallbacks;
+	TSharedRef<SWoTSettingsScreen> Saving = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, SaveCallbacks);
+	Saving->SetSharingSubsystemForTesting(Sharing);
+	TestTrue(TEXT("the hint shows while sharing is on and nothing was found"),
+		Saving->IsSharingHintVisibleForTesting());
+	Saving->SharingCheckBoxForTesting()->ToggleCheckedState();
+	TestFalse(TEXT("the hint hides while the switch is off"),
+		Saving->IsSharingHintVisibleForTesting());
+	Saving->SaveForTesting();
+	TestEqual(TEXT("Save closes the screen"), SaveCallbacks.SavedCount, 1);
+	TestFalse(TEXT("Save persisted off"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+	TestFalse(TEXT("the confirmed switch is off"), Saving->SharingConfirmedForTesting());
+	TestFalse(TEXT("Save stopped the sharer"), Sharing->IsSharerRunning());
+
+	// A reopened page reads the side file again.
+	FScreenCallbacks ReloadCallbacks;
+	TSharedRef<SWoTSettingsScreen> Reloaded = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, ReloadCallbacks);
+	TestFalse(TEXT("a reopened page shows sharing off"), Reloaded->SharingDraftForTesting());
+	Reloaded->SetSharingSubsystemForTesting(Sharing);
+	Reloaded->SharingCheckBoxForTesting()->ToggleCheckedState();
+	Reloaded->SaveForTesting();
+	TestTrue(TEXT("switching it back on persists"),
+		UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+	TestTrue(TEXT("and restarts the sharer"), Sharing->IsSharerRunning());
+
+	FScreenCallbacks ControlsCallbacks;
+	TSharedRef<SWoTSettingsScreen> ControlsScreen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, ControlsCallbacks);
+	TestFalse(TEXT("Controls has no sharing row"),
+		ControlsScreen->SharingCheckBoxForTesting().IsValid());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareSettingsHintSpec,
+	"WoT.InstallerShare.SettingsHintWhereDownloadsIsSkipped", ScreenFlags)
+
+bool FWoTInstallerShareSettingsHintSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	UWoTInstallerSharingSubsystem* Sharing =
+		NewObject<UWoTInstallerSharingSubsystem>(Fixture.Instance);
+	Sharing->AddToRoot();
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT
+	{
+		Sharing->ApplySharingSwitch(false);
+		Sharing->RemoveFromRoot();
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
+		WoTSetSharingFinderSkipsDownloadsForTesting({});
+	};
+	FWoTInstallerSharingTestConfig Config;
+	Config.IsBootstrapReady = []() { return true; };
+	Config.SharerConfig.Label = TEXT("a Mac");
+	Config.SharerConfig.Size = 8;
+	Config.MakeDependencies = []()
+	{
+		FWoTInstallerSharer::FDependencies Dependencies;
+		Dependencies.Source = MakeShared<FSettingsNothingToShareSource>();
+		return Dependencies;
+	};
+	Sharing->ConfigureForTesting(MoveTemp(Config), true);
+	Sharing->EvaluateForTesting();
+	Sharing->PumpForTesting();
+	if (!TestTrue(TEXT("the sharer found nothing"), Sharing->HasNothingToShare())) return false;
+
+	const FString MacHint(TEXT(
+		"On a Mac, keep the original installer beside WoT Reborn or choose it with Browse to share it."));
+	const FString DefaultHint(TEXT("No original installer found on this computer to share."));
+	struct FHintCase
+	{
+		bool bSkipsDownloads;
+		const FString* Expected;
+	};
+	for (const FHintCase& Case : {FHintCase{true, &MacHint}, FHintCase{false, &DefaultHint}})
+	{
+		WoTSetSharingFinderSkipsDownloadsForTesting(Case.bSkipsDownloads);
+		if (Case.bSkipsDownloads)
+		{
+			// The hint follows the finder: this search only looks up the
+			// Downloads path (it never opens Downloads).
+			TestTrue(TEXT("the production search skips Downloads"),
+				WoTProductionLocalInstallerSearch({}).DownloadsDirectory.IsEmpty());
+		}
+		FScreenCallbacks Callbacks;
+		TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+			EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+		Screen->SetSharingSubsystemForTesting(Sharing);
+		TestTrue(TEXT("the hint shows"), Screen->IsSharingHintVisibleForTesting());
+		const TSharedPtr<STextBlock> Hint = Screen->SharingHintForTesting();
+		TestTrue(Case.bSkipsDownloads
+				? TEXT("where Downloads is skipped, the hint names where to keep it")
+				: TEXT("elsewhere, the hint says nothing was found"),
+			Hint.IsValid() && Hint->GetText().ToString() == *Case.Expected);
+	}
+	WoTSetSharingFinderSkipsDownloadsForTesting({});
+	TestEqual(TEXT("unset, the platform decides: only a Mac skips Downloads"),
+		WoTSharingFinderSkipsDownloads(), PLATFORM_MAC != 0);
+	TestEqual(TEXT("and the hint follows it"),
+		UWoTInstallerSharingSubsystem::NothingToShareHint(),
+		PLATFORM_MAC ? MacHint : DefaultHint);
 	return !HasAnyErrors();
 }
 

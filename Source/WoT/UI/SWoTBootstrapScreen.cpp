@@ -89,6 +89,8 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 	ExitRequested = InArgs._OnExitRequested;
 	BrowseInstallerRequested = InArgs._OnBrowseInstaller;
 	GetOriginalGameRequested = InArgs._OnGetOriginalGame;
+	CopyFromAnotherComputerRequested = InArgs._OnCopyFromAnotherComputer;
+	CancelInstallerCopyRequested = InArgs._OnCancelInstallerCopy;
 	Ready = InArgs._OnReady;
 
 	BackdropBrush = WoTSetupBackdrop::MakeBrush(WoTSetupBackdrop::Current());
@@ -184,6 +186,20 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 		+ SVerticalBox::Slot().AutoHeight()
 			.Padding(0.0f, 12.0f * WoTBootstrapScale, 0.0f, 0.0f)
 		[
+			// The one LAN-copy line: how to copy from another computer on this
+			// network, or what the copy is doing.
+			SNew(STextBlock)
+			.Text(this, &SWoTBootstrapScreen::InstallerCopyText)
+			.Font(WoTBootstrapFont(TEXT("Regular"),
+				WoTBootstrapDetailFontSize))
+			.AutoWrapText(true)
+			.AccessibleText(this, &SWoTBootstrapScreen::InstallerCopyText)
+			.Visibility(this,
+				&SWoTBootstrapScreen::InstallerCopyTextVisibility)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+			.Padding(0.0f, 12.0f * WoTBootstrapScale, 0.0f, 0.0f)
+		[
 			// Shown once "Get it on GOG" was clicked: GOG steers buyers to its
 			// Galaxy app, and the offline installer is easy to miss.
 			SNew(STextBlock)
@@ -267,6 +283,35 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 					&SWoTBootstrapScreen::OriginalGameActionVisibility)
 				.OnClicked(this, &SWoTBootstrapScreen::GetOriginalGame)
 			]
+			+ SHorizontalBox::Slot().AutoWidth()
+				.Padding(0.0f, 0.0f, WoTBootstrapButtonGap, 0.0f)
+			[
+				// Windows and Mac only: listening is what raises the firewall
+				// or Local Network prompt, so it waits for this click.
+				SAssignNew(CopyFromAnotherComputerButton, SButton)
+				.Text(LOCTEXT("CopyFromAnotherComputer",
+					"Copy from another computer"))
+				.TextStyle(&WoTBootstrapButtonTextStyle())
+				.ContentPadding(WoTBootstrapButtonPadding)
+				.AccessibleText(LOCTEXT("CopyFromAnotherComputerAccessible",
+					"Copy the original game installer from WoT Reborn on another computer on this network"))
+				.Visibility(this,
+					&SWoTBootstrapScreen::CopyFromAnotherComputerVisibility)
+				.OnClicked(this, &SWoTBootstrapScreen::CopyFromAnotherComputer)
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+				.Padding(0.0f, 0.0f, WoTBootstrapButtonGap, 0.0f)
+			[
+				SAssignNew(CancelInstallerCopyButton, SButton)
+				.Text(LOCTEXT("CancelInstallerCopy", "Cancel"))
+				.TextStyle(&WoTBootstrapButtonTextStyle())
+				.ContentPadding(WoTBootstrapButtonPadding)
+				.AccessibleText(LOCTEXT("CancelInstallerCopyAccessible",
+					"Stop copying the original game installer"))
+				.Visibility(this,
+					&SWoTBootstrapScreen::CancelInstallerCopyVisibility)
+				.OnClicked(this, &SWoTBootstrapScreen::CancelInstallerCopy)
+			]
 		]
 		]
 		]
@@ -319,6 +364,11 @@ FText SWoTBootstrapScreen::ProgressText() const
 			LOCTEXT("StageAndProgress", "{0}\n{1}"), Snapshot.StageText,
 			Progress);
 	};
+	if (Snapshot.Phase == EWoTBootstrapPhase::OriginalGameNeeded
+		&& Snapshot.InstallerCopy.Status == EWoTInstallerCopyStatus::Copying)
+	{
+		return InstallerCopyProgressTextFor(Snapshot);
+	}
 	if (Snapshot.bDiskPreflightVisible && Snapshot.RequiredBytes.IsSet()
 		&& Snapshot.AvailableBytes.IsSet())
 	{
@@ -522,6 +572,135 @@ FReply SWoTBootstrapScreen::GetOriginalGame()
 	return FReply::Handled();
 }
 
+FReply SWoTBootstrapScreen::CopyFromAnotherComputer()
+{
+	if (CopyFromAnotherComputerVisibility() == EVisibility::Visible)
+	{
+		CopyFromAnotherComputerRequested.ExecuteIfBound();
+	}
+	return FReply::Handled();
+}
+
+FReply SWoTBootstrapScreen::CancelInstallerCopy()
+{
+	if (CancelInstallerCopyVisibility() == EVisibility::Visible)
+	{
+		CancelInstallerCopyRequested.ExecuteIfBound();
+	}
+	return FReply::Handled();
+}
+
+EVisibility SWoTBootstrapScreen::CopyFromAnotherComputerVisibility() const
+{
+	const FWoTBootstrapSnapshot Snapshot = GetSnapshot();
+	const EWoTInstallerCopyStatus Status = Snapshot.InstallerCopy.Status;
+	// Never under Proton (it listens by itself there), and gone while the
+	// receiver listens; back after three damaged copies.
+	return Snapshot.Phase == EWoTBootstrapPhase::OriginalGameNeeded
+		&& !Snapshot.InstallerCopy.bAutomatic
+		&& (Status == EWoTInstallerCopyStatus::Off
+			|| Status == EWoTInstallerCopyStatus::GaveUp)
+		? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SWoTBootstrapScreen::CancelInstallerCopyVisibility() const
+{
+	const FWoTBootstrapSnapshot Snapshot = GetSnapshot();
+	return Snapshot.Phase == EWoTBootstrapPhase::OriginalGameNeeded
+		&& Snapshot.InstallerCopy.Status == EWoTInstallerCopyStatus::Copying
+		? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+FText SWoTBootstrapScreen::InstallerCopyText() const
+{
+	return InstallerCopyTextFor(GetSnapshot(), PLATFORM_WINDOWS != 0);
+}
+
+EVisibility SWoTBootstrapScreen::InstallerCopyTextVisibility() const
+{
+	return InstallerCopyText().IsEmpty()
+		? EVisibility::Collapsed : EVisibility::Visible;
+}
+
+FText SWoTBootstrapScreen::InstallerCopyTextFor(
+	const FWoTBootstrapSnapshot& Snapshot, bool bWindows)
+{
+	if (Snapshot.Phase != EWoTBootstrapPhase::OriginalGameNeeded)
+	{
+		return FText::GetEmpty();
+	}
+	const FWoTInstallerCopyState& Copy = Snapshot.InstallerCopy;
+	const FText Label = FText::FromString(Copy.PeerLabel.IsEmpty()
+		? FString(TEXT("another computer")) : Copy.PeerLabel);
+	// The firewall asks when the receiver starts listening, right after the
+	// click. On a network Windows calls Public (its default for new networks),
+	// allowing only private networks would leave the receiver blocked.
+	const FText AllowLine = bWindows
+		? LOCTEXT("InstallerCopyAllow", " If Windows asks, click Allow.")
+		: FText::GetEmpty();
+	switch (Copy.Status)
+	{
+	case EWoTInstallerCopyStatus::Off:
+		if (Copy.bAutomatic)
+		{
+			return FText::GetEmpty();
+		}
+		return FText::Format(LOCTEXT("InstallerCopyHint",
+			"Have WoT Reborn on another computer on this network? Open it "
+			"there, then click Copy from another computer.{0}"), AllowLine);
+	case EWoTInstallerCopyStatus::Waiting:
+		if (Copy.bAutomatic)
+		{
+			// The version is the first release that shares; adjust at release.
+			return LOCTEXT("InstallerCopyAutomatic",
+				"Or open WoT Reborn (version 0.1.4 or later) on a computer on "
+				"this network that has the installer; it is copied here "
+				"automatically.");
+		}
+		return FText::Format(LOCTEXT("InstallerCopyLooking",
+			"Looking for WoT Reborn on another computer on this network…{0}"),
+			AllowLine);
+	case EWoTInstallerCopyStatus::Damaged:
+		return FText::Format(LOCTEXT("InstallerCopyDamaged",
+			"The copy from {0} was damaged. Trying again…"), Label);
+	case EWoTInstallerCopyStatus::GaveUp:
+		return LOCTEXT("InstallerCopyGaveUp",
+			"Copies from this network keep arriving damaged. Use Browse, or put "
+			"the installer in Downloads.");
+	case EWoTInstallerCopyStatus::NotEnoughSpace:
+	{
+		// Rounded up to a tenth of a gigabyte (2^30 bytes, as the system's
+		// own file views count them).
+		const double Gigabytes = FMath::CeilToDouble(
+			static_cast<double>(Copy.NeededBytes)
+				/ (1024.0 * 1024.0 * 1024.0) * 10.0) / 10.0;
+		return FText::Format(LOCTEXT("InstallerCopyNoSpace",
+			"Not enough free space for the original installer: {0} GB needed."),
+			FText::FromString(FString::Printf(TEXT("%.1f"), Gigabytes)));
+	}
+	case EWoTInstallerCopyStatus::Copying:
+	case EWoTInstallerCopyStatus::Unknown:
+	case EWoTInstallerCopyStatus::Disabled:
+	default:
+		return FText::GetEmpty();
+	}
+}
+
+FText SWoTBootstrapScreen::InstallerCopyProgressTextFor(
+	const FWoTBootstrapSnapshot& Snapshot)
+{
+	const FString& PeerLabel = Snapshot.InstallerCopy.PeerLabel;
+	const uint64 Total = Snapshot.TotalBytes.Get(0);
+	const uint64 Completed = FMath::Min(Snapshot.CompletedBytes.Get(0), Total);
+	const uint64 Percentage = Total == 0 ? 0 : (Completed * 100) / Total;
+	return FText::Format(LOCTEXT("InstallerCopyProgress",
+		"Copying the original game installer from {0}… {1}%"),
+		FText::FromString(PeerLabel.IsEmpty()
+			? FString(TEXT("another computer")) : PeerLabel),
+		FText::FromString(FString::Printf(TEXT("%llu"),
+			static_cast<unsigned long long>(Percentage))));
+}
+
 FText SWoTBootstrapScreen::GogStepsText() const
 {
 	return LOCTEXT("OriginalGameGogSteps",
@@ -653,6 +832,17 @@ SWoTBootstrapScreen::BrowseInstallerWidgetForTesting() const
 TSharedPtr<SWidget> SWoTBootstrapScreen::GetOriginalGameWidgetForTesting() const
 {
 	return GetOriginalGameButton;
+}
+
+TSharedPtr<SWidget>
+SWoTBootstrapScreen::CopyFromAnotherComputerWidgetForTesting() const
+{
+	return CopyFromAnotherComputerButton;
+}
+
+TSharedPtr<SWidget> SWoTBootstrapScreen::CancelInstallerCopyWidgetForTesting() const
+{
+	return CancelInstallerCopyButton;
 }
 
 float SWoTBootstrapScreen::ContentWidthForTesting(float ScreenWidth) const

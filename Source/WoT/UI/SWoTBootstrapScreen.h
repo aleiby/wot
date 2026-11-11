@@ -26,6 +26,11 @@ public:
 		SLATE_EVENT(FSimpleDelegate, OnExitRequested)
 		SLATE_EVENT(FSimpleDelegate, OnBrowseInstaller)
 		SLATE_EVENT(FSimpleDelegate, OnGetOriginalGame)
+		/** "Copy from another computer" (Windows and Mac): start listening
+		 * for WoT Reborn on another computer on this network. */
+		SLATE_EVENT(FSimpleDelegate, OnCopyFromAnotherComputer)
+		/** Cancel during a LAN copy. */
+		SLATE_EVENT(FSimpleDelegate, OnCancelInstallerCopy)
 		SLATE_EVENT(FSimpleDelegate, OnReady)
 	SLATE_END_ARGS()
 
@@ -45,6 +50,18 @@ public:
 	// The step-by-step GOG instructions, shown after "Get it on GOG".
 	FText GogStepsText() const;
 	EVisibility GogStepsVisibility() const;
+	/** The LAN copy line (spec B1): the hint, waiting, damaged, three
+	 * strikes or not enough space. Empty while a copy runs (the status line
+	 * shows it) and where receiving is unavailable. */
+	FText InstallerCopyText() const;
+	EVisibility InstallerCopyTextVisibility() const;
+	EVisibility CopyFromAnotherComputerVisibility() const;
+	EVisibility CancelInstallerCopyVisibility() const;
+	/** Pure text rules; bWindows adds the firewall line ("click Allow"). */
+	static FText InstallerCopyTextFor(const FWoTBootstrapSnapshot& Snapshot,
+		bool bWindows);
+	/** "Copying the original game installer from <label>... NN%". */
+	static FText InstallerCopyProgressTextFor(const FWoTBootstrapSnapshot& Snapshot);
 	TOptional<float> PhaseProgress() const;
 	EVisibility OriginalGameTextVisibility() const;
 	EVisibility OriginalGameActionVisibility() const;
@@ -65,9 +82,13 @@ public:
 	TSharedPtr<SWidget> GetOriginalGameWidgetForTesting() const;
 	/** The controller prompt strip (A Select). */
 	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+	TSharedPtr<SWidget> CopyFromAnotherComputerWidgetForTesting() const;
+	TSharedPtr<SWidget> CancelInstallerCopyWidgetForTesting() const;
 #if WITH_AUTOMATION_TESTS
 	FReply BrowseInstallerForTesting() { return BrowseInstaller(); }
 	FReply GetOriginalGameForTesting() { return GetOriginalGame(); }
+	FReply CopyFromAnotherComputerForTesting() { return CopyFromAnotherComputer(); }
+	FReply CancelInstallerCopyForTesting() { return CancelInstallerCopy(); }
 #endif
 	/** The content column width for the last arranged screen width. */
 	float ContentWidthForTesting(float ScreenWidth) const;
@@ -80,6 +101,8 @@ private:
 	FReply Exit();
 	FReply BrowseInstaller();
 	FReply GetOriginalGame();
+	FReply CopyFromAnotherComputer();
+	FReply CancelInstallerCopy();
 
 	TAttribute<FWoTBootstrapSnapshot> SnapshotAttribute;
 	FSimpleDelegate ContinueRequested;
@@ -87,12 +110,16 @@ private:
 	FSimpleDelegate ExitRequested;
 	FSimpleDelegate BrowseInstallerRequested;
 	FSimpleDelegate GetOriginalGameRequested;
+	FSimpleDelegate CopyFromAnotherComputerRequested;
+	FSimpleDelegate CancelInstallerCopyRequested;
 	FSimpleDelegate Ready;
 	TSharedPtr<SButton> ContinueButton;
 	TSharedPtr<SButton> SkipButton;
 	TSharedPtr<SButton> ExitButton;
 	TSharedPtr<SButton> BrowseInstallerButton;
 	TSharedPtr<SButton> GetOriginalGameButton;
+	TSharedPtr<SButton> CopyFromAnotherComputerButton;
+	TSharedPtr<SButton> CancelInstallerCopyButton;
 	TSharedPtr<STextBlock> TitleText;
 	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	TSharedPtr<SProgressBar> ProgressBar;

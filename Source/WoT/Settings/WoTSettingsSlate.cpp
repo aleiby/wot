@@ -10,6 +10,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Engine/GameInstance.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
@@ -19,6 +20,7 @@
 #include "../UI/WoTControllerUIInput.h"
 #include "../UI/WoTMenuNavigation.h"
 #include "../UI/WoTTextEntry.h"
+#include "../Online/WoTInstallerSharingSubsystem.h"
 
 namespace
 {
@@ -106,6 +108,11 @@ void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 	// The page itself holds focus only during a key capture; the binding's
 	// "Press a key..." is the cue, so no outline is drawn around the page.
 	AddMetadata<FWoTSelfDrawnFocusMetaData>(MakeShared<FWoTSelfDrawnFocusMetaData>());
+	if (Page == EWoTSettingsPage::Hardware)
+	{
+		bSharingConfirmed = UWoTInstallerSharingSubsystem::LoadSharingSwitch();
+		bSharingDraft = bSharingConfirmed;
+	}
 
 	const FText Title = Retail(Page == EWoTSettingsPage::Controls
 		? TEXT("menuOptions.MenuTitle") : TEXT("menuConfiguration.MenuTitle"));
@@ -1017,6 +1024,86 @@ void SWoTSettingsScreen::BuildHardwareBody()
 		]
 	];
 	NavigationRows.Add({VolumeSlider});
+	// NETWORK: LAN installer sharing. The sharer only ever sends (it never
+	// listens), so the switch is on by default.
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+	[
+		BuildLabel(Literal(TEXT("NETWORK")))
+	];
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 0.0f)
+	[
+		SAssignNew(SharingCheckBox, SCheckBox)
+		.Style(&BodyCheckBoxStyle)
+		.IsChecked_Lambda([this]()
+		{
+			return bSharingDraft ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		})
+		.OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+		{
+			bSharingDraft = State == ECheckBoxState::Checked;
+		})
+		[
+			BuildLabel(Literal(TEXT("Share the original installer on this network")))
+		]
+	];
+	Rows->AddSlot().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+	[
+		SAssignNew(SharingHint, STextBlock)
+		.Visibility_Lambda([this]()
+		{
+			return IsSharingHintVisible() ? EVisibility::Visible : EVisibility::Collapsed;
+		})
+		// Names where the finder looks when it skips Downloads (Mac).
+		.Text(FText::FromString(
+			UWoTInstallerSharingSubsystem::NothingToShareHint()))
+		.Font(this, &SWoTSettingsScreen::Body)
+		.ColorAndOpacity(FWoTMenuStyle::SelectedColor())
+		.AutoWrapText(true)
+	];
+	NavigationRows.Add({SharingCheckBox});
+}
+
+UWoTInstallerSharingSubsystem* SWoTSettingsScreen::ResolveSharing() const
+{
+#if WITH_AUTOMATION_TESTS
+	if (SharingForTesting.IsValid())
+	{
+		return SharingForTesting.Get();
+	}
+#endif
+	const UWoTPreferencesSubsystem* Owner = Preferences.Get();
+	const UGameInstance* Instance = Owner != nullptr ? Owner->GetGameInstance() : nullptr;
+	return Instance != nullptr
+		? Instance->GetSubsystem<UWoTInstallerSharingSubsystem>() : nullptr;
+}
+
+bool SWoTSettingsScreen::IsSharingHintVisible() const
+{
+	if (!bSharingDraft)
+	{
+		return false;
+	}
+	const UWoTInstallerSharingSubsystem* Sharing = ResolveSharing();
+	return Sharing != nullptr && Sharing->HasNothingToShare();
+}
+
+bool SWoTSettingsScreen::CommitSharingDraft()
+{
+	if (Page != EWoTSettingsPage::Hardware || bSharingDraft == bSharingConfirmed)
+	{
+		return true;
+	}
+	if (!UWoTInstallerSharingSubsystem::SaveSharingSwitch(bSharingDraft))
+	{
+		return false;
+	}
+	bSharingConfirmed = bSharingDraft;
+	if (UWoTInstallerSharingSubsystem* Sharing = ResolveSharing())
+	{
+		// Turning sharing off stops any transfer in progress.
+		Sharing->ApplySharingSwitch(bSharingConfirmed);
+	}
+	return true;
 }
 
 void SWoTSettingsScreen::BeginCapture(EWoTManagedBinding Action, EWoTBindingSlot Slot)
@@ -1124,6 +1211,11 @@ bool SWoTSettingsScreen::CommitDraft()
 		}
 		bSteamKeyboardConfirmed = bSteamKeyboardDraft;
 	}
+	if (!CommitSharingDraft())
+	{
+		SetError(Literal(TEXT("Settings could not be saved. Your changes are still shown; try again.")));
+		return false;
+	}
 	SetError(FText::GetEmpty());
 	return true;
 }
@@ -1194,7 +1286,8 @@ FReply SWoTSettingsScreen::RevertVideo()
 
 bool SWoTSettingsScreen::HasUnsavedChanges() const
 {
-	return !(Draft == Confirmed) || bSteamKeyboardDraft != bSteamKeyboardConfirmed;
+	return !(Draft == Confirmed) || bSteamKeyboardDraft != bSteamKeyboardConfirmed
+		|| bSharingDraft != bSharingConfirmed;
 }
 
 bool SWoTSettingsScreen::HandleBack()
@@ -1317,6 +1410,7 @@ void SWoTSettingsScreen::LeaveDiscardingDraft()
 	}
 	Draft = Confirmed;
 	bSteamKeyboardDraft = bSteamKeyboardConfirmed;
+	bSharingDraft = bSharingConfirmed;
 	OnBack.ExecuteIfBound();
 }
 
@@ -1420,6 +1514,12 @@ void SWoTSettingsScreen::SetStatus(const FText& Text)
 TArray<float> SWoTSettingsScreen::SensitivityStepsForTesting()
 {
 	return TArray<float>(SensitivitySteps, UE_ARRAY_COUNT(SensitivitySteps));
+}
+
+void SWoTSettingsScreen::SetSharingSubsystemForTesting(
+	UWoTInstallerSharingSubsystem* Sharing)
+{
+	SharingForTesting = Sharing;
 }
 
 TArray<float> SWoTSettingsScreen::ControllerSensitivityStepsForTesting()
