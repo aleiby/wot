@@ -25,6 +25,11 @@ import release_formats as formats  # noqa: E402
 import release_test_fixtures as fixtures  # noqa: E402
 import verify_release  # noqa: E402
 
+# Stands in for Install-WoT-Reborn.desktop and for its rebuild at the build
+# commit: the fixture commit is not in any repository, so these specs patch
+# the rebuild (test_steamos_installer_asset.py runs the real one).
+STEAMOS_BYTES = b"[Desktop Entry]\nName=Install WoT Reborn\n# spec stand-in\n"
+
 
 def replace_zip_member(archive_path: Path, member: str, data: bytes) -> None:
     replacement_path = archive_path.with_suffix(archive_path.suffix + ".replacement")
@@ -44,6 +49,14 @@ class VerifyReleaseTests(unittest.TestCase):
         cls.dmg_inspection_patcher = mock.patch.object(
             verify_release.mac_dmg, "verify_dmg")
         cls.dmg_inspection = cls.dmg_inspection_patcher.start()
+        cls.steamos_patcher = mock.patch.object(
+            verify_release.steamos_installer, "build_at_commit",
+            return_value=STEAMOS_BYTES)
+        cls.steamos_rebuild = cls.steamos_patcher.start()
+        # Whether the build commit carries the installer: yes, unless a spec says no.
+        cls.steamos_source_patcher = mock.patch.object(
+            verify_release.steamos_installer, "has_source", return_value=True)
+        cls.steamos_source = cls.steamos_source_patcher.start()
         cls.fixture = fixtures.ReleaseFixture()
         cls.pristine = cls.fixture.root / "pristine"
         cls.fixture.sign(cls.pristine)
@@ -53,6 +66,18 @@ class VerifyReleaseTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.fixture.cleanup()
         cls.dmg_inspection_patcher.stop()
+        cls.steamos_patcher.stop()
+        cls.steamos_source_patcher.stop()
+
+    def setUp(self):
+        self.steamos_rebuild.reset_mock(side_effect=True)
+        self.steamos_rebuild.return_value = STEAMOS_BYTES
+        self.steamos_source.reset_mock(side_effect=True)
+        self.steamos_source.return_value = True
+
+    @staticmethod
+    def add_steamos_installer(directory, data=STEAMOS_BYTES):
+        (directory / formats.STEAMOS_INSTALLER_ASSET).write_bytes(data)
 
     def copy(self):
         type(self).counter += 1
@@ -274,6 +299,7 @@ class VerifyReleaseTests(unittest.TestCase):
         directory = self.copy()
         # Sequence 0 publishes an empty cumulative asset (merge_release_notes).
         (directory / notes).write_bytes(formats.merge_release_notes(None, 0, ""))
+        self.add_steamos_installer(directory)
         verified = self.verify(directory, published=True)
         self.assertEqual(verified.release_notes["entry_sequences"], [])
         self.assertNotIn(notes, verified.assets)
@@ -287,7 +313,9 @@ class VerifyReleaseTests(unittest.TestCase):
         self.assertFails(directory, "unexpected file stray.txt", published=True)
 
         directory = self.copy()
-        self.assertFails(directory, "but the downloaded set has none", published=True)
+        self.add_steamos_installer(directory)
+        self.assertFails(directory, f"a published release carries {notes}, but the "
+                                    "downloaded set has none", published=True)
         (directory / notes).write_bytes(b'{"format":"wrong","notes":[]}')
         self.assertFails(directory, ".format is not", published=True)
         (directory / notes).write_bytes(formats.merge_release_notes(None, 2, "Later."))
@@ -307,6 +335,7 @@ class VerifyReleaseTests(unittest.TestCase):
         }
         for fixed_name, source_name in sources.items():
             shutil.copyfile(directory / source_name, directory / fixed_name)
+        self.add_steamos_installer(directory)
 
         verified = self.verify(directory, published=True)
         expected = {
@@ -332,6 +361,7 @@ class VerifyReleaseTests(unittest.TestCase):
             "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
         (directory / fixed_name).write_bytes(
             (directory / source_name).read_bytes() + b"different")
+        self.add_steamos_installer(directory)
         self.assertFails(
             directory, f"{fixed_name}: differs from {source_name}", published=True)
 
@@ -344,6 +374,7 @@ class VerifyReleaseTests(unittest.TestCase):
             "Win64", fixtures.COMMIT, formats.SHIPPING_CONFIGURATION)
         shutil.copyfile(directory / source_name, directory / fixed_name)
         (directory / source_name).unlink()
+        self.add_steamos_installer(directory)
         self.assertFails(
             directory, f"{fixed_name}: has no commit-named source in the set",
             published=True)
@@ -364,15 +395,128 @@ class VerifyReleaseTests(unittest.TestCase):
         directory = self.copy()
         (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
             formats.merge_release_notes(None, 0, ""))
+        self.add_steamos_installer(directory)
         arguments = ["--set", str(directory), "--release",
                      f"Mac={self.fixture.releases['Mac']}", *self.fixture.trust_arguments()]
         with contextlib.redirect_stderr(io.StringIO()) as errors:
             self.assertEqual(verify_release.main(arguments), 1)
         self.assertIn(f"unexpected file {formats.RELEASE_NOTES_ASSET}", errors.getvalue())
+        self.assertIn(f"unexpected file {formats.STEAMOS_INSTALLER_ASSET}",
+                      errors.getvalue())
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(verify_release.main(arguments + ["--published"]), 0)
         self.assertIn(f"{formats.RELEASE_NOTES_ASSET} is valid", out.getvalue())
+        self.assertIn(f"{formats.STEAMOS_INSTALLER_ASSET} matches a rebuild at build "
+                      f"commit {fixtures.COMMIT}", out.getvalue())
         self.assertIn("verify_release: PASS", out.getvalue())
+        self.steamos_rebuild.assert_called_with(formats.REPOSITORY_ROOT, fixtures.COMMIT)
+        elsewhere = self.fixture.root / "another-clone"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(verify_release.main(
+                arguments + ["--published", "--repository-root", str(elsewhere)]), 0)
+        self.steamos_rebuild.assert_called_with(elsewhere, fixtures.COMMIT)
+
+    def test_an_unpublished_set_refuses_the_steamos_installer(self):
+        directory = self.copy()
+        self.add_steamos_installer(directory)
+        self.assertFails(directory, f"unexpected file {formats.STEAMOS_INSTALLER_ASSET}")
+        # The signing set (sign_release's own re-verification) is closed too.
+        with self.assertRaises(verify_release.VerifyError) as caught:
+            verify_release._verify_signing_output(
+                directory, trust=self.fixture.trust, compiled=self.fixture.compiled,
+                releases={"Mac": self.fixture.releases["Mac"]}, funnel_receipts={},
+                allow_staging_sequence=False, allow_test=False)
+        self.assertIn(f"unexpected file {formats.STEAMOS_INSTALLER_ASSET}",
+                      "\n".join(caught.exception.failures))
+        self.steamos_rebuild.assert_not_called()
+        self.steamos_source.assert_not_called()
+        self.assertNotIn(formats.STEAMOS_INSTALLER_ASSET,
+                         {path.name for path in self.pristine.iterdir()})
+
+    def test_a_release_built_before_the_installer_must_not_carry_it(self):
+        self.steamos_source.return_value = False
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        repository = self.fixture.root / "repository"
+        # Older releases stay verifiable: no asset, no failure, nothing rebuilt.
+        verified = self.verify(directory, published=True, repository_root=repository)
+        self.steamos_source.assert_called_once_with(repository, fixtures.COMMIT)
+        self.steamos_rebuild.assert_not_called()
+        self.assertIsNone(verified.steamos_installer)
+        self.assertNotIn("steamos_installer", verified.summary())
+        # Present at such a commit, it is an unexpected file.
+        self.add_steamos_installer(directory)
+        failures = self.assertFails(
+            directory, f"unexpected file {formats.STEAMOS_INSTALLER_ASSET} in the publish "
+                       f"set: build commit {fixtures.COMMIT} predates the SteamOS installer",
+            published=True, repository_root=repository)
+        self.assertEqual(len(failures), 1, failures)
+        self.steamos_rebuild.assert_not_called()
+
+    def test_an_unknown_build_commit_is_a_failure_not_an_older_release(self):
+        self.steamos_source.side_effect = verify_release.steamos_installer \
+            .SteamOSInstallerError(f"git ls-tree failed: Not a valid object name "
+                                   f"{fixtures.COMMIT}")
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        for present in (False, True):
+            with self.subTest(present=present):
+                if present:
+                    self.add_steamos_installer(directory)
+                self.assertFails(
+                    directory, f"{formats.STEAMOS_INSTALLER_ASSET}: cannot tell whether "
+                               f"build commit {fixtures.COMMIT}", published=True)
+        self.steamos_rebuild.assert_not_called()
+
+    def test_a_published_set_requires_the_steamos_installer(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        failures = self.assertFails(
+            directory, f"a published release carries {formats.STEAMOS_INSTALLER_ASSET}, "
+                       "but the downloaded set has none", published=True)
+        self.assertEqual(len(failures), 1, failures)
+        # Required because the build commit carries the installer, checked in git.
+        self.steamos_source.assert_called_once_with(formats.REPOSITORY_ROOT, fixtures.COMMIT)
+        self.steamos_rebuild.assert_not_called()
+
+    def test_a_published_steamos_installer_must_match_a_rebuild_at_the_build_commit(self):
+        directory = self.copy()
+        (directory / formats.RELEASE_NOTES_ASSET).write_bytes(
+            formats.merge_release_notes(None, 0, ""))
+        self.add_steamos_installer(directory)
+        repository = self.fixture.root / "repository"
+        verified = self.verify(directory, published=True, repository_root=repository)
+        self.steamos_source.assert_called_once_with(repository, fixtures.COMMIT)
+        self.steamos_rebuild.assert_called_once_with(repository, fixtures.COMMIT)
+        expected = {"build_commit": fixtures.COMMIT,
+                    "sha256": formats.sha256_hex(STEAMOS_BYTES),
+                    "size": len(STEAMOS_BYTES)}
+        self.assertEqual(verified.steamos_installer, expected)
+        self.assertEqual(verified.summary()["steamos_installer"], expected)
+        self.assertNotIn(formats.STEAMOS_INSTALLER_ASSET, verified.assets)
+        self.assertEqual(sorted(verified.assets), sorted(self.verify(self.pristine).assets))
+        self.assertNotIn("steamos_installer", self.verify(self.pristine).summary())
+
+        # One changed byte fails, and so does a longer or shorter copy.
+        for published in (STEAMOS_BYTES.replace(b"stand-in", b"stand-im"),
+                          STEAMOS_BYTES + b"#\n", STEAMOS_BYTES[:-1]):
+            with self.subTest(published=published):
+                self.add_steamos_installer(directory, published)
+                self.assertFails(
+                    directory, f"{formats.STEAMOS_INSTALLER_ASSET}: differs from a rebuild "
+                               f"at build commit {fixtures.COMMIT}", published=True)
+
+        # A rebuild that cannot run is a failure, never a pass.
+        self.add_steamos_installer(directory)
+        self.steamos_rebuild.side_effect = verify_release.steamos_installer \
+            .SteamOSInstallerError(f"git ls-tree failed: Not a valid object name "
+                                   f"{fixtures.COMMIT}")
+        self.assertFails(
+            directory, f"{formats.STEAMOS_INSTALLER_ASSET}: cannot rebuild it at build "
+                       f"commit {fixtures.COMMIT}", published=True)
 
     def test_mac_dmg_and_sidecar_are_required_and_hash_bound(self):
         dmg_name = formats.guarded_install_dmg_asset(

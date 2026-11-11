@@ -61,7 +61,8 @@ const TCHAR* WoTGamepadActionName(EWoTGamepadAction Action)
 		TEXT("NextItem"), TEXT("PrevHand"), TEXT("NextHand"), TEXT("ViewUp"),
 		TEXT("ViewDown"), TEXT("RandomTaunt"), TEXT("WalkToggle"), TEXT("CenterView"),
 		TEXT("Scoreboard"), TEXT("Menu"), TEXT("TurnAround"),
-		TEXT("JoinTeam1"), TEXT("JoinTeam2"), TEXT("JoinTeam3"), TEXT("JoinTeam4")};
+		TEXT("JoinTeam1"), TEXT("JoinTeam2"), TEXT("JoinTeam3"), TEXT("JoinTeam4"),
+		TEXT("Chat"), TEXT("TeamChat")};
 	static_assert(UE_ARRAY_COUNT(Names) == static_cast<int32>(EWoTGamepadAction::Count),
 		"one name per gamepad action");
 	const int32 Index = static_cast<int32>(Action);

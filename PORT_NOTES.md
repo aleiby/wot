@@ -60,9 +60,14 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** The exact shipped behavior is not confirmed. The constants will be rechecked if climbing feels different.
 
 ### Player starts buried in solid geometry are never chosen
-- **Original:** Start selection could pick a start whose center lay inside solid world geometry. The spawn then failed, and a joining player could be refused.
-- **Port:** Starts whose center is in solid space are never scored, so joins and restarts land on a start where a player can spawn. A player is refused only if every start is blocked.
-- **Why:** Stops players being refused or falling out of the world on two buried starts.
+- **Original:** Start selection could pick a start whose center lay inside solid world geometry (Battle3_01 has two). Placing a player there always fails, so a joining player was refused and a restart failed.
+- **Port:** Starts whose center is in solid space are never rated.
+- **Why:** Stops players being refused on two buried starts.
+
+### A refused start falls back to the next rated start
+- **Original:** A join, a respawn or a team change uses only the best-rated start. If the player cannot be placed there, a joining player is refused, a dead player stays dead until they press fire again, and a player changing team stays where they stood.
+- **Port:** The best-rated start is still tried first. If it refuses the player, the other starts are tried in rating order, so a player is refused, or left waiting to respawn, only when every start refuses. A start also refuses a player who would overlap another blocking actor, such as a player or a decoration; the original refuses only for movers and places the player overlapping anything else.
+- **Why:** A blocked start must not leave a player without a body, and the original's first choice is kept.
 
 ### Player-start scoring
 - **Original:** The occupied-start penalty uses the game object's own collision size. If every start is occupied, no start is returned.
@@ -75,8 +80,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** UE5 splits the player into a persistent controller and a disposable pawn.
 
 ### Team-select restart replaces the pawn
-- **Original:** Choosing a team restarts the same player pawn.
-- **Port:** The old pawn is removed and a new team pawn spawns at a team start.
+- **Original:** Choosing a team restarts the same player pawn by moving it to a team start. If no start takes it, the pawn stays where it stood and the player keeps playing.
+- **Port:** A new team pawn spawns at a team start, and the old pawn is removed only once the new one exists. While the starts are tried, the old pawn is hidden and does not collide. If no start takes the new pawn, the old pawn reappears where it stood and the player keeps control of it.
 - **Why:** The UE5 split between controller and pawn. This matches the port's normal respawn.
 
 ### Carcass pose on an instant respawn
@@ -356,7 +361,7 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Mashadar growth and retraction
 - **Original:** New tail segments are seeded by re-linking the chain every frame, and retracting walks the chain in reverse.
-- **Port:** A replicated chain phase and counters drive growth and retraction by distance. The chain length tracks reach divided by segment spacing, up to 100 segments; it spans guide to lair, grows with range and pulls back when idle.
+- **Port:** A replicated chain phase and counters drive growth and retraction by distance. Growth appends as many joints as needed in one tick until the tail reaches the lair, with 48-unit head spacing and 42-unit body spacing. Authority begins full retraction after the body count exceeds 100; the original's separate 150-segment client safety cap is not implemented.
 - **Why:** The choreography only moved segments nobody can see, and this form replicates reliably. Damage and collision behave the same.
 
 ### Mashadar chasing a Personal Illusion
@@ -381,8 +386,43 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Controller layout
 - **Original:** The default joystick setup binds Fire, Jump and four hat directions only.
-- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. On a Battle map, a player without a team picks one with the D-pad (left, right, up and down for teams 1 to 4), and the team prompt names those buttons when the joystick is enabled. In the game menu and its windows the D-pad or stick moves the selection, A chooses and B backs out. Chat and the front-end menus by controller arrive with an on-screen keyboard and menu navigation.
+- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. On a Battle map, a player without a team picks one with the D-pad (left, right, up and down for teams 1 to 4), and the team prompt names those buttons when the joystick is enabled. D-pad up opens chat (see "Chat and taunts by controller and from the game menu"). Every menu works by controller: the front end and its notices, the multiplayer screen, the player and settings screens, the setup screen, and the game menu and its windows. The D-pad or stick moves one highlight (held, it repeats after 0.35 s and then every 0.08 s), A chooses, and B or View backs out one level: an open notice or prompt closes before the screen behind it, a held B backs out only once, and B never quits from the setup screen. While the controller is in use the mouse pointer is hidden and nothing under it highlights; moving the mouse more than a few pixels, clicking or typing brings it back. A gold outline marks the focused control, and a strip at the bottom of each menu shows what the buttons do there (for example "A Select, B Back"); both appear only while the controller is in use. The D-pad's Left and Right adjust a slider. Escape keeps its own behaviour on every screen, except that it closes an open drop-down list or on-screen keyboard first, and that on the settings screens it asks before dropping unsaved changes (see "Settings ask before dropping unsaved changes"). A on a text field or the chat line opens an on-screen keyboard (see "Text fields by controller and touch").
 - **Why:** A match must be playable on a controller alone.
+
+### Menu navigation for every player
+- **Original:** The keyboard moves through the main menu lists and wraps at either end. Each screen opens with its usual first control focused.
+- **Port:** Every menu screen (the main menu, the multiplayer, player and settings screens, notices and the setup screen) has explicit navigation links built from its live rows, so the arrow keys and the D-pad wrap at list ends and reach every row, including rows added at run time. On the multiplayer screen, Left and Right move between the host and browser columns. While a multiplayer notice or prompt is open, the panels behind it are disabled until it closes. After controller input a screen opens on the control a controller needs first (the map list on the multiplayer screen, Save on the player screen, the first setting on the settings screens); after mouse or keyboard input it opens where it always has. Likewise the gold focus outline is drawn only after controller input; keyboard players keep the existing highlight.
+- **Why:** Owner ruling (2026-11-08): the menu improvements made for controllers apply to every player; only the first focus and the focus outline follow the last device used.
+
+### Dropdowns are touch-friendly
+- **Original:** A drop-down list (the window framework's combo list) opens short rows, 15 units tall, that highlight under the mouse; releasing the button over a row picks it, and a long list scrolls with its scroll bar.
+- **Port:** The host screen's map list and the Hardware screen's choices (brightness, resolution, window mode, quality and frame-rate limit) open a list over the screen with rows at least 48 pixels tall. A press only arms the row under it: releasing within 8 pixels picks that row, and moving further drags the list instead, for the mouse and touch alike; the wheel scrolls it. With the keyboard or a controller the open list highlights the current choice, the arrows, D-pad or stick move the highlight (wrapping at the ends) without changing anything, A or Enter picks, and B or Escape closes the list without a change; a second Escape then backs out of the screen as before. A closed list never changes on Up or Down: they move to the next setting.
+- **Why:** Touch and controller play on the Steam Deck. Owner ruling (2026-11-08): release-picking and dragging apply to mouse players too, and Escape on an open drop-down list closes only the list.
+
+### Settings ask before dropping unsaved changes
+- **Original:** The options and configuration menus apply each change as it is made and keep it when the player backs out; there is nothing to confirm.
+- **Port:** The Controls and Hardware screens edit a draft with Save and Back buttons. With unsaved changes, the back action (B, View or Escape) asks "Save changes?": Save applies them and leaves, exactly as the Save button does (a display change still waits for Keep), Discard drops them and leaves, exactly as the Back button does, and B or Escape on the question returns to the screen with nothing lost. The question takes focus, is worked with the D-pad, stick or keyboard, and shows its own buttons in the prompt strip. With nothing changed, the back action leaves at once, as before; clicking Save or Back is unchanged.
+- **Why:** Owner ruling (Steam Deck session, 2026-11-09): a B pressed to leave a settings screen should not throw away the changes made on it.
+
+### Text fields by controller and touch
+- **Original:** Every text field (the player name, the host's server name and passwords, a server's password, the direct address and the chat line) is typed on a keyboard.
+- **Port:** A controller's A on a focused text field opens an on-screen keyboard over the screen: rows of digits, letters and `. - _ :`, with Shift, Space, Backspace and Done keys. The D-pad or stick moves the highlighted key (wrapping) and A types it; X deletes, Y types a space, Menu is Done and B cancels. View does nothing there, and Shift has no button of its own: it is the on-screen Shift key, pressed with A. A held A or X repeats after 0.35 s, then every 0.08 s. The keyboard is drawn large, twice its first size (each key about 83 by 74 pixels on a Steam Deck), with key labels at least 16 pixels tall there; it sits just above a dark band along the bottom of the screen that carries the button strip, so nothing behind shows through the prompts, and it shrinks to fit only on a screen too small for it. What is typed so far stays visible above the keys, wrapping when it is long. Keys can be tapped or clicked, physical typing still works while it is open, and Escape, or a press outside it, cancels it. Done checks the text first: a password the game would refuse keeps the keyboard open and says why. Cancel leaves the field as it was. On a Steam Deck a tap on a field opens it too, and Steam's own on-screen keyboard is used instead by default ("Use Steam Keyboard on Steam Deck" on the Controls page, offered only on a Deck; a player who turns it off keeps the project's keyboard); Y then switches to the project's keyboard, and B cancels. That choice is stored in its own preferences file beside the player's preferences, not in the versioned settings, so older builds keep reading the settings file; a player who never set it gets the default. Typing with a keyboard and clicking a field with the mouse are unchanged.
+- **Why:** A match must be playable on a controller alone, and on the Steam Deck's touchscreen. The button map, the size and the dark band, and Steam's keyboard being on by default are the owner's rulings from the first Steam Deck session (2026-11-09).
+
+### On-screen keyboard limits
+- **Original:** The host's server name and the browser's direct address take whatever the keyboard types into them.
+- **Port:** The on-screen keyboard caps the server name at 32 characters and the direct address at 64. The other fields keep their existing limits there (player name 20, passwords 32, chat 128). Keyboard typing into the boxes is unchanged.
+- **Why:** Every entry on the on-screen keyboard is bounded; these cover any real server name or address with a port.
+
+### Chat shows "Say:" and "Team say:"
+- **Original:** Talk (T) and Team Talk (Y) open the console line with the editable text "Say " or "TeamSay " already typed after the "(>" prompt.
+- **Port:** That text shows as a "Say:" or "Team say:" label before what the player types, for keyboard chat too, and the line sent is the same. Backspace on an empty line turns the label back into editable text, as Backspace over the typed "Say " did. With a controller, A on the chat line opens the on-screen keyboard over chat: gameplay keys still held are released when it opens, and chat continues as before when it closes.
+- **Why:** Owner ruling (2026-11-08): the label shows which channel the line goes to, by keyboard or by controller.
+
+### Chat and taunts by controller and from the game menu
+- **Original:** Chat opens only from the keyboard (T for Say, Y for Team Say), and taunts play only from their keys (taunts 1 to 6 and a random one). The game menu has no chat or taunt entries.
+- **Port:** On a controller, a tap of D-pad up opens chat and a hold of half a second opens team chat, with the on-screen keyboard (or, on a Steam Deck, Steam's keyboard unless the player turned it off) open in the same step; D-pad down still plays a random taunt. The half second is the same hold time that separates drop from drop tainted. While a Battle player is picking a team, D-pad up still picks team 3, and in the citadel editor it still cycles the view. The game menu gains Chat, Team Chat and Taunts, right after Help. Chat and Team Chat close the menu and open the chat line; after controller input the on-screen keyboard opens with it, and after mouse or keyboard input it is the ordinary typing line. Taunts opens a page with Taunt 1 to Taunt 6 and Random, whose entries wrap like the menu's; choosing one closes the menu and plays that taunt, exactly as its key does. B, View or Escape on that page return to the game menu. The lines sent and the taunts played are the same as from the keys.
+- **Why:** A match must be playable on a controller alone, and the menu entries also reach chat and taunts by touch on the Steam Deck.
 
 ## Networking
 
@@ -595,6 +635,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** World translucent materials use one opacity value, taken from the strongest channel. This is exact for grey effects and over black backgrounds, and slightly darker on strongly colored ones. Sky sheets over visible geometry use an exact per-channel blend.
 - **Why:** UE5's alpha-composite blending cannot apply a separate factor per channel, and a scene-color alternative would break stacked translucent layers.
 
+### Mesh-particle translucency
+- **Original:** Mesh `bParticles` draws every current source vertex with screen-aligned texture UVs. Vertex positions ignore actor DrawScale; only each icon's width and height use it (`UnMesh.cpp:433,574`, `UnMeshRn.cpp:384-460`). Translucency blends each color channel as `Src + Dst*(1-Src)` (`und3d.cpp:1261-1265`).
+- **Port:** Mashadar and the mesh-effect particle clouds (including all five elemental shields) preserve that vertex space at spawn and through scale changes; growth changes icon size only. Mashadar includes the animated unreferenced tip vertex on both asset and runtime paths; editor recovery caches the decoded frames per retail identity. Its MyTex2 texture is a live WetTexture on both paths. Runtime mesh resolution remains guarded in production; automation uses an explicit test entry point. The shared mesh-particle renderer still uses a single additive pass, `Src + Dst`, making overlap/background contributions brighter than retail.
+- **Why:** An exact replacement must preserve per-particle ordering of background attenuation and addition. Adding one pooled modulation pass before the pooled additive pass is not equivalent for overlapping puffs. A contained follow-up should implement and visually verify ordered per-channel screen blending; this difference is not corrected by changing cloud density, sprite size or glow.
+
 ### Volumetric fog
 - **Original:** Fog maps are drawn per surface and screen-blended over the frame per color channel, only on opaque surfaces in fog zones and only while the viewer stands in a fog zone.
 - **Port:** Each fog light draws as a sphere that reproduces the same per-channel screen blend, with the fog amount worked out per pixel. It also covers pixels behind the sphere, including translucent ones, and the pass is gated on the camera being inside a fog zone's bounding box.
@@ -645,10 +690,10 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Each rotator seeds its randomness from its actor name, so every client and every run shares the same phases without replication.
 - **Why:** The motion is visual only, and the result looks the same with no network traffic.
 
-### Sprite animation at a fixed 30 Hz
-- **Original:** Animated sprite textures, including the Earth Tremor, Decay and Swap Places rings, advance one frame per rendered frame, in sync across the whole engine. Mashadar fades also run per rendered frame.
-- **Port:** Sprites cycle per actor at a fixed 30 Hz, and Mashadar fades use the same rates at a fixed 30 Hz equivalent.
-- **Why:** Frame-rate independence. At modern frame rates the original rule would play them two to eight times too fast.
+### Mashadar fade cadence
+- **Original:** Mashadar fades run per rendered frame.
+- **Port:** Mashadar fades use a fixed 30 Hz equivalent. Fade swell changes icon size without moving the vertex cloud, as retail does. Sprite texture animation is separately shared by retail identity and advances on observed draws.
+- **Why:** Frame-rate independence for the fade; modern frame rates would otherwise shorten its duration.
 
 ### Lightning beams draw straight
 - **Original:** Lightning streaks can bend through navigation points around obstacles.
@@ -805,9 +850,24 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Multiplayer menus use the port's dark charcoal and gold skin with the original Tahoma face. Menu text uses exact 2x pixel copies of the original fonts, and slider artwork is enlarged evenly.
 - **Why:** Readability at modern resolutions, with no stretching and no outside fonts. The skin is a presentation choice.
 
+### Small text meets the Steam Deck legibility targets
+- **Original:** Help text could select an 8-pixel font, the item info window drew its element names in an 8-pixel font, and the chat line, the item info window's other text and the server list's resource error drew 14-pixel text. All were sized for 640x480 screens.
+- **Port:** On screens shorter than 1080 pixels, such as the Steam Deck's 1280x800 and 1280x720, the chat line, its button prompts and the on-screen keyboard over it, and the item info window draw exact twice-size copies of the original fonts: 28 pixels, with the item's title in its own 30-pixel font. The item info window widens so its text wraps at about 1000 pixels, and the chat line's strip grows to hold its button prompts beside the text. Help's 8-pixel lines draw at twice size (16 pixels) in its full-screen page; if a page falls back to the 640x480 window at 1x, they use the original 14-pixel font of the same family instead, so nothing is stretched or blurred. The server list's resource error uses the menus' twice-size text on every screen. The update banner wraps a long line instead of switching to the 14-pixel font on wide screens; it still switches on the smallest windows, such as 640x480, where its twice-size text would cover the menu. A controller button's letter is never under 12 pixels. From 1080p up the chat line and the item info window are unchanged.
+- **Why:** Steam Deck verification requires on-screen text of at least 9 pixels at 1280x800, and the port's own targets are 12 pixels for every text and 16 for text read during play. The original drew small text only because its screens were 640x480. Presentation only.
+
+### HUD text at twice size on small screens
+- **Original:** The HUD draws its text in its 14-pixel message font at the screen's own size, sized for 640x480. The scoreboards place their rows 20 pixels apart (14 in a Citadel match) from a quarter of the way down the screen and drop any header line that would reach the column titles.
+- **Port:** Where the HUD itself draws at 1x (screens under 1280x960, such as the Steam Deck's 1280x800 and 1280x720), every HUD text draws at exactly twice its font's size: chat and kill messages, pickup names, Select Team, the connection progress lines and player names. The icons, and the numbers drawn on them (health, charges, hand keys), stay at 1x. The scoreboards and the Citadel team overview draw on a board half the screen's size, shown at twice size, which keeps the original column proportions. Every header line shows: where one would reach the column titles, the titles move down instead. Where the board doesn't fit, it first tightens (Arena rows 16 pixels apart instead of 20; Citadel team blocks without their two blank lines), and only where that doesn't fit either does it draw at 1x as before. At 1280x800 a 16-player Arena match and two Citadel teams of eight fit at twice size; four Citadel teams of four use the 1x board. From 1280x960 up nothing changes.
+- **Why:** Steam Deck legibility: at 1x the HUD's text is 14 pixels tall on a 1280x800 screen. Presentation only; the scoreboards show the same rows in the same order.
+
+### Help fills small screens
+- **Original:** Help is a 640x480 window. Its own command list lays the text out in one column, with the function-key table placed at a fixed position near the bottom.
+- **Port:** Where the window would draw at 1x (screens narrower than 1280 or shorter than 960 pixels, such as the Steam Deck's), Help fills the screen at twice size and reflows its page: the title, the opening line across the full width, the headed sections in two columns, the function-key table below them at its own column offsets, and the subtitle at the bottom. The shipped page uses 764 of the Deck's 800 rows of pixels (684 of 720 at 1280x720). A page that could not fit this way would keep the 640x480 window at 1x. From 1280x960 up the window is unchanged.
+- **Why:** Steam Deck legibility: the 1x window's text is 14 pixels tall and uses 60% of the Deck's screen height. Presentation only; the text is the purchaser's own help page.
+
 ### Menu slider travel and host-setting stops
-- **Original:** The slider knob stopped a few pixels short of each end. The host screen's kill limit, time limit and max players were numbers stepped by one.
-- **Port:** The knob reaches the track's end borders. Those host settings are sliders with one stop per unit, and max players spans 2 to 16.
+- **Original:** The slider knob stopped a few pixels short of each end. The host screen's kill limit, time limit, max players and max team size were numbers stepped by one. View Bob's nine steps shared the slider's eight cells, so its top two steps showed on one cell.
+- **Port:** The knob reaches the track's end borders. Those host settings are sliders with one stop per unit; max players spans 2 to 16, and max team size has one stop per size the map's citadel count allows. View Bob has one stop per step.
 - **Why:** Presentation and usability; all values stay reachable.
 
 ### Host seal settings and citadel count
@@ -864,8 +924,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Mashadar and Legion voices
 - **Original:** Mashadar breathes when more than two segments grow in one tick. A dying Legion's hidden pawn hums beside its carcass.
-- **Port:** Mashadar breathes on the third growth within one second, because the port grows one segment per tick. The pawn's hum stops when the carcass appears.
-- **Why:** A different growth cadence, and no doubled hum.
+- **Port:** Mashadar breathes on the third growth within one second. Growth can append multiple segments per tick, but the sound counter retains its one-second window. The pawn's hum stops when the carcass appears.
+- **Why:** The sound counter differs from the original per-tick counter, and the port avoids a doubled hum.
 
 ### SoundDispatcher extras
 - **Original:** A SoundDispatcher can choose a mixing slot per actor and look sounds up from a sound table.
@@ -898,6 +958,12 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Original:** The main menu showed no version number.
 - **Port:** The main menu shows the running version small in its bottom-right corner, for example `v0.1.2`; a development build shows `dev` and its commit. Update banners and the update-failed notice use the same version number when the release names one.
 - **Why:** Players and testers need to see which build they are running, and updates name versions the same way the menu does.
+
+### The game can share the original installer on the local network
+- **Original:** None. This is a port-only feature for the Steam Deck install route (owner decision 3).
+- **Port:** Once setup has finished, a running copy offers the original game installer it finds on this computer (beside the game, the file chosen with Browse, a copy it received over the network, or Downloads; not Downloads on a Mac) to other WoT Reborn copies on the same local network. It never listens: it broadcasts a small offer every 2 seconds from a port the system picks, reads only replies to those offers from private network addresses, and sends the file over outgoing connections, at most two at once. It checks the file's SHA-256 while sending and stops offering a file that is not the original installer. While a copy is sent, the player sees a short "Sending the original game installer to ..." notice in the bottom-left corner of every screen, menus and matches alike; it goes away 6 seconds after the last copy is sent or stopped. Settings > Hardware > Network > "Share the original installer on this network" turns it off; it is on by default. On a Mac it starts only after the player has seen the game's Local Network notice.
+- **Receiving:** A copy waiting at the "Original game needed" screen can receive the installer from such a sharer. Under Wine on Linux (Proton on a Steam Deck) it listens by itself as soon as that screen appears; on Windows and Mac it listens only after the player clicks **Copy from another computer**, because listening is what raises the Windows firewall or macOS Local Network prompt (the screen says "If Windows asks, click Allow"). It answers only offers carrying this build's exact installer size and SHA-256 from private network addresses, checks for the installer's size plus 64 MB of free space first, and accepts one incoming connection from that sharer with the token it handed out; it only ever reads that connection. The file streams into `OriginalGame/<random>.part` in the game's data folder and the screen shows "Copying the original game installer from <a Windows PC / a Mac / a Steam Deck>... NN%" with a Cancel button. A complete copy whose SHA-256 matches is renamed to the installer's own name in `OriginalGame`, and setup continues exactly as for an installer found in Downloads (searched after a remembered Browse pick and before Downloads; a broken file there is deleted without changing the screen's message). A stopped copy is kept and resumed from the next sharer; a damaged one is deleted and that sharer ignored, and after three damaged copies it stops listening until the player clicks again (or reopens the game on a Deck). Cancel stops the copy, keeps it, and ignores that sharer for 30 seconds. Browse stays available throughout, and nothing listens before that screen or after it.
+- **Why:** A Steam Deck can copy the 1 GB installer from the owner's PC or Mac instead of downloading it again. Nothing leaves the local network, and a copy is accepted only with the installer's exact size and SHA-256, as for an installer found on disk.
 
 ## Platform
 

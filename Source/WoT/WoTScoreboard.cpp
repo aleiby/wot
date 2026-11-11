@@ -45,6 +45,75 @@ namespace
 	}
 }
 
+float FWoTScoreboardBoardChoice::Bottom(const TArray<FWoTHUDDrawCmd>& Commands,
+	float FontLineHeight, float IconSize)
+{
+	float Lowest = 0.0f;
+	for (const FWoTHUDDrawCmd& Command : Commands)
+	{
+		if (!Command.Text.IsEmpty())
+		{
+			Lowest = FMath::Max(Lowest, Command.Y + FontLineHeight);
+		}
+		else if (!Command.TexId.IsNone())
+		{
+			Lowest = FMath::Max(Lowest, Command.Y + IconSize * Command.Scale);
+		}
+	}
+	return Lowest;
+}
+
+FWoTScoreboardBoard FWoTScoreboardBoardChoice::Choose(int32 CanvasSizeX,
+	int32 CanvasSizeY, float FontLineHeight, int32 TextScale,
+	bool bHasCompactDensity, float IconSize,
+	TFunctionRef<TArray<FWoTHUDDrawCmd>(int32 Width, int32 Height,
+		const FWoTScoreboardLayoutOptions& Options)> Layout)
+{
+	FWoTScoreboardBoard Board;
+	if (TextScale >= 2)
+	{
+		// The doubled board: half the canvas, drawn under a 2x transform.
+		const int32 BoardWidth = CanvasSizeX / 2;
+		const int32 BoardHeight = CanvasSizeY / 2;
+		if (BoardWidth >= MinimumBoardWidth && BoardHeight > 0)
+		{
+			for (const EWoTScoreboardDensity Density :
+				{EWoTScoreboardDensity::Retail, EWoTScoreboardDensity::Compact})
+			{
+				if (Density == EWoTScoreboardDensity::Compact && !bHasCompactDensity)
+				{
+					continue;
+				}
+				FWoTScoreboardLayoutOptions Options;
+				Options.Density = Density;
+				Options.bKeepHeaders = true;
+				TArray<FWoTHUDDrawCmd> Commands =
+					Layout(BoardWidth, BoardHeight, Options);
+				if (Bottom(Commands, FontLineHeight, IconSize)
+					<= static_cast<float>(BoardHeight) + UE_KINDA_SMALL_NUMBER)
+				{
+					Board.Mode = Density == EWoTScoreboardDensity::Retail
+						? EWoTScoreboardBoardMode::Double
+						: EWoTScoreboardBoardMode::DoubleCompact;
+					Board.BoardScale = 2;
+					Board.LogicalWidth = BoardWidth;
+					Board.LogicalHeight = BoardHeight;
+					Board.Commands = MoveTemp(Commands);
+					return Board;
+				}
+			}
+		}
+	}
+	// The retail board at the face's own size, as on every 2x-and-up HUD.
+	Board.Mode = EWoTScoreboardBoardMode::Native;
+	Board.BoardScale = 1;
+	Board.LogicalWidth = FMath::Max(640, CanvasSizeX);
+	Board.LogicalHeight = FMath::Max(480, CanvasSizeY);
+	Board.Commands = Layout(Board.LogicalWidth, Board.LogicalHeight,
+		FWoTScoreboardLayoutOptions());
+	return Board;
+}
+
 FWoTArenaScoreboard::FWoTArenaScoreboard()
 {
 	SortOrder.SetNumZeroed(SortHistorySize);
@@ -211,40 +280,60 @@ TArray<FName> FWoTArenaScoreboard::AllIconTextureIds()
 	return TextureIds;
 }
 
+int32 FWoTArenaScoreboard::BoardTopY(int32 LogicalHeight, int32 LineHeight,
+	int32 HeaderLineCount, const FWoTScoreboardLayoutOptions& Options)
+{
+	const int32 Quarter = LogicalHeight / 4;
+	if (!Options.bKeepHeaders)
+	{
+		return Quarter;
+	}
+	// ArenaScoreBoard.DrawHeader draws a line while Y < ClipY/4 - YL, i.e.
+	// while its bottom stays above the legend; the legend moves down just
+	// far enough for the last line to pass that same test.
+	const int32 HeaderEnd = LineHeight * 4 + HeaderLineCount * LineHeight;
+	return FMath::Max(Quarter, HeaderEnd + 1);
+}
+
 TArray<FWoTHUDDrawCmd> FWoTArenaScoreboard::Layout(
 	const FWoTScoreboardSnapshot& Snapshot, int32 LogicalWidth,
 	int32 LogicalHeight, float FontLineHeight, bool bStandalone,
-	bool bIconsAvailable) const
+	bool bIconsAvailable, const FWoTScoreboardLayoutOptions& Options) const
 {
 	TArray<FWoTHUDDrawCmd> Commands;
 	const FLinearColor White = FLinearColor::White;
 	const int32 LineHeight = FMath::Max(FMath::TruncToInt(FontLineHeight), 0);
-	const int32 HeaderLimit = LogicalHeight / 4 - LineHeight;
+	const int32 ClockSeconds = Snapshot.bDisplayRemaining
+		? FMath::Max(Snapshot.RemainingTime, 0) : Snapshot.ElapsedTime;
+	TArray<FString> Headers;
+	for (const FString& Header : {Snapshot.MapName,
+		FString(Snapshot.bDisplayRemaining
+			? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
+			FormatTime(ClockSeconds),
+		Snapshot.VictoryMessage})
+	{
+		if (!Header.IsEmpty())
+		{
+			Headers.Add(Header);
+		}
+	}
+	const int32 LegendY = BoardTopY(LogicalHeight, LineHeight, Headers.Num(), Options);
+	const int32 HeaderLimit = LegendY - LineHeight;
 	int32 HeaderY = LineHeight * 4;
 	const float CenterX = static_cast<float>(LogicalWidth) * 0.5f;
-
-	auto AddHeader = [&](const FString& Text)
+	for (const FString& Header : Headers)
 	{
-		if (!Text.IsEmpty() && HeaderY < HeaderLimit)
+		if (HeaderY < HeaderLimit)
 		{
-			ScoreboardAddText(Commands, Text, CenterX,
+			ScoreboardAddText(Commands, Header, CenterX,
 				static_cast<float>(HeaderY), White, EWoTTextAlignment::Center);
 			HeaderY += LineHeight;
 		}
-	};
-
-	AddHeader(Snapshot.MapName);
-	const int32 ClockSeconds = Snapshot.bDisplayRemaining
-		? FMath::Max(Snapshot.RemainingTime, 0) : Snapshot.ElapsedTime;
-	AddHeader(FString(Snapshot.bDisplayRemaining
-		? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
-		FormatTime(ClockSeconds));
-	AddHeader(Snapshot.VictoryMessage);
+	}
 
 	int32 X[ColumnCount];
 	LayoutColumns(LogicalWidth, X);
 
-	const int32 LegendY = LogicalHeight / 4;
 	LayoutLegend(Commands, X, static_cast<float>(LegendY));
 
 	FWoTArenaScoreboard Sorted = *this;
@@ -255,13 +344,30 @@ TArray<FWoTHUDDrawCmd> FWoTArenaScoreboard::Layout(
 	}
 	Sorted.Sort();
 
+	const int32 Pitch = Options.Density == EWoTScoreboardDensity::Compact
+		? CompactRowPitch : RowPitch;
 	for (int32 Row = 0; Row < Sorted.Players.Num(); ++Row)
 	{
 		LayoutPlayerRow(Commands, Sorted.Players[Row], X,
-			static_cast<float>(LegendY + (Row + 1) * 20), bStandalone,
+			static_cast<float>(LegendY + (Row + 1) * Pitch), bStandalone,
 			bIconsAvailable, FontLineHeight);
 	}
 	return Commands;
+}
+
+FWoTScoreboardBoard FWoTArenaScoreboard::LayoutBoard(
+	const FWoTScoreboardSnapshot& Snapshot, int32 CanvasSizeX,
+	int32 CanvasSizeY, float FontLineHeight, int32 TextScale,
+	bool bStandalone, bool bIconsAvailable) const
+{
+	return FWoTScoreboardBoardChoice::Choose(CanvasSizeX, CanvasSizeY,
+		FontLineHeight, TextScale, /*bHasCompactDensity*/ true,
+		static_cast<float>(IconSize),
+		[&](int32 Width, int32 Height, const FWoTScoreboardLayoutOptions& Options)
+		{
+			return Layout(Snapshot, Width, Height, FontLineHeight, bStandalone,
+				bIconsAvailable, Options);
+		});
 }
 
 void FWoTArenaScoreboard::LayoutColumns(int32 LogicalWidth, int32* OutX)
@@ -384,24 +490,12 @@ FString FWoTCitadelScoreboard::TeamDescription(
 TArray<FWoTHUDDrawCmd> FWoTCitadelScoreboard::Layout(
 	const FWoTScoreboardSnapshot& Snapshot, int32 LogicalWidth,
 	int32 LogicalHeight, float FontLineHeight, bool bStandalone,
-	bool bIconsAvailable) const
+	bool bIconsAvailable, const FWoTScoreboardLayoutOptions& Options) const
 {
 	TArray<FWoTHUDDrawCmd> Commands;
 	const FLinearColor White = FLinearColor::White;
 	const int32 LineHeight = FMath::Max(FMath::TruncToInt(FontLineHeight), 0);
-	const int32 HeaderLimit = LogicalHeight / 4 - LineHeight;
-	int32 HeaderY = LineHeight * 4;
 	const float CenterX = static_cast<float>(LogicalWidth) * 0.5f;
-
-	auto AddHeader = [&](const FString& Text)
-	{
-		if (!Text.IsEmpty() && HeaderY < HeaderLimit)
-		{
-			ScoreboardAddText(Commands, Text, CenterX,
-				static_cast<float>(HeaderY), White, EWoTTextAlignment::Center);
-			HeaderY += LineHeight;
-		}
-	};
 
 	FWoTCitadelScoreboard Sorted = *this;
 	Sorted.Players = Snapshot.Players;
@@ -424,17 +518,35 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelScoreboard::Layout(
 			*TeamDescription(Snapshot, Sorted.Players[0].Team));
 	}
 
-	AddHeader(Snapshot.MapName);
-	// DrawAdditionalHeaderElements (uc:187-203), shipped WoT.int NumSealsText.
-	AddHeader(FString::Printf(TEXT("Number of seals to win: %d"),
-		Snapshot.SealGoal));
 	const int32 ClockSeconds = Snapshot.bDisplayRemaining
 		? FMath::Max(Snapshot.RemainingTime, 0) : Snapshot.ElapsedTime;
-	AddHeader(FString(Snapshot.bDisplayRemaining
-		? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
-		FormatTime(ClockSeconds));
-	// ArenaScoreBoard.DrawHeader draws VictoryMessage after the clock (uc:380-386).
-	AddHeader(VictoryMessage);
+	TArray<FString> Headers;
+	for (const FString& Header : {Snapshot.MapName,
+		// DrawAdditionalHeaderElements (uc:187-203), shipped WoT.int NumSealsText.
+		FString::Printf(TEXT("Number of seals to win: %d"), Snapshot.SealGoal),
+		FString(Snapshot.bDisplayRemaining
+			? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
+			FormatTime(ClockSeconds),
+		// ArenaScoreBoard.DrawHeader draws VictoryMessage after the clock (uc:380-386).
+		VictoryMessage})
+	{
+		if (!Header.IsEmpty())
+		{
+			Headers.Add(Header);
+		}
+	}
+	const int32 TopY = BoardTopY(LogicalHeight, LineHeight, Headers.Num(), Options);
+	const int32 HeaderLimit = TopY - LineHeight;
+	int32 HeaderY = LineHeight * 4;
+	for (const FString& Header : Headers)
+	{
+		if (HeaderY < HeaderLimit)
+		{
+			ScoreboardAddText(Commands, Header, CenterX,
+				static_cast<float>(HeaderY), White, EWoTTextAlignment::Center);
+			HeaderY += LineHeight;
+		}
+	}
 
 	int32 X[ColumnCount];
 	LayoutColumns(LogicalWidth, X);
@@ -442,8 +554,12 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelScoreboard::Layout(
 	// DrawLegend override (uc:107-111): no top-of-board legend — each team block
 	// carries its own (DrawTeamHeader, uc:50-87).
 	constexpr int32 CitadelSlotSpacing = 14;
+	// The compact board drops the team block's two blank lines (uc:66, uc:79)
+	// and starts one stride lower, so its first team title still lands where
+	// retail's does.
+	const bool bCompact = Options.Density == EWoTScoreboardDensity::Compact;
 	// Arena starts at ClipY/4, then Citadel.DrawLegend subtracts SlotSpacing*2.
-	int32 RunningY = LogicalHeight / 4 - CitadelSlotSpacing * 2;
+	int32 RunningY = TopY - CitadelSlotSpacing * (bCompact ? 1 : 2);
 	uint8 PrevTeam = 255;
 	for (int32 Row = 0; Row < Sorted.Players.Num(); ++Row)
 	{
@@ -452,7 +568,10 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelScoreboard::Layout(
 		RunningY += CitadelSlotSpacing;
 		if (Player.Team != PrevTeam)
 		{
-			RunningY += LineHeight;   // space (uc:66)
+			if (!bCompact)
+			{
+				RunningY += LineHeight;   // space (uc:66)
+			}
 			if (Player.Team != 255)
 			{
 				ScoreboardAddText(Commands, FString::Printf(
@@ -463,7 +582,10 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelScoreboard::Layout(
 					EWoTTextAlignment::Center);
 			}
 			RunningY += LineHeight;
-			RunningY += LineHeight;   // space (uc:79)
+			if (!bCompact)
+			{
+				RunningY += LineHeight;   // space (uc:79)
+			}
 			LayoutLegend(Commands, X, static_cast<float>(RunningY));
 			RunningY += LineHeight;
 		}

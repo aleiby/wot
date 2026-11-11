@@ -6,6 +6,7 @@ committed CSVs, so a layout edited without regenerating fails here.
 """
 from __future__ import annotations
 
+import ast
 import shutil
 import sys
 import tempfile
@@ -15,8 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import generate_controller_layout as gen  # noqa: E402
 
-LAYOUT = (gen.REPO / gen.LAYOUT_RELATIVE).read_bytes()
-TUNING = (gen.REPO / gen.TUNING_RELATIVE).read_bytes()
+# LF-normalized, so the row edits below match on a CRLF (Windows) checkout too;
+# the generator hashes LF-normalized text either way.
+LAYOUT = (gen.REPO / gen.LAYOUT_RELATIVE).read_bytes().replace(b"\r\n", b"\n")
+TUNING = (gen.REPO / gen.TUNING_RELATIVE).read_bytes().replace(b"\r\n", b"\n")
 
 
 def _replace(data: bytes, old: str, new: str) -> bytes:
@@ -109,9 +112,52 @@ class GeneratorTests(unittest.TestCase):
                          ("YawRate,220,", "YawRate,0,"),
                          ("LookExponent,2.0,", "LookExponent,nan,"),
                          ("TurnAroundSeconds,0.15,", "TurnAroundSeconds,0,"),
-                         ("DropHoldSeconds,0.5,FaceLeft: a tap drops; a hold this long drops tainted\n", "")]:
+                         ("HoldSeconds,0.5,", "HoldSeconds,0,"),
+                         ("HoldSeconds,0.5,", "DropHoldSeconds,0.5,")]:
             with self.subTest(new=new), self.assertRaises(gen.LayoutError):
                 gen.render(LAYOUT, _replace(TUNING, old, new))
+        without_hold = "\n".join(line for line in TUNING.decode().split("\n")
+                                 if not line.startswith("HoldSeconds,"))
+        with self.assertRaisesRegex(gen.LayoutError, "missing HoldSeconds"):
+            gen.render(LAYOUT, without_hold.encode())
+
+    def test_dpad_up_taps_chat_and_holds_team_chat(self):
+        text = gen.render(LAYOUT, TUNING).decode()
+        self.assertIn("{EWoTGamepadContext::Gameplay, EWoTGamepadInput::DPadUp, "
+                      "EWoTGamepadAction::Chat, EWoTGamepadTrigger::Tap},", text)
+        self.assertIn("{EWoTGamepadContext::Gameplay, EWoTGamepadInput::DPadUp, "
+                      "EWoTGamepadAction::TeamChat, EWoTGamepadTrigger::Hold},", text)
+        # One hold time for every Tap/Hold pair (FaceLeft and D-pad up).
+        self.assertIn("/*HoldSeconds*/ 0.5f,", text)
+        self.assertNotIn("DropHoldSeconds", text)
+
+    def test_team_select_and_the_editor_keep_dpad_up(self):
+        text = gen.render(LAYOUT, TUNING).decode()
+        self.assertIn("{EWoTGamepadContext::TeamSelect, EWoTGamepadInput::DPadUp, "
+                      "EWoTGamepadAction::JoinTeam3, EWoTGamepadTrigger::Press},", text)
+        self.assertIn("{EWoTGamepadContext::CitadelEditor, EWoTGamepadInput::DPadUp, "
+                      "EWoTGamepadAction::ViewUp, EWoTGamepadTrigger::Press},", text)
+        for context in ("CitadelEditor", "TeamSelect"):
+            for action in ("Chat", "TeamChat"):
+                self.assertNotIn("{EWoTGamepadContext::%s, EWoTGamepadInput::DPadUp, "
+                                 "EWoTGamepadAction::%s," % (context, action), text)
+
+    def test_dpad_up_takes_no_third_gameplay_binding(self):
+        third = _replace(LAYOUT, "Gameplay,DPadUp,TeamChat,Hold",
+                         "Gameplay,DPadUp,TeamChat,Hold\nGameplay,DPadUp,ViewUp,")
+        with self.assertRaisesRegex(gen.LayoutError, "DPadUp is bound twice in Gameplay"):
+            gen.render(third, TUNING)
+        swapped = _replace(LAYOUT, "Gameplay,DPadUp,Chat,Tap", "Gameplay,DPadUp,Chat,")
+        with self.assertRaises(gen.LayoutError):
+            gen.render(swapped, TUNING)
+
+    def test_sources_parse_as_python_3_9(self):
+        # The Mac host pipeline runs Python 3.9: no 3.10+ syntax here.
+        here = Path(__file__).resolve().parent
+        for name in ("generate_controller_layout.py", "test_generate_controller_layout.py"):
+            with self.subTest(name=name):
+                source = (here / name).read_text(encoding="utf-8")
+                ast.parse(source, filename=name, feature_version=(3, 9))
 
     def test_check_detects_a_stale_include(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -122,7 +168,7 @@ class GeneratorTests(unittest.TestCase):
             self.assertTrue(gen.check(root))
             layout = root / gen.LAYOUT_RELATIVE
             layout.write_bytes(_replace(layout.read_bytes(), "Gameplay,DPadDown,RandomTaunt",
-                                        "Gameplay,DPadUp,RandomTaunt"))
+                                        "Gameplay,DPadDown,ViewDown"))
             self.assertFalse(gen.check(root))
 
 

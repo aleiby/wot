@@ -9,6 +9,7 @@
 #include "../WoTFractalData.h"
 #include "../WoTFractalSubsystem.h"
 #include "../WoTVertexAnimComponent.h"
+#include "../WoTSpriteBillboard.h"
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/Texture2D.h"
@@ -162,8 +163,7 @@ bool FWoTG42HeadBodyQuadPoseSpec::RunTest(const FString&)
 			APlayerCameraManager* Camera =
 				UGameplayStatics::GetPlayerCameraManager(Segment, 0);
 			const FQuat ExpectedFace = Camera
-				? FRotationMatrix::MakeFromZ(
-					-Camera->GetCameraRotation().Vector()).ToQuat()
+				? WoTSpriteFacing::ScreenAlignedQuat(Camera->GetCameraRotation())
 				: FQuat::Identity;
 			TestTrue(TEXT("quad uses the sprayer camera-facing quaternion"),
 				G42QuatsEqual(

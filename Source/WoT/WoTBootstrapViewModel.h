@@ -79,6 +79,55 @@ struct FWoTUpdateState
 	FString ReleasePageUrl;
 };
 
+/** Where the LAN installer copy stands at the original-game-needed screen. */
+enum class EWoTInstallerCopyStatus : uint8
+{
+	/** Nothing published yet: no line and no button. */
+	Unknown,
+	/** Not listening: the player's click starts it (Windows, Mac). */
+	Off,
+	/** Listening for WoT Reborn on another computer. */
+	Waiting,
+	/** A copy is streaming in (bytes in CompletedBytes/TotalBytes). */
+	Copying,
+	/** The last copy failed its check; waiting for another one. */
+	Damaged,
+	/** Three copies arrived damaged: no longer listening. */
+	GaveUp,
+	/** An offer came but there is not enough free space (NeededBytes). */
+	NotEnoughSpace,
+	/** Receiving is unavailable here (switched off, no data folder). */
+	Disabled,
+};
+
+/** The LAN installer copy's state, published by the worker with every
+ * original-game-needed progress event (spec B1, B5). */
+struct FWoTInstallerCopyState
+{
+	EWoTInstallerCopyStatus Status = EWoTInstallerCopyStatus::Unknown;
+	/** The receiver starts by itself here (Wine on Linux: a Steam Deck), so
+	 * there is no "Copy from another computer" button. */
+	bool bAutomatic = false;
+	/** The sharer's generic display label ("a Windows PC", ...). */
+	FString PeerLabel;
+	/** NotEnoughSpace: the free bytes the copy needs. */
+	uint64 NeededBytes = 0;
+
+	bool operator==(const FWoTInstallerCopyState& Other) const
+	{
+		return Status == Other.Status && bAutomatic == Other.bAutomatic
+			&& PeerLabel == Other.PeerLabel && NeededBytes == Other.NeededBytes;
+	}
+	bool operator!=(const FWoTInstallerCopyState& Other) const
+	{
+		return !(*this == Other);
+	}
+};
+
+/** Every copy attempt publishes its bytes under its own stage id with this
+ * prefix ("lan-copy-1", "lan-copy-2", ...): a new id restarts the bytes. */
+inline constexpr TCHAR WoTInstallerCopyStagePrefix[] = TEXT("lan-copy-");
+
 /** A bounded worker-to-game-thread progress publication. */
 struct FWoTBootstrapProgressEvent
 {
@@ -92,6 +141,8 @@ struct FWoTBootstrapProgressEvent
 	double ElapsedSeconds = 0.0;
 	TOptional<EWoTOriginalGameNeededReason> OriginalGameNeededReason;
 	FString OriginalGameNeededDetail;
+	/** Original-game-needed only: the LAN installer copy's state. */
+	TOptional<FWoTInstallerCopyState> InstallerCopy;
 };
 
 /**
@@ -125,6 +176,8 @@ struct FWoTBootstrapSnapshot
 	EWoTOriginalGameNeededReason OriginalGameNeededReason =
 		EWoTOriginalGameNeededReason::Missing;
 	FString OriginalGameNeededDetail;
+	/** Original-game-needed only: the LAN installer copy's state. */
+	FWoTInstallerCopyState InstallerCopy;
 	bool bMandatoryWork = false;
 	bool bResumeStateVerified = false;
 	/** Notify-only update state; the bootstrap intentionally presents no menu UI for it. */
@@ -180,6 +233,9 @@ public:
 	static bool IsLegalTransition(
 		EWoTBootstrapPhase From, EWoTBootstrapPhase To);
 	static bool IsBytePhase(EWoTBootstrapPhase Phase);
+	/** IsBytePhase, relaxed for one stage: the original-game-needed screen's
+	 * LAN copy ("lan-copy-N") carries byte progress too. */
+	static bool IsBytePhase(EWoTBootstrapPhase Phase, FStringView StageId);
 	static bool IsItemPhase(EWoTBootstrapPhase Phase);
 	static FText PhaseText(EWoTBootstrapPhase Phase);
 	static FText StageText(FStringView StageId);

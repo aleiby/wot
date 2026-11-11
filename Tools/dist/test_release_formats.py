@@ -904,6 +904,9 @@ class GuardedReleaseConfigurationTests(unittest.TestCase):
             "ba3c735cdbe4235e6cadf81c412b883a3472d1045faea189f584f8beca46e343",
         }
         self.assertTrue(retained_markers.issubset(formats.TEST_SEAM_MARKERS))
+        # LAN installer sharing's loopback pairing and receiver-off switch.
+        self.assertTrue({"wottestlanloopback", "WOT_TEST_LAN_RECEIVER_OFF"}
+                        .issubset(formats.TEST_SEAM_MARKERS))
         self.assertTrue({
             "WOT_BOOTSTRAP_TEST_HELPER_CRASH_AT",
             "WOT_BOOTSTRAP_TEST_HELPER_TRACE",
