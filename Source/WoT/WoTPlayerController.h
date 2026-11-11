@@ -513,8 +513,9 @@ public:
 	// PlayerPawn.ServerRestartPlayer: Level.Game.RestartPlayer(self) unconditionally.
 	// BattleHUD's team select (BattleHUD.uc:63-64) depends on it restarting a LIVE
 	// player at a team start; the engine's retained ServerRestartPlayer RPC no-ops for
-	// a live pawn, so this WoT RPC consumes the current body first (the port replaces
-	// pawns instead of reusing them — same divergence as ServerRespawnPlayer).
+	// a live pawn, so this WoT RPC replaces the pawn (the port replaces pawns instead
+	// of moving them — same divergence as ServerRespawnPlayer). The live pawn is kept
+	// until its replacement exists, and kept outright when every start refuses.
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRestartPlayerWoT();
 

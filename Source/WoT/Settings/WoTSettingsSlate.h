@@ -1,8 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Framework/SlateDelegates.h"
+#include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "UI/SWoTButtonPrompts.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WoTGameSettings.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -11,6 +14,8 @@ class FWoTFrontEndPresentationAuthority;
 class SCheckBox;
 class SScrollBox;
 class STextBlock;
+class SWoTRetailSlider;
+class UTexture2D;
 class UWoTPreferencesSubsystem;
 class UWoTInstallerSharingSubsystem;
 
@@ -28,6 +33,45 @@ enum class EWoTBindingSlot : uint8
 {
 	Primary,
 	Secondary
+};
+
+// menuOptions' Crosshair row (menuOptions.uc:45-46, 80-81, 121-122, 200-217) is
+// not a slider: it draws the HUD's own crosshair art and steps through
+// MainHUD's 21 crosshairs (the last draws nothing) with MainHUD.ChangeCrosshair's
+// wrap. Left/Right (keyboard, D-pad or stick) step -1/+1; Enter or A steps +1 as
+// PlayerPawn.ChangeCrosshair does. A click on its left half steps back, on its
+// right half forward. One focus stop, like a slider row.
+class SWoTCrosshairSelector : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SWoTCrosshairSelector) {}
+		SLATE_ATTRIBUTE(int32, Value)
+		SLATE_ATTRIBUTE(FSlateFontInfo, Font)
+		SLATE_EVENT(FOnInt32ValueChanged, OnValueChanged)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnKeyDown(
+		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
+	virtual FReply OnMouseButtonDown(
+		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+
+	/** MainHUD.ChangeCrosshair(Delta) applied to the bound value. */
+	void Change(int32 Delta);
+	/** The brush drawing the current value's crosshair; no resource for none. */
+	const FSlateBrush* CrosshairBrush() const;
+
+private:
+	FSlateColor SelectionColor() const;
+
+	TAttribute<int32> Value;
+	FOnInt32ValueChanged OnValueChanged;
+	mutable FSlateBrush Brush;
+	mutable int32 BrushCrosshair = INDEX_NONE;
+	mutable TStrongObjectPtr<UTexture2D> BrushTexture;
 };
 
 // One Controls or Hardware screen. The widget owns the draft, the key capture
@@ -145,6 +189,10 @@ public:
 	TSharedPtr<STextBlock> SharingHintForTesting() const { return SharingHint; }
 	/** The game instance's sharing subsystem, for a screen built outside one. */
 	void SetSharingSubsystemForTesting(UWoTInstallerSharingSubsystem* Sharing);
+	TSharedPtr<SWoTCrosshairSelector> CrosshairSelectorForTesting() const
+		{ return CrosshairSelector; }
+	TSharedPtr<SWoTRetailSlider> ViewBobSliderForTesting() const
+		{ return ViewBobSlider; }
 #endif
 
 private:
@@ -252,6 +300,8 @@ private:
 #if WITH_AUTOMATION_TESTS
 	TWeakObjectPtr<UWoTInstallerSharingSubsystem> SharingForTesting;
 #endif
+	TSharedPtr<SWoTRetailSlider> ViewBobSlider;
+	TSharedPtr<SWoTCrosshairSelector> CrosshairSelector;
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;

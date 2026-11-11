@@ -640,8 +640,9 @@ public:
 		SLATE_ARGUMENT(float, StepSize)
 		// Knob stops across the full MinValue..MinValue+8*StepSize range. The
 		// retail menuWOT.DrawSlider has 8 (one per cell); a value the retail
-		// menu stepped one unit at a time (time limit 0-60) uses one stop per unit.
-		SLATE_ARGUMENT(int32, Positions)
+		// menu stepped one unit at a time (time limit 0-60) uses one stop per unit,
+		// and a range that depends on other settings binds its live stop count.
+		SLATE_ATTRIBUTE(int32, Positions)
 		SLATE_EVENT(FOnFloatValueChanged, OnValueChanged)
 	SLATE_END_ARGS()
 
@@ -667,9 +668,14 @@ public:
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+#if WITH_AUTOMATION_TESTS
+	/** The 1-based stop the knob shows for the current value. */
+	int32 KnobStopForTesting() const { return ValueCell(); }
+#endif
 
 private:
 	FSlateColor SelectionColor() const;
+	int32 PositionCount() const;
 	int32 ValueCell() const;
 	int32 CellFromMouse(const FGeometry& MyGeometry, const FVector2D& ScreenPosition) const;
 	void CommitCell(int32 CellIndex);
@@ -678,7 +684,7 @@ private:
 	FOnFloatValueChanged OnValueChanged;
 	float MinValue = 0.0f;
 	float StepSize = 0.125f;
-	int32 Positions = 8;
+	TAttribute<int32> Positions;
 	bool bDragging = false;
 };
 

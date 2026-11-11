@@ -353,6 +353,12 @@ public:
 
 	UFUNCTION(Exec)
 	void ChangeCrosshair(int32 Delta);
+	// MainHUD.ChangeCrosshair's wrap (MainHUD.uc:63-74): past the last of the
+	// NumCrossHairs entries (the 21st draws nothing) back to 0, and below 0 to it.
+	static int32 WrapCrosshair(int32 InCrosshair, int32 Delta);
+	// The art MainHUD.DrawCrossHair draws for InCrosshair, as the HUD resolves it;
+	// null for the "no crosshair" entry.
+	static UTexture2D* ResolveCrosshairTexture(int32 InCrosshair);
 
 	static TArray<FWoTHUDDrawCmd> LayoutCrosshair(int32 Index, int32 ClipX, int32 ClipY);
 	static TArray<FWoTHUDDrawCmd> LayoutHealth(

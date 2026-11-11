@@ -2104,7 +2104,14 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				return Max > 1 ? (ViewModel.GetHostRequest().MaxTeamSize - 1)
 					/ static_cast<float>(Max - 1) : 0.0f;
 			})
-			.Positions(8)
+			// menuStartBattleServer.uc:130,196: 1 to 16 / citadels in unit steps,
+			// one stop each. Eight fixed stops put the 3- and 4-citadel sizes on
+			// cell boundaries, where Left or Right could not leave them.
+			.Positions_Lambda([this]()
+			{
+				return 16 / FMath::Max(2, FWoTFrontEndModel::BattleCitadelCount(
+					ViewModel.GetHostRequest().MapPackage));
+			})
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				const int32 Citadels = FMath::Max(2,

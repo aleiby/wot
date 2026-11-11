@@ -1,8 +1,10 @@
 #include "WoTSettingsSlate.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
+#include "Engine/Texture2D.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/CoreStyle.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -11,6 +13,7 @@
 #include "Widgets/SOverlay.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Engine/GameInstance.h"
+#include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
@@ -56,6 +59,22 @@ int32 CellIndexFromSliderValue(float Value)
 	return FMath::Clamp(FMath::RoundToInt(Value * 7.0f), 0, 7);
 }
 
+// menuOptions View Bob: UpdateBob(Bob +/- 0.004) clamped to 0..0.032, nine values
+// (menuOptions.uc:48-49, 83-84; PlayerPawn.UpdateBob). The row's slider holds the
+// whole step count, so no float quotient lands a stop just below a cell boundary.
+constexpr float ViewBobStep = 0.004f;
+constexpr int32 ViewBobSteps = 8;
+
+int32 ViewBobStepOf(float ViewBob)
+{
+	return FMath::Clamp(FMath::RoundToInt(ViewBob / ViewBobStep), 0, ViewBobSteps);
+}
+
+// The menu's retail art scale (SWoTRetailSlider draws its 8px sprites at 3x).
+constexpr float CrosshairArtScale = 3.0f;
+// MainHUD.DrawCursor centres the crosshair art on 16x16 (0.5 * ClipX - 8).
+constexpr float CrosshairArtSize = 16.0f;
+
 FString ResolutionLabel(uint16 Width, uint16 Height)
 {
 	return FString::Printf(TEXT("%u x %u"), Width, Height);
@@ -80,6 +99,134 @@ FLinearColor WoTSettings_ConfirmTitleColor()
 	return FLinearColor::FromSRGBColor(FColor(240, 196, 92));
 }
 } // namespace
+
+void SWoTCrosshairSelector::Construct(const FArguments& InArgs)
+{
+	Value = InArgs._Value;
+	OnValueChanged = InArgs._OnValueChanged;
+	const TAttribute<FSlateFontInfo> Font = InArgs._Font;
+	auto Arrow = [this, &Font](const TCHAR* Glyph) -> TSharedRef<SWidget>
+	{
+		return SNew(STextBlock)
+			.Text(FText::FromString(Glyph))
+			.Font(Font)
+			.ColorAndOpacity(this, &SWoTCrosshairSelector::SelectionColor);
+	};
+	ChildSlot
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			Arrow(TEXT("<"))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(14.0f, 0.0f)
+		[
+			SNew(SBox)
+			.WidthOverride(CrosshairArtSize * CrosshairArtScale)
+			.HeightOverride(CrosshairArtSize * CrosshairArtScale)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+				// The HUD draws the art untinted (MainHUD.DrawCrossHair: white).
+				SNew(SImage).Image(this, &SWoTCrosshairSelector::CrosshairBrush)
+			]
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+		[
+			Arrow(TEXT(">"))
+		]
+	];
+}
+
+FSlateColor SWoTCrosshairSelector::SelectionColor() const
+{
+	return FWoTMenuStyle::MenuColor(IsHovered() || HasKeyboardFocus());
+}
+
+const FSlateBrush* SWoTCrosshairSelector::CrosshairBrush() const
+{
+	const int32 Current = Value.Get(0);
+	if (Current != BrushCrosshair)
+	{
+		BrushCrosshair = Current;
+		UTexture2D* Texture = AWoTHUD::ResolveCrosshairTexture(Current);
+		BrushTexture.Reset(Texture);
+		Brush = FSlateBrush();
+		if (Texture)
+		{
+			Brush.SetResourceObject(Texture);
+			Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY())
+				* CrosshairArtScale;
+			Brush.DrawAs = ESlateBrushDrawType::Image;
+		}
+		else
+		{
+			// MainHUD's 21st crosshair draws nothing.
+			Brush.DrawAs = ESlateBrushDrawType::NoDrawType;
+		}
+	}
+	return &Brush;
+}
+
+void SWoTCrosshairSelector::Change(int32 Delta)
+{
+	OnValueChanged.ExecuteIfBound(AWoTHUD::WrapCrosshair(Value.Get(0), Delta));
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+FReply SWoTCrosshairSelector::OnKeyDown(
+	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	const FKey Key = InKeyEvent.GetKey();
+	// menuOptions.ProcessLeft/ProcessRight: MyHUD.ChangeCrosshair(-1/+1).
+	if (Key == EKeys::Left || Key == EKeys::Gamepad_DPad_Left)
+	{
+		Change(-1);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Right || Key == EKeys::Gamepad_DPad_Right)
+	{
+		Change(1);
+		return FReply::Handled();
+	}
+	// menuOptions.ProcessSelection: PlayerPawn.ChangeCrosshair(), which is +1.
+	if (FSlateApplication::IsInitialized()
+		&& FSlateApplication::Get().GetNavigationActionFromKey(InKeyEvent)
+			== EUINavigationAction::Accept)
+	{
+		Change(1);
+		return FReply::Handled();
+	}
+	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+FNavigationReply SWoTCrosshairSelector::OnNavigation(
+	const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent)
+{
+	// The stick steps the row like the D-pad; Up/Down still leave it.
+	if (InNavigationEvent.GetNavigationGenesis() == ENavigationGenesis::Controller)
+	{
+		const EUINavigation Direction = InNavigationEvent.GetNavigationType();
+		if (Direction == EUINavigation::Left || Direction == EUINavigation::Right)
+		{
+			Change(Direction == EUINavigation::Right ? 1 : -1);
+			return FNavigationReply::Stop();
+		}
+	}
+	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
+}
+
+FReply SWoTCrosshairSelector::OnMouseButtonDown(
+	const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return FReply::Unhandled();
+	}
+	const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
+	Change(LocalX < MyGeometry.GetLocalSize().X * 0.5f ? -1 : 1);
+	return FReply::Handled().SetUserFocus(SharedThis(this), EFocusCause::Mouse);
+}
 
 void SWoTSettingsScreen::Construct(const FArguments& InArgs)
 {
@@ -734,26 +881,31 @@ void SWoTSettingsScreen::BuildControlsBody()
 		];
 		NavigationRows.Add({SteamKeyboardCheckBox});
 	}
-	TSharedPtr<SWidget> ViewBobSlider;
 	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[8]")))];
 	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f)
 	[
-		SAssignNew(ViewBobSlider, SWoTRetailSlider).MinValue(0.0f).StepSize(0.125f)
-		.Value_Lambda([this]() { return Draft.ViewBob / 0.032f; })
+		// One stop per 0.004 step: retail's eight cells put its top two steps
+		// on one cell (PORT_NOTES "Menu slider travel and host-setting stops").
+		SAssignNew(ViewBobSlider, SWoTRetailSlider)
+		.MinValue(0.0f).StepSize(1.0f).Positions(ViewBobSteps + 1)
+		.Value_Lambda([this]() { return static_cast<float>(ViewBobStepOf(Draft.ViewBob)); })
 		.OnValueChanged_Lambda([this](float Value)
-			{ Draft.ViewBob = FMath::RoundToFloat(Value * 8.0f) * 0.004f; })
+		{
+			Draft.ViewBob = ViewBobStep
+				* static_cast<float>(FMath::Clamp(FMath::RoundToInt(Value), 0, ViewBobSteps));
+		})
 	];
 	NavigationRows.Add({ViewBobSlider});
-	TSharedPtr<SWidget> CrosshairSlider;
 	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[7]")))];
-	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f)
+	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 16.0f).HAlign(HAlign_Left)
 	[
-		SAssignNew(CrosshairSlider, SWoTRetailSlider).MinValue(0.0f).StepSize(0.05f)
-		.Value_Lambda([this]() { return Draft.Crosshair / 20.0f; })
-		.OnValueChanged_Lambda([this](float Value)
-			{ Draft.Crosshair = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 20.0f), 0, 20)); })
+		SAssignNew(CrosshairSelector, SWoTCrosshairSelector)
+		.Font(this, &SWoTSettingsScreen::Body)
+		.Value_Lambda([this]() { return static_cast<int32>(Draft.Crosshair); })
+		.OnValueChanged_Lambda([this](int32 NewCrosshair)
+			{ Draft.Crosshair = static_cast<uint8>(NewCrosshair); })
 	];
-	NavigationRows.Add({CrosshairSlider});
+	NavigationRows.Add({CrosshairSelector});
 	TSharedPtr<SWidget> GoreSlider;
 	Rows->AddSlot()[BuildLabel(Retail(TEXT("menuOptions.MenuList[10]")))];
 	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 18.0f)
