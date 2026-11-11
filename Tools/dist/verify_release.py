@@ -17,6 +17,14 @@ writes and publish_release.py uploads:
   WoT-Mac-guarded-shipping-<commit>.dmg.verify.json
                                                   canonical cross-host verification data
 
+A set downloaded from a published release (--published) also holds what
+publish_release adds outside the signed set: WoT-release-notes-v1.json
+(required), the fixed-name player downloads (optional) and
+Install-WoT-Reborn.desktop, the SteamOS installer. That one is required, and
+must equal a rebuild at the manifest's build commit (steamos_installer_asset.py,
+from git objects), whenever that commit carries the installer; a release built
+before it existed must not hold it.
+
 The signed update chain is checked the way the shipped game/updater checks it
 (release_formats cites each native reader), using public trust material: the
 announcement key and offline-root ring that bootstrap-trust-v1.json binds and
@@ -57,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import release_crypto as crypto  # noqa: E402
 import release_formats as formats  # noqa: E402
 import mac_dmg  # noqa: E402
+import steamos_installer_asset as steamos_installer  # noqa: E402
 from release_formats import FormatError  # noqa: E402
 
 VERIFY_RECEIPT_FORMAT = "wot-release-verify-receipt-v1"
@@ -108,6 +117,9 @@ class VerifiedSet:
     # Unsigned, fixed-name copies of the player downloads. They are admitted
     # only in --published mode and never become part of signed assets.
     player_downloads: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    # Only for --published: the unsigned SteamOS installer, proven identical to
+    # a rebuild at the build commit. Never part of the signed assets.
+    steamos_installer: Optional[Dict[str, object]] = None
 
     def summary(self) -> dict:
         summary = {
@@ -139,6 +151,8 @@ class VerifiedSet:
             summary["release_notes"] = self.release_notes
         if self.player_downloads:
             summary["player_downloads"] = self.player_downloads
+        if self.steamos_installer is not None:
+            summary["steamos_installer"] = self.steamos_installer
         return summary
 
 
@@ -191,6 +205,50 @@ def _check_published_player_downloads(
             "size": size,
         }
     return result
+
+
+def _check_published_steamos_installer(path: Optional[Path], repository: Path,
+                                       build_commit: str, failures: List[str]
+                                       ) -> Optional[Dict[str, object]]:
+    """Install-WoT-Reborn.desktop, judged by what the build commit carries.
+
+    A build commit with Tools/deck/installer/build_desktop_entry.py publishes
+    the asset: it is required and must be byte-identical to a rebuild there
+    (publish_release builds it from the release commit's own files with that
+    commit's builder; steamos_installer_asset repeats that from git, so a
+    stale or hand-made asset, or an upload from the wrong tree, fails). An
+    older build commit predates the asset, so it must be absent, which keeps
+    releases published before it verifiable.
+    """
+    name = formats.STEAMOS_INSTALLER_ASSET
+    try:
+        carries = steamos_installer.has_source(repository, build_commit)
+    except FormatError as exc:
+        failures.append(f"{name}: cannot tell whether build commit {build_commit} in "
+                        f"{repository} carries it: {exc}")
+        return None
+    if not carries:
+        if path is not None:
+            failures.append(f"unexpected file {name} in the publish set: build commit "
+                            f"{build_commit} predates the SteamOS installer")
+        return None
+    if path is None:
+        failures.append(f"a published release carries {name}, but the downloaded set "
+                        "has none")
+        return None
+    try:
+        rebuilt = steamos_installer.build_at_commit(repository, build_commit)
+    except FormatError as exc:
+        failures.append(f"{name}: cannot rebuild it at build commit {build_commit} "
+                        f"in {repository}: {exc}")
+        return None
+    published = path.read_bytes()
+    if published != rebuilt:
+        failures.append(f"{name}: differs from a rebuild at build commit {build_commit} "
+                        f"({len(published)} bytes published, {len(rebuilt)} rebuilt)")
+        return None
+    return {"build_commit": build_commit, "sha256": formats.sha256_hex(published),
+            "size": len(published)}
 
 
 def _read(directory: Path, name: str, failures: List[str]) -> Optional[bytes]:
@@ -783,7 +841,8 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
                         allow_unnotarized: bool,
                         require_previous: bool,
                         inspect_mac_dmg: bool,
-                        published: bool = False) -> VerifiedSet:
+                        published: bool = False,
+                        repository_root: Optional[Path] = None) -> VerifiedSet:
     directory = Path(directory)
     failures: List[str] = []
     if not trust.recovery_url.endswith("/" + formats.KEY_RING_ASSET):
@@ -878,6 +937,7 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
     release_notes: Optional[Dict[str, object]] = None
     player_download_paths: Dict[str, Path] = {}
     notes_seen = False
+    steamos_path: Optional[Path] = None
     for path in sorted(directory.iterdir()) if directory.is_dir() else []:
         if path.is_dir():
             failures.append(f"unexpected directory {path.name} in the publish set")
@@ -890,6 +950,10 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
             continue
         if published and path.name in formats.PLAYER_DOWNLOAD_ASSETS.values():
             player_download_paths[path.name] = path
+            continue
+        if published and path.name == formats.STEAMOS_INSTALLER_ASSET:
+            # Unsigned too, and likewise refused in a signing set.
+            steamos_path = path
             continue
         match = _INSTALL_ZIP.match(path.name)
         if path.name not in known and not match:
@@ -917,6 +981,14 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
     if published and not notes_seen:
         failures.append(f"a published release carries {formats.RELEASE_NOTES_ASSET}, "
                         "but the downloaded set has none")
+    steamos: Optional[Dict[str, object]] = None
+    build_commits = {result.manifest.document["build_commit"]
+                     for result in results.values()}
+    # (No agreed build commit means the signed chain already failed.)
+    if published and len(build_commits) == 1:
+        steamos = _check_published_steamos_installer(
+            steamos_path, Path(repository_root or formats.REPOSITORY_ROOT),
+            next(iter(build_commits)), failures)
     checked_releases: Dict[str, formats.GuardedRelease] = {}
     for platform, release_json in (releases or {}).items():
         if platform in results:
@@ -940,7 +1012,7 @@ def _verify_publish_set(directory: Path, *, trust: formats.Trust,
         build_commit=first.manifest.document["build_commit"], ring=ring,
         ring_signer=ring_signer, platforms=results, sequence_gate=sequence_gate,
         assets=assets, release_notes=release_notes,
-        player_downloads=player_downloads)
+        player_downloads=player_downloads, steamos_installer=steamos)
 
 
 def verify_publish_set(directory: Path, *, trust: formats.Trust,
@@ -953,12 +1025,17 @@ def verify_publish_set(directory: Path, *, trust: formats.Trust,
                        allow_test: bool = False,
                        allow_unnotarized: bool = False,
                        inspect_mac_dmg: Optional[bool] = None,
-                       published: bool = False) -> VerifiedSet:
+                       published: bool = False,
+                       repository_root: Optional[Path] = None) -> VerifiedSet:
     """Verify a candidate set, including the mandatory positive-sequence history.
 
     ``published`` verifies a set downloaded from a published release, which
-    may also hold the release-notes asset and fixed player-download copies;
-    they are validated, not signed.
+    also holds the release-notes asset, may hold fixed player-download copies
+    and, when its build commit carries the SteamOS installer, holds
+    Install-WoT-Reborn.desktop; they are validated, not signed. The desktop
+    entry is rebuilt at the build commit from ``repository_root``'s git objects
+    (default: this checkout) and must match byte for byte; a build commit
+    before the installer existed must not have one.
     """
     return _verify_publish_set(
         directory, trust=trust, compiled=compiled, previous=previous,
@@ -968,7 +1045,7 @@ def verify_publish_set(directory: Path, *, trust: formats.Trust,
         require_previous=True,
         inspect_mac_dmg=(sys.platform == "darwin"
                          if inspect_mac_dmg is None else inspect_mac_dmg),
-        published=published)
+        published=published, repository_root=repository_root)
 
 
 def _verify_signing_output(directory: Path, *, trust: formats.Trust,
@@ -1127,9 +1204,15 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--receipt", help="write a verify receipt here")
     result.add_argument("--published", action="store_true",
                         help="the set was downloaded from a published release: also "
-                        f"accept and validate {formats.RELEASE_NOTES_ASSET} and "
-                        "fixed player-download copies, which publish_release adds "
-                        "outside the signed set")
+                        f"require and validate {formats.RELEASE_NOTES_ASSET}, and "
+                        f"{formats.STEAMOS_INSTALLER_ASSET} when the build commit "
+                        "carries the SteamOS installer, and accept fixed "
+                        "player-download copies, which publish_release adds outside "
+                        "the signed set")
+    result.add_argument("--repository-root", default=str(formats.REPOSITORY_ROOT),
+                        help="git repository holding the release's build commit; "
+                        f"--published rebuilds {formats.STEAMOS_INSTALLER_ASSET} "
+                        "there (default: this checkout)")
     add_trust_arguments(result)
     return result
 
@@ -1148,7 +1231,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             allow_staging_sequence=args.allow_staging_sequence, openssl=openssl,
             allow_test=args.allow_test,
             allow_unnotarized=args.allow_unnotarized,
-            published=args.published)
+            published=args.published,
+            repository_root=Path(args.repository_root))
     except VerifyError as exc:
         for failure in exc.failures:
             print(f"FAIL: {failure}", file=sys.stderr)
@@ -1172,6 +1256,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if notes is not None:
         print(f"verify_release: {formats.RELEASE_NOTES_ASSET} is valid (unsigned; "
               f"entries for sequences {notes['entry_sequences']})")
+    steamos = summary.get("steamos_installer")
+    if steamos is not None:
+        print(f"verify_release: {formats.STEAMOS_INSTALLER_ASSET} matches a rebuild at "
+              f"build commit {steamos['build_commit']} (unsigned)")
     mac = summary["platforms"].get("Mac")
     if mac and mac.get("dmg_inspection"):
         if "contents-not-inspected" in mac["dmg_inspection"]:

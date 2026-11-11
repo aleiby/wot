@@ -643,6 +643,49 @@ WoTTryAcquirePinnedAdjacentInstaller(const FString& CanonicalAdjacentPath,
 		Location, MoveTemp(IsCancelled), ExpectedInstallerIdentity);
 }
 
+TWoTBootstrapResult<FWoTNativeFileHandle> WoTOpenInspectedInstallerForStreaming(
+	FWoTInstallerLocation& Location,
+	const FWoTNativeFileIdentity& InspectedIdentity)
+{
+	using FResult = TWoTBootstrapResult<FWoTNativeFileHandle>;
+	TWoTBootstrapResult<FWoTInstallerPins> Pins = ProductionPins();
+	if (Pins.IsError())
+	{
+		return FResult::Error(MoveTemp(Pins).GetError());
+	}
+	TWoTBootstrapResult<FWoTInstallerParent> Parent =
+		OpenParent(Location, Pins.GetValue());
+	if (Parent.IsError())
+	{
+		return FResult::Error(MoveTemp(Parent).GetError());
+	}
+	TWoTBootstrapResult<FWoTNativeFileHandle> Held = OpenInstallerSource(
+		Parent.GetValue().Directory, Parent.GetValue().Leaf);
+	if (Held.IsError())
+	{
+		return FResult::Error(MoveTemp(Held).GetError());
+	}
+	if (Held.GetValue().GetIdentity() != InspectedIdentity)
+	{
+		return FResult::Error(InstallerError(EWoTBootstrapError::UnsafePath,
+			WoTInstallerIdentityMutated, Location.CanonicalPath));
+	}
+	FWoTAdjacentInstallerInspection Locality;
+	FWoTBootstrapError AttributeError;
+	if (!PopulateOnlineOnlyState(Held.GetValue(), Location.CanonicalPath,
+		Locality, AttributeError))
+	{
+		return FResult::Error(MoveTemp(AttributeError));
+	}
+	if (Locality.State == EWoTPinnedAdjacentInstallerProbe::OnlineOnly)
+	{
+		return FResult::Error(InstallerError(EWoTBootstrapError::Io,
+			TEXT("the installer is an online-only file"),
+			Location.CanonicalPath));
+	}
+	return FResult::Success(MoveTemp(Held).GetValue());
+}
+
 namespace
 {
 TWoTBootstrapResult<bool> ProbeAdjacentInstallerParentWritable(

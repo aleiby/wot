@@ -363,7 +363,7 @@ void UWoTSpriteBillboardComponent::TickComponent(
 	// USize/VSize on the 100uu plane.
 	APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const FQuat Face = Cam
-		? FRotationMatrix::MakeFromZ(-Cam->GetCameraRotation().Vector()).ToQuat()
+		? WoTSpriteFacing::ScreenAlignedQuat(Cam->GetCameraRotation())
 		: FQuat::Identity;
 	const float Glow = FMath::Clamp(ScaleGlow, 0.0f, 1.0f);
 	const FVector Scale(DrawScale * TexWidth / 100.0f,

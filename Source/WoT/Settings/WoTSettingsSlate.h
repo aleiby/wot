@@ -1,15 +1,23 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Framework/SlateDelegates.h"
+#include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
+#include "UI/SWoTButtonPrompts.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WoTGameSettings.h"
 #include "Widgets/SCompoundWidget.h"
 
+class FWoTBackStackEntryHandle;
 class FWoTFrontEndPresentationAuthority;
 class SCheckBox;
 class SScrollBox;
 class STextBlock;
+class SWoTRetailSlider;
+class UTexture2D;
 class UWoTPreferencesSubsystem;
+class UWoTInstallerSharingSubsystem;
 
 enum class EWoTSettingsPage : uint8
 {
@@ -25,6 +33,45 @@ enum class EWoTBindingSlot : uint8
 {
 	Primary,
 	Secondary
+};
+
+// menuOptions' Crosshair row (menuOptions.uc:45-46, 80-81, 121-122, 200-217) is
+// not a slider: it draws the HUD's own crosshair art and steps through
+// MainHUD's 21 crosshairs (the last draws nothing) with MainHUD.ChangeCrosshair's
+// wrap. Left/Right (keyboard, D-pad or stick) step -1/+1; Enter or A steps +1 as
+// PlayerPawn.ChangeCrosshair does. A click on its left half steps back, on its
+// right half forward. One focus stop, like a slider row.
+class SWoTCrosshairSelector : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SWoTCrosshairSelector) {}
+		SLATE_ATTRIBUTE(int32, Value)
+		SLATE_ATTRIBUTE(FSlateFontInfo, Font)
+		SLATE_EVENT(FOnInt32ValueChanged, OnValueChanged)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs);
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnKeyDown(
+		const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
+	virtual FReply OnMouseButtonDown(
+		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+
+	/** MainHUD.ChangeCrosshair(Delta) applied to the bound value. */
+	void Change(int32 Delta);
+	/** The brush drawing the current value's crosshair; no resource for none. */
+	const FSlateBrush* CrosshairBrush() const;
+
+private:
+	FSlateColor SelectionColor() const;
+
+	TAttribute<int32> Value;
+	FOnInt32ValueChanged OnValueChanged;
+	mutable FSlateBrush Brush;
+	mutable int32 BrushCrosshair = INDEX_NONE;
+	mutable TStrongObjectPtr<UTexture2D> BrushTexture;
 };
 
 // One Controls or Hardware screen. The widget owns the draft, the key capture
@@ -52,10 +99,23 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SWoTSettingsScreen() override;
 
-	/** Escape/back: cancels a live key capture first, then reverts an
-	 * unconfirmed video preview, then leaves the screen. Always handled. */
+	/** The back action (B, View or Escape): cancels a live key capture first;
+	 * closes an open "Save changes?" prompt, back to editing; with the video
+	 * Keep/Revert strip up, reverts the preview and leaves, as before; with
+	 * unsaved changes, opens the "Save changes?" prompt (the owner's Steam
+	 * Deck session, 2026-11-09); else leaves the screen. Always handled. The
+	 * Back button keeps leaving at once and dropping the draft. */
 	bool HandleBack();
 	bool IsCapturingBinding() const { return CaptureAction.IsSet(); }
+	/** The draft (the Steam keyboard choice included) differs from what is saved. */
+	bool HasUnsavedChanges() const;
+	/** The "Save changes?" prompt is open. */
+	bool IsConfirmingUnsaved() const { return bConfirmingUnsaved; }
+	/** The first control of the page: initial focus in Controller mode. */
+	TSharedPtr<SWidget> InitialControllerFocusWidget() const;
+	/** The prompt strip's set for this page now (spec r3 section 1a): the
+	 * settings set, the video Keep/Revert strip's, or a live key capture's. */
+	TArray<FWoTButtonPrompt> ControllerPrompts() const;
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnPreviewKeyDown(
@@ -66,6 +126,8 @@ public:
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseWheel(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
 	virtual void Tick(
 		const FGeometry& AllottedGeometry, const double InCurrentTime,
 		const float InDeltaTime) override;
@@ -85,11 +147,21 @@ public:
 	bool IsAwaitingVideoConfirmationForTesting() const { return VideoConfirmDeadline > 0.0; }
 	double VideoConfirmDeadlineForTesting() const { return VideoConfirmDeadline; }
 	FReply SaveForTesting() { return Save(); }
+	/** The Back button's click: leaves at once, dropping the draft. */
+	FReply BackForTesting() { return Back(); }
+	TSharedPtr<SWidget> ConfirmSaveButtonForTesting() const { return ConfirmSaveButton; }
+	TSharedPtr<SWidget> ConfirmDiscardButtonForTesting() const { return ConfirmDiscardButton; }
+	TSharedPtr<SWidget> ConfirmPromptForTesting() const { return ConfirmPrompt; }
 	FReply KeepVideoForTesting() { return KeepVideo(); }
 	FReply RevertVideoForTesting() { return RevertVideo(); }
 	FReply ResetBindingsForTesting() { return ResetBindings(); }
 	TSharedPtr<SWidget> SaveButtonForTesting() const { return SaveButton; }
 	TSharedPtr<SWidget> BackButtonForTesting() const { return BackButton; }
+	TSharedPtr<SWidget> KeepButtonForTesting() const { return KeepButton; }
+	TSharedPtr<SWidget> RevertButtonForTesting() const { return RevertButton; }
+	/** Every focusable row of the body, top to bottom, then the footer. */
+	const TArray<TArray<TSharedPtr<SWidget>>>& NavigationRowsForTesting() const
+		{ return NavigationRows; }
 	TSharedPtr<SWidget> BodyScrollForTesting() const { return BodyScroll; }
 	bool IsAvailableForTesting() const { return Preferences.IsValid(); }
 	FText ResolvedRetailTextForTesting(const TCHAR* Key) const
@@ -105,14 +177,33 @@ public:
 		{ return ControllerSensitivitySlider; }
 	TSharedPtr<SCheckBox> ControllerInvertCheckBoxForTesting() const
 		{ return ControllerInvertCheckBox; }
+	/** The Steam keyboard toggle; null where Steam's keyboard cannot open. */
+	TSharedPtr<SCheckBox> SteamKeyboardCheckBoxForTesting() const
+		{ return SteamKeyboardCheckBox; }
+	bool SteamKeyboardDraftForTesting() const { return bSteamKeyboardDraft; }
+	bool SharingDraftForTesting() const { return bSharingDraft; }
+	bool SharingConfirmedForTesting() const { return bSharingConfirmed; }
+	TSharedPtr<SCheckBox> SharingCheckBoxForTesting() const
+		{ return SharingCheckBox; }
+	bool IsSharingHintVisibleForTesting() const { return IsSharingHintVisible(); }
+	TSharedPtr<STextBlock> SharingHintForTesting() const { return SharingHint; }
+	/** The game instance's sharing subsystem, for a screen built outside one. */
+	void SetSharingSubsystemForTesting(UWoTInstallerSharingSubsystem* Sharing);
+	TSharedPtr<SWoTCrosshairSelector> CrosshairSelectorForTesting() const
+		{ return CrosshairSelector; }
+	TSharedPtr<SWoTRetailSlider> ViewBobSliderForTesting() const
+		{ return ViewBobSlider; }
 #endif
 
 private:
-	TSharedRef<SWidget> BuildBody();
-	TSharedRef<SWidget> BuildControlsBody();
-	TSharedRef<SWidget> BuildHardwareBody();
+	/** Fills BodyScroll, one scroll-box slot per row (spec r3 [I5]). */
+	void BuildBody();
+	void BuildControlsBody();
+	void BuildHardwareBody();
 	TSharedRef<SWidget> BuildBindingRow(EWoTManagedBinding Action);
 	TSharedRef<SWidget> BuildBindingButton(EWoTManagedBinding Action, EWoTBindingSlot Slot);
+	/** After Keep/Revert closes the strip, focus returns to Save. */
+	void FocusSaveAfterStrip(bool bAlways);
 	TSharedRef<SWidget> BuildLabel(const FText& Text);
 	TSharedRef<SWidget> BuildChoiceRow(const FText& Label,
 		TSharedRef<SWidget> Control, TSharedPtr<SWidget>* LabelCapture = nullptr);
@@ -129,9 +220,24 @@ private:
 	FReply ResetBindings();
 	FReply Save();
 	FReply Back();
+	/** Drops the draft (restoring any live preview) and leaves the screen. */
+	void LeaveDiscardingDraft();
+	void OpenSaveConfirm();
+	/** Closes the prompt; with bRestoreFocus, focus returns where it was. */
+	void CloseSaveConfirm(bool bRestoreFocus);
+	/** Shows or hides the prompt and disables or enables the page behind it. */
+	void SetConfirmShown(bool bShown);
+	/** The prompt's Save: exactly the Save button. */
+	FReply ConfirmSave();
+	/** The prompt's Discard: exactly the Back button. */
+	FReply ConfirmDiscard();
 	FReply KeepVideo();
 	FReply RevertVideo();
 	bool CommitDraft();
+	/** Persists a changed sharing switch and tells the sharer. */
+	bool CommitSharingDraft();
+	UWoTInstallerSharingSubsystem* ResolveSharing() const;
+	bool IsSharingHintVisible() const;
 	bool VideoDiffersFromConfirmed() const;
 	void RevertDraftVideoToConfirmed();
 	void SetError(const FText& Text);
@@ -155,14 +261,47 @@ private:
 	double VideoConfirmDeadline = 0.0;
 	double LastTickTime = 0.0;
 	bool bVideoPreviewLive = false;
+	/** "Share the original installer on this network" (Hardware > NETWORK):
+	 * a preferences side file, saved with the rest of the page. */
+	bool bSharingConfirmed = true;
+	bool bSharingDraft = true;
 
 	TSharedPtr<SWidget> SaveButton;
 	TSharedPtr<SWidget> BackButton;
+	TSharedPtr<SWidget> KeepButton;
+	TSharedPtr<SWidget> RevertButton;
 	TSharedPtr<SScrollBox> BodyScroll;
+	/** The focus graph's rows: body rows, then Save and Back. */
+	TArray<TArray<TSharedPtr<SWidget>>> NavigationRows;
+	/** B cancels a live capture; B on the video strip reverts; B on the
+	 * "Save changes?" prompt closes it. */
+	TSharedPtr<FWoTBackStackEntryHandle> CaptureBackEntry;
+	TSharedPtr<FWoTBackStackEntryHandle> VideoStripBackEntry;
+	TSharedPtr<FWoTBackStackEntryHandle> ConfirmBackEntry;
+	/** The "Save changes?" prompt over the page, its two buttons, and the
+	 * page's host, disabled while the prompt is open. */
+	TSharedPtr<SWidget> ConfirmPrompt;
+	TSharedPtr<SWidget> PageHost;
+	TSharedPtr<SWidget> ConfirmSaveButton;
+	TSharedPtr<SWidget> ConfirmDiscardButton;
+	/** Where focus was when the prompt opened; it returns there on B. */
+	TWeakPtr<SWidget> FocusBeforeConfirm;
+	bool bConfirmingUnsaved = false;
 	TSharedPtr<SWidget> WindowModeLabel;
 	TSharedPtr<SWidget> WindowModeControl;
 	TSharedPtr<SWidget> ControllerSensitivitySlider;
 	TSharedPtr<SCheckBox> ControllerInvertCheckBox;
+	/** Steam's keyboard for text fields: its own side file, not the settings. */
+	TSharedPtr<SCheckBox> SteamKeyboardCheckBox;
+	bool bSteamKeyboardConfirmed = false;
+	bool bSteamKeyboardDraft = false;
+	TSharedPtr<SCheckBox> SharingCheckBox;
+	TSharedPtr<STextBlock> SharingHint;
+#if WITH_AUTOMATION_TESTS
+	TWeakObjectPtr<UWoTInstallerSharingSubsystem> SharingForTesting;
+#endif
+	TSharedPtr<SWoTRetailSlider> ViewBobSlider;
+	TSharedPtr<SWoTCrosshairSelector> CrosshairSelector;
 	FCheckBoxStyle BodyCheckBoxStyle;
 	float BodyCheckBoxGlyphSize = 0.0f;
 	TArray<TSharedPtr<FString>> ResolutionItems;

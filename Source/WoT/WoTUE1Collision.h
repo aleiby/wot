@@ -62,15 +62,34 @@ namespace WoTUE1Collision
 		return Actor.TeleportTo(Destination, Rotation);
 	}
 
+	// ULevel::SinglePointCheck with bActors=0 (UnLevAct.cpp:1234-1288): true when
+	// a UE1 collision box of half-size Extent at Location neither touches level
+	// geometry nor sits in solid space. Only the level model counts; movers and
+	// other actors do not.
+	WOT_API bool LevelPointCheckFits(UWorld& World, const FVector& Location,
+		const FVector& Extent);
+
+	// ULevel::FindSpot(Extent, Location, bCheckActors=0, bAssumeFit)
+	// (UnLevAct.cpp:786-842): with bAssumeFit a box that already fits stays put;
+	// otherwise TRACE_VisBlocking probes along each axis, then each corner, push
+	// it out of whatever they hit by (1.05 - Time) * probe length, and the result
+	// must fit the level within sqrt(1.5) * |Extent| of the request.
+	// SpawnActor passes bAssumeFit, FarMoveActor (SetLocation) does not. UE5's
+	// FindTeleportSpot is not a substitute: it takes one minimum-translation step
+	// against the zero-thickness BSP triangles, which can point sideways off a
+	// triangle edge instead of up out of a flat floor.
+	WOT_API bool FindSpotLevelOnly(UWorld& World, const FVector& Extent,
+		FVector& InOutLocation, bool bAssumeFit);
+
 	// SpawnActor/SetLocation in UE1 perform the world FindSpot first, then reject
 	// the move when the resolved cylinder still encroaches a mutually-blocking
 	// actor (UE1's SpawnActor/CheckEncroachment).  UE5's AlwaysSpawn path
 	// deliberately omits that second half, so callers which need the retail split
-	// use this after FindTeleportSpotWorldOnly.
-	inline bool EncroachesBlockingActor(const AActor& Actor)
+	// use this after the level-only FindSpot; it returns the first such actor.
+	inline const AActor* FindEncroachedBlockingActor(const AActor& Actor)
 	{
 		const UWorld* World = Actor.GetWorld();
-		if (!World) return false;
+		if (!World) return nullptr;
 		TInlineComponentArray<UPrimitiveComponent*> Primitives(&Actor);
 		for (const UPrimitiveComponent* Primitive : Primitives)
 		{
@@ -96,11 +115,11 @@ namespace WoTUE1Collision
 					&& Other->GetCollisionResponseToChannel(
 						Primitive->GetCollisionObjectType()) == ECR_Block)
 				{
-					return true;
+					return OtherActor;
 				}
 			}
 		}
-		return false;
+		return nullptr;
 	}
 
 	// A pawn capsule is rounded: where its UE1 cylinder's flat cap meets the
