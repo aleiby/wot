@@ -3750,12 +3750,12 @@ bool FWoTFrontEndTextEntryFieldsSpec::RunTest(const FString&)
 	if (TestTrue(TEXT("A on the direct address opens the panel"), Panel.IsValid()))
 	{
 		TestEqual(TEXT("the direct address takes 64 characters"), Panel->GetMaxLength(), 64);
-		Panel->SetDraft(TEXT("10.0.0.5:7777"));
+		Panel->SetDraft(TEXT("192.0.2.5:7777"));
 		Done();
 		TestEqual(TEXT("Done sets the direct address"), Root->DirectAddressForTesting(),
-			FString(TEXT("10.0.0.5:7777")));
+			FString(TEXT("192.0.2.5:7777")));
 		TestEqual(TEXT("and the box shows it"),
-			WoTEntryTest_BoxText(Root->DirectAddressTextBoxForTesting()), FString(TEXT("10.0.0.5:7777")));
+			WoTEntryTest_BoxText(Root->DirectAddressTextBoxForTesting()), FString(TEXT("192.0.2.5:7777")));
 		TestTrue(TEXT("Done then connects"), Root->IsLocalNetworkHeadsUpVisibleForTesting());
 		Root->CancelLocalNetworkHeadsUpForTesting();
 		FrontEnd.Settle();
