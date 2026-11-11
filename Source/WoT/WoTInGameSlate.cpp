@@ -193,12 +193,11 @@ namespace
 		Entries.Append({
 			{EWoTInGameMenuEntry::PlayerConfig, TEXT("Player Config")},
 			{EWoTInGameMenuEntry::Controls, TEXT("Controls")},
-			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")},
-			{EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")}
+			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")}
 		});
-		// Seam extension rows, appended at the end; an empty registry appends
+		// Seam extension rows, immediately before Quit; an empty registry adds
 		// nothing, so a build without the onboarding plugin renders exactly
-		// the list above. Labels resolve here (snapshot time) so Tick's
+		// the retail entries. Labels resolve here (snapshot time) so Tick's
 		// live/snapshot comparison follows label changes too.
 		const TArray<FWoTOnboardingRow>& ExtensionRows =
 			FWoTOnboardingSeams::Get().MenuRows;
@@ -212,6 +211,7 @@ namespace
 					WoTInGameSlate_ExtensionIdBase + RowIndex),
 				Row.Label ? Row.Label() : FString()});
 		}
+		Entries.Add({EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")});
 		return Entries;
 	}
 }

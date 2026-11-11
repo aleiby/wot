@@ -23,6 +23,7 @@
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Text/STextBlock.h"
 
 // The settings screen's seam extension group (plan Task 4): rows registered
@@ -59,6 +60,8 @@ TSharedRef<FWoTFrontEndPresentationAuthority> MakeWoTOnboardingScreenAuthority()
 	// Invented labels identify the options around the extension group. A
 	// testing authority is ready only with at least four labels.
 	TMap<FName, FString> Labels;
+	Labels.Add(FName(TEXT("menuOptions.MenuList[10]")), TEXT("FIXTUREGORE"));
+	Labels.Add(FName(TEXT("menuKeyboard.MenuList[18]")), TEXT("FIXTURERESET"));
 	Labels.Add(FName(TEXT("menuOptions.MenuList[11]")), TEXT("FIXTUREPLAYERID"));
 	Labels.Add(FName(TEXT("menuOptions.MenuList[1]")), TEXT("FIXTUREBINDINGS"));
 	Labels.Add(FName(TEXT("menuKeyboard.MenuList[1]")), TEXT("FIXTUREFIRE"));
@@ -133,45 +136,27 @@ TSharedPtr<SButton> WoTOnboardingScreenFindButton(
 	return nullptr;
 }
 
-/** The vertical box with a direct slot containing the requested label. */
-TSharedPtr<SVerticalBox> WoTOnboardingScreenFindRows(
-	const TSharedRef<SWidget>& Root, const TCHAR* Label)
-{
-	if (Root->GetType() == FName(TEXT("SVerticalBox")))
-	{
-		FChildren* Slots = Root->GetChildren();
-		for (int32 SlotIndex = 0; SlotIndex < Slots->Num(); ++SlotIndex)
-		{
-			const TSharedRef<SWidget> Child = Slots->GetChildAt(SlotIndex);
-			if (Child->GetType() == FName(TEXT("STextBlock"))
-				&& StaticCastSharedRef<STextBlock>(Child)->GetText().ToString() == Label)
-			{
-				return StaticCastSharedRef<SVerticalBox>(Root);
-			}
-		}
-	}
-	if (FChildren* Children = Root->GetChildren())
-	{
-		for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
-		{
-			if (TSharedPtr<SVerticalBox> Found = WoTOnboardingScreenFindRows(
-				Children->GetChildAt(ChildIndex), Label)) return Found;
-		}
-	}
-	return nullptr;
-}
-
-int32 WoTOnboardingScreenTextSlot(const TSharedRef<SVerticalBox>& Rows,
+/** Visual rows are the real scrolling body's slots, including non-focusable headings. */
+int32 WoTOnboardingScreenTextSlot(const TSharedRef<SScrollBox>& Rows,
 	const TCHAR* Label)
 {
-	FChildren* Slots = Rows->GetChildren();
-	for (int32 SlotIndex = 0; SlotIndex < Slots->Num(); ++SlotIndex)
+	for (int32 SlotIndex = 0; SlotIndex < Rows->NumSlots(); ++SlotIndex)
 	{
 		TArray<TSharedRef<STextBlock>> Texts;
-		WoTOnboardingScreenCollectText(Slots->GetChildAt(SlotIndex), Texts);
+		WoTOnboardingScreenCollectText(Rows->GetSlot(SlotIndex).GetWidget(), Texts);
 		if (WoTOnboardingScreenHasText(Texts, Label)) return SlotIndex;
 	}
 	return INDEX_NONE;
+}
+
+bool WoTOnboardingScreenContains(const TSharedRef<SWidget>& Root,
+	const TSharedPtr<SWidget>& Target)
+{
+	if (Root == Target) return true;
+	if (FChildren* Children = Root->GetChildren())
+		for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+			if (WoTOnboardingScreenContains(Children->GetChildAt(ChildIndex), Target)) return true;
+	return false;
 }
 
 /** A real, activated preferences owner writing to a temporary file — the
@@ -334,25 +319,53 @@ bool FWoTOnboardingScreenSettingsOrderSpec::RunTest(const FString&)
 {
 	FWoTOnboardingScreenPrefsFixture Fixture;
 	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
-	FWoTOnboardingScreenRowsGuard RegistryGuard;
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
-		[]() { return FString(TEXT("Fixture Aid")); }, []() {}});
+	const TArray<FWoTOnboardingRow>& Registered = FWoTOnboardingSeams::Get().SettingsRows;
+	if (!TestTrue(TEXT("the real onboarding settings are registered"), !Registered.IsEmpty())) return false;
 	const TSharedRef<SWoTSettingsScreen> Screen = MakeWoTOnboardingScreen(
 		Fixture.Owner, MakeWoTOnboardingScreenAuthority());
-	const TSharedPtr<SVerticalBox> Rows =
-		WoTOnboardingScreenFindRows(Screen, TEXT("ONBOARDING"));
+	const TSharedPtr<SScrollBox> Rows = StaticCastSharedPtr<SScrollBox>(Screen->BodyScrollForTesting());
 	if (!TestTrue(TEXT("the group belongs to the Controls rows"), Rows.IsValid())) return false;
+	const int32 GoreSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTUREGORE"));
 	const int32 PlayerIdSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTUREPLAYERID"));
 	const int32 HeaderSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("ONBOARDING"));
-	const int32 AidSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("Fixture Aid"));
 	const int32 ControlsSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTUREBINDINGS"));
 	const int32 BindingSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTUREFIRE"));
-	TestTrue(TEXT("all five labels have slots"), PlayerIdSlot >= 0 && HeaderSlot >= 0
-		&& AidSlot >= 0 && ControlsSlot >= 0 && BindingSlot >= 0);
+	const int32 ResetSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTURERESET"));
+	TestTrue(TEXT("all section labels have slots"), GoreSlot >= 0 && PlayerIdSlot >= 0
+		&& HeaderSlot >= 0 && ControlsSlot >= 0 && BindingSlot >= 0 && ResetSlot >= 0);
+	TestEqual(TEXT("player ID follows Gore's label and slider"), PlayerIdSlot - GoreSlot, 2);
 	TestEqual(TEXT("the header follows player ID"), HeaderSlot - PlayerIdSlot, 1);
-	TestEqual(TEXT("the row follows its header"), AidSlot - HeaderSlot, 1);
-	TestEqual(TEXT("player controls follows the group"), ControlsSlot - AidSlot, 1);
+	for (int32 ExtensionIndex = 0; ExtensionIndex < Registered.Num(); ++ExtensionIndex)
+	{
+		TestEqual(TEXT("each registered toggle follows its header in registration order"),
+			WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), *Registered[ExtensionIndex].Label()),
+			HeaderSlot + 1 + ExtensionIndex);
+	}
+	TestEqual(TEXT("player controls follows the group"), ControlsSlot - HeaderSlot, Registered.Num() + 1);
 	TestEqual(TEXT("the first binding follows player controls"), BindingSlot - ControlsSlot, 1);
+	TestEqual(TEXT("Reset follows every key binding"), ResetSlot - BindingSlot,
+		FWoTGameSettings::ManagedActions().Num());
+	TestEqual(TEXT("Reset closes the scrolling body"), ResetSlot, Rows->NumSlots() - 1);
+
+	// Match every interactive visual slot to exactly one controller row.
+	// Headings are skipped; Gore, Player ID, every aid, bindings and Reset
+	// must have the same order in both representations.
+	const auto& Navigation = Screen->NavigationRowsForTesting();
+	int32 ExpectedNavigation = 0;
+	for (int32 VisualIndex = 0; VisualIndex < Rows->NumSlots(); ++VisualIndex)
+	{
+		const TSharedRef<SWidget> VisualRow = Rows->GetSlot(VisualIndex).GetWidget();
+		for (int32 NavIndex = 0; NavIndex < Navigation.Num(); ++NavIndex)
+		{
+			if (!Navigation[NavIndex].IsEmpty()
+				&& WoTOnboardingScreenContains(VisualRow, Navigation[NavIndex][0]))
+			{
+				TestEqual(TEXT("controller rows follow visual slot order"), NavIndex, ExpectedNavigation++);
+			}
+		}
+	}
+	TestEqual(TEXT("every body control participates, with only the footer outside the body"),
+		ExpectedNavigation, Navigation.Num() - 1);
 	return !HasAnyErrors();
 }
 
@@ -426,7 +439,7 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 	TestFalse(TEXT("an empty registry appends no extension entry"),
 		BaselineLabels.Contains(TEXT("Fixture Guide Row")));
 
-	// One registered row appends exactly one entry at the end, and its
+	// One registered row inserts exactly one entry before Quit, and its
 	// activation runs the row's invoke.
 	int32 Invocations = 0;
 	FWoTOnboardingSeams::Get().MenuRows.Add({
@@ -438,11 +451,11 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 		.PlayerController(nullptr)
 		.RequiredFontsForTesting(Fonts);
 	TArray<FString> ExpectedLabels = BaselineLabels;
-	ExpectedLabels.Add(TEXT("Fixture Guide Row"));
-	TestTrue(TEXT("the registered row appends after today's entries"),
+	ExpectedLabels.Insert(TEXT("Fixture Guide Row"), BaselineLabels.Num() - 1);
+	TestTrue(TEXT("the registered row precedes Quit and preserves every other entry"),
 		Extended->MenuLabelsForTesting() == ExpectedLabels);
-	Extended->ActivateVisibleMainMenuEntryForTesting(BaselineLabels.Num());
-	TestEqual(TEXT("activating the appended entry fires its invoke"),
+	Extended->ActivateVisibleMainMenuEntryForTesting(BaselineLabels.Num() - 1);
+	TestEqual(TEXT("activating the inserted entry fires its invoke"),
 		Invocations, 1);
 
 	// The live/snapshot comparison rebuilds the open menu when the registry

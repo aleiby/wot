@@ -61,6 +61,8 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SWindow.h"
+#include "Widgets/SOverlay.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SListView.h"
 #include "Widgets/Views/STableRow.h"
@@ -79,6 +81,21 @@ namespace
 {
 constexpr EAutomationTestFlags WoTUITest_Flags =
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
+
+/** Retail actions keep their identity when registered rows shift their display index. */
+int32 WoTUITest_MainEntry(EWoTFrontEndMainMenuAction Action)
+{
+	const auto Entries = SWoTFrontEndRoot::RetailMainEntries();
+	for (int32 RetailIndex = 0; RetailIndex < Entries.Num(); ++RetailIndex)
+	{
+		if (Entries[RetailIndex].Action == Action)
+		{
+			return RetailIndex == 0 ? 0
+				: RetailIndex + FWoTOnboardingSeams::Get().MenuRows.Num();
+		}
+	}
+	return INDEX_NONE;
+}
 
 FKeyEvent WoTUITest_Key(FKey Key, bool bRepeat = false)
 {
@@ -1049,7 +1066,7 @@ bool FWoTUIBackStackFrontEndSpec::RunTest(const FString&)
 	TestFalse(TEXT("B dismisses Main's top notice"), Root->IsUpdateFailedNoticeVisibleForTesting());
 
 	// Play backs to Main; Player backs to Play.
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	TestTrue(TEXT("Play is open"), Screen() == EWoTFrontEndScreen::Play);
 	Root->OpenPlayerConfigForTesting();
@@ -1060,7 +1077,7 @@ bool FWoTUIBackStackFrontEndSpec::RunTest(const FString&)
 	TestTrue(TEXT("B on Play backs to Main"), Screen() == EWoTFrontEndScreen::Main);
 
 	// Controls: binding capture first, then the page.
-	Root->ActivateMainMenuEntryForTesting(1);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Controls));
 	FrontEnd.Settle();
 	const TSharedPtr<SWoTSettingsScreen> Controls = Root->SettingsScreenForTesting();
 	if (!TestTrue(TEXT("Controls is open"), Controls.IsValid()))
@@ -1114,7 +1131,7 @@ bool FWoTUIBackStackPlayOverlaySpec::RunTest(const FString&)
 			WoTUITest_Authority();
 		FWoTUITest_FrontEnd LanFrontEnd(LanAuthority, WoTUITest_MakeRoot(LanAuthority),
 			FVector2D(1280.0f, 720.0f));
-		LanFrontEnd.Root->ActivateMainMenuEntryForTesting(0);
+		LanFrontEnd.Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 		LanFrontEnd.Settle();
 		if (TestTrue(TEXT("the local-network heads-up shows"),
 			LanFrontEnd.Root->IsLocalNetworkHeadsUpVisibleForTesting()))
@@ -1132,7 +1149,7 @@ bool FWoTUIBackStackPlayOverlaySpec::RunTest(const FString&)
 		WoTUITest_MakeRoot(Authority, nullptr, /*bShowDisclosure*/ true),
 		FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	FSlateApplication& Slate = FSlateApplication::Get();
 	if (!TestTrue(TEXT("the disclosure covers Play"), Root->IsOnlineDisclosureVisibleForTesting()
@@ -1195,7 +1212,7 @@ bool FWoTUIBackStackPlayOverlaySpec::RunTest(const FString&)
 		FWoTUITest_FrontEnd PointerFrontEnd(PointerAuthority,
 			WoTUITest_MakeRoot(PointerAuthority), FVector2D(1280.0f, 720.0f));
 		const TSharedRef<SWoTFrontEndRoot>& PointerRoot = PointerFrontEnd.Root;
-		PointerRoot->ActivateMainMenuEntryForTesting(0);
+		PointerRoot->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 		PointerFrontEnd.Settle();
 		const TSharedPtr<SWidget> Back = PointerRoot->PlayBackButtonForTesting();
 		if (TestTrue(TEXT("Play is open with a Back button"), Back.IsValid()
@@ -1570,7 +1587,10 @@ bool FWoTUIFrontEndGraphsSpec::RunTest(const FString&)
 	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(),
 		WoTUITest_MakeRoot(WoTUITest_Authority()), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	const int32 Last = SWoTFrontEndRoot::RetailMainEntries().Num() - 1;
+	const int32 Last = SWoTFrontEndRoot::RetailMainEntries().Num()
+		+ FWoTOnboardingSeams::Get().MenuRows.Num() - 1;
+	TestTrue(TEXT("Main initially focuses Multiplayer with the real extensions present"),
+		Slate.GetKeyboardFocusedWidget() == Root->MainMenuButtonForTesting(0));
 
 	// Main: the arrow keys wrap for everyone (owner ruling); the update
 	// banner, not interactive here, is skipped.
@@ -1587,8 +1607,24 @@ bool FWoTUIFrontEndGraphsSpec::RunTest(const FString&)
 	TestTrue(TEXT("Main's initial focus is the selected entry in both modes"),
 		Root->InitialFocusWidget() == Root->MainMenuButtonForTesting(0));
 
+	TestTrue(TEXT("the real Field Guide row is registered at display entry one"),
+		!FWoTOnboardingSeams::Get().MenuRows.IsEmpty()
+		&& FWoTOnboardingSeams::Get().MenuRows[0].Label() == TEXT("Field Guide"));
+	for (const FKey Direction : {EKeys::Down, EKeys::Up, EKeys::Gamepad_DPad_Down, EKeys::Gamepad_DPad_Up})
+	{
+		Slate.SetKeyboardFocus(Root->MainMenuButtonForTesting(0), EFocusCause::SetDirectly);
+		const bool bForward = Direction == EKeys::Down || Direction == EKeys::Gamepad_DPad_Down;
+		for (int32 Step = 1; Step <= Last + 1; ++Step)
+		{
+			FrontEnd.Press(Direction);
+			const int32 Expected = bForward ? Step % (Last + 1) : (Last + 1 - Step) % (Last + 1);
+			TestTrue(FString::Printf(TEXT("%s walks display entry %d, including wrap"), *Direction.ToString(), Expected),
+				Slate.GetKeyboardFocusedWidget() == Root->MainMenuButtonForTesting(Expected));
+		}
+	}
+
 	// Play: two columns over the footer; Controller mode starts on the map list.
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	TestTrue(TEXT("Pointer mode keeps today's Play focus (Back)"),
 		Root->InitialFocusWidget() == Root->PlayBackButtonForTesting());
@@ -1637,7 +1673,7 @@ bool FWoTUIFrontEndGraphsSpec::RunTest(const FString&)
 	// Controls: Controller mode starts on the first control.
 	FrontEnd.Press(EKeys::Escape);
 	FrontEnd.Press(EKeys::Escape);
-	Root->ActivateMainMenuEntryForTesting(1);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Controls));
 	FrontEnd.Settle();
 	const TSharedPtr<SWoTSettingsScreen> Controls = Root->SettingsScreenForTesting();
 	if (TestTrue(TEXT("Controls is open"), Controls.IsValid()))
@@ -1647,6 +1683,63 @@ bool FWoTUIFrontEndGraphsSpec::RunTest(const FString&)
 		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
 		TestTrue(TEXT("Controller mode starts on the first control"),
 			Root->InitialFocusWidget() == Controls->InitialControllerFocusWidget());
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUIFieldGuideActivationSpec,
+	"WoT.FrontEnd.ControllerFocus.FieldGuide", WoTUITest_Flags)
+
+bool FWoTUIFieldGuideActivationSpec::RunTest(const FString&)
+{
+	FWoTUITest_ModeGuard ModeGuard;
+	if (!TestTrue(TEXT("the real Field Guide registration is present"),
+		!FWoTOnboardingSeams::Get().MenuRows.IsEmpty()
+		&& FWoTOnboardingSeams::Get().MenuRows[0].Label() == TEXT("Field Guide"))) return false;
+	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(),
+		WoTUITest_MakeRoot(WoTUITest_Authority()), FVector2D(1280.0f, 800.0f));
+	FSlateApplication& Slate = FSlateApplication::Get();
+	// Reparenting invalidates the existing focus path; rebuild it below.
+	Slate.ClearKeyboardFocus(EFocusCause::SetDirectly);
+	FrontEnd.Shown.Window->SetContent(SNullWidget::NullWidget);
+	const TSharedRef<SOverlay> Host = SNew(SOverlay)
+		+ SOverlay::Slot()[FrontEnd.Root];
+	FrontEnd.Shown.Window->SetContent(Host);
+	const TStrongObjectPtr<UGameViewportClient> Viewport(NewObject<UGameViewportClient>(GEngine));
+	Viewport->SetViewportOverlayWidget(FrontEnd.Shown.Window, Host);
+	UGameViewportClient* PreviousViewport = GEngine->GameViewport;
+	GEngine->GameViewport = Viewport.Get();
+	auto PreviousOverlayInput = MoveTemp(FWoTOnboardingSeams::Get().SetOverlayInput);
+	FWoTOnboardingSeams::Get().SetOverlayInput = nullptr;
+	ON_SCOPE_EXIT
+	{
+		// Close through the same input path even if an assertion failed.
+		Slate.ProcessKeyDownEvent(WoTUITest_Key(EKeys::Escape));
+		Slate.ProcessKeyUpEvent(WoTUITest_Key(EKeys::Escape));
+		FWoTOnboardingSeams::Get().SetOverlayInput = MoveTemp(PreviousOverlayInput);
+		GEngine->GameViewport = PreviousViewport;
+	};
+	FrontEnd.Settle();
+	for (const FKey Activate : {EKeys::Gamepad_FaceButton_Bottom, EKeys::Enter})
+	{
+		Slate.SetKeyboardFocus(FrontEnd.Root->MainMenuButtonForTesting(0), EFocusCause::SetDirectly);
+		FrontEnd.Press(Activate == EKeys::Enter ? EKeys::Down : EKeys::Gamepad_DPad_Down);
+		TestTrue(TEXT("one step from Multiplayer reaches the real guide row"),
+			Slate.GetKeyboardFocusedWidget() == FrontEnd.Root->MainMenuButtonForTesting(1));
+		{
+			// Hosting is normally suppressed for unrelated automation. Enable
+			// the real production host only for this input's synchronous callback.
+			TGuardValue<bool> HostingGuard(GIsAutomationTesting, false);
+			Slate.ProcessKeyDownEvent(WoTUITest_Key(Activate));
+			Slate.ProcessKeyUpEvent(WoTUITest_Key(Activate));
+		}
+		FrontEnd.Settle();
+		const TSharedPtr<SWidget> Focus = Slate.GetKeyboardFocusedWidget();
+		TestTrue(FString::Printf(TEXT("%s opens the real guide browser"), *Activate.ToString()),
+			Focus.IsValid() && Focus->GetType() == FName(TEXT("SWoTGuideBrowser")));
+		TestEqual(TEXT("the guide is hosted on the real viewport overlay"), Host->GetChildren()->Num(), 2);
+		FrontEnd.Press(EKeys::Escape);
+		TestEqual(TEXT("closing removes the guide from the viewport"), Host->GetChildren()->Num(), 1);
 	}
 	return !HasAnyErrors();
 }
@@ -1661,17 +1754,12 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 	{
 		return false;
 	}
-	FWoTUITest_SettingsRowsGuard RowsGuard;
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
-		[]() { return FString(TEXT("Walk Aid Alpha")); }, []() {}});
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
-		[]() { return FString(TEXT("Walk Aid Beta")); }, []() {}});
 	FWoTUITest_ModeGuard ModeGuard;
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 	FWoTUITest_FrontEnd FrontEnd(Authority,
 		WoTUITest_MakeRoot(Authority, nullptr, false, Fixture.Owner), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	Root->ActivateMainMenuEntryForTesting(1);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Controls));
 	FrontEnd.Settle();
 	const TSharedPtr<SWoTSettingsScreen> Controls = Root->SettingsScreenForTesting();
 	if (!TestTrue(TEXT("Controls is open"), Controls.IsValid()))
@@ -1695,31 +1783,29 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 			return Row.Contains(Widget);
 		});
 	};
-	auto LabelOf = [](const TSharedPtr<SWidget>& Widget)
+
+	const TArray<FWoTOnboardingRow>& Registered = FWoTOnboardingSeams::Get().SettingsRows;
+	TestTrue(TEXT("the real onboarding toggles participate"), !Registered.IsEmpty());
+	const int32 FirstAid = Rows.Num() - 2 - FWoTGameSettings::ManagedActions().Num() - Registered.Num();
+	for (int32 AidIndex = 0; AidIndex < Registered.Num(); ++AidIndex)
 	{
+		const TSharedPtr<SWidget> Aid = Rows[FirstAid + AidIndex][0];
+		const TSharedRef<SWidget> Content = Aid->GetChildren()->GetChildAt(0);
+		// Menu buttons own a content border; find their text without assuming its depth.
+		TArray<TSharedPtr<SWidget>> Pending = {Content};
 		FString Label;
-		TArray<TSharedPtr<SWidget>> Pending = {Widget};
-		while (!Pending.IsEmpty() && Label.IsEmpty())
+		while (!Pending.IsEmpty())
 		{
 			const TSharedPtr<SWidget> Current = Pending.Pop();
 			if (Current->GetType() == FName(TEXT("STextBlock")))
-			{
 				Label = StaticCastSharedPtr<STextBlock>(Current)->GetText().ToString();
-			}
 			if (FChildren* Children = Current->GetChildren())
-			{
-				for (int32 Index = 0; Index < Children->Num(); ++Index)
-				{
-					Pending.Add(Children->GetChildAt(Index));
-				}
-			}
+				for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
+					Pending.Add(Children->GetChildAt(ChildIndex));
 		}
-		return Label;
-	};
-	TestEqual(TEXT("the onboarding rows close the body"),
-		LabelOf(Rows[Rows.Num() - 2][0]), FString(TEXT("Walk Aid Beta")));
-	TestEqual(TEXT("the first onboarding row is part of the graph"),
-		LabelOf(Rows[Rows.Num() - 3][0]), FString(TEXT("Walk Aid Alpha")));
+		TestEqual(TEXT("each real onboarding toggle precedes the bindings in the graph"),
+			Label, Registered[AidIndex].Label());
+	}
 
 	// First to last by the D-pad at 1280x720, each row scrolled into view.
 	Slate.SetKeyboardFocus(Controls->InitialControllerFocusWidget(), EFocusCause::SetDirectly);
@@ -1985,7 +2071,7 @@ bool FWoTUIWidgetsPlaySliderSpec::RunTest(const FString&)
 	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(),
 		WoTUITest_MakeRoot(WoTUITest_Authority()), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	FSlateApplication& Slate = FSlateApplication::Get();
 	TSharedPtr<SWidget> KillSlider;
@@ -2302,7 +2388,7 @@ bool FWoTUIWidgetsSettingsDropdownSpec::RunTest(const FString&)
 	FSlateApplication& Slate = FSlateApplication::Get();
 	auto OpenHardware = [&Root, &FrontEnd]() -> TSharedPtr<SWoTSettingsScreen>
 	{
-		Root->ActivateMainMenuEntryForTesting(2);
+		Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Hardware));
 		FrontEnd.Settle();
 		return Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Hardware
 			? Root->SettingsScreenForTesting() : nullptr;
@@ -2659,7 +2745,7 @@ bool FWoTUIWidgetsPromptWindowsSpec::RunTest(const FString&)
 	Root->ContinueUpdateFailedForTesting();
 	FrontEnd.Settle();
 
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	Expect(TEXT("the online disclosure"),
 		FWoTButtonPromptSets::Overlay(FText::FromString(TEXT("Cancel"))));
 	Root->CancelOnlineDisclosureForTesting();
@@ -2689,7 +2775,7 @@ bool FWoTUIWidgetsPromptWindowsSpec::RunTest(const FString&)
 
 	FrontEnd.Press(EKeys::Escape);
 	FrontEnd.Press(EKeys::Escape);
-	Root->ActivateMainMenuEntryForTesting(1);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Controls));
 	FrontEnd.Settle();
 	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
 	Expect(TEXT("Controls"), FWoTButtonPromptSets::Settings());
@@ -3693,7 +3779,7 @@ bool FWoTFrontEndTextEntryFieldsSpec::RunTest(const FString&)
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 	FWoTUITest_FrontEnd FrontEnd(Authority, WoTUITest_MakeRoot(Authority), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	auto Done = [&FrontEnd]() { FrontEnd.Press(EKeys::Gamepad_Special_Right); };
 
@@ -3872,7 +3958,7 @@ bool FWoTFrontEndTextEntryRebuildSpec::RunTest(const FString&)
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 	FWoTUITest_FrontEnd FrontEnd(Authority, WoTUITest_MakeRoot(Authority), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 	const TSharedPtr<SWidget> OldField = Root->ServerNameTextBoxForTesting();
 	const TSharedPtr<SWoTOnScreenKeyboard> Panel = WoTEntryTest_BeginOn(FrontEnd, OldField);
@@ -3937,7 +4023,7 @@ bool FWoTFrontEndTextEntryBackSpec::RunTest(const FString&)
 	FWoTUITest_FrontEnd FrontEnd(Authority, WoTUITest_MakeRoot(Authority), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
 	auto Screen = [&Root]() { return Root->CurrentScreenForTesting(); };
-	Root->ActivateMainMenuEntryForTesting(0);
+	Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 	FrontEnd.Settle();
 
 	// Escape with the panel open cancels the panel first [M3].
@@ -5269,7 +5355,7 @@ bool FWoTDeckKeyboardPanelFitSpec::RunTest(const FString&)
 			const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 			const TSharedRef<SWoTFrontEndRoot> Root = WoTUITest_MakeRoot(Authority);
 			FWoTDeckTest_Screen Screen(Root, Resolution);
-			Root->ActivateMainMenuEntryForTesting(0);
+			Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Multiplayer));
 			Screen.Settle();
 			const TSharedPtr<SWidget> Field = Root->ServerNameTextBoxForTesting();
 			FString Text;
@@ -5431,7 +5517,7 @@ bool FWoTDeckSettingsSaveChangesSpec::RunTest(const FString&)
 	auto Screen = [&Root]() { return Root->CurrentScreenForTesting(); };
 	auto OpenControls = [&Root, &FrontEnd]()
 	{
-		Root->ActivateMainMenuEntryForTesting(1);
+		Root->ActivateMainMenuEntryForTesting(WoTUITest_MainEntry(EWoTFrontEndMainMenuAction::Controls));
 		FrontEnd.Settle();
 		return Root->SettingsScreenForTesting();
 	};
@@ -5618,7 +5704,8 @@ bool FWoTDeckInGameMenuFitsSpec::RunTest(const FString&)
 				.RequiredFontsForTesting(WoTUITest_Fonts());
 			FWoTDeckTest_Screen Screen(Overlay, Resolution);
 			const int32 Count = Overlay->RenderedMainMenuEntryCountForTesting();
-			TestEqual(Label + TEXT(": every entry"), Count, bBattle ? 11 : 10);
+			TestEqual(Label + TEXT(": every entry"), Count, (bBattle ? 11 : 10)
+				+ FWoTOnboardingSeams::Get().MenuRows.Num());
 			TestEqual(Label + TEXT(": Quit is last"),
 				Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit), Count - 1);
 			const FSlateRect Background = FWoTDeckTest_Screen::Rect(Overlay->MenuBackgroundForTesting());
