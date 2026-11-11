@@ -467,21 +467,30 @@ bool FWoTUpdateBannerLiveActionSpec::RunTest(const FString&)
 		BannerButton.IsValid() && BannerButton->SupportsKeyboardFocus())
 		&& TestTrue(TEXT("last menu button exists"), LastMenu.IsValid()))
 	{
-		const TSharedPtr<FNavigationMetaData> Down =
-			LastMenu->GetMetaData<FNavigationMetaData>();
-		const TSharedPtr<FNavigationMetaData> Up =
-			BannerButton->GetMetaData<FNavigationMetaData>();
+		// The Main graph is evaluated when the player navigates (it skips the
+		// banner while it is not interactive), so it needs a shown window.
+		const TSharedRef<SWindow> Window = SNew(SWindow)
+			.ClientSize(FVector2D(1280.0f, 720.0f))
+			.CreateTitleBar(false).SupportsMaximize(false).SupportsMinimize(false)
+			[Root];
+		FSlateApplication::Get().AddWindow(Window, false);
+		Window->SlatePrepass(1.0f);
+		auto Navigate = [](const TSharedPtr<SWidget>& From, EUINavigation Direction)
+			-> TSharedPtr<SWidget>
+		{
+			const TSharedPtr<FNavigationMetaData> MetaData =
+				From->GetMetaData<FNavigationMetaData>();
+			return MetaData.IsValid()
+				&& MetaData->GetBoundaryRule(Direction) == EUINavigationRule::Custom
+				&& MetaData->GetFocusDelegate(Direction).IsBound()
+				? MetaData->GetFocusDelegate(Direction).Execute(Direction) : nullptr;
+		};
 		TestTrue(TEXT("Down from the last menu entry reaches the banner button"),
-			Down.IsValid()
-				&& Down->GetBoundaryRule(EUINavigation::Down)
-					== EUINavigationRule::Explicit
-				&& Down->GetFocusRecipient(EUINavigation::Down).Pin()
-					== BannerButton);
+			Navigate(LastMenu, EUINavigation::Down) == BannerButton);
 		TestTrue(TEXT("Up from the banner button returns to the last menu entry"),
-			Up.IsValid()
-				&& Up->GetBoundaryRule(EUINavigation::Up)
-					== EUINavigationRule::Explicit
-				&& Up->GetFocusRecipient(EUINavigation::Up).Pin() == LastMenu);
+			Navigate(BannerButton, EUINavigation::Up) == LastMenu);
+		FSlateApplication::Get().RequestDestroyWindow(Window);
+		FSlateApplication::Get().Tick();
 	}
 
 	TestTrue(TEXT("Quit click is handled"),

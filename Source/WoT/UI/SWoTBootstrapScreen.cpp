@@ -1,6 +1,9 @@
 #include "SWoTBootstrapScreen.h"
 
 #include "WoTSetupBackdrop.h"
+#include "WoTBackStack.h"
+#include "WoTControllerUIInput.h"
+#include "WoTMenuNavigation.h"
 #include "WoTBootstrapCore/TestOverrides.h"
 
 #include "Brushes/SlateDynamicImageBrush.h"
@@ -254,6 +257,17 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 		]
 		]
 	];
+
+	// Only the visible buttons take focus; Left/Right wrap through them and
+	// focus cannot leave the row.
+	const TArray<TSharedPtr<SWidget>> Buttons = {ContinueButton, SkipButton,
+		ExitButton, BrowseInstallerButton, GetOriginalGameButton};
+	WoTWrapHorizontalNavigation(Buttons, /*bHoldVertical*/ true);
+	CursorLease = FWoTControllerUIInput::AcquireCursorLease();
+	// B and View are consumed and do nothing: B must never quit the game
+	// mid-setup. Escape keeps its own path (OnKeyDown).
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
+		[]() { return true; });
 
 #if WITH_ACCESSIBILITY
 	SetAccessibleBehavior(EAccessibleBehavior::Summary,
@@ -563,6 +577,19 @@ void SWoTBootstrapScreen::FocusInitialWidget()
 
 TSharedPtr<SWidget> SWoTBootstrapScreen::InitialFocusWidget() const
 {
+	if (FWoTControllerUIInput::IsControllerMode())
+	{
+		// Controller mode: the first visible button, left to right.
+		const TSharedPtr<SButton> Ordered[] = {ContinueButton, SkipButton,
+			ExitButton, BrowseInstallerButton, GetOriginalGameButton};
+		for (const TSharedPtr<SButton>& Button : Ordered)
+		{
+			if (Button.IsValid() && Button->GetVisibility().IsVisible())
+			{
+				return Button;
+			}
+		}
+	}
 	if (OriginalGameActionVisibility() == EVisibility::Visible)
 	{
 		return BrowseInstallerButton;

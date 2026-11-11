@@ -8,6 +8,8 @@
 
 class AWoTPlayerController;
 class AWoTInventory;
+class FWoTBackStackEntryHandle;
+class FWoTCursorLease;
 class FWoTFrontEndPresentationAuthority;
 class SBox;
 class SEditableText;
@@ -121,6 +123,8 @@ private:
 	FReply SavePlayerConfig();
 	void ReturnToMainMenu();
 	FReply Resume();
+	/** Escape, B and View: leave the page, else resume. Always handled. */
+	bool BackOneLevel();
 	FReply ActivateScoreboard();
 	FReply ActivateHelp();
 	FReply ActivateCitadel();
@@ -149,6 +153,9 @@ private:
 	TSharedPtr<SEditableText> PlayerNameInput;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> PresentationAuthority;
 	TSharedPtr<const FWoTRequiredMenuFonts> RequiredFonts;
+	/** B/View: as Escape on every page (spec r3 section 1a, in-game menu). */
+	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
+	TSharedPtr<FWoTCursorLease> CursorLease;
 	bool bUsingFallbackFonts = false;
 	float LiveViewportScale = 1.0f;
 	float EntryHeight = 0.0f;
@@ -233,6 +240,7 @@ public:
 private:
 	FReply Close();
 	FSlateFontInfo FontForIndex(int32 FontIndex) const;
+	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
 	float WindowScale() const { return PixelScale / FMath::Max(DpiScale, 0.01f); }
 	int32 PixelScale = 1;
 	float DpiScale = 1.0f;

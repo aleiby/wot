@@ -5,6 +5,7 @@
 #include "WoTGameSettings.h"
 #include "Widgets/SCompoundWidget.h"
 
+class FWoTBackStackEntryHandle;
 class FWoTFrontEndPresentationAuthority;
 class SCheckBox;
 class SScrollBox;
@@ -56,6 +57,8 @@ public:
 	 * unconfirmed video preview, then leaves the screen. Always handled. */
 	bool HandleBack();
 	bool IsCapturingBinding() const { return CaptureAction.IsSet(); }
+	/** The first control of the page: initial focus in Controller mode. */
+	TSharedPtr<SWidget> InitialControllerFocusWidget() const;
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnPreviewKeyDown(
@@ -66,6 +69,8 @@ public:
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseWheel(
 		const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual FNavigationReply OnNavigation(
+		const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent) override;
 	virtual void Tick(
 		const FGeometry& AllottedGeometry, const double InCurrentTime,
 		const float InDeltaTime) override;
@@ -90,6 +95,11 @@ public:
 	FReply ResetBindingsForTesting() { return ResetBindings(); }
 	TSharedPtr<SWidget> SaveButtonForTesting() const { return SaveButton; }
 	TSharedPtr<SWidget> BackButtonForTesting() const { return BackButton; }
+	TSharedPtr<SWidget> KeepButtonForTesting() const { return KeepButton; }
+	TSharedPtr<SWidget> RevertButtonForTesting() const { return RevertButton; }
+	/** Every focusable row of the body, top to bottom, then the footer. */
+	const TArray<TArray<TSharedPtr<SWidget>>>& NavigationRowsForTesting() const
+		{ return NavigationRows; }
 	TSharedPtr<SWidget> BodyScrollForTesting() const { return BodyScroll; }
 	bool IsAvailableForTesting() const { return Preferences.IsValid(); }
 	FText ResolvedRetailTextForTesting(const TCHAR* Key) const
@@ -108,11 +118,14 @@ public:
 #endif
 
 private:
-	TSharedRef<SWidget> BuildBody();
-	TSharedRef<SWidget> BuildControlsBody();
-	TSharedRef<SWidget> BuildHardwareBody();
+	/** Fills BodyScroll, one scroll-box slot per row (spec r3 [I5]). */
+	void BuildBody();
+	void BuildControlsBody();
+	void BuildHardwareBody();
 	TSharedRef<SWidget> BuildBindingRow(EWoTManagedBinding Action);
 	TSharedRef<SWidget> BuildBindingButton(EWoTManagedBinding Action, EWoTBindingSlot Slot);
+	/** After Keep/Revert closes the strip, focus returns to Save. */
+	void FocusSaveAfterStrip(bool bAlways);
 	TSharedRef<SWidget> BuildLabel(const FText& Text);
 	TSharedRef<SWidget> BuildChoiceRow(const FText& Label,
 		TSharedRef<SWidget> Control, TSharedPtr<SWidget>* LabelCapture = nullptr);
@@ -158,7 +171,14 @@ private:
 
 	TSharedPtr<SWidget> SaveButton;
 	TSharedPtr<SWidget> BackButton;
+	TSharedPtr<SWidget> KeepButton;
+	TSharedPtr<SWidget> RevertButton;
 	TSharedPtr<SScrollBox> BodyScroll;
+	/** The focus graph's rows: body rows, then Save and Back. */
+	TArray<TArray<TSharedPtr<SWidget>>> NavigationRows;
+	/** B cancels a live capture; B on the video strip reverts. */
+	TSharedPtr<FWoTBackStackEntryHandle> CaptureBackEntry;
+	TSharedPtr<FWoTBackStackEntryHandle> VideoStripBackEntry;
 	TSharedPtr<SWidget> WindowModeLabel;
 	TSharedPtr<SWidget> WindowModeControl;
 	TSharedPtr<SWidget> ControllerSensitivitySlider;

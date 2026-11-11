@@ -381,8 +381,13 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Controller layout
 - **Original:** The default joystick setup binds Fire, Jump and four hat directions only.
-- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. On a Battle map, a player without a team picks one with the D-pad (left, right, up and down for teams 1 to 4), and the team prompt names those buttons when the joystick is enabled. In the game menu and its windows the D-pad or stick moves the selection, A chooses and B backs out. Chat and the front-end menus by controller arrive with an on-screen keyboard and menu navigation.
+- **Port:** Every gameplay action is on the controller, including the citadel editor: B enters and leaves it. The left trigger turns the player around. On a Battle map, a player without a team picks one with the D-pad (left, right, up and down for teams 1 to 4), and the team prompt names those buttons when the joystick is enabled. Every menu works by controller: the front end and its notices, the multiplayer screen, the player and settings screens, the setup screen, and the game menu and its windows. The D-pad or stick moves one highlight (held, it repeats after 0.35 s and then every 0.08 s), A chooses, and B or View backs out one level: an open notice or prompt closes before the screen behind it, a held B backs out only once, and B never quits from the setup screen. While the controller is in use the mouse pointer is hidden and nothing under it highlights; moving the mouse more than a few pixels, clicking or typing brings it back. Escape keeps its own behaviour on every screen. Chat and text fields by controller arrive with an on-screen keyboard.
 - **Why:** A match must be playable on a controller alone.
+
+### Menu navigation for every player
+- **Original:** The keyboard moves through the main menu lists and wraps at either end. Each screen opens with its usual first control focused.
+- **Port:** Every menu screen (the main menu, the multiplayer, player and settings screens, notices and the setup screen) has explicit navigation links built from its live rows, so the arrow keys and the D-pad wrap at list ends and reach every row, including rows added at run time. On the multiplayer screen, Left and Right move between the host and browser columns. While a multiplayer notice or prompt is open, the panels behind it are disabled until it closes. After controller input a screen opens on the control a controller needs first (the map list on the multiplayer screen, Save on the player screen, the first setting on the settings screens); after mouse or keyboard input it opens where it always has.
+- **Why:** Owner ruling (2026-11-08): the menu improvements made for controllers apply to every player; only the first focus follows the last device used.
 
 ## Networking
 
