@@ -426,8 +426,8 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 	TestFalse(TEXT("an empty registry appends no extension entry"),
 		BaselineLabels.Contains(TEXT("Fixture Guide Row")));
 
-	// One registered row appends exactly one entry at the end, and its
-	// activation runs the row's invoke.
+	// One registered row adds exactly one entry, just above Quit, which stays
+	// last; its activation runs the row's invoke.
 	int32 Invocations = 0;
 	FWoTOnboardingSeams::Get().MenuRows.Add({
 		[]() { return FString(TEXT("Fixture Guide Row")); },
@@ -437,12 +437,18 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 		SNew(SWoTInGameMenuOverlay)
 		.PlayerController(nullptr)
 		.RequiredFontsForTesting(Fonts);
+	const int32 QuitIndex = BaselineLabels.Num() - 1;
+	if (!TestTrue(TEXT("today's list ends with Quit"), QuitIndex >= 0
+		&& BaselineLabels[QuitIndex] == TEXT("Quit to Main Menu")))
+	{
+		return false;
+	}
 	TArray<FString> ExpectedLabels = BaselineLabels;
-	ExpectedLabels.Add(TEXT("Fixture Guide Row"));
-	TestTrue(TEXT("the registered row appends after today's entries"),
+	ExpectedLabels.Insert(TEXT("Fixture Guide Row"), QuitIndex);
+	TestTrue(TEXT("the registered row sits just above Quit"),
 		Extended->MenuLabelsForTesting() == ExpectedLabels);
-	Extended->ActivateVisibleMainMenuEntryForTesting(BaselineLabels.Num());
-	TestEqual(TEXT("activating the appended entry fires its invoke"),
+	Extended->ActivateVisibleMainMenuEntryForTesting(QuitIndex);
+	TestEqual(TEXT("activating the row's entry fires its invoke"),
 		Invocations, 1);
 
 	// The live/snapshot comparison rebuilds the open menu when the registry

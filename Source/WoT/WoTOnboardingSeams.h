@@ -76,7 +76,7 @@ struct WOT_API FWoTOnboardingSeams
 	FWoTShowGuideRequested ShowGuideRequested;
 	FWoTCloseClientWindows CloseClientWindows;
 
-	/** Extra rows appended to the front-end and in-game menus, and to the
+	/** Extra rows added to the front-end and in-game menus, and to the
 	    settings screen (consumed by Tasks 4-5; empty lists cost nothing). */
 	TArray<FWoTOnboardingRow> MenuRows;
 	TArray<FWoTOnboardingRow> SettingsRows;
