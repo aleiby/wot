@@ -4,6 +4,7 @@
 #include "Engine/Canvas.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
+#include "WoTMenuStyle.h"
 
 namespace
 {
@@ -28,6 +29,14 @@ int32 FWoTCanvasScale::ComputeUpscale(
 	const int32 LargestFit = FMath::Max(
 		1, FMath::Min(SizeX / 640, SizeY / 480));
 	return Override >= 1 ? FMath::Clamp(Override, 1, LargestFit) : LargestFit;
+}
+
+int32 FWoTCanvasScale::ComputeTextScale(int32 Upscale, float LineHeightPixels)
+{
+	const float Physical = FMath::Max(LineHeightPixels, 1.0f)
+		* static_cast<float>(FMath::Max(Upscale, 1));
+	return FMath::Clamp(FMath::CeilToInt(
+		FWoTMenuStyle::PrimaryLegiblePixels / Physical), 1, 2);
 }
 
 FWoTCanvasDimensions FWoTCanvasScale::ApplyLogicalDimensions(
@@ -91,13 +100,14 @@ void FWoTCanvasScale::DrawIconAt(UCanvas* CanvasObject, UTexture2D* Texture,
 
 void FWoTCanvasScale::DrawScaledTextAt(UCanvas* CanvasObject, float X, float Y,
 	const FString& Text, UFont* Font, bool bCenterX, const FLinearColor& Tint,
-	EWoTTextAlignment Alignment) const
+	EWoTTextAlignment Alignment, float TextScale) const
 {
 	if (!CanvasObject || !Font)
 	{
 		return;
 	}
 
+	const float Scale = TextScale > 0.0f ? TextScale : 1.0f;
 	float DrawX = X * FactorX;
 	const float DrawY = Y * FactorY;
 	const EWoTTextAlignment EffectiveAlignment = bCenterX
@@ -107,6 +117,7 @@ void FWoTCanvasScale::DrawScaledTextAt(UCanvas* CanvasObject, float X, float Y,
 		float TextSizeX = 0.0f;
 		float TextSizeY = 0.0f;
 		CanvasObject->StrLen(Font, Text, TextSizeX, TextSizeY);
+		TextSizeX *= Scale;
 		DrawX -= EffectiveAlignment == EWoTTextAlignment::Center
 			? TextSizeX * 0.5f : TextSizeX;
 	}
@@ -114,5 +125,6 @@ void FWoTCanvasScale::DrawScaledTextAt(UCanvas* CanvasObject, float X, float Y,
 	FCanvasTextItem TextItem(FVector2D(DrawX, DrawY), FText::FromString(Text),
 		Font, Tint);
 	TextItem.BlendMode = SE_BLEND_Masked;
+	TextItem.Scale = FVector2D(Scale, Scale);
 	CanvasObject->DrawItem(TextItem);
 }

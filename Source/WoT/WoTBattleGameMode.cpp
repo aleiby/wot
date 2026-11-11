@@ -195,7 +195,16 @@ void AWoTBattleGameMode::BeginPlay()
 {
 	// giMPBattle.PostBeginPlay: Super first (giCombatBase seeds the clock + starts Timer).
 	Super::BeginPlay();
+	PrepareBattle();
+}
 
+void AWoTBattleGameMode::PrepareBattle()
+{
+	if (bBattlePrepared)
+	{
+		return;
+	}
+	bBattlePrepared = true;
 	LocateBattle();
 	if (!Battle)
 	{
@@ -370,9 +379,12 @@ void AWoTBattleGameMode::PostLogin(APlayerController* NewPlayer)
 	// which routes through LeaveTeam). The port assigns team in PostLogin; skip the base's
 	// free-for-all ChangeTeam(255) and go straight to the engine PostLogin (which spawns the
 	// pawn), then assign — so the pawn exists for JoinTeam's deferred ServerChangeClass.
+	// Retail's PostBeginPlay (the BattleInfo, the seal settings and ResetBattle's editing
+	// phase) always preceded Login; a listen host's LoadMap logs in before BeginPlay.
+	PrepareBattle();
 	AGameModeBase::PostLogin(NewPlayer);
-	// Direct -game LoadMap logs the local player in before world BeginPlay: locate the
-	// BattleInfo now so GetSmallestTeam reads real team counts, not the null fallback.
+	// A BattleInfo that appeared after the setup ran is still found on demand, so
+	// GetSmallestTeam reads real team counts.
 	LocateBattle();
 	const int32 InTeam = bAutoTeamSelect ? GetSmallestTeam() : 255;
 	ChangeTeam(NewPlayer, InTeam);

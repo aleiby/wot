@@ -836,15 +836,28 @@ UTexture2D* AWoTHUD::ResolveHUDTexture(FName Id) const
 
 void AWoTHUD::ChangeCrosshair(int32 Delta)
 {
-	Crosshair += Delta;
-	if (Crosshair >= NumCrossHairs)
+	Crosshair = WrapCrosshair(Crosshair, Delta);
+}
+
+int32 AWoTHUD::WrapCrosshair(int32 InCrosshair, int32 Delta)
+{
+	int32 Wrapped = InCrosshair + Delta;
+	if (Wrapped >= NumCrossHairs)
 	{
-		Crosshair = 0;
+		Wrapped = 0;
 	}
-	else if (Crosshair < 0)
+	else if (Wrapped < 0)
 	{
-		Crosshair = NumCrossHairs - 1;
+		Wrapped = NumCrossHairs - 1;
 	}
+	return Wrapped;
+}
+
+UTexture2D* AWoTHUD::ResolveCrosshairTexture(int32 InCrosshair)
+{
+	const TArray<FWoTHUDDrawCmd> Commands = LayoutCrosshair(InCrosshair, 0, 0);
+	return Commands.IsEmpty() ? nullptr
+		: GetDefault<AWoTHUD>()->ResolveHUDTexture(Commands[0].TexId);
 }
 
 TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutCrosshair(int32 Index, int32 ClipX, int32 ClipY)
@@ -1270,9 +1283,10 @@ TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutCurrentHand(
 
 TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutProgressMessages(
 	const TArray<FWoTProgressEntry>& Entries, int32 ClipX, int32 ClipY,
-	float FontLineHeight)
+	float FontLineHeight, int32 TextScale)
 {
 	TArray<FWoTHUDDrawCmd> Commands;
+	const float LineScale = static_cast<float>(FMath::Max(TextScale, 1));
 	for (int32 Index = 0; Index < Entries.Num(); ++Index)
 	{
 		if (Entries[Index].Message.IsEmpty())
@@ -1283,12 +1297,22 @@ TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutProgressMessages(
 		Command.Text = Entries[Index].Message;
 		Command.FontId = FName(TEXT("F_WOTReg14"));
 		Command.X = static_cast<float>(ClipX) * 0.5f;
+		// The retail pitch is a line plus one pixel; at a text scale both
+		// grow, exactly as a 2x HUD draws them.
 		Command.Y = static_cast<float>(ClipY) * 0.25f
-			+ static_cast<float>(Index) * (FontLineHeight + 1.0f);
+			+ static_cast<float>(Index) * (FontLineHeight + 1.0f) * LineScale;
+		Command.Scale = LineScale;
 		Command.bCenterX = true;
 		Command.Tint = Entries[Index].Color;
 	}
 	return Commands;
+}
+
+int32 AWoTHUD::ComputeHUDTextScale(int32 ViewportX, int32 ViewportY,
+	int32 UpscaleOverride, float LineHeight)
+{
+	return FWoTCanvasScale::ComputeTextScale(FWoTCanvasScale::ComputeUpscale(
+		ViewportX, ViewportY, UpscaleOverride), LineHeight);
 }
 
 TArray<FWoTHUDDrawCmd> AWoTHUD::LayoutAddedItems(
@@ -1731,8 +1755,6 @@ void AWoTHUD::DrawArenaScoreboard(UCanvas* CanvasObject)
 	CanvasObject->StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
 	(void)TestWidth;
 
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
 	TMap<FName, UTexture2D*> IconTextures;
 	bool bIconsAvailable = true;
 	for (const FName TextureId : FWoTArenaScoreboard::AllIconTextureIds())
@@ -1751,11 +1773,18 @@ void AWoTHUD::DrawArenaScoreboard(UCanvas* CanvasObject)
 	const FWoTCitadelScoreboard CitadelBoard;
 	const FWoTArenaScoreboard& Scoreboard = bCitadel
 		? static_cast<const FWoTArenaScoreboard&>(CitadelBoard) : ArenaBoard;
-	const TArray<FWoTHUDDrawCmd> Commands = Scoreboard.Layout(
-		GatherArenaScoreboard(), FMath::Max(640, CanvasObject->SizeX),
-		FMath::Max(480, CanvasObject->SizeY), FontLineHeight, bStandalone,
-		bIconsAvailable);
-	for (const FWoTHUDDrawCmd& Command : Commands)
+	// Below a 2x HUD the board is laid out on half the canvas and drawn at 2x
+	// (or, where even the compact form overflows, at 1x as before).
+	const FWoTScoreboardBoard Board = Scoreboard.LayoutBoard(
+		GatherArenaScoreboard(), CanvasObject->SizeX, CanvasObject->SizeY,
+		FontLineHeight, HUDTextScale, bStandalone, bIconsAvailable);
+	const FWoTHUDIntegerUpscaleGuard BoardGuard(*CanvasObject, Board.BoardScale);
+	FWoTCanvasScale CanvasScale;
+	if (Board.BoardScale == 1)
+	{
+		CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
+	}
+	for (const FWoTHUDDrawCmd& Command : Board.Commands)
 	{
 		if (!Command.Text.IsEmpty())
 		{
@@ -1788,13 +1817,17 @@ void AWoTHUD::DrawCitadelTeamOverview(UCanvas* CanvasObject)
 	CanvasObject->StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
 	(void)TestWidth;
 
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
 	const FWoTCitadelTeamOverview Overview;
-	const TArray<FWoTHUDDrawCmd> Commands = Overview.Layout(
-		GatherCitadelTeamOverview(), FMath::Max(640, CanvasObject->SizeX),
-		FMath::Max(480, CanvasObject->SizeY), FontLineHeight);
-	for (const FWoTHUDDrawCmd& Command : Commands)
+	const FWoTScoreboardBoard Board = Overview.LayoutBoard(
+		GatherCitadelTeamOverview(), CanvasObject->SizeX, CanvasObject->SizeY,
+		FontLineHeight, HUDTextScale);
+	const FWoTHUDIntegerUpscaleGuard BoardGuard(*CanvasObject, Board.BoardScale);
+	FWoTCanvasScale CanvasScale;
+	if (Board.BoardScale == 1)
+	{
+		CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
+	}
+	for (const FWoTHUDDrawCmd& Command : Board.Commands)
 	{
 		if (!Command.Text.IsEmpty())
 		{
@@ -2064,11 +2097,11 @@ void AWoTHUD::DrawProgressMessages(UCanvas* CanvasObject)
 	const FWoTCanvasScale CanvasScale;
 	for (const FWoTHUDDrawCmd& Command : LayoutProgressMessages(
 		WoTController->GetProgressEntries(), CanvasObject->SizeX,
-		CanvasObject->SizeY, FontLineHeight))
+		CanvasObject->SizeY, FontLineHeight, HUDTextScale))
 	{
 		CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
 			Command.Text, Font, Command.bCenterX, Command.Tint,
-			Command.TextAlignment);
+			Command.TextAlignment, Command.Scale);
 	}
 }
 
@@ -2090,14 +2123,17 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 
 	FWoTCanvasScale CanvasScale;
 	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	auto TextSize = [CanvasObject](UFont* Font, const FString& Text)
+	// Every message draws at the HUD's text scale, and every size measured to
+	// place or stack one is the scaled size.
+	const float MessageTextScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
+	auto TextSize = [CanvasObject, MessageTextScale](UFont* Font, const FString& Text)
 	{
 		FVector2D Size(0.0f, 0.0f);
 		CanvasObject->StrLen(Font, Text, Size.X, Size.Y);
-		return Size;
+		return Size * MessageTextScale;
 	};
-	auto DrawMessageText = [CanvasObject](const FString& Text, UFont* Font, float X,
-		float Y, uint8 Intensity, float FadeScale, bool bCenterX,
+	auto DrawMessageText = [CanvasObject, MessageTextScale](const FString& Text,
+		UFont* Font, float X, float Y, uint8 Intensity, float FadeScale, bool bCenterX,
 		float WrapWidth = 0.0f)
 	{
 		if (!Font || Intensity == 0 || FadeScale <= 0.0f)
@@ -2105,15 +2141,16 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			return;
 		}
 		const float Opacity = static_cast<float>(Intensity) * FadeScale / 255.0f;
+		const FVector2D ItemScale(MessageTextScale, MessageTextScale);
 		if (WrapWidth > 0.0f)
 		{
 			const TArray<FString> Lines = WrapMessageLines(Text, WrapWidth,
-				[CanvasObject, Font](const FString& Line)
+				[CanvasObject, Font, MessageTextScale](const FString& Line)
 				{
 					float Width = 0.0f;
 					float Height = 0.0f;
 					CanvasObject->StrLen(Font, Line, Width, Height);
-					return Width;
+					return Width * MessageTextScale;
 				});
 			const bool bCenterLine = bCenterX && Lines.Num() == 1;
 			float LineY = Y;
@@ -2123,13 +2160,14 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 					Font, FadedHUDColor(Opacity));
 				LineItem.BlendMode = SE_BLEND_Translucent;
 				LineItem.bCentreX = bCenterLine;
+				LineItem.Scale = ItemScale;
 				CanvasObject->DrawItem(LineItem);
 
 				float LineWidth = 0.0f;
 				float LineHeight = 0.0f;
 				CanvasObject->StrLen(Font, Line.IsEmpty() ? TEXT(" ") : Line,
 					LineWidth, LineHeight);
-				LineY += LineHeight;
+				LineY += LineHeight * MessageTextScale;
 			}
 			return;
 		}
@@ -2138,6 +2176,7 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			FadedHUDColor(Opacity));
 		TextItem.BlendMode = SE_BLEND_Translucent;
 		TextItem.bCentreX = bCenterX;
+		TextItem.Scale = ItemScale;
 		CanvasObject->DrawItem(TextItem);
 	};
 
@@ -2278,10 +2317,15 @@ void AWoTHUD::DrawTeamSelect(UCanvas* CanvasObject)
 	float TextHeight = 0.0f;
 	float TextWidth = 0.0f;
 	CanvasObject->StrLen(PromptFont, Prompt, TextWidth, TextHeight);
+	// BattleHUD centres the prompt and drops it three text heights: both
+	// follow the scaled text.
+	const float PromptScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
 	FCanvasTextItem PromptItem(
-		TeamSelectPosition(static_cast<float>(CanvasObject->SizeX), TextWidth, TextHeight),
+		TeamSelectPosition(static_cast<float>(CanvasObject->SizeX),
+			TextWidth * PromptScale, TextHeight * PromptScale),
 		FText::FromString(Prompt), PromptFont, FLinearColor::White);
 	PromptItem.BlendMode = SE_BLEND_Masked;
+	PromptItem.Scale = FVector2D(PromptScale, PromptScale);
 	CanvasObject->DrawItem(PromptItem);
 }
 
@@ -2344,6 +2388,9 @@ void AWoTHUD::UpdatePlayerID(UCanvas* CanvasObject, float DeltaTime)
 		FadedHUDColor(Intensity));
 	NameItem.BlendMode = SE_BLEND_Translucent;
 	NameItem.bCentreX = true;
+	// The centring measures the scaled text (FCanvasTextItemBase::Draw).
+	const float NameScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
+	NameItem.Scale = FVector2D(NameScale, NameScale);
 	CanvasObject->DrawItem(NameItem);
 }
 
@@ -2484,6 +2531,16 @@ void AWoTHUD::DrawHUD()
 		// The retail HUD draws on a logical canvas scaled by an integer factor; the
 		// debug readout below uses an engine runtime font and stays at native size.
 		const FWoTHUDIntegerUpscaleGuard UpscaleGuard(*Canvas, HUDUpscale);
+		// Retail text draws at twice its face's size where the HUD itself
+		// cannot (the Steam Deck legibility pass); icons stay at 1x.
+		HUDTextScale = 1;
+		if (UFont* MessageFace = ResolveFont(FName(TEXT("F_WOTReg14")), Canvas->SizeX))
+		{
+			float FaceWidth = 0.0f;
+			float FaceHeight = 0.0f;
+			Canvas->StrLen(MessageFace, TEXT("TEST"), FaceWidth, FaceHeight);
+			HUDTextScale = FWoTCanvasScale::ComputeTextScale(HUDUpscale, FaceHeight);
+		}
 
 		if (ShouldDrawHealth(HUDMode))
 		{

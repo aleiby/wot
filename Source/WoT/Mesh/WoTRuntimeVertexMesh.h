@@ -140,6 +140,8 @@ public:
 	static void ResetRuntimeCache();
 
 #if WITH_AUTOMATION_TESTS
+	static FWoTRuntimeVertexMeshDataPtr ResolveAndLoadForTesting(FStringView MeshName,
+		FName PackageHint = NAME_None);
 	static FWoTRuntimeVertexMeshDataPtr MakeSyntheticForTesting(
 		TConstArrayView<FIntVector> SourcePositions,
 		TConstArrayView<FIntVector> SourceTriangles,
@@ -155,6 +157,8 @@ public:
 #endif
 
 private:
+	static FWoTRuntimeVertexMeshDataPtr ResolveAndLoadInternal(FStringView MeshName,
+		FName PackageHint);
 	static TWoTBootstrapResult<FWoTRuntimeVertexMeshDataPtr> Decode(
 		FWoTRuntimeVerifiedObject&& MeshObject,
 		FWoTRuntimeVerifiedObject&& AnimationObject,

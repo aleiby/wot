@@ -1,6 +1,7 @@
 #include "WoTMeshParticleRenderer.h"
 
 #include "WoTVertexAnimComponent.h"
+#include "WoTSpriteBillboard.h"
 
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
@@ -59,6 +60,17 @@ void UWoTMeshParticleRenderer::SetParticleTexture(UTexture* Texture)
 	{
 		ParticleTexWidth = Texture2D->GetSizeX();
 		ParticleTexHeight = Texture2D->GetSizeY();
+#if WITH_EDITORONLY_DATA
+		// A freshly imported editor texture has no platform size under null RHI.
+		// Its source dimensions are still the authored USize/VSize; runtime
+		// textures have platform data and never enter this fallback.
+		if (ParticleTexWidth == 0 || ParticleTexHeight == 0)
+		{
+			const FIntPoint ImportedSize = Texture2D->GetImportedSize();
+			ParticleTexWidth = ImportedSize.X;
+			ParticleTexHeight = ImportedSize.Y;
+		}
+#endif
 	}
 	else
 	{
@@ -114,7 +126,7 @@ void UWoTMeshParticleRenderer::UpdateParticleQuads(
 	const int32 PreviousInstanceCount = GetInstanceCount();
 	APlayerCameraManager* Camera = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const FQuat Face = Camera
-		? FRotationMatrix::MakeFromZ(-Camera->GetCameraRotation().Vector()).ToQuat()
+		? WoTSpriteFacing::ScreenAlignedQuat(Camera->GetCameraRotation())
 		: FQuat::Identity;
 	const FVector QuadScale(
 		DrawScale * static_cast<float>(ParticleTexWidth) / 100.0f,

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "WoTHUDDrawCmd.h"
+#include "WoTScoreboard.h"
 
 struct FWoTCitadelTeamOverviewRow
 {
@@ -37,5 +38,11 @@ public:
 	static constexpr int32 SlotSpacing = 20;
 
 	TArray<FWoTHUDDrawCmd> Layout(const FWoTCitadelTeamOverviewSnapshot& Snapshot,
-		int32 LogicalWidth, int32 LogicalHeight, float FontLineHeight) const;
+		int32 LogicalWidth, int32 LogicalHeight, float FontLineHeight,
+		const FWoTScoreboardLayoutOptions& Options = FWoTScoreboardLayoutOptions()) const;
+	/** The board the HUD draws on its logical canvas at TextScale
+	 * (FWoTScoreboardBoardChoice::Choose; the overview has no compact form). */
+	FWoTScoreboardBoard LayoutBoard(const FWoTCitadelTeamOverviewSnapshot& Snapshot,
+		int32 CanvasSizeX, int32 CanvasSizeY, float FontLineHeight,
+		int32 TextScale) const;
 };

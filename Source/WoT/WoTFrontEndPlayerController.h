@@ -68,6 +68,8 @@ private:
 	void HandleBootstrapExit();
 	void HandleBrowseInstaller();
 	void HandleGetOriginalGame();
+	void HandleCopyFromAnotherComputer();
+	void HandleCancelInstallerCopy();
 	bool RunFrontEndHandoff(EWoTFrontEndHandoffPath Path,
 		const FWoTBootstrapSnapshot& ReadySnapshot, FStringView Detail);
 	bool PrepareFrontEndWidget(EWoTFrontEndHandoffPath Path);
