@@ -5305,6 +5305,110 @@ bool FWoTDeckKeyboardPanelFitSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTLegibilityChatLineSpec,
+	"WoT.UI.Legibility.ChatLine", WoTUITest_Flags)
+
+bool FWoTLegibilityChatLineSpec::RunTest(const FString&)
+{
+	// SP3 PR 7: on Deck-class screens the chat line, its labels, its prompts
+	// and the keyboard panel over it draw the list face's crisp 2x strike (28
+	// physical pixels, the front end's size), and the line's strip holds the
+	// prompts beside the text. From 1080p up nothing changes.
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
+	FWoTUITest_ModeGuard ModeGuard;
+	FWoTEntryTest_Guard EntryGuard;
+	const FVector2D Resolutions[] = {FVector2D(1280.0, 800.0), FVector2D(1280.0, 720.0),
+		FVector2D(1920.0, 1080.0), FVector2D(2560.0, 1440.0)};
+	for (const FVector2D& Resolution : Resolutions)
+	{
+		const FString Res = WoTDeckTest_Label(Resolution);
+		const bool bDeck = Resolution.Y < 1080.0;
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+		const TSharedRef<SWoTChatInputOverlay> Chat = SNew(SWoTChatInputOverlay)
+			.PlayerController(nullptr)
+			.InitialText(TEXT("Say "))
+			.InitialPhysicalSize(Resolution);
+		FWoTDeckTest_Screen Screen(Chat, Resolution);
+		const FSlateFontInfo LineFont = Chat->LineFontForTesting();
+		const float LinePixels = FWoTMenuStyle::PhysicalTextPixels(LineFont.Size, Screen.Dpi);
+		AddInfo(FString::Printf(TEXT("%s: chat line %.1f px (size %.2f)"), *Res, LinePixels,
+			LineFont.Size));
+		if (bDeck)
+		{
+			TestTrue(FString::Printf(TEXT("%s: the chat line draws the 2x strike, 28 px (%.2f)"),
+				*Res, LinePixels), FMath::IsNearlyEqual(LinePixels, 28.0f, 0.01f));
+		}
+		else
+		{
+			TestEqual(Res + TEXT(": the chat line keeps the native list face"),
+				LineFont.Size, 14.0f);
+		}
+		const FSlateRect PointerStrip = FWoTDeckTest_Screen::Rect(Chat->LineStripForTesting());
+
+		// Controller mode: the prompts show at the line's right end.
+		FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+		Screen.Settle();
+		const FSlateRect Strip = FWoTDeckTest_Screen::Rect(Chat->LineStripForTesting());
+		const FSlateRect Prompts = FWoTDeckTest_Screen::Rect(Chat->ButtonPromptsForTesting());
+		const FSlateRect Typed = FWoTDeckTest_Screen::Rect(Chat->TextWidget());
+		AddInfo(FString::Printf(TEXT("%s: line strip %s (%s with the mouse), prompts %s"), *Res,
+			*WoTDeckTest_RectText(Strip), *WoTDeckTest_RectText(PointerStrip),
+			*WoTDeckTest_RectText(Prompts)));
+		if (bDeck)
+		{
+			TestTrue(FString::Printf(TEXT("%s: the prompts sit on the line's strip %s in %s"),
+				*Res, *WoTDeckTest_RectText(Prompts), *WoTDeckTest_RectText(Strip)),
+				Prompts.Top >= Strip.Top - 0.5f && Prompts.Bottom <= Strip.Bottom + 0.5f);
+			TestTrue(FString::Printf(TEXT("%s: the typed text stays clear of the prompts (%.0f, %.0f)"),
+				*Res, Typed.Right, Prompts.Left), Typed.Right <= Prompts.Left + 0.5f);
+			const float LabelPixels = FWoTMenuStyle::PhysicalTextPixels(
+				Chat->ButtonPromptsForTesting()->LabelFontForTesting().Size, Screen.Dpi);
+			TestTrue(FString::Printf(TEXT("%s: the prompt labels are 28 px like the front end's (%.2f)"),
+				*Res, LabelPixels), FMath::IsNearlyEqual(LabelPixels, 28.0f, 0.01f));
+		}
+		else
+		{
+			TestTrue(FString::Printf(TEXT("%s: the line's strip is as before %s"), *Res,
+				*WoTDeckTest_RectText(Strip)),
+				FMath::IsNearlyEqual(Strip.Top, PointerStrip.Top, 0.5f)
+				&& FMath::IsNearlyEqual(Strip.Bottom, PointerStrip.Bottom, 0.5f));
+		}
+		WoTDeckTest_CheckStrip(*this, Res + TEXT(" chat line"), Chat->ButtonPromptsForTesting(),
+			Screen);
+
+		// The keyboard panel over chat: its key labels match the front end's.
+		if (TestTrue(Res + TEXT(": the panel opens over chat"), Chat->BeginTextEntry(0)))
+		{
+			Screen.Settle();
+			const TSharedPtr<SWoTOnScreenKeyboard> Panel = FWoTTextEntry::GetPanel();
+			if (TestTrue(Res + TEXT(": the panel shows"), Panel.IsValid()))
+			{
+				const float KeyPixels = FWoTMenuStyle::PhysicalTextPixels(
+					Panel->KeyFontForTesting().Size, Screen.Dpi);
+				AddInfo(FString::Printf(TEXT("%s: keyboard panel key labels %.1f px"), *Res,
+					KeyPixels));
+				if (bDeck)
+				{
+					TestTrue(FString::Printf(TEXT("%s: key labels draw the 2x strike, 28 px (%.2f)"),
+						*Res, KeyPixels), FMath::IsNearlyEqual(KeyPixels, 28.0f, 0.01f));
+				}
+				else
+				{
+					TestEqual(Res + TEXT(": key labels keep their PR 6 size"),
+						Panel->KeyFontForTesting().Size,
+						SWoTOnScreenKeyboard::MinimumKeyLabelSize);
+				}
+			}
+		}
+		FWoTTextEntry::ResetForTesting();
+	}
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTDeckSettingsSaveChangesSpec,
 	"WoT.Settings.SaveChangesPrompt", WoTUITest_Flags)
 

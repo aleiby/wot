@@ -859,6 +859,45 @@ FSlateFontInfo FWoTMenuStyle::LegibleSmallFont(float LayoutScale) const
 	return Font;
 }
 
+int32 FWoTMenuStyle::RetailFaceLineHeight(FName Face)
+{
+	// Tallest glyph cell of each shipped face, which the runtime font owner
+	// uses as the line height (WoT.UI.Legibility.HelpRetailGlyphs pins the
+	// WOT.u faces against the converted retail ones).
+	if (Face == FName(TEXT("F_WOTReg08"))) return 8;
+	if (Face == FName(TEXT("F_WOTReg30"))) return 30;
+	if (Face == FName(TEXT("Tahoma20"))) return 24;
+	return 14; // F_WOTReg14, F_WOTIta14
+}
+
+int32 FWoTMenuStyle::LegibleStrikeScale(FName Face)
+{
+	const int32 LineHeight = FMath::Max(RetailFaceLineHeight(Face), 1);
+	return FMath::Clamp(FMath::CeilToInt(
+		PrimaryLegiblePixels / static_cast<float>(LineHeight)), 1, 2);
+}
+
+FSlateFontInfo FWoTMenuStyle::LegibleStrikeFont(
+	const FWoTFrontEndPresentationAuthority* Authority, FName Face,
+	const FSlateFontInfo& Fallback, float LayoutScale)
+{
+	const float Scale = FMath::IsFinite(LayoutScale) && LayoutScale > 0.0f
+		? LayoutScale : 1.0f;
+	const int32 Strike = LegibleStrikeScale(Face);
+	if (Authority != nullptr && Authority->IsReady())
+	{
+		const FSlateFontInfo Authenticated =
+			Authority->MultiplayerFont(Face, Scale, Strike);
+		if (Authenticated.HasValidFont()) return Authenticated;
+	}
+	// The same size the authenticated strike gets: its line height in
+	// pixels, as points under Scale (Size x 96/72 x Scale = line x strike).
+	FSlateFontInfo Font = Fallback;
+	Font.Size *= static_cast<float>(Strike) * 72.0f
+		/ (static_cast<float>(FontConstants::RenderDPI) * Scale);
+	return Font;
+}
+
 FWoTRetailBrowserStyle& FWoTRetailBrowserStyle::Get()
 {
 	static FWoTRetailBrowserStyle Style;

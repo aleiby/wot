@@ -123,8 +123,18 @@ public:
 	 * as Slate draws it); InFont itself where it already is. An invalid face
 	 * becomes the engine's default face. */
 	static FSlateFontInfo LegibleLabelFont(const FSlateFontInfo& InFont, float LayoutScale);
-	/** A glyph's side, in layout units, beside a label in InLabelFont. */
-	static float GlyphSizeFor(const FSlateFontInfo& InLabelFont);
+	/** A glyph's side, in layout units, beside a label in InLabelFont: 1.6
+	 * per point of the label, and never too small for its letter's floor
+	 * (LetterFontFor) under LayoutScale. */
+	static float GlyphSizeFor(const FSlateFontInfo& InLabelFont, float LayoutScale = 1.0f);
+	/** The letter on a face-button glyph Side units across: half the side,
+	 * and never under FWoTMenuStyle::FloorLegiblePixels (12) physical pixels
+	 * under LayoutScale. Labels at their 16-pixel floor already give a 13-pixel
+	 * letter, so the floor only guards smaller hosts. */
+	static FSlateFontInfo LetterFontFor(float Side, float LayoutScale);
+	/** The whole point size a glyph letter needs to reach the floor under
+	 * LayoutScale. */
+	static int32 LetterFloorPoints(float LayoutScale);
 	/** The strip's height, in layout units, for labels bound to InFont under
 	 * LayoutScale: the taller of a glyph and a label line. */
 	static float BarHeightFor(const FSlateFontInfo& InFont, float LayoutScale);

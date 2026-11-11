@@ -8,6 +8,7 @@
 #include "Rendering/SlateRenderer.h"
 #include "Styling/CoreStyle.h"
 #include "UI/WoTControllerUIInput.h"
+#include "WoTMenuStyle.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/Text/STextBlock.h"
@@ -126,8 +127,8 @@ public:
 		{
 			Box(0.0f, 0.0f, Side, Side, WoTPromptGlyph_Disc(),
 				WoTPromptGlyph_FaceColor(Which), LayerId);
-			const FSlateFontInfo LetterFont = FCoreStyle::GetDefaultFontStyle(
-				TEXT("Bold"), FMath::Max(6, FMath::RoundToInt(Side * 0.5f)));
+			const FSlateFontInfo LetterFont = SWoTButtonPrompts::LetterFontFor(Side,
+				AllottedGeometry.GetAccumulatedLayoutTransform().GetScale());
 			FVector2f Measured(Side * 0.4f, Side * 0.6f);
 			if (FSlateApplication::IsInitialized()
 				&& FSlateApplication::Get().GetRenderer() != nullptr)
@@ -343,7 +344,7 @@ void SWoTButtonPrompts::Construct(const FArguments& InArgs)
 				})
 				.Size_Lambda([this]()
 				{
-					return GlyphSizeFor(LabelFont());
+					return GlyphSizeFor(LabelFont(), GetPrepassLayoutScaleMultiplier());
 				})
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -413,9 +414,27 @@ FSlateFontInfo SWoTButtonPrompts::LegibleLabelFont(const FSlateFontInfo& InFont,
 	return Result;
 }
 
-float SWoTButtonPrompts::GlyphSizeFor(const FSlateFontInfo& InLabelFont)
+float SWoTButtonPrompts::GlyphSizeFor(const FSlateFontInfo& InLabelFont, float LayoutScale)
 {
-	return FMath::Max(14.0f, InLabelFont.Size * GlyphSizePerPoint);
+	return FMath::Max3(14.0f, InLabelFont.Size * GlyphSizePerPoint,
+		2.0f * static_cast<float>(LetterFloorPoints(LayoutScale)));
+}
+
+int32 SWoTButtonPrompts::LetterFloorPoints(float LayoutScale)
+{
+	const float PixelsPerPoint = static_cast<float>(FontConstants::RenderDPI) / 72.0f
+		* FMath::Max(LayoutScale, 0.01f);
+	// The tolerance keeps a size that lands exactly on the floor from rounding
+	// up a whole point through float error.
+	return FMath::CeilToInt(
+		FWoTMenuStyle::FloorLegiblePixels / PixelsPerPoint - UE_KINDA_SMALL_NUMBER);
+}
+
+FSlateFontInfo SWoTButtonPrompts::LetterFontFor(float Side, float LayoutScale)
+{
+	const int32 Size = FMath::Max3(6, FMath::RoundToInt(Side * 0.5f),
+		LetterFloorPoints(LayoutScale));
+	return FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), Size);
 }
 
 float SWoTButtonPrompts::BarHeightFor(const FSlateFontInfo& InFont, float LayoutScale)
@@ -429,7 +448,7 @@ float SWoTButtonPrompts::BarHeightFor(const FSlateFontInfo& InFont, float Layout
 			LineHeight = Renderer->GetFontMeasureService()->GetMaxCharacterHeight(Label);
 		}
 	}
-	return FMath::Max(GlyphSizeFor(Label), LineHeight);
+	return FMath::Max(GlyphSizeFor(Label, LayoutScale), LineHeight);
 }
 
 #if WITH_AUTOMATION_TESTS

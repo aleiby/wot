@@ -372,9 +372,21 @@ public:
 	static TArray<FWoTHUDDrawCmd> LayoutAddedItems(
 		const UWoTHandSet* HandSet, int32 ScaledSizeX, int32 ScaledSizeY,
 		float TimeSeconds, float InTimeOut = 1.5f);
+	/** TextScale (ComputeHUDTextScale) sets each line's Scale and multiplies
+	 * the retail line pitch (FontLineHeight + 1). */
 	static TArray<FWoTHUDDrawCmd> LayoutProgressMessages(
 		const TArray<FWoTProgressEntry>& Entries, int32 ClipX, int32 ClipY,
-		float FontLineHeight);
+		float FontLineHeight, int32 TextScale = 1);
+	/** The HUD's text scale on a ViewportX x ViewportY screen whose 14-pixel
+	 * message face is LineHeight pixels tall at 1x: FWoTCanvasScale::
+	 * ComputeTextScale at the HUD's own integer upscale (wot.HUDScale
+	 * override included). 2 at 1280x800 and 1280x720, 1 from 1080p up. The
+	 * dev-only wot.HUDDebug readout is exempt: it draws the engine's 8-pixel
+	 * SmallFont at native size, outside the HUD scale. */
+	static int32 ComputeHUDTextScale(int32 ViewportX, int32 ViewportY,
+		int32 UpscaleOverride, float LineHeight);
+	/** The text scale of the last DrawHUD (1 until the HUD first draws). */
+	int32 GetHUDTextScale() const { return HUDTextScale; }
 	static EWoTInterfaceLevel NextInterfaceLevel(EWoTInterfaceLevel Level);
 	static EWoTInterfaceLevel PreviousInterfaceLevel(EWoTInterfaceLevel Level);
 	static FWoTHUDSurfaceVisibility SurfaceVisibility(
@@ -508,6 +520,10 @@ protected:
 	float HandSelectionTime = -2.0f * HandDisplayTime;
 	float LastMessageRenderTime = 0.0f;
 	float TriggerWarningTime = 0.0f;
+	/** Retail canvas text draws at this many times its face's size: 2 where
+	 * the HUD's integer upscale is 1 (ComputeHUDTextScale). Icons, and the
+	 * digits drawn onto them (health, charges, hand keys), stay at 1x. */
+	int32 HUDTextScale = 1;
 	UPROPERTY(Transient)
 	EWoTHUDMode HUDMode = EWoTHUDMode::Normal;
 	bool bDebugReadoutCacheValid = false;

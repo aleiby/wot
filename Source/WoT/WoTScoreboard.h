@@ -35,6 +35,75 @@ enum class EWoTScoreboardJustification : uint8
 	RightThird
 };
 
+// The Steam Deck legibility pass (SP3 PR 7). Below a 2x HUD (1280x800,
+// 1280x720) the scoreboards draw on a virtual board of half the HUD canvas
+// under a 2x transform, so their retail 14-pixel text is 28 physical pixels and
+// the retail column proportions hold. The board is measured first and falls
+// back in a fixed order: the doubled board, the doubled compact board, then the
+// retail board at the face's own size (FWoTScoreboardBoardChoice).
+enum class EWoTScoreboardDensity : uint8
+{
+	/** The shipped row pitch and blank lines. */
+	Retail,
+	/** Arena rows at CompactRowPitch; citadel team blocks without their two
+	 * blank lines (CitadelScoreBoard.uc:66,79). */
+	Compact
+};
+
+struct FWoTScoreboardLayoutOptions
+{
+	EWoTScoreboardDensity Density = EWoTScoreboardDensity::Retail;
+	/** Every header line shows: the legend moves down just far enough that
+	 * retail's own header rule (a header line ends above the legend) keeps
+	 * them all, where retail would drop the lines that reach the legend. */
+	bool bKeepHeaders = false;
+};
+
+enum class EWoTScoreboardBoardMode : uint8
+{
+	/** The retail board on the HUD's logical canvas. */
+	Native,
+	/** The retail board on a virtual board of half the canvas, drawn at 2x. */
+	Double,
+	/** The compact board on that virtual board, drawn at 2x. */
+	DoubleCompact
+};
+
+/** The board the HUD draws: its commands in board units, and how many canvas
+ * pixels one board unit covers. */
+struct FWoTScoreboardBoard
+{
+	EWoTScoreboardBoardMode Mode = EWoTScoreboardBoardMode::Native;
+	int32 BoardScale = 1;
+	int32 LogicalWidth = 0;
+	int32 LogicalHeight = 0;
+	TArray<FWoTHUDDrawCmd> Commands;
+};
+
+struct FWoTScoreboardBoardChoice
+{
+	/** The retail columns need a board at least this wide (ArenaScoreBoard's
+	 * 640-unit design); a narrower doubled board is not tried. */
+	static constexpr int32 MinimumBoardWidth = 640;
+
+	/** The lowest edge Commands draw, in board units: a text line's top plus
+	 * FontLineHeight, a texture's top plus IconSize x its scale. */
+	static float Bottom(const TArray<FWoTHUDDrawCmd>& Commands,
+		float FontLineHeight, float IconSize);
+	/** The measure-then-fallback choice on a HUD canvas of CanvasSizeX x
+	 * CanvasSizeY logical pixels whose text draws at TextScale
+	 * (FWoTCanvasScale::ComputeTextScale). With TextScale 2: the doubled
+	 * board when everything fits, else the doubled compact board (when the
+	 * layout has one), else the native board. With TextScale 1 the native
+	 * board, exactly as before. Layout lays the board out at a size with the
+	 * given options. */
+	static FWoTScoreboardBoard Choose(int32 CanvasSizeX, int32 CanvasSizeY,
+		float FontLineHeight, int32 TextScale, bool bHasCompactDensity,
+		float IconSize,
+		TFunctionRef<TArray<FWoTHUDDrawCmd>(int32 Width, int32 Height,
+			const FWoTScoreboardLayoutOptions& Options)> Layout);
+};
+
 struct FWoTScoreboardDisplayInfo
 {
 	EWoTScoreboardJustification Justification =
@@ -89,6 +158,10 @@ public:
 	static constexpr int32 IconSize = 16;
 	static constexpr int32 ColorTextureCount = 5;
 	static constexpr int32 PlayerTextureCount = 4;
+	/** ArenaScoreBoard's row pitch, and the compact board's: the icon's
+	 * height, so adjacent rows' icons never overlap. */
+	static constexpr int32 RowPitch = 20;
+	static constexpr int32 CompactRowPitch = IconSize;
 
 	FWoTArenaScoreboard();
 	virtual ~FWoTArenaScoreboard() = default;
@@ -111,9 +184,19 @@ public:
 	static TArray<FName> AllIconTextureIds();
 	virtual TArray<FWoTHUDDrawCmd> Layout(const FWoTScoreboardSnapshot& Snapshot,
 		int32 LogicalWidth, int32 LogicalHeight, float FontLineHeight,
-		bool bStandalone, bool bIconsAvailable) const;
+		bool bStandalone, bool bIconsAvailable,
+		const FWoTScoreboardLayoutOptions& Options = FWoTScoreboardLayoutOptions()) const;
+	/** The board the HUD draws on its logical canvas (CanvasSizeX x
+	 * CanvasSizeY) at TextScale: FWoTScoreboardBoardChoice::Choose over Layout. */
+	FWoTScoreboardBoard LayoutBoard(const FWoTScoreboardSnapshot& Snapshot,
+		int32 CanvasSizeX, int32 CanvasSizeY, float FontLineHeight,
+		int32 TextScale, bool bStandalone, bool bIconsAvailable) const;
 
 protected:
+	/** The legend's (or first team block's) Y: a quarter of the board, moved
+	 * down when Options keep header lines that would reach it. */
+	static int32 BoardTopY(int32 LogicalHeight, int32 LineHeight,
+		int32 HeaderLineCount, const FWoTScoreboardLayoutOptions& Options);
 	// The shared row renderer (one player line at X columns / row tint) so the
 	// citadel layout draws identical rows between its team blocks.
 	void LayoutPlayerRow(TArray<FWoTHUDDrawCmd>& Commands,
@@ -146,7 +229,8 @@ public:
 		int32 SortType) const override;
 	virtual TArray<FWoTHUDDrawCmd> Layout(const FWoTScoreboardSnapshot& Snapshot,
 		int32 LogicalWidth, int32 LogicalHeight, float FontLineHeight,
-		bool bStandalone, bool bIconsAvailable) const override;
+		bool bStandalone, bool bIconsAvailable,
+		const FWoTScoreboardLayoutOptions& Options = FWoTScoreboardLayoutOptions()) const override;
 
 	// CitadelScoreBoard.GetTeamDescription (uc:90-104): BattleInfo's description
 	// with the "Team #N+1" fallback (also on an empty description).

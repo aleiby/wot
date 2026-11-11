@@ -1517,23 +1517,25 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
+				// The Steam Deck legibility pass: the 2x body face, as the
+				// rest of the multiplayer screens (was the 14-pixel strike).
 				SNew(STextBlock)
 				.Text(PresentationAuthority->BrowserResourceError())
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f)
 			[
 				SNew(STextBlock)
 				.Text(WoTFrontEndSlate_Text(TEXT("Return to the main menu and try again.")))
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(STextBlock)
 				.Text(this, &SWoTFrontEndRoot::StatusText)
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 		];
@@ -2692,21 +2694,16 @@ float SWoTFrontEndRoot::UpdateBannerEstimatedHeightForFont(
 
 bool SWoTFrontEndRoot::ShouldUseCompactUpdateBannerFont() const
 {
+	// The last resort only: the wrapped 2x banner overruns the room below the
+	// menu. The Slate canvas is about 1080 units tall at every resolution, so
+	// this never happens at 1280x720 or larger; it keeps the menu clear on the
+	// smallest windows (640x480), where the 14-pixel face still passes the
+	// 12-pixel floor. A long reason line on a wide screen wraps instead (the
+	// Steam Deck legibility pass removed that 14-pixel case).
 	constexpr float MenuGap = 6.0f;
-	const FSlateFontInfo LargeFont = LargeBodyFont();
 	const float AvailableHeight = (LiveViewportHeight - MainMenuListHeight) * 0.5f
 		- MenuGap;
-	if (UpdateBannerEstimatedHeightForFont(LargeFont) > AvailableHeight)
-	{
-		return true;
-	}
-
-	const FWoTUpdateBannerPresentation Banner = UpdateBannerPresentation();
-	const float PhysicalViewportWidth = LiveViewportWidth * LiveViewportScale;
-	return PhysicalViewportWidth >= 1920.0f && !Banner.ReasonLine.IsEmpty()
-		&& FWoTMenuLayout::MeasureText(
-			WoTFrontEndSlate_Text(Banner.ReasonLine), LargeFont).X
-			> UpdateBannerTextWrapWidthForFont(LargeFont);
+	return UpdateBannerEstimatedHeightForFont(LargeBodyFont()) > AvailableHeight;
 }
 
 FSlateFontInfo SWoTFrontEndRoot::UpdateBannerBodyFont() const
