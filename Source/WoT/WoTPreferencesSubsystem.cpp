@@ -4,6 +4,8 @@
 #include "Payload/WoTPayloadActivation.h"
 
 #include "Framework/Application/SlateApplication.h"
+#include "GenericPlatform/GenericApplication.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerInput.h"
@@ -1028,13 +1030,28 @@ UWoTPreferencesSubsystem::ApplyFullPreferencesAfterCacheActivation()
 	const FString PlayerName = ParsePlayerName(Bytes);
 	TArray<FWoTSavedServerPassword> SavedPasswords =
 		ParseSavedPasswords(Bytes);
+	FIntPoint WorkAreaPixels = FIntPoint::ZeroValue;
+	float DpiScale = 1.0f;
+	if (!GIsEditor && !IsRunningCommandlet() && !IsRunningDedicatedServer()
+		&& FSlateApplication::IsInitialized())
+	{
+		FDisplayMetrics DisplayMetrics;
+		FDisplayMetrics::RebuildDisplayMetrics(DisplayMetrics);
+		const FPlatformRect& WorkArea = DisplayMetrics.PrimaryDisplayWorkAreaRect;
+		WorkAreaPixels = FIntPoint(WorkArea.Right - WorkArea.Left,
+			WorkArea.Bottom - WorkArea.Top);
+		DpiScale = FPlatformApplicationMisc::GetDPIScaleFactorAtPoint(
+			WorkArea.Left + WorkAreaPixels.X * 0.5f,
+			WorkArea.Top + WorkAreaPixels.Y * 0.5f);
+	}
 	FWoTGameSettings ParsedSettings;
 	FString ParseError;
-	if (!FWoTGameSettingsCodec::Parse(Bytes, ParsedSettings, ParseError))
+	if (!FWoTGameSettingsCodec::Parse(Bytes, ParsedSettings, ParseError,
+		WorkAreaPixels, DpiScale))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Invalid saved game settings; using defaults: %s"),
 			*ParseError);
-		ParsedSettings = FWoTGameSettings::Defaults();
+		ParsedSettings = FWoTGameSettings::Defaults(WorkAreaPixels, DpiScale);
 	}
 	FWoTBootstrapStatus AppliedFaction =
 		AssignSelectedFactionAfterCacheActivation(Faction);

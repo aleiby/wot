@@ -792,8 +792,8 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ### Controls and Hardware settings screens
 - **Original:** Options live in the period UWindow dialogs.
-- **Port:** Dedicated screens cover mouse sensitivity (the eight original steps), invert, key bindings, resolution, window mode, VSync (on by default), quality, frame-rate cap and master volume. Video changes revert after 15 seconds unless the player keeps them.
-- **Why:** Modern display and input options that are safe to try.
+- **Port:** Dedicated screens cover mouse sensitivity (the eight original steps), invert, key bindings, resolution, window mode, VSync (on by default), quality, frame-rate cap and master volume. Video changes revert after 15 seconds unless the player keeps them. The first window is sized from the display instead of a fixed resolution: 1280x720 at the display's scale, fitted within 90% of the work area, with a 1280x720 minimum.
+- **Why:** Modern display and input options that are safe to try. A fixed pixel size is tiny on high-density screens.
 
 ### Front end and server browser
 - **Original:** The game connects through its own console and server browser, built on the original window framework, with draggable and resizable windows, tabbed server lists, a right-click server menu and password prompts.

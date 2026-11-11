@@ -252,8 +252,8 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 		Scores->Primary = EKeys::F5;
 	}
 	const FString Encoded = FWoTGameSettingsCodec::Serialize(Edited);
-	TestTrue(TEXT("new saves use game settings version 10"),
-		Encoded.StartsWith(TEXT("GameSettingsVersion=10\n")));
+	TestTrue(TEXT("new saves use game settings version 11"),
+		Encoded.StartsWith(TEXT("GameSettingsVersion=11\n")));
 	const FTCHARToUTF8 Bytes(*Encoded);
 	TArray<uint8> Full = Old;
 	Full.Append(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
@@ -262,7 +262,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	TestTrue(TEXT("roundtrip preserves both binding slots and numeric fields"), Out == Edited);
 	FString VersionOneText = Encoded;
 	StripVersionSevenPresentationRecords(VersionOneText);
-	VersionOneText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionOneText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=1"));
 	VersionOneText.ReplaceInline(TEXT("GameVSync=1"), TEXT("GameVSync=0"));
 	VersionOneText.ReplaceInline(TEXT("GameMouseSensitivity=2"),
@@ -281,7 +281,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// from their retail defaults without discarding any saved legacy binding.
 	FString VersionTwoText = Encoded;
 	StripVersionSevenPresentationRecords(VersionTwoText);
-	VersionTwoText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionTwoText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=2"));
 	// Authentic v2 records predate the newly introduced secondary aliases.
 	VersionTwoText.ReplaceInline(TEXT("GameBinding.MoveForward=W,Up"),
@@ -343,7 +343,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// migrate from retail defaults while every saved v3 choice is retained.
 	FString VersionThreeText = Encoded;
 	StripVersionSevenPresentationRecords(VersionThreeText);
-	VersionThreeText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionThreeText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=3"));
 	for (const TCHAR* ChatIdentity : {
 		TEXT("Type"), TEXT("Talk"), TEXT("TeamTalk"),
@@ -424,7 +424,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// with its saved action and leaves the colliding new slot visibly unbound.
 	FString VersionFourText = Encoded;
 	StripVersionSevenPresentationRecords(VersionFourText);
-	VersionFourText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionFourText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=4"));
 	for (const TCHAR* DropIdentity : {
 		TEXT("Drop"), TEXT("DropTainted"),
@@ -486,7 +486,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	// already owns one of those keys.
 	FString VersionFiveText = Encoded;
 	StripVersionSevenPresentationRecords(VersionFiveText);
-	VersionFiveText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionFiveText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=5"));
 	for (const TCHAR* NewIdentity : {
 		TEXT("Walking"), TEXT("PlayTaunt1"), TEXT("PlayTaunt2"), TEXT("PlayTaunt3"),
@@ -538,7 +538,7 @@ bool FWoTGameSettingsCodecSpec::RunTest(const FString&)
 	}
 	FString VersionSixText = Encoded;
 	StripVersionSevenPresentationRecords(VersionSixText);
-	VersionSixText.ReplaceInline(TEXT("GameSettingsVersion=10"),
+	VersionSixText.ReplaceInline(TEXT("GameSettingsVersion=11"),
 		TEXT("GameSettingsVersion=6"));
 	{
 		const FTCHARToUTF8 VersionSixUtf8(*VersionSixText);
@@ -1171,11 +1171,11 @@ bool FWoTGameSettingsControllerFieldsSpec::RunTest(const FString&)
 	Full.Append(reinterpret_cast<const uint8*>(Bytes.Get()), Bytes.Length());
 	FWoTGameSettings Out;
 	FString Error;
-	TestTrue(TEXT("version 10 roundtrips"), FWoTGameSettingsCodec::Parse(Full, Out, Error));
+	TestTrue(TEXT("version 11 roundtrips"), FWoTGameSettingsCodec::Parse(Full, Out, Error));
 	TestTrue(TEXT("roundtrip keeps controller fields and an explicit joystick off"), Out == Edited);
 
 	FString VersionNine = Encoded;
-	VersionNine.ReplaceInline(TEXT("GameSettingsVersion=10"), TEXT("GameSettingsVersion=9"));
+	VersionNine.ReplaceInline(TEXT("GameSettingsVersion=11"), TEXT("GameSettingsVersion=9"));
 	for (const TCHAR* Key : {TEXT("GameControllerLookSensitivity="),
 		TEXT("GameControllerInvertY="), TEXT("GameControllerDeadZone=")})
 	{
