@@ -26,11 +26,20 @@ import publish_release  # noqa: E402
 
 GH = "gh-never-runs"
 HEAD = "0a1b2c3d4" + "e" * 31
+# Stands in for Install-WoT-Reborn.desktop: these specs never run the real
+# builder (test_steamos_installer_asset.py covers it against a real commit).
+STEAMOS_BYTES = b"[Desktop Entry]\nName=Install WoT Reborn\n# spec stand-in\n"
+LATEST_DESKTOP = ("https://github.com/aleiby/wot/releases/latest/download/"
+                  "Install-WoT-Reborn.desktop")
+TAGGED_DESKTOP = ("https://github.com/aleiby/wot/releases/download/v0.1.0/"
+                  "Install-WoT-Reborn.desktop")
+ASSET_HOST_DESKTOP = ("https://release-assets.githubusercontent.com/"
+                      "github-production-release-asset/1/2?sp=r")
 
 
 class FakeRunner:
     def __init__(self, *, dirty=False, head=HEAD, tag_exists=False, uploaded=None,
-                 previous=None, previous_notes=None):
+                 previous=None, previous_notes=None, heads=None):
         self.calls = []
         self.dirty = dirty
         self.head = head
@@ -41,6 +50,11 @@ class FakeRunner:
         self.created_release_notes = None
         self.created_release_notes_asset = None
         self.created_player_downloads = {}
+        self.created_steamos_installer = None
+        # curl --head answers by URL: (returncode, "<status> <redirect url>").
+        self.heads = {LATEST_DESKTOP: (0, "302 " + TAGGED_DESKTOP),
+                      TAGGED_DESKTOP: (0, "302 " + ASSET_HOST_DESKTOP)}
+        self.heads.update(heads or {})
 
     def __call__(self, command):
         command = list(command)
@@ -88,16 +102,26 @@ class FakeRunner:
                     path = Path(value)
                     if path.name in formats.PLAYER_DOWNLOAD_ASSETS.values():
                         self.created_player_downloads[path.name] = path.read_bytes()
+                    if path.name == formats.STEAMOS_INSTALLER_ASSET:
+                        self.created_steamos_installer = path.read_bytes()
                 return done()
             if verb == ["release", "view"]:
                 return done(stdout=json.dumps({"assets": self.uploaded, "isDraft": True,
                                                "tagName": command[3]}))
             if verb == ["release", "edit"]:
                 return done()
+        if command[0] == "curl" and command[1] == "--head" \
+                and command[-1] in self.heads:
+            code, answer = self.heads[command[-1]]
+            return done(code, stdout=answer if code == 0 else "",
+                        stderr="" if code == 0 else "curl: (6) Could not resolve host")
         raise AssertionError(f"unscripted command {command}")
 
     def gh_verbs(self):
         return [" ".join(call[1:3]) for call in self.calls if call[0] == GH]
+
+    def heads_requested(self):
+        return [call[-1] for call in self.calls if call[0] == "curl"]
 
 
 class PublishReleaseTests(unittest.TestCase):
@@ -106,6 +130,10 @@ class PublishReleaseTests(unittest.TestCase):
         cls.dmg_inspection = mock.patch.object(
             publish_release.verify_release.mac_dmg, "verify_dmg")
         cls.dmg_inspection.start()
+        cls.steamos_patch = mock.patch.object(
+            publish_release.steamos_installer, "build_at_commit",
+            return_value=STEAMOS_BYTES)
+        cls.steamos_builder = cls.steamos_patch.start()
         cls.fixture = fixtures.ReleaseFixture()
         cls.set = cls.fixture.root / "set"
         cls.fixture.sign(cls.set)
@@ -136,7 +164,13 @@ class PublishReleaseTests(unittest.TestCase):
             {"name": fixed_name, "size": source.stat().st_size,
              "digest": "sha256:" + formats.sha256_file(source)[0]}
             for fixed_name, source in sorted(cls.player_sources.items())]
-        cls.union_assets = [*cls.assets, *cls.player_rows, cls.notes_row]
+        cls.steamos_row = {
+            "name": formats.STEAMOS_INSTALLER_ASSET,
+            "size": len(STEAMOS_BYTES),
+            "digest": "sha256:" + __import__("hashlib").sha256(STEAMOS_BYTES).hexdigest(),
+        }
+        cls.union_assets = [*cls.assets, *cls.player_rows, cls.steamos_row,
+                            cls.notes_row]
         cls.previous_directory = cls.fixture.root / "previous-zero"
         cls.previous_directory.mkdir()
         for platform in formats.PLATFORMS:
@@ -148,6 +182,11 @@ class PublishReleaseTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.fixture.cleanup()
         cls.dmg_inspection.stop()
+        cls.steamos_patch.stop()
+
+    def setUp(self):
+        self.steamos_builder.reset_mock(side_effect=True)
+        self.steamos_builder.return_value = STEAMOS_BYTES
 
     def run_main(self, runner, *extra, directory=None):
         receipt = self.fixture.root / "receipts" / f"{len(runner.calls)}-{id(runner)}.json"
@@ -365,7 +404,8 @@ class PublishReleaseTests(unittest.TestCase):
             sorted(set(Path(arg).name for arg in create)
                    & set(formats.PLAYER_DOWNLOAD_ASSETS.values())),
             sorted(formats.PLAYER_DOWNLOAD_ASSETS.values()))
-        edit = runner.calls[-1]
+        edit = [call for call in runner.calls if call[0] == GH][-1]
+        self.assertEqual(edit[1:3], ["release", "edit"])
         self.assertEqual(edit[-2:], ["--draft=false", "--latest"])
         self.assertEqual(receipt["outcome"], "published")
         self.assertEqual(receipt["player_downloads"], {
@@ -398,6 +438,140 @@ class PublishReleaseTests(unittest.TestCase):
             for name, source in self.player_sources.items()
         })
         self.assertEqual(receipt["outcome"], "published")
+
+    def test_publish_attaches_the_steamos_installer_built_at_the_release_commit(self):
+        runner = FakeRunner(uploaded=self.union_assets)
+        code, text, receipt = self.run_main(runner, "--publish", "--confirm-tag", "v0.1.0")
+        self.assertEqual(code, 0, text)
+        # Built once, from the release commit's own files in the repository.
+        self.steamos_builder.assert_called_once_with(self.repository, HEAD)
+        create = next(call for call in runner.calls if call[1:3] == ["release", "create"])
+        uploaded = [Path(value) for value in create
+                    if Path(value).name == formats.STEAMOS_INSTALLER_ASSET]
+        self.assertEqual(len(uploaded), 1)
+        self.assertEqual(runner.created_steamos_installer, STEAMOS_BYTES)
+        self.assertNotEqual(uploaded[0].parent, self.set)
+        digest = __import__("hashlib").sha256(STEAMOS_BYTES).hexdigest()
+        self.assertEqual(receipt["steamos_installer"], {
+            "build_commit": HEAD, "sha256": digest, "size": len(STEAMOS_BYTES)})
+        # After the latest flip, the README link is checked with HEAD requests.
+        self.assertEqual(runner.heads_requested(), [LATEST_DESKTOP, TAGGED_DESKTOP])
+        edit_index = next(index for index, call in enumerate(runner.calls)
+                          if call[1:3] == ["release", "edit"])
+        self.assertTrue(all(call[0] == "curl" for call in runner.calls[edit_index + 1:]))
+        for call in runner.calls[edit_index + 1:]:
+            self.assertNotIn("--location", call)
+        self.assertEqual(receipt["post_publish_failures"], [])
+
+    def test_the_steamos_installer_never_enters_the_signed_set(self):
+        before = {path.name: path.read_bytes() for path in self.set.iterdir()}
+        self.assertNotIn(formats.STEAMOS_INSTALLER_ASSET, before)
+        runner = FakeRunner(uploaded=self.union_assets)
+        code, text, receipt = self.run_main(runner, "--publish", "--confirm-tag", "v0.1.0")
+        self.assertEqual(code, 0, text)
+        self.assertEqual({path.name: path.read_bytes() for path in self.set.iterdir()},
+                         before)
+        self.assertNotIn(formats.STEAMOS_INSTALLER_ASSET, receipt["set"]["assets"])
+        self.assertEqual(sorted(receipt["set"]["assets"]), sorted(before))
+        create = next(call for call in runner.calls if call[1:3] == ["release", "create"])
+        signed = sorted(Path(arg).name for arg in create if arg.startswith(str(self.set)))
+        self.assertEqual(signed, sorted(before))
+
+    def test_dry_run_builds_the_installer_and_plans_its_upload_and_check(self):
+        runner = FakeRunner()
+        code, text, receipt = self.run_main(runner)
+        self.assertEqual(code, 0, text)
+        self.steamos_builder.assert_called_once_with(self.repository, HEAD)
+        self.assertIn(f"<generated {formats.STEAMOS_INSTALLER_ASSET}>", text)
+        self.assertIn("curl --head --silent --show-error --max-time 30", text)
+        self.assertIn(LATEST_DESKTOP, text)
+        self.assertEqual(runner.heads_requested(), [])  # a dry run requests nothing
+        self.assertEqual(receipt["steamos_installer"]["size"], len(STEAMOS_BYTES))
+
+    def test_public_target_still_builds_the_installer_at_the_release_commit(self):
+        runner = FakeRunner(uploaded=self.union_assets)
+        code, text, _ = self.run_main(runner, "--publish", "--confirm-tag", "v0.1.0",
+                                      "--public-target", "ab" * 20)
+        self.assertEqual(code, 0, text)
+        self.steamos_builder.assert_called_once_with(self.repository, HEAD)
+
+    def test_an_installer_that_cannot_be_built_creates_nothing(self):
+        self.steamos_builder.side_effect = publish_release.steamos_installer \
+            .SteamOSInstallerError("commit x has no Tools/deck/installer/"
+                                   "build_desktop_entry.py; it predates it")
+        runner = FakeRunner(uploaded=self.union_assets)
+        code, text, receipt = self.run_main(runner, "--publish", "--confirm-tag", "v0.1.0")
+        self.assertEqual(code, 1)
+        self.assertIn("predates", text)
+        self.assertEqual(receipt["outcome"], "failed")
+        self.assertIsNone(receipt["steamos_installer"])
+        self.assertEqual(runner.gh_verbs(), [])
+        self.assertEqual(runner.heads_requested(), [])
+
+    def test_a_mismatched_installer_upload_is_never_made_latest(self):
+        for field, value in (("size", len(STEAMOS_BYTES) + 1),
+                             ("digest", "sha256:" + "f" * 64)):
+            with self.subTest(field=field):
+                uploaded = [dict(row, **{field: value})
+                            if row["name"] == formats.STEAMOS_INSTALLER_ASSET else row
+                            for row in self.union_assets]
+                runner = FakeRunner(uploaded=uploaded)
+                code, text, receipt = self.run_main(
+                    runner, "--publish", "--confirm-tag", "v0.1.0")
+                self.assertEqual(code, 1)
+                self.assertIn(f"uploaded {formats.STEAMOS_INSTALLER_ASSET} differs", text)
+                self.assertNotIn("release edit", runner.gh_verbs())
+        missing = [row for row in self.union_assets
+                   if row["name"] != formats.STEAMOS_INSTALLER_ASSET]
+        runner = FakeRunner(uploaded=missing)
+        code, text, _ = self.run_main(runner, "--publish", "--confirm-tag", "v0.1.0")
+        self.assertEqual(code, 1)
+        self.assertIn("left unpublished", text)
+        self.assertNotIn("release edit", runner.gh_verbs())
+
+    def test_post_publish_check_reports_a_link_that_does_not_serve_this_release(self):
+        older = TAGGED_DESKTOP.replace("v0.1.0", "v0.0.9")
+        cases = (
+            ({LATEST_DESKTOP: (0, "302 " + older)}, f"expected a redirect to {TAGGED_DESKTOP}"),
+            ({TAGGED_DESKTOP: (0, "404 ")}, "expected a redirect to the release-asset host"),
+            ({TAGGED_DESKTOP: (0, "302 https://example.invalid/x")},
+             "expected a redirect to the release-asset host"),
+            ({LATEST_DESKTOP: (6, "")}, "Could not resolve host"),
+        )
+        for heads, fragment in cases:
+            with self.subTest(fragment=fragment, heads=heads):
+                runner = FakeRunner(uploaded=self.union_assets, heads=heads)
+                code, text, receipt = self.run_main(
+                    runner, "--publish", "--confirm-tag", "v0.1.0")
+                self.assertEqual(code, 1)
+                self.assertEqual(receipt["outcome"], "published")
+                self.assertIn(fragment, "\n".join(receipt["post_publish_failures"]))
+                self.assertIn("POST-PUBLISH CHECK FAILED", text)
+                self.assertIn("IS published and latest", text)
+
+    def test_post_publish_check_reports_a_missing_curl(self):
+        runner = FakeRunner(uploaded=self.union_assets)
+
+        def no_curl(command):
+            if command[0] == "curl":
+                raise FileNotFoundError(2, "No such file or directory", "curl")
+            return runner(command)
+
+        receipt_path = self.fixture.root / "receipts" / "no-curl.json"
+        arguments = ["--set", str(self.set), "--human-version", "0.1.0",
+                     "--notes-file", str(self.notes_file), "--gh", GH,
+                     "--receipt", str(receipt_path),
+                     "--repository-root", str(self.repository),
+                     *self.fixture.trust_arguments(),
+                     "--release", f"Mac={self.fixture.releases['Mac']}",
+                     "--publish", "--confirm-tag", "v0.1.0"]
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            code = publish_release.main(arguments, runner=no_curl)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        self.assertEqual(code, 1)
+        self.assertEqual(receipt["outcome"], "published")
+        self.assertIn("curl could not run", errors.getvalue())
 
     def test_public_target_still_requires_the_release_commit_at_head(self):
         runner = FakeRunner(head="0" * 40)
@@ -460,7 +634,7 @@ class PublishReleaseTests(unittest.TestCase):
             {"name": path.name, "size": path.stat().st_size,
              "digest": "sha256:" + formats.sha256_file(path)[0]}
             for path in sorted(release_set.iterdir())]
-        runner = FakeRunner(uploaded=[*test_assets, self.notes_row])
+        runner = FakeRunner(uploaded=[*test_assets, self.steamos_row, self.notes_row])
         code, text, receipt = self.run_main(
             runner, "--allow-test", "--release", f"Mac={releases['Mac']}",
             "--publish", "--confirm-tag", "v0.1.0", directory=release_set)

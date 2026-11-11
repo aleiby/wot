@@ -182,6 +182,10 @@ void AWoTFrontEndPlayerController::ConstructAuthorizedWidget()
 			this, &AWoTFrontEndPlayerController::HandleBrowseInstaller))
 		.OnGetOriginalGame(FSimpleDelegate::CreateUObject(
 			this, &AWoTFrontEndPlayerController::HandleGetOriginalGame))
+		.OnCopyFromAnotherComputer(FSimpleDelegate::CreateUObject(
+			this, &AWoTFrontEndPlayerController::HandleCopyFromAnotherComputer))
+		.OnCancelInstallerCopy(FSimpleDelegate::CreateUObject(
+			this, &AWoTFrontEndPlayerController::HandleCancelInstallerCopy))
 		.OnReady(FSimpleDelegate::CreateUObject(
 			this, &AWoTFrontEndPlayerController::HandleBootstrapReady));
 	WidgetViewport->AddViewportWidgetContent(
@@ -487,6 +491,26 @@ void AWoTFrontEndPlayerController::HandleGetOriginalGame()
 {
 	FPlatformProcess::LaunchURL(
 		TEXT("https://www.gog.com/en/game/the_wheel_of_time"), nullptr, nullptr);
+}
+
+void AWoTFrontEndPlayerController::HandleCopyFromAnotherComputer()
+{
+	UGameInstance* Instance = GetGameInstance();
+	if (UWoTBootstrapSubsystem* Bootstrap = Instance
+			? Instance->GetSubsystem<UWoTBootstrapSubsystem>() : nullptr)
+	{
+		Bootstrap->RequestInstallerCopy();
+	}
+}
+
+void AWoTFrontEndPlayerController::HandleCancelInstallerCopy()
+{
+	UGameInstance* Instance = GetGameInstance();
+	if (UWoTBootstrapSubsystem* Bootstrap = Instance
+			? Instance->GetSubsystem<UWoTBootstrapSubsystem>() : nullptr)
+	{
+		Bootstrap->CancelInstallerCopy();
+	}
 }
 
 void AWoTFrontEndPlayerController::EndPlay(const EEndPlayReason::Type Reason)

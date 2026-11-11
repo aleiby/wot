@@ -5,6 +5,11 @@ e19ab8c5e8238e6455d9ccb9175817be7fd62b9cdd1eef20f63dd88e0ec469ab  ThirdParty/dmg
 fbacbb0bd5193ab3e66e5a47fff63619f15e374ffbec8ae29744251a6c8f05b5  ThirdParty/dmgbuild/1.6.5/ds_store-1.3.1-py3-none-any.whl
 504ab8ac546f35bbd75ad014d6ad977c426660aa721f2cd3acf3dc2f664141bd  ThirdParty/dmgbuild/1.6.5/mac_alias-2.2.2-py3-none-any.whl
 6344a69fc1ed847d4ed3e272e0da5998948c6b828cb7af39c6321aba6cf88126  ThirdParty/innoextract/1.9/upstream/innoextract-1.9.tar.gz
+cecff00c069acb027e820a07890a1be59619fa7994a90e08a0df86e395c4a654  Tools/deck/installer/art/capsule_portrait.jpg
+3345d68e5deb1d0c56279288c977a7a4f1e899e5a836bc3d2ac27ff05aa3c4c7  Tools/deck/installer/art/capsule_wide.jpg
+b7f91077d7844ba750f2b057c93cf596518d35d7b1cb5f50a6ddadbe14c9af49  Tools/deck/installer/art/hero.jpg
+842a36291f467b4178d8493d335c526e53dd9b19dc7ca7ecf19cf86eeadecc29  Tools/deck/installer/art/logo.png
+572dc62c57b5c3028f109c71f4aa651391b05baca1eb4bfc3555e37a3795b717  Tools/deck/installer/art/wordmark.png
 1cc9e1be2ce23d29d51c6d2d76c099085caca23ae91f8acaaeed6f6c2564cb1b  Tools/dist/fixtures/cache-v3-animation-lod.bin
 1b90839edbff92073dcd62ba31ae856f6e7f92d1d10ae50209dd366d58bad039  Tools/dist/fixtures/cache-v3-animation-notify-out-of-range.bin
 9f5d70a4628753ce4ec1ce789883aaed95cae68c25ed23eb4b16cc7ac3e45a04  Tools/dist/fixtures/cache-v3-animation-plain.bin

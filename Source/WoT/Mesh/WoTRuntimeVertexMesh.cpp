@@ -1601,15 +1601,21 @@ FWoTRuntimeVertexMeshDataPtr FWoTRuntimeVertexMesh::ResolveAndLoad(
 	FStringView MeshName, FName PackageHint)
 {
 #if WOT_GUARDED_BOOTSTRAP
+	return ResolveAndLoadInternal(MeshName, PackageHint);
+#else
+	return nullptr;
+#endif
+}
+
+FWoTRuntimeVertexMeshDataPtr FWoTRuntimeVertexMesh::ResolveAndLoadInternal(
+	FStringView MeshName, FName PackageHint)
+{
 	FString MeshId;
 	FString AnimationId;
 	const TArray<FWoTNeutralResourceId> Resources =
 		FWoTRuntimeRegistry::Get().ListResources(EWoTNeutralResourceKind::VertexMesh);
 	return ResolveLogicalIds(MeshName, PackageHint, Resources, MeshId, AnimationId)
 		? Load(MeshId, AnimationId) : nullptr;
-#else
-	return nullptr;
-#endif
 }
 
 void FWoTRuntimeVertexMesh::ResetRuntimeCache()
@@ -1619,6 +1625,12 @@ void FWoTRuntimeVertexMesh::ResetRuntimeCache()
 }
 
 #if WITH_AUTOMATION_TESTS
+FWoTRuntimeVertexMeshDataPtr FWoTRuntimeVertexMesh::ResolveAndLoadForTesting(
+	FStringView MeshName, FName PackageHint)
+{
+	return ResolveAndLoadInternal(MeshName, PackageHint);
+}
+
 void FWoTRuntimeVertexMesh::EvaluateCurvyMidpointForTesting(
 	const FVector3d& PositionA, const FVector3d& PositionB,
 	const FVector3d& NormalA, const FVector3d& NormalB,

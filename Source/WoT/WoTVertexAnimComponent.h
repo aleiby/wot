@@ -153,6 +153,8 @@ public:
 	// bParticles renderer used these CURRENT vertices. bRandomFrame is deliberately
 	// absent: MashadarSegment/MashadarTip never author it.
 	bool GetCurrentPoseVertexPositions(TArray<FVector>& OutPositions) const;
+	// Runtime source poses include even vertices not referenced by triangles.
+	bool HasCompleteSourceVertexPose() const { return RuntimeVertexMesh.IsValid(); }
 	// Opt in before mesh assignment when a caller will sample every tick. A
 	// one-off GetCurrentPoseVertexPositions call also requests the cache lazily.
 	void RequestCurrentPoseCPUAccess();

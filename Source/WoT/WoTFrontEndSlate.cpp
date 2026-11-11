@@ -15,6 +15,7 @@
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SWrapBox.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/SOverlay.h"
@@ -34,7 +35,20 @@
 #include "WoTSessionSubsystem.h"
 #include "Online/WoTLocalNetworkAccess.h"
 #include "Settings/WoTSettingsSlate.h"
+#include "UI/SWoTFocusOutline.h"
+#include "UI/SWoTListCombo.h"
+#include "UI/SWoTOnScreenKeyboard.h"
+#include "UI/SWoTTextFieldActivator.h"
+#include "UI/WoTBackStack.h"
+#include "UI/WoTControllerUIInput.h"
+#include "UI/WoTMenuNavigation.h"
+#include "UI/WoTTextEntry.h"
 
+// Escape's per-window back path. B and View go through the back stack
+// (FWoTBackStack) since controller sub-project 3; Escape keeps this path,
+// except that with the keyboard panel open it cancels the panel first, and
+// with a dropdown open it closes only the dropdown (owner ruling 2026-11-08,
+// spec r3 [M3] [N1]).
 class FWoTFrontEndBackInputProcessor final : public IInputProcessor
 {
 public:
@@ -52,15 +66,12 @@ public:
 	virtual bool HandleKeyDownEvent(FSlateApplication& SlateApp,
 		const FKeyEvent& InKeyEvent) override
 	{
-		const FKey Key = InKeyEvent.GetKey();
-		if (Key != EKeys::Escape && Key != EKeys::Gamepad_Special_Left
-			&& Key != EKeys::Gamepad_FaceButton_Right)
+		if (InKeyEvent.GetKey() != EKeys::Escape)
 		{
 			return false;
 		}
 		const TSharedPtr<SWoTFrontEndRoot> PinnedRoot = Root.Pin();
-		if (!PinnedRoot.IsValid() || !PinnedRoot->IsPresentationReady()
-			|| PinnedRoot->ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+		if (!PinnedRoot.IsValid() || !PinnedRoot->IsPresentationReady())
 		{
 			return false;
 		}
@@ -82,6 +93,20 @@ public:
 		}
 		if (!bInsideRootWindowFamily) return false;
 
+		// An open keyboard panel cancels first, and no screen back happens.
+		if (FWoTTextEntry::CancelWithin(PinnedRoot.ToSharedRef()))
+		{
+			return true;
+		}
+		if (PinnedRoot->ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+		{
+			return false;
+		}
+		// An open dropdown closes first; a second Escape backs the screen.
+		if (SWoTListCombo::CloseOpenWithin(PinnedRoot.ToSharedRef()))
+		{
+			return true;
+		}
 		SlateApp.DismissAllMenus();
 		return PinnedRoot->HandleBackInput().IsEventHandled();
 	}
@@ -254,12 +279,46 @@ void SWoTFrontEndRoot::Construct(const FArguments& InArgs)
 		}
 	}
 
+	// The focus outline layer draws the controller focus outline on every
+	// screen. The prompt strip overlays the screens' bottom-right corner and
+	// shows only in Controller mode; as an overlay it never resizes the screen
+	// host, so the menus don't move when the input mode flips.
 	ChildSlot
 	[
-		SAssignNew(ScreenHost, SBox)
-		.HAlign(HAlign_Fill)
-		.VAlign(VAlign_Fill)
+		SAssignNew(FocusOutlineLayer, SWoTFocusOutlineLayer)
+		[
+			SNew(SOverlay)
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Fill)
+			.VAlign(VAlign_Fill)
+			[
+				// Hosts the keyboard panel over every screen (spec r3 section
+				// 3). Outside the screen host, so a rebuild keeps the panel and
+				// its draft; the prompt strip stays drawn above it.
+				SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
+				.Font(this, &SWoTFrontEndRoot::PromptFont)
+				// The dark strip behind the prompt strip below (10 under it).
+				.PromptBarMargin(FMargin(0.0f, 10.0f, 0.0f, 10.0f))
+				[
+					SAssignNew(ScreenHost, SBox)
+					.HAlign(HAlign_Fill)
+					.VAlign(VAlign_Fill)
+				]
+			]
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Right)
+			.VAlign(VAlign_Bottom)
+			.Padding(FMargin(24.0f, 0.0f, 28.0f, 10.0f))
+			[
+				SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+				.Prompts(this, &SWoTFrontEndRoot::ControllerPrompts)
+				.Font(this, &SWoTFrontEndRoot::PromptFont)
+			]
+		]
 	];
+	// The front end is a modal surface: a controller hides the pointer.
+	CursorLease = FWoTControllerUIInput::AcquireCursorLease();
+	RegisterBackStackEntries();
 	RebuildScreen();
 	if (FSlateApplication::IsInitialized())
 	{
@@ -311,11 +370,269 @@ void SWoTFrontEndRoot::BindSessionEvents()
 
 TSharedPtr<SWidget> SWoTFrontEndRoot::InitialFocusWidget() const
 {
-	return IsPresentationReady() ? FirstFocusableWidget : nullptr;
+	if (!IsPresentationReady())
+	{
+		return nullptr;
+	}
+	// Initial focus follows the last input (owner ruling 2026-11-08):
+	// Controller mode uses spec r3 section 1a, Pointer keeps today's.
+	return FWoTControllerUIInput::IsControllerMode() && ControllerFocusWidget.IsValid()
+		? ControllerFocusWidget : FirstFocusableWidget;
+}
+
+void SWoTFrontEndRoot::RegisterBackStackEntries()
+{
+	FWoTBackStack& Stack = FWoTBackStack::Get();
+	const TSharedRef<SWidget> Self = AsShared();
+	auto OnScreen = [this](EWoTFrontEndScreen Screen)
+	{
+		return IsPresentationReady() && ViewModel.GetScreen() == Screen;
+	};
+	// Bottom of the stack: the screen itself.
+	BackStackEntries.Add(Stack.Register(Self,
+		[this]() { return IsPresentationReady(); },
+		[this]() { return HandleControllerBack(); }));
+	// Main's notices: B dismisses the one showing.
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Main) && bShowReleaseNotesNotice;
+		},
+		[this]() { ContinueReleaseNotes(); return true; }));
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Main) && bShowUpdateFailedNotice;
+		},
+		[this]() { ContinueUpdateFailed(); return true; }));
+	// Play's overlays, bottom to top as BuildPlayScreen stacks them: B takes
+	// the top visible overlay's cancel and never also backs the screen.
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Play) && bShowOnlineDisclosure;
+		},
+		[this]() { CancelOnlineDisclosure(); return true; }));
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Play) && bShowLocalNetworkNotice;
+		},
+		[this]() { DismissLocalNetworkNotice(); return true; }));
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Play)
+				&& PendingLocalNetworkAction != ELocalNetworkAction::None;
+		},
+		[this]() { CancelLocalNetworkHeadsUp(); return true; }));
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Play)
+				&& PendingKeychainAction != EKeychainAction::None;
+		},
+		[this]() { CancelKeychainHeadsUp(); return true; }));
+	BackStackEntries.Add(Stack.Register(Self,
+		[this, OnScreen]()
+		{
+			return OnScreen(EWoTFrontEndScreen::Play) && IsPasswordPromptVisible();
+		},
+		[this]() { CancelServerPassword(); return true; }));
+}
+
+bool SWoTFrontEndRoot::HandleControllerBack()
+{
+	if (!IsPresentationReady())
+	{
+		return false;
+	}
+	if (ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+	{
+		// Nothing to back out of; the press is consumed and does nothing.
+		return true;
+	}
+	if (FSlateApplication::IsInitialized())
+	{
+		// An open map list closes with the screen, as Escape does.
+		FSlateApplication::Get().DismissAllMenus();
+	}
+	return HandleBackInput().IsEventHandled();
+}
+
+TArray<FWoTButtonPrompt> SWoTFrontEndRoot::ControllerPrompts() const
+{
+	if (!IsPresentationReady())
+	{
+		return {};
+	}
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel's set, or Steam's keyboard's.
+		return FWoTTextEntry::ControllerPrompts();
+	}
+	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
+	{
+		return FWoTButtonPromptSets::Dropdown();
+	}
+	switch (ViewModel.GetScreen())
+	{
+	case EWoTFrontEndScreen::Play:
+		if (IsPasswordPromptVisible())
+		{
+			return FWoTButtonPromptSets::Password();
+		}
+		if (PendingKeychainAction != EKeychainAction::None
+			|| PendingLocalNetworkAction != ELocalNetworkAction::None)
+		{
+			return FWoTButtonPromptSets::Overlay(
+				WoTFrontEndSlate_Text(TEXT("Not Now")));
+		}
+		if (bShowLocalNetworkNotice)
+		{
+			return FWoTButtonPromptSets::Overlay(WoTFrontEndSlate_Text(TEXT("OK")));
+		}
+		if (bShowOnlineDisclosure)
+		{
+			return FWoTButtonPromptSets::Overlay(WoTFrontEndSlate_Text(TEXT("Cancel")));
+		}
+		return FWoTButtonPromptSets::SelectBack();
+	case EWoTFrontEndScreen::PlayerConfig:
+		return FWoTButtonPromptSets::SelectBack();
+	case EWoTFrontEndScreen::Controls:
+	case EWoTFrontEndScreen::Hardware:
+		return ActiveSettingsScreen.IsValid()
+			? ActiveSettingsScreen->ControllerPrompts() : FWoTButtonPromptSets::Settings();
+	case EWoTFrontEndScreen::Main:
+	default:
+		return bShowReleaseNotesNotice || bShowUpdateFailedNotice
+			? FWoTButtonPromptSets::Notice() : FWoTButtonPromptSets::Select();
+	}
+}
+
+FSlateFontInfo SWoTFrontEndRoot::PromptFont() const
+{
+	// Never an empty face: that would draw Slate's last-resort font.
+	return IsPresentationReady() ? LargeBodyFont()
+		: FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
+}
+
+#if WITH_AUTOMATION_TESTS
+TSharedPtr<SWidget> SWoTFrontEndRoot::MapComboBoxForTesting() const
+{
+	return MapComboBox;
+}
+#endif
+
+bool SWoTFrontEndRoot::IsPasswordPromptVisible() const
+{
+	const UWoTSessionSubsystem* Sessions = SessionSubsystem.Get();
+	return PasswordPromptWidget.IsValid() && Sessions != nullptr
+		&& Sessions->GetPasswordChallenge() != EWoTPasswordChallenge::None;
+}
+
+bool SWoTFrontEndRoot::IsPlayOverlayVisible() const
+{
+	return bShowOnlineDisclosure || bShowLocalNetworkNotice
+		|| PendingLocalNetworkAction != ELocalNetworkAction::None
+		|| PendingKeychainAction != EKeychainAction::None
+		|| IsPasswordPromptVisible();
+}
+
+TSharedPtr<SWidget> SWoTFrontEndRoot::PlayOverlayFocusTarget() const
+{
+	if (IsPasswordPromptVisible() && PasswordTextBox.IsValid())
+	{
+		return PasswordTextBox;
+	}
+	if (PendingKeychainAction != EKeychainAction::None)
+	{
+		return KeychainHeadsUpPrimaryWidget;
+	}
+	if (PendingLocalNetworkAction != ELocalNetworkAction::None)
+	{
+		return LocalNetworkHeadsUpPrimaryWidget;
+	}
+	if (bShowLocalNetworkNotice)
+	{
+		return LocalNetworkNoticePrimaryWidget;
+	}
+	if (bShowOnlineDisclosure)
+	{
+		return OnlineDisclosurePrimaryWidget;
+	}
+	return nullptr;
+}
+
+void SWoTFrontEndRoot::SyncPlayOverlayFocus()
+{
+	if (ViewModel.GetScreen() != EWoTFrontEndScreen::Play
+		|| !FSlateApplication::IsInitialized())
+	{
+		LastPlayOverlayFocus.Reset();
+		PrePlayOverlayFocus.Reset();
+		return;
+	}
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel keeps focus; overlays sync once the entry ends.
+		return;
+	}
+	const TSharedPtr<SWidget> OverlayFocus = PlayOverlayFocusTarget();
+	const TSharedPtr<SWidget> Previous = LastPlayOverlayFocus.Pin();
+	if (OverlayFocus == Previous)
+	{
+		return;
+	}
+	LastPlayOverlayFocus = OverlayFocus;
+	FSlateApplication& SlateApp = FSlateApplication::Get();
+	if (OverlayFocus.IsValid())
+	{
+		// The panels behind it are disabled, so focus moves into the overlay.
+		const TSharedPtr<SWidget> Focused = SlateApp.GetKeyboardFocusedWidget();
+		if (!Previous.IsValid())
+		{
+			PrePlayOverlayFocus = Focused;
+		}
+		if (Focused != OverlayFocus)
+		{
+			SlateApp.SetKeyboardFocus(OverlayFocus, EFocusCause::SetDirectly);
+		}
+	}
+	else if (Previous.IsValid())
+	{
+		const TSharedPtr<SWidget> Restore = PrePlayOverlayFocus.Pin();
+		PrePlayOverlayFocus.Reset();
+		if (FWoTControllerUIInput::IsControllerMode())
+		{
+			// The overlay closed: a controller needs focus back on the panels,
+			// where Controller mode starts (spec r3 section 1a, Play).
+			const TSharedPtr<SWidget> PanelFocus = MapComboBox.IsValid()
+				? StaticCastSharedPtr<SWidget>(MapComboBox) : PlayBackButton;
+			if (PanelFocus.IsValid())
+			{
+				SlateApp.SetKeyboardFocus(PanelFocus, EFocusCause::SetDirectly);
+			}
+		}
+		else if (Restore.IsValid() && Restore->GetVisibility().IsVisible()
+			&& Restore->IsEnabled())
+		{
+			// Keyboard and mouse get focus back where it was before the
+			// overlay took it, never left on the collapsed overlay.
+			SlateApp.SetKeyboardFocus(Restore, EFocusCause::SetDirectly);
+		}
+	}
 }
 
 void SWoTFrontEndRoot::FocusInitialWidget()
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// A rebuild during entry keeps the entry and its draft [M6]: focus
+		// stays on the panel, or returns to the rebuilt field for Steam's keys.
+		FWoTTextEntry::RestoreFocus();
+		return;
+	}
 	const TSharedPtr<SWidget> InitialFocus = InitialFocusWidget();
 	if (FSlateApplication::IsInitialized() && InitialFocus.IsValid())
 	{
@@ -349,6 +666,7 @@ void SWoTFrontEndRoot::Tick(
 		FocusInitialWidget();
 	}
 	RepairUpdateBannerFocus();
+	SyncPlayOverlayFocus();
 	FVector2D LiveSize = AllottedGeometry.GetLocalSize();
 	if (ScreenHost.IsValid())
 	{
@@ -542,10 +860,19 @@ FReply SWoTFrontEndRoot::OnPreviewKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
 	if (!IsPresentationReady()) return FReply::Unhandled();
-	const FKey Key = InKeyEvent.GetKey();
-	if (Key == EKeys::Escape || Key == EKeys::Gamepad_Special_Left
-		|| Key == EKeys::Gamepad_FaceButton_Right)
+	// Escape only: B and View reach the screen through the back stack.
+	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		// An open keyboard panel cancels first (spec r3 [M3]).
+		if (FWoTTextEntry::CancelWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
+		// An open dropdown closes first (spec r3 [N1]).
+		if (SWoTListCombo::CloseOpenWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
 		return HandleBackInput();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
@@ -573,7 +900,17 @@ void SWoTFrontEndRoot::RebuildScreen()
 	++ScreenRebuildCount;
 #endif
 	FirstFocusableWidget.Reset();
+	ControllerFocusWidget.Reset();
+	PlayBackButton.Reset();
+	PlayerConfigSaveButton.Reset();
+	OnlineDisclosureCancelWidget.Reset();
+	HostNavigationRows.Reset();
+	JoinNavigationRows.Reset();
 	PlayerNameTextBox.Reset();
+	ServerNameTextBox.Reset();
+	AdminPasswordTextBox.Reset();
+	GamePasswordTextBox.Reset();
+	DirectAddressTextBox.Reset();
 	MainMenuButtons.Reset();
 	MapComboBox.Reset();
 	SessionListView.Reset();
@@ -694,16 +1031,16 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 			Entries
 		];
 	const TSharedRef<SWidget> UpdateBanner = BuildUpdateBanner();
-	if (UpdateBannerButton.IsValid() && MainMenuButtons.Num() > 0)
+	// The runtime entry list (onboarding rows included once they render
+	// here) wraps top to bottom; after the last entry comes the update
+	// banner, skipped while it is not interactive (spec r3 section 1a).
+	TArray<TSharedPtr<SWidget>> MainNavigation;
+	for (const TSharedPtr<SWoTMenuButton>& Button : MainMenuButtons)
 	{
-		const TSharedPtr<SWoTMenuButton> LastMenuButton = MainMenuButtons.Last();
-		TSharedRef<FNavigationMetaData> Down =
-			LastMenuButton->FindOrAddMetaData<FNavigationMetaData>();
-		Down->SetNavigationExplicit(EUINavigation::Down, UpdateBannerButton);
-		TSharedRef<FNavigationMetaData> Up =
-			UpdateBannerButton->FindOrAddMetaData<FNavigationMetaData>();
-		Up->SetNavigationExplicit(EUINavigation::Up, LastMenuButton);
+		MainNavigation.Add(Button);
 	}
+	MainNavigation.Add(UpdateBannerButton);
+	WoTWrapVerticalNavigation(MainNavigation);
 	const TSharedRef<SWidget> MainMenu = SNew(SBox)
 		.WidthOverride_Lambda([this]() { return MainMenuSafeWidth; })
 		.HAlign(HAlign_Center)
@@ -942,7 +1279,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 		+ SHorizontalBox::Slot()
 		.FillWidth(1.0f)
 		[
-			SAssignNew(PlayerNameTextBox, SEditableTextBox)
+			TextField(SAssignNew(PlayerNameTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.MaximumLength(20)
@@ -951,7 +1288,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 				return WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName());
 			})
 			.OnTextChanged(this, &SWoTFrontEndRoot::SetPlayerName)
-			.OnTextCommitted(this, &SWoTFrontEndRoot::CommitPlayerName)
+			.OnTextCommitted(this, &SWoTFrontEndRoot::CommitPlayerName),
+			PlayerNameEntryRequest())
 		]
 	];
 	Rows->AddSlot()
@@ -965,6 +1303,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 		.AutoWrapText(true)
 		.Justification(ETextJustify::Center)
 	];
+	TArray<TArray<TSharedPtr<SWidget>>> PlayerRows;
+	PlayerRows.Add({PlayerNameTextBox});
 	TSharedPtr<SWoTMenuButton> FirstFactionButton;
 	for (const FWoTFactionChoice& Choice : FWoTFrontEndModel::FactionChoices())
 	{
@@ -1010,7 +1350,10 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 		{
 			FirstFactionButton = FactionButton;
 		}
+		PlayerRows.Add({FactionButton});
 	}
+	TSharedPtr<SWoTMenuButton> SkinPreviousButton;
+	TSharedPtr<SWoTMenuButton> SkinNextButton;
 
 	Rows->AddSlot()
 	.AutoHeight()
@@ -1033,7 +1376,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 			+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Right)
 			.VAlign(VAlign_Center)
 			[
-				SNew(SWoTMenuButton)
+				SAssignNew(SkinPreviousButton, SWoTMenuButton)
 				.ContentPadding(FMargin(12.0f, 4.0f))
 				.OnClicked_Lambda([this]()
 				{
@@ -1066,7 +1409,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 			+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Left)
 			.VAlign(VAlign_Center)
 			[
-				SNew(SWoTMenuButton)
+				SAssignNew(SkinNextButton, SWoTMenuButton)
 				.ContentPadding(FMargin(12.0f, 4.0f))
 				.OnClicked_Lambda([this]()
 				{
@@ -1099,6 +1442,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 	];
 
 	TSharedPtr<SWoTMenuButton> SaveButton;
+	TSharedPtr<SWoTMenuButton> PlayerBackButton;
 	TSharedRef<SVerticalBox> Panel = SNew(SVerticalBox);
 	Panel->AddSlot()
 	.AutoHeight()
@@ -1143,7 +1487,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 		+ SHorizontalBox::Slot()
 		.AutoWidth()
 		[
-			SNew(SWoTMenuButton)
+			SAssignNew(PlayerBackButton, SWoTMenuButton)
 			.ContentPadding(FMargin(18.0f, 8.0f))
 			.OnClicked(this, &SWoTFrontEndRoot::CancelPlayerConfig)
 			[
@@ -1157,6 +1501,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayerConfigScreen()
 	FirstFocusableWidget = PlayerNameTextBox.IsValid()
 		? StaticCastSharedPtr<SWidget>(PlayerNameTextBox)
 		: StaticCastSharedPtr<SWidget>(SaveButton);
+	// Controller mode starts on Save (spec r3 section 1a, Player); the page
+	// wraps top to bottom, the skin arrows and Save/Back side by side.
+	PlayerConfigSaveButton = SaveButton;
+	ControllerFocusWidget = SaveButton;
+	PlayerRows.Add({SkinPreviousButton, SkinNextButton});
+	PlayerRows.Add({SaveButton, PlayerBackButton});
+	WoTWrapGridNavigation(PlayerRows);
 
 	return SNew(SBox)
 		.MaxDesiredWidth(700.0f)
@@ -1203,6 +1554,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 		]
 	];
 	FirstFocusableWidget = BackButton;
+	PlayBackButton = BackButton;
 	if (!bBrowserReady)
 	{
 		Panel->AddSlot().FillHeight(1.0f).VAlign(VAlign_Center)
@@ -1210,23 +1562,25 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
+				// The Steam Deck legibility pass: the 2x body face, as the
+				// rest of the multiplayer screens (was the 14-pixel strike).
 				SNew(STextBlock)
 				.Text(PresentationAuthority->BrowserResourceError())
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f)
 			[
 				SNew(STextBlock)
 				.Text(WoTFrontEndSlate_Text(TEXT("Return to the main menu and try again.")))
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(STextBlock)
 				.Text(this, &SWoTFrontEndRoot::StatusText)
-				.Font(this, &SWoTFrontEndRoot::PlayBodyFont)
+				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 				.AutoWrapText(true)
 			]
 		];
@@ -1234,6 +1588,11 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 		return SNew(SBox).Padding(24.0f)[Panel];
 	}
 
+	// Overlays fire no show or hide event, so the panels behind them are
+	// disabled through a bound attribute: a disabled parent keeps every
+	// control in it out of D-pad search (spec r3 [I6]).
+	const TSharedRef<SWidget> HostPanel = BuildHostPanel();
+	const TSharedRef<SWidget> JoinPanel = BuildJoinPanel();
 	Panel->AddSlot()
 	.FillHeight(1.0f)
 	[
@@ -1241,16 +1600,17 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 		+ SOverlay::Slot()
 		[
 			SNew(SHorizontalBox)
+			.IsEnabled_Lambda([this]() { return !IsPlayOverlayVisible(); })
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.36f)
 			.Padding(0.0f, 0.0f, 20.0f, 0.0f)
 			[
-				BuildHostPanel()
+				HostPanel
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(0.64f)
 			[
-				BuildJoinPanel()
+				JoinPanel
 			]
 		]
 		+ SOverlay::Slot()
@@ -1298,7 +1658,9 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 		.Padding(0.0f, 0.0f, 20.0f, 0.0f)
 		.VAlign(VAlign_Center)
 		[
+			// Disabled under an overlay with the panels (spec r3 [I6]).
 			SNew(SHorizontalBox)
+			.IsEnabled_Lambda([this]() { return !IsPlayOverlayVisible(); })
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)[BackButton]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).HAlign(HAlign_Right)
 				.VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
@@ -1339,6 +1701,18 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPlayScreen()
 			]
 		]
 	];
+	// Two columns over the footer: Left/Right switch columns at the nearest
+	// row (spec r3 section 1a, Play).
+	const TArray<TSharedPtr<SWidget>> Footer = {BackButton, PlayerConfigButton};
+	WoTTwoColumnNavigation(HostNavigationRows, JoinNavigationRows, Footer);
+	// Controller mode starts on the host column's first non-text control, the
+	// map list, unless an overlay is up (its own first control).
+	const TSharedPtr<SWidget> OverlayFocus = PlayOverlayFocusTarget();
+	ControllerFocusWidget = MapComboBox;
+	if (OverlayFocus.IsValid())
+	{
+		ControllerFocusWidget = OverlayFocus;
+	}
 	return SNew(SBox).Padding(24.0f)[Panel];
 }
 
@@ -1375,6 +1749,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 		return SNullWidget::NullWidget;
 	}
 	const FWoTRetailBrowserStyle& Style = *Browser;
+	TSharedPtr<SWidget> PasswordConnectButton;
+	TSharedPtr<SWidget> PasswordCancelButton;
 	TSharedRef<SWidget> Prompt = SAssignNew(PasswordPromptWidget, SBox)
 		.MaxDesiredWidth(680.0f)
 		[
@@ -1404,12 +1780,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 					]
 					+ SVerticalBox::Slot().AutoHeight()
 					[
-						SAssignNew(PasswordTextBox, SEditableTextBox)
+						TextField(SAssignNew(PasswordTextBox, SEditableTextBox)
 						.Style(Style.EditableTextBoxStyle())
 						.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 						.IsPassword(true)
 						.OnTextCommitted(this,
-							&SWoTFrontEndRoot::CommitServerPassword)
+							&SWoTFrontEndRoot::CommitServerPassword),
+						ServerPasswordEntryRequest())
 					]
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f)
 					.HAlign(HAlign_Right)
@@ -1417,7 +1794,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth()
 						[
-							SNew(SButton)
+							SAssignNew(PasswordConnectButton, SButton)
 							.ButtonStyle(Style.ButtonStyle())
 							.OnClicked(this,
 								&SWoTFrontEndRoot::SubmitServerPassword)
@@ -1429,7 +1806,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 						]
 						+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 						[
-							SNew(SButton)
+							SAssignNew(PasswordCancelButton, SButton)
 							.ButtonStyle(Style.ButtonStyle())
 							.OnClicked(this,
 								&SWoTFrontEndRoot::CancelServerPassword)
@@ -1444,6 +1821,11 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildPasswordPrompt()
 			]
 		];
 	FirstFocusableWidget = PasswordTextBox;
+	// Box above Connect and Cancel; focus stays in the prompt.
+	TArray<TArray<TSharedPtr<SWidget>>> PasswordRows;
+	PasswordRows.Add({PasswordTextBox});
+	PasswordRows.Add({PasswordConnectButton, PasswordCancelButton});
+	WoTWrapGridNavigation(PasswordRows);
 	return Prompt;
 }
 
@@ -1548,6 +1930,12 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			];
 	};
+	// Each control joins the Play focus graph's host column, in row order.
+	auto HostControl = [this](const TSharedRef<SWidget>& Control) -> TSharedRef<SWidget>
+	{
+		HostNavigationRows.Add({Control});
+		return Control;
+	};
 	// Battle-only rows hide whole, label and control together.
 	auto BattleOnly = [this](const TSharedRef<SWidget>& Row) -> TSharedRef<SWidget>
 	{
@@ -1568,36 +1956,51 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 	Panel->AddSlot().AutoSize().Padding(0.0f, 0.0f, 0.0f, 9.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[7]")),
-			SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(ServerNameTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.Text_Lambda([this]()
 			{
 				return WoTFrontEndSlate_Text(ViewModel.GetHostRequest().ServerName);
 			})
-			.OnTextChanged(this, &SWoTFrontEndRoot::SetServerName))
+			.OnTextChanged(this, &SWoTFrontEndRoot::SetServerName)),
+			ServerNameEntryRequest()))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 0.0f, 0.0f, 5.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[1]")),
-			SAssignNew(MapComboBox, SComboBox<FMapItem>)
+			// The touch-friendly list (spec r3 section 2): D-pad Up/Down move
+			// focus off it while closed, never the selected map.
+			HostControl(SAssignNew(MapComboBox, SWoTListCombo)
 			.ComboBoxStyle(FWoTMenuStyle::Get().ComboBoxStyle())
+			// The live frame brush: the combo style holds a copy of it that
+			// is not rebound when the menu textures are.
+			.MenuBorderBrush(FWoTMenuStyle::Get().Frame())
 			.ItemStyle(FWoTMenuStyle::Get().TableRowStyle())
 			.ScrollBarStyle(FWoTMenuStyle::Get().ScrollBarStyle())
 			.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-			.OptionsSource(&MapItems)
-			.InitiallySelectedItem(SelectedMapItem)
-			.OnGenerateWidget(this, &SWoTFrontEndRoot::GenerateMapWidget)
-			.OnSelectionChanged(this, &SWoTFrontEndRoot::SelectMap)
+			.NumItems_Lambda([this]() { return MapItems.Num(); })
+			.SelectedIndex_Lambda([this]() { return MapItems.IndexOfByKey(SelectedMapItem); })
+			.OnGenerateItem_Lambda([this](int32 Index)
+			{
+				return GenerateMapWidget(MapItems.IsValidIndex(Index) ? MapItems[Index] : FMapItem());
+			})
+			.OnPicked_Lambda([this](int32 Index, ESelectInfo::Type SelectInfo)
+			{
+				if (MapItems.IsValidIndex(Index))
+				{
+					SelectMap(MapItems[Index], SelectInfo);
+				}
+			})
 			[
 				SNew(STextBlock)
 				.Text(this, &SWoTFrontEndRoot::SelectedMapText)
 				.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
-			])
+			]))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 0.0f)
 	[
-		SNew(SCheckBox)
+		HostControl(SNew(SCheckBox)
 		.Style(FWoTMenuStyle::Get().CheckBoxStyle())
 		.IsChecked_Lambda([this]()
 		{
@@ -1617,12 +2020,12 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 					: FName(TEXT("menuStartArenaServer.MenuList[4]")));
 			})
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
-		]
+		])
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[2]")), SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				return ViewModel.GetHostRequest().FragLimit / 100.0f;
@@ -1632,13 +2035,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				SetFragLimit(FMath::RoundToInt(Value * 100.0f));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().FragLimit); }))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[3]")), SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				return ViewModel.GetHostRequest().TimeLimit / 60.0f;
@@ -1648,14 +2051,14 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				SetTimeLimit(FMath::RoundToInt(Value * 60.0f));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().TimeLimit); }))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		BattleOnly(InlineRow(RetailText(TEXT("menuStartBattleServer.MenuList[6]")),
 			SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				return (ViewModel.GetHostRequest().SealGoal - 2) / 2.0f;
@@ -1665,14 +2068,14 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				SetSealGoal(2 + FMath::RoundToInt(Value * 2.0f));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().SealGoal); })))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		BattleOnly(InlineRow(RetailText(TEXT("menuStartBattleServer.MenuList[7]")),
 			SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				const int32 Min = ViewModel.GetMinSealBudget();
@@ -1689,13 +2092,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				const int32 Min = ViewModel.GetMinSealBudget();
 				const int32 Max = ViewModel.GetMaxSealBudget();
 				SetSealBudget(Min + FMath::RoundToInt(Value * (Max - Min)));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().SealBudget); })))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		InlineRow(RetailText(TEXT("menuStartArenaServer.MenuList[5]")), SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				return (ViewModel.GetHostRequest().MaxPlayers - 2) / 14.0f;
@@ -1705,12 +2108,12 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				SetMaxPlayers(2 + FMath::RoundToInt(Value * 14.0f));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().MaxPlayers); }))
 	];
 	Panel->AddSlot().AutoSize()
 	[
-		SNew(SCheckBox)
+		HostControl(SNew(SCheckBox)
 		.Visibility_Lambda([this]()
 		{
 			return ViewModel.IsBattleMapSelected()
@@ -1730,13 +2133,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			SNew(STextBlock)
 			.Text(RetailText(TEXT("menuStartBattleServer.MenuList[8]")))
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
-		]
+		])
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
 		BattleOnly(InlineRow(RetailText(TEXT("menuStartBattleServer.MenuList[10]")),
 			SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				const int32 Citadels = FMath::Max(2,
@@ -1746,7 +2149,14 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				return Max > 1 ? (ViewModel.GetHostRequest().MaxTeamSize - 1)
 					/ static_cast<float>(Max - 1) : 0.0f;
 			})
-			.Positions(8)
+			// menuStartBattleServer.uc:130,196: 1 to 16 / citadels in unit steps,
+			// one stop each. Eight fixed stops put the 3- and 4-citadel sizes on
+			// cell boundaries, where Left or Right could not leave them.
+			.Positions_Lambda([this]()
+			{
+				return 16 / FMath::Max(2, FWoTFrontEndModel::BattleCitadelCount(
+					ViewModel.GetHostRequest().MapPackage));
+			})
 			.OnValueChanged_Lambda([this](float Value)
 			{
 				const int32 Citadels = FMath::Max(2,
@@ -1754,7 +2164,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 						ViewModel.GetHostRequest().MapPackage));
 				const int32 Max = 16 / Citadels;
 				ViewModel.SetMaxTeamSize(1 + FMath::RoundToInt(Value * (Max - 1)));
-			}),
+			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().MaxTeamSize); })))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
@@ -1766,7 +2176,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				: FName(TEXT("menuStartArenaServer.MenuList[6]")));
 		}),
 			SliderWithValue(
-			SNew(SWoTRetailSlider)
+			HostControl(SNew(SWoTRetailSlider)
 			.Value_Lambda([this]()
 			{
 				const int32 TickRate = ViewModel.GetHostRequest().MaxClientTickRate;
@@ -1777,7 +2187,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			{
 				const int32 Index = FMath::RoundToInt(Value * 21.0f);
 				ViewModel.SetMaxClientTickRate(Index == 0 ? 0 : Index + 9);
-			}),
+			})),
 			[this]()
 			{
 				return FText::FromString(FString::Printf(TEXT("%d fps"),
@@ -1792,7 +2202,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				? FName(TEXT("menuStartBattleServer.MenuList[13]"))
 				: FName(TEXT("menuStartArenaServer.MenuList[8]")));
 		}),
-			SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(AdminPasswordTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.IsPassword(true)
@@ -1803,7 +2213,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnTextChanged_Lambda([this](const FText& Text)
 			{
 				ViewModel.SetAdminPassword(Text.ToString());
-			}))
+			})),
+			HostPasswordEntryRequest(/*bAdmin*/ true)))
 	];
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
 	[
@@ -1813,7 +2224,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				? FName(TEXT("menuStartBattleServer.MenuList[14]"))
 				: FName(TEXT("menuStartArenaServer.MenuList[9]")));
 		}),
-			SNew(SEditableTextBox)
+			TextField(HostControl(SAssignNew(GamePasswordTextBox, SEditableTextBox)
 			.Style(FWoTMenuStyle::Get().EditableTextBoxStyle())
 			.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
 			.IsPassword(true)
@@ -1824,12 +2235,16 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			.OnTextChanged_Lambda([this](const FText& Text)
 			{
 				ViewModel.SetGamePassword(Text.ToString());
-			}))
+			})),
+			HostPasswordEntryRequest(/*bAdmin*/ false)))
 	];
+	TArray<TSharedPtr<SWidget>> HostNetworkRow;
 	Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 8.0f)
 	[
-		BuildNetworkModeRow(/*bBrowser*/ false)
+		BuildNetworkModeRow(/*bBrowser*/ false, &HostNetworkRow)
 	];
+	HostNavigationRows.Add(HostNetworkRow);
+	TSharedPtr<SWidget> ResetIdentityButton;
 	// The internet status line and the relay privacy option live once, in the
 	// browser panel (BuildInternetOptions); the host panel pairs the identity
 	// reset with Host Match on one row to keep the panel short.
@@ -1839,7 +2254,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			.Padding(0.0f, 0.0f, 6.0f, 0.0f)
 		[
-			SNew(SButton)
+			SAssignNew(ResetIdentityButton, SButton)
 			.ButtonStyle(PresentationAuthority->BrowserStyle()->ButtonStyle())
 			.ContentPadding(FMargin(10.0f, 8.0f))
 			.Visibility(this, &SWoTFrontEndRoot::ResetIdentityVisibility)
@@ -1868,6 +2283,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			]
 		]
 	];
+	HostNavigationRows.Add({ResetIdentityButton, HostMatchButton});
 	return SNew(SBorder)
 		.BorderImage(PresentationAuthority->BrowserStyle()->WindowFrame())
 		.Padding(14.0f)
@@ -1910,22 +2326,39 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 			];
 	};
 
+	// The Play focus graph's join column, row by row.
+	TArray<TSharedPtr<SWidget>> JoinTopRow;
+	TArray<TSharedPtr<SWidget>> JoinOptionsRow;
+	TArray<TSharedPtr<SWidget>> JoinHeadingRow;
+	TSharedPtr<SWidget> RefreshButton;
+	TSharedPtr<SWidget> JoinSelectedButton;
+	TSharedPtr<SWidget> DirectAddressBox;
+	TSharedPtr<SWidget> DirectConnectButton;
 	TSharedRef<SHorizontalBox> Headings = SNew(SHorizontalBox);
+	const TSharedRef<SWidget> ServerHeading =
+		MakeHeading(TEXT("Server"), EWoTBrowserSortColumn::Server);
+	const TSharedRef<SWidget> PingHeading =
+		MakeHeading(TEXT("Ping"), EWoTBrowserSortColumn::Ping);
+	const TSharedRef<SWidget> MapHeading =
+		MakeHeading(TEXT("Map"), EWoTBrowserSortColumn::Map);
+	const TSharedRef<SWidget> PlayersHeading =
+		MakeHeading(TEXT("Players"), EWoTBrowserSortColumn::Players);
+	JoinHeadingRow = {ServerHeading, PingHeading, MapHeading, PlayersHeading};
 	Headings->AddSlot().FillWidth(0.40f)
 	[
-		MakeHeading(TEXT("Server"), EWoTBrowserSortColumn::Server)
+		ServerHeading
 	];
 	Headings->AddSlot().FillWidth(0.15f)
 	[
-		MakeHeading(TEXT("Ping"), EWoTBrowserSortColumn::Ping)
+		PingHeading
 	];
 	Headings->AddSlot().FillWidth(0.25f)
 	[
-		MakeHeading(TEXT("Map"), EWoTBrowserSortColumn::Map)
+		MapHeading
 	];
 	Headings->AddSlot().FillWidth(0.20f)
 	[
-		MakeHeading(TEXT("Players"), EWoTBrowserSortColumn::Players)
+		PlayersHeading
 	];
 	// SListView reserves this slot for its 24px bar plus surrounding 2px
 	// gutters. Mirror it so every heading boundary matches its row boundary.
@@ -1950,7 +2383,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
-				SNew(SButton)
+				SAssignNew(RefreshButton, SButton)
 				.ButtonStyle(Style.ButtonStyle())
 				.ContentPadding(FMargin(12.0f, 4.0f))
 				.IsEnabled_Lambda([this]() { return ViewModel.CanStartAsyncAction(); })
@@ -1965,17 +2398,18 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 				.Padding(12.0f, 0.0f, 0.0f, 0.0f)
 			[
-				BuildNetworkModeRow(/*bBrowser*/ true)
+				BuildNetworkModeRow(/*bBrowser*/ true, &JoinTopRow)
 			]
 		]
 	];
+	JoinTopRow.Insert(RefreshButton, 0);
 	Client->AddSlot().AutoHeight()
 	[
 		SNew(SBorder)
 		.BorderImage(Style.FaceBackground())
 		.Padding(FMargin(4.0f, 2.0f))
 		[
-			BuildInternetOptions(/*bBrowser*/ true)
+			BuildInternetOptions(/*bBrowser*/ true, &JoinOptionsRow)
 		]
 	];
 	Client->AddSlot().AutoHeight()
@@ -2017,7 +2451,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(SButton)
+				SAssignNew(JoinSelectedButton, SButton)
 				.ButtonStyle(Style.ButtonStyle())
 				.ContentPadding(FMargin(12.0f, 4.0f))
 				.HAlign(HAlign_Center)
@@ -2047,16 +2481,20 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 				+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(
 					0.0f, 0.0f, 4.0f, 0.0f)
 				[
-					SNew(SEditableTextBox)
+					TextField(SAssignNew(DirectAddressTextBox, SEditableTextBox)
 						.Style(Style.EditableTextBoxStyle())
 						.Font(this, &SWoTFrontEndRoot::PlayBrowserFont)
 						.HintText(WoTFrontEndSlate_Text(
 								TEXT("192.0.2.10:7777")))
-						.OnTextChanged(this, &SWoTFrontEndRoot::SetDirectAddress)
+						// Shows the address the root keeps, so a rebuild or
+						// the keyboard panel's Done is reflected here.
+						.Text_Lambda([this]() { return WoTFrontEndSlate_Text(DirectAddress); })
+						.OnTextChanged(this, &SWoTFrontEndRoot::SetDirectAddress),
+						DirectAddressEntryRequest())
 				]
 				+ SHorizontalBox::Slot().AutoWidth()
 				[
-					SNew(SButton)
+					SAssignNew(DirectConnectButton, SButton)
 						.ButtonStyle(Style.ButtonStyle())
 						.ContentPadding(FMargin(10.0f, 3.0f))
 						.IsEnabled_Lambda([this]()
@@ -2075,6 +2513,13 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildJoinPanel()
 		]
 	];
 
+	DirectAddressBox = DirectAddressTextBox;
+	JoinNavigationRows.Add(JoinTopRow);
+	JoinNavigationRows.Add(JoinOptionsRow);
+	JoinNavigationRows.Add(JoinHeadingRow);
+	JoinNavigationRows.Add({SessionListView});
+	JoinNavigationRows.Add({JoinSelectedButton});
+	JoinNavigationRows.Add({DirectAddressBox, DirectConnectButton});
 	return SNew(SBorder)
 		.BorderImage(Style.WindowFrame())
 		.Padding(FMargin(4.0f, 0.0f))
@@ -2301,21 +2746,16 @@ float SWoTFrontEndRoot::UpdateBannerEstimatedHeightForFont(
 
 bool SWoTFrontEndRoot::ShouldUseCompactUpdateBannerFont() const
 {
+	// The last resort only: the wrapped 2x banner overruns the room below the
+	// menu. The Slate canvas is about 1080 units tall at every resolution, so
+	// this never happens at 1280x720 or larger; it keeps the menu clear on the
+	// smallest windows (640x480), where the 14-pixel face still passes the
+	// 12-pixel floor. A long reason line on a wide screen wraps instead (the
+	// Steam Deck legibility pass removed that 14-pixel case).
 	constexpr float MenuGap = 6.0f;
-	const FSlateFontInfo LargeFont = LargeBodyFont();
 	const float AvailableHeight = (LiveViewportHeight - MainMenuListHeight) * 0.5f
 		- MenuGap;
-	if (UpdateBannerEstimatedHeightForFont(LargeFont) > AvailableHeight)
-	{
-		return true;
-	}
-
-	const FWoTUpdateBannerPresentation Banner = UpdateBannerPresentation();
-	const float PhysicalViewportWidth = LiveViewportWidth * LiveViewportScale;
-	return PhysicalViewportWidth >= 1920.0f && !Banner.ReasonLine.IsEmpty()
-		&& FWoTMenuLayout::MeasureText(
-			WoTFrontEndSlate_Text(Banner.ReasonLine), LargeFont).X
-			> UpdateBannerTextWrapWidthForFont(LargeFont);
+	return UpdateBannerEstimatedHeightForFont(LargeBodyFont()) > AvailableHeight;
 }
 
 FSlateFontInfo SWoTFrontEndRoot::UpdateBannerBodyFont() const
@@ -2467,6 +2907,8 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildSettingsPage(EWoTFrontEndScreen Scree
 		.OnBack(FSimpleDelegate::CreateSP(this, &SWoTFrontEndRoot::CloseSettingsPage))
 		.OnSaved(FSimpleDelegate::CreateSP(this, &SWoTFrontEndRoot::CloseSettingsPage));
 	FirstFocusableWidget = ActiveSettingsScreen;
+	// Controller mode starts on the page's first control (spec r3 section 1a).
+	ControllerFocusWidget = ActiveSettingsScreen->InitialControllerFocusWidget();
 	return ActiveSettingsScreen.ToSharedRef();
 }
 
@@ -3016,6 +3458,146 @@ void SWoTFrontEndRoot::SortSessionItems()
 		});
 }
 
+TSharedRef<SWidget> SWoTFrontEndRoot::TextField(const TSharedRef<SWidget>& Field,
+	const FWoTTextEntryRequest& Request)
+{
+	return SNew(SWoTTextFieldActivator)
+		.Request(Request)
+		[
+			Field
+		];
+}
+
+FWoTTextValidation SWoTFrontEndRoot::ValidateHostPassword(const FString& Text)
+{
+	FString Sanitized;
+	if (FWoTFrontEndModel::SanitizeHostPassword(Text, Sanitized))
+	{
+		return FWoTTextValidation::Accept();
+	}
+	// SanitizeHostPassword rejects rather than trims, so the message names
+	// the rule (spec r3 section 3).
+	return FWoTTextValidation::Reject(WoTFrontEndSlate_Text(
+		TEXT("Passwords are up to 32 characters: letters, digits and symbols, ")
+		TEXT("with no spaces and none of ? # = \" \\")));
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::PlayerNameEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = RetailText(TEXT("menuPlayer.MenuList[1]"));
+	Request.MaxLength = 20;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PlayerNameTextBox); };
+	Request.GetText = [this]() { return ViewModel.GetPendingPlayerName(); };
+	Request.SetText = [this](const FString& Text)
+	{
+		ViewModel.SelectPendingPlayerName(Text);
+		// The box's own commit (CommitPlayerName) sets its text directly, which
+		// ends its binding, so the entry sets it the same way.
+		if (PlayerNameTextBox.IsValid())
+		{
+			PlayerNameTextBox->SetText(WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName()));
+		}
+	};
+	Request.Filter = [](const FString& Text)
+	{
+		return FWoTFrontEndModel::FilterPlayerNameInput(Text);
+	};
+	Request.Commit = [this]()
+	{
+		CommitPlayerName(WoTFrontEndSlate_Text(ViewModel.GetPendingPlayerName()),
+			ETextCommit::OnEnter);
+	};
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::ServerPasswordEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = WoTFrontEndSlate_Text(TEXT("Server Password"));
+	Request.MaxLength = 32;
+	Request.bPassword = true;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PasswordTextBox); };
+	Request.GetText = [this]()
+	{
+		return PasswordTextBox.IsValid() ? PasswordTextBox->GetText().ToString() : FString();
+	};
+	Request.SetText = [this](const FString& Text)
+	{
+		if (PasswordTextBox.IsValid())
+		{
+			PasswordTextBox->SetText(WoTFrontEndSlate_Text(Text));
+		}
+	};
+	Request.Validate = &SWoTFrontEndRoot::ValidateHostPassword;
+	Request.Commit = [this]() { SubmitServerPassword(); };
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::ServerNameEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = RetailText(TEXT("menuStartArenaServer.MenuList[7]"));
+	// New for controller entry (spec r3 [M6]); the keyboard's box is unbounded.
+	Request.MaxLength = 32;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(ServerNameTextBox); };
+	Request.GetText = [this]() { return ViewModel.GetHostRequest().ServerName; };
+	Request.SetText = [this](const FString& Text) { SetServerName(WoTFrontEndSlate_Text(Text)); };
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::HostPasswordEntryRequest(bool bAdmin)
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = TAttribute<FText>::CreateLambda([this, bAdmin]()
+	{
+		const bool bBattle = ViewModel.IsBattleMapSelected();
+		return RetailText(bAdmin
+			? (bBattle ? FName(TEXT("menuStartBattleServer.MenuList[13]"))
+				: FName(TEXT("menuStartArenaServer.MenuList[8]")))
+			: (bBattle ? FName(TEXT("menuStartBattleServer.MenuList[14]"))
+				: FName(TEXT("menuStartArenaServer.MenuList[9]"))));
+	});
+	Request.MaxLength = 32;
+	Request.bPassword = true;
+	Request.GetField = [this, bAdmin]()
+	{
+		return StaticCastSharedPtr<SWidget>(bAdmin ? AdminPasswordTextBox : GamePasswordTextBox);
+	};
+	Request.GetText = [this, bAdmin]()
+	{
+		return bAdmin ? ViewModel.GetHostRequest().AdminPassword
+			: ViewModel.GetHostRequest().GamePassword;
+	};
+	Request.SetText = [this, bAdmin](const FString& Text)
+	{
+		if (bAdmin)
+		{
+			ViewModel.SetAdminPassword(Text);
+		}
+		else
+		{
+			ViewModel.SetGamePassword(Text);
+		}
+	};
+	Request.Validate = &SWoTFrontEndRoot::ValidateHostPassword;
+	return Request;
+}
+
+FWoTTextEntryRequest SWoTFrontEndRoot::DirectAddressEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = WoTFrontEndSlate_Text(TEXT("Direct Address"));
+	// New for controller entry (spec r3 [M6]); the keyboard's box is unbounded.
+	Request.MaxLength = 64;
+	Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(DirectAddressTextBox); };
+	Request.GetText = [this]() { return DirectAddress; };
+	Request.SetText = [this](const FString& Text) { SetDirectAddress(WoTFrontEndSlate_Text(Text)); };
+	// Done connects, as the Connect button beside the box does.
+	Request.Commit = [this]() { ConnectDirect(); };
+	return Request;
+}
+
 void SWoTFrontEndRoot::SetServerName(const FText& Text)
 {
 	if (!IsPresentationReady()) return;
@@ -3170,15 +3752,18 @@ void SWoTFrontEndRoot::AutoFetchSessions()
 	RefreshSessions();
 }
 
-TSharedRef<SWidget> SWoTFrontEndRoot::BuildNetworkModeRow(bool bBrowser)
+TSharedRef<SWidget> SWoTFrontEndRoot::BuildNetworkModeRow(bool bBrowser,
+	TArray<TSharedPtr<SWidget>>* OutNavigationRow)
 {
 	(void)bBrowser;
 	const auto Font = &SWoTFrontEndRoot::LargeBodyFont;
-	return SNew(SHorizontalBox)
+	TSharedPtr<SWidget> LanRadio;
+	TSharedPtr<SWidget> InternetRadio;
+	const TSharedRef<SWidget> Row = SNew(SHorizontalBox)
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			.Padding(0.0f, 0.0f, 14.0f, 0.0f)
 		[
-			SNew(SCheckBox)
+			SAssignNew(LanRadio, SCheckBox)
 			.Style(&PlayCheckBoxStyle)
 			.IsChecked(this, &SWoTFrontEndRoot::LANState)
 			.IsEnabled_Lambda([this]() { return ViewModel.CanLeaveOrSwitchNetwork(); })
@@ -3194,7 +3779,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildNetworkModeRow(bool bBrowser)
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
-			SNew(SCheckBox)
+			SAssignNew(InternetRadio, SCheckBox)
 			.Style(&PlayCheckBoxStyle)
 			.IsChecked(this, &SWoTFrontEndRoot::InternetCheckState)
 			.IsEnabled(this, &SWoTFrontEndRoot::CanChooseInternet)
@@ -3208,10 +3793,18 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildNetworkModeRow(bool bBrowser)
 				.Font(this, Font)
 			]
 		];
+	if (OutNavigationRow != nullptr)
+	{
+		OutNavigationRow->Add(LanRadio);
+		OutNavigationRow->Add(InternetRadio);
+	}
+	return Row;
 }
 
-TSharedRef<SWidget> SWoTFrontEndRoot::BuildInternetOptions(bool bBrowser)
+TSharedRef<SWidget> SWoTFrontEndRoot::BuildInternetOptions(bool bBrowser,
+	TArray<TSharedPtr<SWidget>>* OutNavigationRow)
 {
+	TSharedPtr<SWidget> RelayCheckBox;
 	TSharedRef<SVerticalBox> Options = SNew(SVerticalBox);
 	Options->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 3.0f)
 	[
@@ -3223,7 +3816,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildInternetOptions(bool bBrowser)
 	];
 	Options->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, bBrowser ? 0.0f : 4.0f)
 	[
-		SNew(SCheckBox)
+		SAssignNew(RelayCheckBox, SCheckBox)
 		.Style(&PlayCheckBoxStyle)
 		.IsChecked(this, &SWoTFrontEndRoot::AlwaysUseEpicRelayState)
 		.IsEnabled_Lambda([this]() { return ViewModel.IsIdleOrSearching(); })
@@ -3243,6 +3836,10 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildInternetOptions(bool bBrowser)
 			})
 		]
 	];
+	if (OutNavigationRow != nullptr)
+	{
+		OutNavigationRow->Add(RelayCheckBox);
+	}
 	return Options;
 }
 
@@ -3253,7 +3850,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildOnlineDisclosure()
 	const FWoTRetailBrowserStyle& Style = *Browser;
 	// Not the browser WindowFrame brush: the two framed Play panels are the
 	// only window frames (WoT.FrontEnd.MultiplayerGeometry).
-	return SAssignNew(OnlineDisclosureWidget, SBox)
+	const TSharedRef<SWidget> Disclosure = SAssignNew(OnlineDisclosureWidget, SBox)
 		.MaxDesiredWidth_Lambda([this]()
 		{
 			// Match the menu's inverse-DPI font sizing: keep the notice near 1200
@@ -3343,7 +3940,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildOnlineDisclosure()
 						]
 						+ SHorizontalBox::Slot().AutoWidth()
 						[
-							SNew(SButton)
+							SAssignNew(OnlineDisclosureCancelWidget, SButton)
 							.ButtonStyle(Style.ButtonStyle())
 							.ContentPadding(FMargin(14.0f, 4.0f))
 							.OnClicked(this, &SWoTFrontEndRoot::CancelOnlineDisclosure)
@@ -3358,6 +3955,11 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildOnlineDisclosure()
 				]
 			]
 		];
+	// An overlay's buttons keep focus until it closes (spec r3 [I6]).
+	const TArray<TSharedPtr<SWidget>> Buttons = {
+		OnlineDisclosurePrimaryWidget, OnlineDisclosureCancelWidget};
+	WoTWrapHorizontalNavigation(Buttons, /*bHoldVertical*/ true);
+	return Disclosure;
 }
 
 bool SWoTFrontEndRoot::ShowLocalNetworkNoticeIfDenied(const TCHAR* Trigger)
@@ -3411,6 +4013,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildNoticePanel(
 			];
 	};
 	TSharedPtr<SButton> PrimaryButton;
+	TSharedPtr<SWidget> SecondaryButton;
 	TSharedRef<SHorizontalBox> Buttons = SNew(SHorizontalBox);
 	Buttons->AddSlot().AutoWidth()
 	[
@@ -3428,15 +4031,19 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildNoticePanel(
 	if (SecondaryLabel != nullptr && SecondaryLabel[0] != TEXT('\0')
 		&& OnSecondary.IsBound())
 	{
+		SecondaryButton = Button(SecondaryLabel, OnSecondary);
 		Buttons->AddSlot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 		[
-			Button(SecondaryLabel, OnSecondary)
+			SecondaryButton.ToSharedRef()
 		];
 	}
 	if (OutPrimaryWidget != nullptr)
 	{
 		*OutPrimaryWidget = PrimaryButton;
 	}
+	// A notice's buttons keep focus until it closes (spec r3 section 1a).
+	const TArray<TSharedPtr<SWidget>> NoticeButtons = {PrimaryButton, SecondaryButton};
+	WoTWrapHorizontalNavigation(NoticeButtons, /*bHoldVertical*/ true);
 	TSharedRef<SWidget> BodyWidget = Paragraph(Body);
 	if (bScrollableBody)
 	{

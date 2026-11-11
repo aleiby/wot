@@ -4,6 +4,7 @@
 #include "CoreMinimal.h"
 #include "../WoTBootstrapSubsystem.h"
 #include "WoTInstallerAcquisition.h"
+#include "WoTInstallerReceiver.h"
 #include "WoTCacheBootstrapOperation.h"
 #include "WoTExecutableLayout.h"
 #include "WoTReleaseIdentity.h"
@@ -79,6 +80,9 @@ public:
 			InstallerLocationFaultForTesting;
 		/** Observes each cooperative yield between staging hash chunks. */
 		TFunction<void()> StagingYieldForTesting;
+		/** LAN installer receiver overrides (loopback, OS-chosen port). */
+		TOptional<FWoTInstallerReceiverOverridesForTesting>
+			InstallerReceiverForTesting;
 #endif
 	};
 
@@ -96,8 +100,13 @@ public:
 	virtual bool RequestRestartToUpdate() override;
 	virtual void RequestOriginalGameRecheck() override;
 	virtual void RequestPickedInstaller(FString CanonicalPath) override;
+	virtual void RequestInstallerReceive() override;
+	virtual void CancelInstallerReceive() override;
 	virtual void CancelAndJoin() override;
 #if WITH_AUTOMATION_TESTS
+	/** Call before the original-game-needed phase starts. */
+	void SetInstallerReceiverForTesting(
+		FWoTInstallerReceiverOverridesForTesting Overrides);
 	void SetRunningReleaseSequenceForTesting(uint64 ReleaseSequence);
 	void SetRunningIdentityForTesting(bool bStamped, uint64 ReleaseSequence,
 		FString ReleaseCommit);
