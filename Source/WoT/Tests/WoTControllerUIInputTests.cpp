@@ -1735,10 +1735,18 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 		}
 		return Label;
 	};
-	TestEqual(TEXT("the onboarding rows close the body"),
-		LabelOf(Rows[Rows.Num() - 2][0]), FString(TEXT("Walk Aid Beta")));
-	TestEqual(TEXT("the first onboarding row is part of the graph"),
-		LabelOf(Rows[Rows.Num() - 3][0]), FString(TEXT("Walk Aid Alpha")));
+	// The onboarding rows precede player controls: the binding rows, then
+	// Reset, then the footer.
+	const int32 AlphaRow = Rows.IndexOfByPredicate([&LabelOf](const FWoTNavRow& Row)
+	{
+		return !Row.IsEmpty() && LabelOf(Row[0]) == TEXT("Walk Aid Alpha");
+	});
+	TestTrue(TEXT("the first onboarding row is part of the graph"), AlphaRow != INDEX_NONE);
+	TestTrue(TEXT("the second onboarding row follows it"), AlphaRow != INDEX_NONE
+		&& Rows.IsValidIndex(AlphaRow + 1) && !Rows[AlphaRow + 1].IsEmpty()
+		&& LabelOf(Rows[AlphaRow + 1][0]) == TEXT("Walk Aid Beta"));
+	TestEqual(TEXT("the binding rows and Reset come between them and the footer"),
+		AlphaRow + 2 + FWoTGameSettings::ManagedActions().Num() + 1, Rows.Num() - 1);
 
 	// First to last by the D-pad at 1280x720, each row scrolled into view.
 	Slate.SetKeyboardFocus(Controls->InitialControllerFocusWidget(), EFocusCause::SetDirectly);

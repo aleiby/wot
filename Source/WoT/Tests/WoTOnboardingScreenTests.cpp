@@ -133,35 +133,31 @@ TSharedPtr<SButton> WoTOnboardingScreenFindButton(
 	return nullptr;
 }
 
-/** The vertical box with a direct slot containing the requested label. */
-TSharedPtr<SVerticalBox> WoTOnboardingScreenFindRows(
+/** The panel with a direct slot holding the requested label: the page's rows,
+    whichever panel (a vertical box or a scroll box's panel) lays them out. */
+TSharedPtr<SWidget> WoTOnboardingScreenFindRows(
 	const TSharedRef<SWidget>& Root, const TCHAR* Label)
 {
-	if (Root->GetType() == FName(TEXT("SVerticalBox")))
+	FChildren* Children = Root->GetChildren();
+	if (!Children) return nullptr;
+	for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
 	{
-		FChildren* Slots = Root->GetChildren();
-		for (int32 SlotIndex = 0; SlotIndex < Slots->Num(); ++SlotIndex)
+		const TSharedRef<SWidget> Child = Children->GetChildAt(ChildIndex);
+		if (Child->GetType() == FName(TEXT("STextBlock"))
+			&& StaticCastSharedRef<STextBlock>(Child)->GetText().ToString() == Label)
 		{
-			const TSharedRef<SWidget> Child = Slots->GetChildAt(SlotIndex);
-			if (Child->GetType() == FName(TEXT("STextBlock"))
-				&& StaticCastSharedRef<STextBlock>(Child)->GetText().ToString() == Label)
-			{
-				return StaticCastSharedRef<SVerticalBox>(Root);
-			}
+			return Root;
 		}
 	}
-	if (FChildren* Children = Root->GetChildren())
+	for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
 	{
-		for (int32 ChildIndex = 0; ChildIndex < Children->Num(); ++ChildIndex)
-		{
-			if (TSharedPtr<SVerticalBox> Found = WoTOnboardingScreenFindRows(
-				Children->GetChildAt(ChildIndex), Label)) return Found;
-		}
+		if (TSharedPtr<SWidget> Found = WoTOnboardingScreenFindRows(
+			Children->GetChildAt(ChildIndex), Label)) return Found;
 	}
 	return nullptr;
 }
 
-int32 WoTOnboardingScreenTextSlot(const TSharedRef<SVerticalBox>& Rows,
+int32 WoTOnboardingScreenTextSlot(const TSharedRef<SWidget>& Rows,
 	const TCHAR* Label)
 {
 	FChildren* Slots = Rows->GetChildren();
@@ -339,7 +335,7 @@ bool FWoTOnboardingScreenSettingsOrderSpec::RunTest(const FString&)
 		[]() { return FString(TEXT("Fixture Aid")); }, []() {}});
 	const TSharedRef<SWoTSettingsScreen> Screen = MakeWoTOnboardingScreen(
 		Fixture.Owner, MakeWoTOnboardingScreenAuthority());
-	const TSharedPtr<SVerticalBox> Rows =
+	const TSharedPtr<SWidget> Rows =
 		WoTOnboardingScreenFindRows(Screen, TEXT("ONBOARDING"));
 	if (!TestTrue(TEXT("the group belongs to the Controls rows"), Rows.IsValid())) return false;
 	const int32 PlayerIdSlot = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("FIXTUREPLAYERID"));
