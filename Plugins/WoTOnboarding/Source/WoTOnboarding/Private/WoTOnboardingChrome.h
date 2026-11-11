@@ -8,32 +8,41 @@
 struct FGeometry;
 class FWoTOnboardingFaces;
 
-// How every onboarding widget draws (plan Task 8): the original game's window
-// look, at the whole-number scale its own windows use.
+// How every onboarding widget draws: the original game's window look.
 //
 // Window units. The widgets lay out in the original's 1x pixels inside a
-// scale box that draws WindowScale screen pixels per unit: the largest whole
-// number (1 or 2) at which the guide's 960x540 window fits the screen, or, on
-// a screen smaller than that, the fraction that fits. The faces are the
-// published bitmap strikes for that scale, so every glyph lands on whole
-// pixels; without them, engine faces of about the same size stand in.
+// scale box that draws WindowScale screen pixels per unit. The guide fills
+// GuideScreenFill of the largest 960x540 window that fits the screen, at any
+// fraction, so its text reads at the screen's size. The cards draw at the
+// largest whole number (1 or 2) at which that window fits, or, on a screen
+// smaller than that, the fraction that fits. The faces are the published
+// bitmap strikes for PixelScaleFor (1 or 2); without them, engine faces of
+// about the same size stand in.
 //
 // Steam Deck legibility: Valve's compatibility checklist rejects text under
-// 9 px tall at 1280x800 and recommends 12 px. The Deck draws the windows at
-// 1x, where the smallest original face they use is 14 px tall. Font() still
-// lifts every face, the engine stand-ins included, to DeckMinimumFontSize(),
-// so no onboarding line draws under 12 px on the Deck's screen whatever the
-// published faces carry.
+// 9 px tall at 1280x800 and recommends 12 px. The Deck draws the cards at
+// 1x and the guide a little larger, and the smallest original face they use
+// is 14 px tall. Font() still lifts every face, the engine stand-ins
+// included, to DeckMinimumFontSize(), so no onboarding line draws under 12 px
+// on the Deck's screen whatever the published faces carry.
 namespace WoTOnboardingChrome
 {
 	/** The height, in physical pixels at 1280x800, that every onboarding
 	    line meets: Valve's recommendation (its hard floor is 9). */
 	constexpr float DeckMinimumTextPixels = 12.0f;
 
-	/** The guide window in window units. The card and the recap draw at the
-	    scale it sets, so all three read at one size. */
+	/** The guide window in window units, also the reference size for card scale. */
 	constexpr float WindowWidth = 960.0f;
 	constexpr float WindowHeight = 540.0f;
+
+	// The guide fills most of the screen, leaving a thin margin of the game.
+	constexpr float GuideScreenFill = 0.95f;
+
+	enum class EWindowScaleRule : uint8
+	{
+		WholeStep,
+		GuideFill
+	};
 
 	/** The original faces the widgets draw: F_WOTReg30 titles, F_WOTReg14
 	    body text and labels, F_WOTIta14 quotes, F_Element gem labels, and
@@ -61,10 +70,10 @@ namespace WoTOnboardingChrome
 	    fits, and 1 on a screen too small for even that. */
 	int32 PixelScaleFor(const FVector2D& PhysicalSize);
 
-	/** Screen pixels per window unit on a screen PhysicalSize pixels large:
-	    PixelScaleFor, or the fraction that fits on a screen smaller than
-	    WindowWidth x WindowHeight. */
-	float WindowScaleFor(const FVector2D& PhysicalSize);
+	/** Screen pixels per window unit: whole steps for cards, or the guide
+	    fill fraction of the scale that fits the screen. */
+	float WindowScaleFor(const FVector2D& PhysicalSize,
+		EWindowScaleRule Rule = EWindowScaleRule::WholeStep);
 
 	/** WindowScaleFor a Width x Height screen. */
 	float WindowScaleAt(int32 Width, int32 Height);
@@ -102,6 +111,9 @@ namespace WoTOnboardingChrome
     tick. */
 struct FWoTOnboardingWindowScale
 {
+	explicit FWoTOnboardingWindowScale(WoTOnboardingChrome::EWindowScaleRule InRule)
+		: Rule(InRule) {}
+
 	/** From the viewport's size in pixels and its UI DPI scale. A zero size
 	    keeps the 1x defaults. */
 	void Initialize(const FVector2D& PhysicalSize, float DpiScale);
@@ -117,6 +129,7 @@ struct FWoTOnboardingWindowScale
 	float SlateScale() const { return WindowScale / FMath::Max(DpiScale, 0.01f); }
 
 private:
+	WoTOnboardingChrome::EWindowScaleRule Rule;
 	float DpiScale = 1.0f;
 	int32 PixelScale = 1;
 	float WindowScale = 1.0f;

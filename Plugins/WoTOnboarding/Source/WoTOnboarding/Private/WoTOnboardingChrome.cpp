@@ -106,12 +106,17 @@ int32 WoTOnboardingChrome::PixelScaleFor(const FVector2D& PhysicalSize)
 	return Fit > 0.0f ? FMath::Clamp(FMath::FloorToInt(Fit), 1, 2) : 1;
 }
 
-float WoTOnboardingChrome::WindowScaleFor(const FVector2D& PhysicalSize)
+float WoTOnboardingChrome::WindowScaleFor(const FVector2D& PhysicalSize,
+	EWindowScaleRule Rule)
 {
 	const float Fit = WoTOnboardingFit(PhysicalSize);
 	if (!(Fit > 0.0f))
 	{
 		return 1.0f;
+	}
+	if (Rule == EWindowScaleRule::GuideFill)
+	{
+		return Fit * GuideScreenFill;
 	}
 	return Fit < 1.0f ? Fit : static_cast<float>(PixelScaleFor(PhysicalSize));
 }
@@ -173,7 +178,7 @@ void FWoTOnboardingWindowScale::Initialize(const FVector2D& PhysicalSize,
 	}
 	DpiScale = FMath::Max(InDpiScale, 0.01f);
 	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
-	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize);
+	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize, Rule);
 }
 
 bool FWoTOnboardingWindowScale::Update(const FGeometry& AllottedGeometry)
@@ -184,7 +189,7 @@ bool FWoTOnboardingWindowScale::Update(const FGeometry& AllottedGeometry)
 		FVector2D(AllottedGeometry.GetLocalSize()) * DpiScale;
 	const int32 PreviousPixelScale = PixelScale;
 	PixelScale = WoTOnboardingChrome::PixelScaleFor(PhysicalSize);
-	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize);
+	WindowScale = WoTOnboardingChrome::WindowScaleFor(PhysicalSize, Rule);
 	return PixelScale != PreviousPixelScale;
 }
 

@@ -72,6 +72,8 @@ public:
 	TArray<FName> GridOrder() const;
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry,
+		const FPointerEvent& MouseEvent) override;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry,
 		const FKeyEvent& InKeyEvent) override;
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry,
@@ -124,6 +126,7 @@ private:
 	TMap<FName, TSharedPtr<SWidget>> GridCells;
 	TSharedPtr<SScrollBox> GridScroll;
 	TSharedPtr<SScrollBox> DetailScroll;
+	TSharedPtr<SBox> WindowBox;
 	TSharedPtr<SBox> DetailHost;
 	FName SelectedClassName;
 };

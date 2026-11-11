@@ -539,32 +539,11 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			{ Draft.GoreDetailLevel = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Value * 3.0f), 0, 3)); })
 	];
 	AddFlag(TEXT("menuOptions.MenuList[11]"), &FWoTGameSettings::bPlayerIDEnabled);
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
-	[
-		BuildLabel(Retail(TEXT("menuOptions.MenuList[1]")))
-	];
-	for (const EWoTManagedBinding Action : FWoTGameSettings::ManagedActions())
-	{
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 3.0f)[BuildBindingRow(Action)];
-	}
-	Rows->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
-	[
-		SNew(SWoTMenuButton)
-		.ContentPadding(FMargin(18.0f, 8.0f))
-		.OnClicked(this, &SWoTSettingsScreen::ResetBindings)
-		[
-			SNew(STextBlock)
-			.Text(Retail(TEXT("menuKeyboard.MenuList[18]")))
-			.Font(this, &SWoTSettingsScreen::Body)
-			.ColorAndOpacity(FSlateColor::UseForeground())
-		]
-	];
 	// Extension rows from the onboarding seam registry (the optional plugin's
-	// settings toggles). Registered rows render as one appended group; an
-	// empty registry appends nothing, so a build without the plugin renders
-	// exactly the rows above. Labels resolve lazily — a row's text follows
-	// its live setting — and the callbacks are copied at build time so the
-	// screen never reads a registry that changed under it.
+	// settings toggles). The group precedes player controls; an empty registry
+	// adds nothing. Labels follow their live settings, and callbacks are
+	// copied at build time so the screen never reads a registry that changed
+	// under it.
 	const TArray<FWoTOnboardingRow>& ExtensionRows =
 		FWoTOnboardingSeams::Get().SettingsRows;
 	if (!ExtensionRows.IsEmpty())
@@ -600,6 +579,27 @@ TSharedRef<SWidget> SWoTSettingsScreen::BuildControlsBody()
 			];
 		}
 	}
+	Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+	[
+		BuildLabel(Retail(TEXT("menuOptions.MenuList[1]")))
+	];
+	for (const EWoTManagedBinding Action : FWoTGameSettings::ManagedActions())
+	{
+		Rows->AddSlot().AutoHeight().Padding(0.0f, 3.0f)[BuildBindingRow(Action)];
+	}
+	Rows->AddSlot().AutoHeight().Padding(0.0f, 14.0f, 0.0f, 0.0f).HAlign(HAlign_Left)
+	[
+		SNew(SWoTMenuButton)
+		.ContentPadding(FMargin(18.0f, 8.0f))
+		.OnClicked(this, &SWoTSettingsScreen::ResetBindings)
+		[
+			SNew(STextBlock)
+			.Text(Retail(TEXT("menuKeyboard.MenuList[18]")))
+			.Font(this, &SWoTSettingsScreen::Body)
+			.ColorAndOpacity(FSlateColor::UseForeground())
+		]
+	];
+
 	return Rows;
 }
 

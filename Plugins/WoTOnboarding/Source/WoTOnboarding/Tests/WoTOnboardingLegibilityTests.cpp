@@ -8,6 +8,7 @@
 #include "WoTOnboardingChrome.h"
 #include "WoTOnboardingSeams.h"
 
+#include "Layout/Geometry.h"
 #include "Misc/ScopeExit.h"
 #include "Styling/CoreStyle.h"
 #include "UObject/Package.h"
@@ -184,6 +185,27 @@ int32 WoTOnboardingLegibilityExpectLines(FAutomationTestBase& Test,
 }
 } // namespace
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingLegibilityFillTrackingSpec,
+	"WoT.Onboarding.LegibilityFillTracking", WoTOnboardingLegibilityFlags)
+
+bool FWoTOnboardingLegibilityFillTrackingSpec::RunTest(const FString&)
+{
+	FWoTOnboardingWindowScale FillScale(WoTOnboardingChrome::EWindowScaleRule::GuideFill);
+	FillScale.Initialize(FVector2D(1280.0, 800.0), 1.0f);
+	TestEqual(TEXT("the guide starts at a fractional scale"), FillScale.GetWindowScale(), 1.266667f, 0.01f);
+	TestTrue(TEXT("moving to 1080p changes the strike"), FillScale.Update(
+		FGeometry::MakeRoot(FVector2D(1280.0, 720.0), FSlateLayoutTransform(1.5f))));
+	TestEqual(TEXT("the guide uses the 2x strike"), FillScale.GetPixelScale(), 2);
+	TestEqual(TEXT("the guide fills 1080p"), FillScale.GetWindowScale(), 1.9f, 0.01f);
+	TestEqual(TEXT("the guide removes UI DPI from its Slate scale"), FillScale.SlateScale(), 1.266667f, 0.01f);
+	TestFalse(TEXT("resizing within a strike does not refresh faces"), FillScale.Update(
+		FGeometry::MakeRoot(FVector2D(2560.0, 1440.0), FSlateLayoutTransform())));
+	TestEqual(TEXT("the fill scale still changes"), FillScale.GetWindowScale(), 2.533333f, 0.01f);
+	FillScale.Initialize(FVector2D::ZeroVector, 3.0f);
+	TestEqual(TEXT("a zero viewport keeps the fill scale"), FillScale.GetWindowScale(), 2.533333f, 0.01f);
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingLegibilityWindowScaleSpec,
 	"WoT.Onboarding.LegibilityWindowScale", WoTOnboardingLegibilityFlags)
 
@@ -207,7 +229,7 @@ bool FWoTOnboardingLegibilityWindowScaleSpec::RunTest(const FString&)
 
 	// A window opened at 1080p under a 1.5 UI DPI scale still lands on 2
 	// screen pixels per unit: the scale box divides the DPI scale back out.
-	FWoTOnboardingWindowScale Scale;
+	FWoTOnboardingWindowScale Scale(WoTOnboardingChrome::EWindowScaleRule::WholeStep);
 	TestEqual(TEXT("an uninitialized window draws at 1x"), Scale.SlateScale(), 1.0f);
 	Scale.Initialize(FVector2D(1920.0, 1080.0), 1.5f);
 	TestEqual(TEXT("1080p picks the 2x strike"), Scale.GetPixelScale(), 2);

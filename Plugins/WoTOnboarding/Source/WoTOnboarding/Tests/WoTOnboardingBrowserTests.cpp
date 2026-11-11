@@ -595,11 +595,133 @@ bool FWoTOnboardingBrowserAndCardDefaultSizeSpec::RunTest(const FString&)
 		{
 			return false;
 		}
-		TestEqual(TEXT("the first geometry update sets the window to 2x"),
-			AfterTick[0].Geometry.GetAccumulatedLayoutTransform().GetScale(), 2.0f);
+		TestEqual(TEXT("the first geometry update applies the window rule"),
+			AfterTick[0].Geometry.GetAccumulatedLayoutTransform().GetScale(),
+			WindowWidget == Browser ? 1.9f : 2.0f, 0.01f);
 		TestEqual(TEXT("the first geometry update selects the 2x font strike"),
 			Heading->GetFont().Size, 26.0f);
 	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserFillBoundsSpec,
+	"WoT.Onboarding.BrowserFillBounds", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserFillBoundsSpec::RunTest(const FString&)
+{
+	struct FScreenCase
+	{
+		FVector2D ScreenSize;
+		FVector2D WindowSize;
+	};
+	const FScreenCase Cases[] = {
+		{{1280.0, 800.0}, {1216.0, 684.0}},
+		{{1280.0, 720.0}, {1216.0, 684.0}},
+		{{1920.0, 1080.0}, {1824.0, 1026.0}},
+		{{2560.0, 1440.0}, {2432.0, 1368.0}},
+		{{3024.0, 1964.0}, {2872.8, 1615.95}},
+		{{800.0, 450.0}, {760.0, 427.5}},
+	};
+	for (const FScreenCase& ScreenCase : Cases)
+	{
+		const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+			.Guide(WoTOnboardingBrowserMakeGuide())
+			.InitialPhysicalSize(ScreenCase.ScreenSize);
+		Browser->SlatePrepass(1.0f);
+		TArray<FArrangedWidget> ArrangedWidgets;
+		WoTOnboardingBrowserArrangeTree(Browser,
+			FGeometry::MakeRoot(ScreenCase.ScreenSize, FSlateLayoutTransform()), ArrangedWidgets);
+		const FArrangedWidget* WindowBox = ArrangedWidgets.FindByPredicate(
+			[](const FArrangedWidget& Candidate)
+			{
+				return Candidate.Widget->GetType() == FName(TEXT("SBox"))
+					&& FVector2D(Candidate.Widget->GetDesiredSize()).Equals(FVector2D(960.0, 540.0), 0.01);
+			});
+		if (!TestNotNull(TEXT("the window box is arranged"), WindowBox)) return false;
+		const FVector2D WindowOrigin = WindowBox->Geometry.GetAbsolutePosition();
+		const FVector2D WindowExtent = WindowBox->Geometry.LocalToAbsolute(
+			WindowBox->Geometry.GetLocalSize()) - WindowOrigin;
+		TestEqual(TEXT("the window fills the expected width"), WindowExtent.X, ScreenCase.WindowSize.X, 0.5);
+		TestEqual(TEXT("the window fills the expected height"), WindowExtent.Y, ScreenCase.WindowSize.Y, 0.5);
+		TestEqual(TEXT("the window is horizontally centered"), WindowOrigin.X,
+			(ScreenCase.ScreenSize.X - ScreenCase.WindowSize.X) / 2.0, 0.5);
+		TestEqual(TEXT("the window is vertically centered"), WindowOrigin.Y,
+			(ScreenCase.ScreenSize.Y - ScreenCase.WindowSize.Y) / 2.0, 0.5);
+	}
+	FWoTPickupCardText CardText;
+	CardText.Title = TEXT("Fixture pickup");
+	for (const FVector2D CardScreen : {FVector2D(1920.0, 1080.0), FVector2D(1280.0, 800.0)})
+	{
+		const TSharedRef<SWoTPickupCard> Card = SNew(SWoTPickupCard)
+			.Text(CardText).InitialPhysicalSize(CardScreen);
+		Card->SlatePrepass(1.0f);
+		const TSharedPtr<SWidget> ScaleBox = WoTOnboardingBrowserFindWidget(Card,
+			[](const TSharedRef<SWidget>& Candidate)
+			{
+				return Candidate->GetType() == FName(TEXT("SScaleBox"));
+			});
+		if (!TestTrue(TEXT("the card has its scale box"), ScaleBox.IsValid())) return false;
+		FArrangedChildren CardChildren(EVisibility::Visible);
+		ScaleBox->ArrangeChildren(FGeometry::MakeRoot(CardScreen, FSlateLayoutTransform()), CardChildren);
+		if (!TestEqual(TEXT("the card window is arranged"), CardChildren.Num(), 1)) return false;
+		TestEqual(TEXT("the card keeps whole steps"),
+			CardChildren[0].Geometry.GetAccumulatedLayoutTransform().GetScale(),
+			CardScreen.X == 1920.0 ? 2.0f : 1.0f, 0.01f);
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserOutsidePressSpec,
+	"WoT.Onboarding.BrowserOutsidePress", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserOutsidePressSpec::RunTest(const FString&)
+{
+	int32 Closes = 0;
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(WoTOnboardingBrowserMakeGuide())
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0))
+		.OnClose(FSimpleDelegate::CreateLambda([&Closes]() { ++Closes; }));
+	const FGeometry RootGeometry = FGeometry::MakeRoot(
+		FVector2D(1280.0, 800.0), FSlateLayoutTransform());
+	Browser->SlatePrepass(1.0f);
+	TArray<FArrangedWidget> ArrangedWidgets;
+	WoTOnboardingBrowserArrangeTree(Browser, RootGeometry, ArrangedWidgets);
+	const FArrangedWidget* WindowBox = ArrangedWidgets.FindByPredicate(
+		[](const FArrangedWidget& Candidate)
+		{
+			return Candidate.Widget->GetType() == FName(TEXT("SBox"))
+				&& FVector2D(Candidate.Widget->GetDesiredSize()).Equals(FVector2D(960.0, 540.0), 0.01);
+		});
+	if (!TestNotNull(TEXT("the window box is arranged"), WindowBox)) return false;
+	const FVector2D WindowCenter = WindowBox->Geometry.LocalToAbsolute(
+		WindowBox->Geometry.GetLocalSize() * 0.5f);
+	const FVector2D RightOutside = WindowBox->Geometry.LocalToAbsolute(
+		FVector2D(WindowBox->Geometry.GetLocalSize().X,
+			WindowBox->Geometry.GetLocalSize().Y * 0.5f)) + FVector2D(2.0, 0.0);
+	const auto Press = [&Browser, &RootGeometry](const FVector2D& Position, const FKey& ButtonKey)
+	{
+		TSet<FKey> PressedButtons;
+		PressedButtons.Add(ButtonKey);
+		return Browser->OnMouseButtonDown(RootGeometry, FPointerEvent(0, Position,
+			Position, PressedButtons, ButtonKey, 0.0f, FModifierKeysState()));
+	};
+	TestTrue(TEXT("an outside left press is handled"), Press(FVector2D(20.0, 20.0), EKeys::LeftMouseButton).IsEventHandled());
+	TestEqual(TEXT("an outside left press closes"), Closes, 1);
+	Press(WindowCenter, EKeys::LeftMouseButton);
+	TestEqual(TEXT("a center press does not close"), Closes, 1);
+	Press(RightOutside, EKeys::LeftMouseButton);
+	TestEqual(TEXT("two pixels past the right edge closes"), Closes, 2);
+	Press(RightOutside, EKeys::RightMouseButton);
+	Press(RightOutside, EKeys::MiddleMouseButton);
+	TestEqual(TEXT("other mouse buttons also close outside"), Closes, 4);
+	Press(WindowCenter, EKeys::RightMouseButton);
+	TestEqual(TEXT("other buttons keep the window open inside"), Closes, 4);
+	const FPointerEvent Motion(0, FVector2D(20.0, 20.0), FVector2D(21.0, 20.0),
+		TSet<FKey>(), EKeys::LeftMouseButton, 1.0f, FModifierKeysState());
+	Browser->OnMouseMove(RootGeometry, Motion);
+	Browser->OnMouseWheel(RootGeometry, Motion);
+	Browser->OnMouseButtonUp(RootGeometry, Motion);
+	TestEqual(TEXT("motion, wheel and release do not close"), Closes, 4);
 	return !HasAnyErrors();
 }
 
@@ -750,7 +872,7 @@ bool FWoTOnboardingBrowserGridFitsSpec::RunTest(const FString&)
 		{
 			TestTrue(FString::Printf(TEXT("%s: %s (got %.3f, expected %.3f)"),
 				bPublishedChrome ? TEXT("published chrome") : TEXT("engine stand-in"),
-				*What, Actual, Expected), FMath::IsNearlyEqual(Actual, Expected, 0.01));
+				*What, Actual, Expected), FMath::IsNearlyEqual(Actual, Expected, 0.5));
 		};
 		const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
 			.Guide(Guide.Get())
@@ -790,10 +912,11 @@ bool FWoTOnboardingBrowserGridFitsSpec::RunTest(const FString&)
 		{
 			return false;
 		}
-		const auto WindowY = [WindowBox](const FGeometry& WidgetGeometry, double LocalY)
+		const float ArrangedScale = WindowBox->Geometry.GetAccumulatedLayoutTransform().GetScale();
+		const auto WindowY = [WindowBox, ArrangedScale](const FGeometry& WidgetGeometry, double LocalY)
 		{
-			return WindowBox->Geometry.AbsoluteToLocal(
-				WidgetGeometry.LocalToAbsolute(FVector2D(0.0, LocalY))).Y;
+			return (WidgetGeometry.LocalToAbsolute(FVector2D(0.0, LocalY)).Y
+				- WindowBox->Geometry.GetAbsolutePosition().Y) / ArrangedScale;
 		};
 		CheckNear(TEXT("the window is 960 units wide"),
 			WindowBox->Geometry.GetLocalSize().X, 960.0);

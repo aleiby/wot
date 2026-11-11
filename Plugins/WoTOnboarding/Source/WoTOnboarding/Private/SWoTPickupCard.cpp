@@ -33,7 +33,7 @@ void SWoTPickupCard::Construct(const FArguments& InArgs)
 
 	Faces = MakeShared<FWoTOnboardingFaces>(WoTOnboardingChrome::Resolve());
 	Art = FWoTRetailArt::Resolve();
-	Scale = MakeShared<FWoTOnboardingWindowScale>();
+	Scale = MakeShared<FWoTOnboardingWindowScale>(WoTOnboardingChrome::EWindowScaleRule::WholeStep);
 	Scale->Initialize(InArgs._InitialPhysicalSize, InArgs._InitialDpiScale);
 	Faces->Refresh(Scale->GetPixelScale());
 

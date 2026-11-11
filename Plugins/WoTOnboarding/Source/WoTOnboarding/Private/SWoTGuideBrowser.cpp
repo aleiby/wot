@@ -6,7 +6,9 @@
 #include "WoTOnboardingHints.h"
 #include "WoTOnboardingSeams.h"
 
+#include "Input/Events.h"
 #include "InputCoreTypes.h"
+#include "Layout/Geometry.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
@@ -140,7 +142,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 
 	Faces = MakeShared<FWoTOnboardingFaces>(WoTOnboardingChrome::Resolve());
 	Art = FWoTRetailArt::Resolve();
-	Scale = MakeShared<FWoTOnboardingWindowScale>();
+	Scale = MakeShared<FWoTOnboardingWindowScale>(WoTOnboardingChrome::EWindowScaleRule::GuideFill);
 	Scale->Initialize(InArgs._InitialPhysicalSize, InArgs._InitialDpiScale);
 	Faces->Refresh(Scale->GetPixelScale());
 
@@ -181,13 +183,13 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 		.HAlign(HAlign_Center)
 		.VAlign(VAlign_Center)
 		[
-			// The window draws at whole screen pixels per unit, with the
-			// matching bitmap strikes, as the game's own windows do.
+			// The window fills most of the screen at a fractional scale;
+			// the faces still resolve at the matching 1x or 2x strike.
 			SNew(SScaleBox)
 			.Stretch(EStretch::UserSpecified)
 			.UserSpecifiedScale_Lambda([ScaleRef]() { return ScaleRef->SlateScale(); })
 			[
-				SNew(SBox)
+				SAssignNew(WindowBox, SBox)
 				.WidthOverride(WoTOnboardingChrome::WindowWidth)
 				.HeightOverride(WoTOnboardingChrome::WindowHeight)
 				[
@@ -834,6 +836,28 @@ FReply SWoTGuideBrowser::Close()
 {
 	OnClose.ExecuteIfBound();
 	return FReply::Handled();
+}
+
+FReply SWoTGuideBrowser::OnMouseButtonDown(const FGeometry& MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	// A press that reaches the browser outside its window (on the dimmed
+	// backdrop) closes the guide, as the Close button and Esc do. Presses
+	// inside the window keep their own handling.
+	if (WindowBox.IsValid())
+	{
+		TSet<TSharedRef<SWidget>> WindowToFind;
+		WindowToFind.Add(WindowBox.ToSharedRef());
+		TMap<TSharedRef<SWidget>, FArrangedWidget> FoundWindow;
+		FindChildGeometries(MyGeometry, WindowToFind, FoundWindow);
+		const FArrangedWidget* ArrangedWindow = FoundWindow.Find(WindowBox.ToSharedRef());
+		if (ArrangedWindow != nullptr
+			&& !ArrangedWindow->Geometry.IsUnderLocation(MouseEvent.GetScreenSpacePosition()))
+		{
+			return Close();
+		}
+	}
+	return SCompoundWidget::OnMouseButtonDown(MyGeometry, MouseEvent);
 }
 
 bool SWoTGuideBrowser::IsCloseKey(const FKey& Key) const
