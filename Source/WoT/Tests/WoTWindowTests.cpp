@@ -3,6 +3,7 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "CoreGlobals.h"
+#include "Engine/Engine.h"
 #include "Settings/WoTGameSettings.h"
 #include "Templates/UnrealTemplate.h"
 #include "UObject/UObjectGlobals.h"
@@ -124,7 +125,12 @@ bool FWoTViewportClickActivationSpec::RunTest(const FString&)
 #if WITH_EDITORONLY_DATA || USING_CODE_ANALYSIS
 	TGuardValue<bool> GameContext(GIsEditor, false);
 #endif
-	UWoTGameViewportClient* Client = NewObject<UWoTGameViewportClient>();
+	// The engine owns every game viewport client (the class is Within=Engine).
+	if (!TestNotNull(TEXT("engine"), GEngine))
+	{
+		return false;
+	}
+	UWoTGameViewportClient* Client = NewObject<UWoTGameViewportClient>(GEngine);
 	Client->SetMouseCaptureMode(EMouseCaptureMode::CapturePermanently_IncludingInitialMouseDown);
 	TestTrue(TEXT("gameplay normally captures"), Client->IsInPermanentCapture());
 	TestTrue(TEXT("a click activation suppresses capture"),
