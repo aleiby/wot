@@ -25,6 +25,12 @@ public:
 		TConstArrayView<FVector> AdditionalLogicalVertices = {});
 
 	static float ComputeRetailParticleColor(float ScaleGlow, uint8 AmbientGlow = 0);
+	// UnMesh.cpp:433,574: bParticles ignores actor DrawScale for positions.
+	// UnMeshRn.cpp:443-444 applies it separately to the sprite dimensions.
+	static FVector PoseDriverScale(bool bParticles, float DrawScale)
+	{
+		return FVector(bParticles ? 1.0f : DrawScale);
+	}
 	UMaterialInstanceDynamic* GetParticleMaterial() const { return ParticleMaterial; }
 	FIntPoint GetParticleTextureSize() const
 	{

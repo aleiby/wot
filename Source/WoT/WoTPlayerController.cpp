@@ -47,6 +47,8 @@
 #include "Traps/WoTPortcullis.h"
 #include "Traps/WoTStaircase.h"
 #include "Traps/WoTTrap.h"
+#include "UI/WoTControllerUIInput.h"
+#include "UI/WoTTextEntry.h"
 
 #include "EngineUtils.h"
 #include "Engine/Engine.h"
@@ -94,6 +96,10 @@ public:
 	virtual bool HandleKeyUpEvent(FSlateApplication&,
 		const FKeyEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		return Dispatch(Event.GetKey(), IE_Released, 0.0f,
 			Event.GetUserIndex());
 	}
@@ -101,6 +107,10 @@ public:
 	virtual bool HandleAnalogInputEvent(FSlateApplication&,
 		const FAnalogInputEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		return Dispatch(Event.GetKey(), IE_Axis, Event.GetAnalogValue(),
 			Event.GetUserIndex());
 	}
@@ -111,7 +121,7 @@ public:
 	{
 		// Gestures are Slate input in this port. A physical wheel follows
 		// FSceneViewport::OnMouseWheel, except retail Typing eats its press.
-		if (GestureEvent || WheelEvent.GetUserIndex() != UserIndex
+		if (bSuspended || GestureEvent || WheelEvent.GetUserIndex() != UserIndex
 			|| !Controller.IsValid())
 		{
 			return false;
@@ -138,13 +148,13 @@ public:
 		// Console Typing consumes every press. A mouse press must therefore reach
 		// neither gameplay nor the editable Slate projection; releases and axes
 		// keep following the gameplay route below.
-		return Event.GetUserIndex() == UserIndex && Controller.IsValid();
+		return !bSuspended && Event.GetUserIndex() == UserIndex && Controller.IsValid();
 	}
 
 	virtual bool HandleMouseButtonDoubleClickEvent(FSlateApplication&,
 		const FPointerEvent& Event) override
 	{
-		return Event.GetUserIndex() == UserIndex && Controller.IsValid();
+		return !bSuspended && Event.GetUserIndex() == UserIndex && Controller.IsValid();
 	}
 
 	virtual bool HandleMotionDetectedEvent(FSlateApplication&,
@@ -152,7 +162,7 @@ public:
 	{
 		// Motion is axis input: Typing passes every non-press action through,
 		// so forward it as FSceneViewport::OnMotionDetected would.
-		if (Event.GetUserIndex() != UserIndex || !Controller.IsValid())
+		if (bSuspended || Event.GetUserIndex() != UserIndex || !Controller.IsValid())
 		{
 			return false;
 		}
@@ -165,7 +175,7 @@ public:
 	virtual bool HandleMouseMoveEvent(FSlateApplication&,
 		const FPointerEvent& Event) override
 	{
-		if (Event.GetUserIndex() != UserIndex || !Controller.IsValid())
+		if (bSuspended || Event.GetUserIndex() != UserIndex || !Controller.IsValid())
 		{
 			return false;
 		}
@@ -184,6 +194,10 @@ public:
 	virtual bool HandleMouseButtonUpEvent(FSlateApplication& Slate,
 		const FPointerEvent& Event) override
 	{
+		if (bSuspended)
+		{
+			return false;
+		}
 		if (Event.IsTouchEvent())
 		{
 			return Event.GetUserIndex() == UserIndex && Controller.IsValid();
@@ -214,6 +228,26 @@ public:
 	void MarkGameplayMouseCaptureRetained()
 	{
 		bGameplayMouseCaptureRetained = true;
+	}
+
+	/**
+	 * The keyboard panel is open over chat: the router passes everything to
+	 * Slate, so the panel takes presses and gameplay sees nothing. The held
+	 * gameplay buttons were flushed, so none is awaited any more.
+	 */
+	void SetSuspended(FSlateApplication& Slate, bool bInSuspended)
+	{
+		if (bInSuspended)
+		{
+			ReleaseGameplayMouseCapture(Slate);
+			HeldGameplayMouseButtons.Reset();
+		}
+		bSuspended = bInSuspended;
+	}
+
+	bool IsSuspended() const
+	{
+		return bSuspended;
 	}
 
 	void ReleaseGameplayMouseCapture(FSlateApplication& Slate)
@@ -256,6 +290,7 @@ private:
 	uint32 UserIndex;
 	TWeakPtr<SViewport> ViewportWidget;
 	bool bGameplayMouseCaptureRetained = false;
+	bool bSuspended = false;
 };
 
 namespace
@@ -1825,14 +1860,15 @@ void AWoTPlayerController::ServerRespawnPlayer_Implementation()
 		return;
 	}
 
-	// Retail reuses its PlayerPawn. This port replaces it, so consume the retained body
-	// immediately before RestartPlayer creates and possesses the new pawn.
+	// Retail reuses its PlayerPawn (PlayerPawn.ServerReStartPlayer moves it). This
+	// port replaces it, so consume the retained body immediately before the restart
+	// creates and possesses the new pawn.
 	if (AWoTCharacter* Corpse = RespawnCorpse.Get())
 	{
 		Corpse->Destroy();
 	}
 	RespawnCorpse.Reset();
-	Game->RestartPlayer(this);
+	Game->ServerReStartPlayer(this);
 	if (!GetPawn())
 	{
 		EnterPlayerState(EWoTPlayerStateMachineState::WaitingForSpawn);
@@ -1844,11 +1880,12 @@ bool AWoTPlayerController::ServerRestartPlayerWoT_Validate() { return true; }
 void AWoTPlayerController::ServerRestartPlayerWoT_Implementation()
 {
 	// PlayerPawn.ServerRestartPlayer → Level.Game.RestartPlayer(self), no state gate:
-	// the team-select restart (BattleHUD.uc:63-64) runs on a LIVE player. Retail reuses
-	// the single PlayerPawn; the port replaces it, so consume the current body (live
-	// pawn or retained corpse) before RestartPlayer spawns the team pawn at a team
-	// start (Battle's GetDefaultPawnClassForController + bSpawnInTeamArea weighting).
-	// Only the match-over freeze holds the restart back.
+	// the team-select restart (BattleHUD.uc:63-64) runs on a LIVE player. Retail moves
+	// the single PlayerPawn to the team start (Battle's GetDefaultPawnClassForController
+	// + bSpawnInTeamArea weighting); the port spawns a replacement there instead. The
+	// live pawn is kept until that replacement exists: if every start refuses it, the
+	// player keeps moving the old pawn where it stood, as retail's "Restartplayer
+	// failed" leaves it. Only the match-over freeze holds the restart back.
 	AWoTGameMode* Game = GetWorld() ? GetWorld()->GetAuthGameMode<AWoTGameMode>() : nullptr;
 	if (!IsValid(Game) || bMatchEnded || Game->bGameEnded)
 	{
@@ -1859,12 +1896,7 @@ void AWoTPlayerController::ServerRestartPlayerWoT_Implementation()
 		Corpse->Destroy();
 	}
 	RespawnCorpse.Reset();
-	if (APawn* LivePawn = GetPawn())
-	{
-		UnPossess();
-		LivePawn->Destroy();
-	}
-	Game->RestartPlayer(this);
+	Game->ServerReStartPlayer(this);
 	if (!GetPawn())
 	{
 		EnterPlayerState(EWoTPlayerStateMachineState::WaitingForSpawn);
@@ -2197,7 +2229,9 @@ void AWoTPlayerController::ServerRequestCitadelEdit_Implementation(int32 Mode)
 		CitadelEndEdit();
 		return;
 	}
-	if (CanRequestCitadelEdit())
+	// WOTPlayer.ServerEditCitadel (WOTPlayer.uc:4448-4458): only giMPBattle's
+	// CanEditCitadel is true; EditCitadel reports its own refusals.
+	if (GetWorld() && GetWorld()->GetAuthGameMode<AWoTBattleGameMode>())
 	{
 		CitadelBeginEdit(Mode);
 		return;
@@ -2222,25 +2256,48 @@ void AWoTPlayerController::CitadelBeginEdit(int32 Mode)
 
 	AWoTBattleGameMode* BattleMode = GetWorld()
 		? GetWorld()->GetAuthGameMode<AWoTBattleGameMode>() : nullptr;
-	if (!IsValid(BattleMode) || BattleMode->CanTeleport() || IsEditingCitadel())
+	if (!IsValid(BattleMode) || IsEditingCitadel())
 	{
 		return;
 	}
+	// WOTPlayer.EditCitadel (WOTPlayer.uc:4466-4507) refuses in this order and
+	// tells the player why with a center message each time.
 	const uint8 SessionTeam = CitadelControllerTeam(this);
-	if (SessionTeam == 255 || !IsValid(BattleMode->Battle.Get())
-		|| SessionTeam >= BattleMode->Battle->NumTeams || SessionTeam >= 4)
-	{
-		return;
-	}
 	AWoTZoneVolume* EntryZone = AWoTZoneVolume::EditZoneAt(
 		GetWorld(), GetCitadelViewerLocation());
-	if (!IsValid(EntryZone) || EntryZone->EditTeam != SessionTeam)
+	if (!IsValid(EntryZone))
 	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditZoneStr"), TEXT("Editing is not possible here.")));
 		return;
 	}
-	AWoTBudgetInfo* Budget = BattleMode->FindTeamBudget(SessionTeam);
-	if (!IsValid(Budget) || !Budget->BeginEdit(this))
+	if (EntryZone->EditTeam != SessionTeam)
 	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditAreaStr"), TEXT("This area belongs to another team.")));
+		return;
+	}
+	if (BattleMode->CanTeleport())
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditNowStr"), TEXT("Editing ends when the battle begins.")));
+		return;
+	}
+	// WOTPlayer.Budget is the team BudgetInfo that EnterCitadel bound on joining
+	// (WOTPlayer.uc:4409-4426); a player without a team has none.
+	AWoTBudgetInfo* Budget = (SessionTeam != 255 && IsValid(BattleMode->Battle.Get())
+		&& SessionTeam < BattleMode->Battle->NumTeams && SessionTeam < 4)
+		? BattleMode->FindTeamBudget(SessionTeam) : nullptr;
+	if (!IsValid(Budget))
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditBudgetStr"), TEXT("Editing is not possible right now.")));
+		return;
+	}
+	if (!Budget->BeginEdit(this))
+	{
+		ClientCenterMessage(WoTPlayerControllerRetailText(TEXT("WOTPlayer"),
+			TEXT("CantEditLimitStr"), TEXT("Your team is already editing.")));
 		return;
 	}
 	const EWoTCitadelEditCameraMode RequestedCameraMode = Mode == 1
@@ -3174,6 +3231,84 @@ void AWoTPlayerController::TeamTalk()
 	BeginChatInput(TEXT("TeamSay "));
 }
 
+void AWoTPlayerController::ChatByController(bool bTeam)
+{
+	// Talk or TeamTalk exactly as the T and Y keys run them (the same prefill
+	// and the same SubmitChatInput), then the line's text entry in the same
+	// step: a controller has no keys to type on the line itself.
+	const bool bWasTyping = bChatTyping;
+	if (bTeam)
+	{
+		TeamTalk();
+	}
+	else
+	{
+		Talk();
+	}
+	if (!bWasTyping && bChatTyping)
+	{
+		BeginChatTextEntry();
+	}
+}
+
+void AWoTPlayerController::ChatFromInGameMenu(bool bTeam)
+{
+	// Chat never opens over the menu (BeginChatInput): leave it first, as the
+	// menu's Scoreboard and Help do.
+	ResumeFromInGameMenu();
+	if (IsInGameMenuOpen())
+	{
+		return;   // leaving for the front end: the menu stays
+	}
+	if (FWoTControllerUIInput::IsControllerMode())
+	{
+		ChatByController(bTeam);
+	}
+	else if (bTeam)
+	{
+		TeamTalk();   // plain keyboard chat, as Y opens it [M6]
+	}
+	else
+	{
+		Talk();       // plain keyboard chat, as T opens it [M6]
+	}
+}
+
+void AWoTPlayerController::TauntFromInGameMenu(int32 TauntIndex)
+{
+	ResumeFromInGameMenu();
+	if (IsInGameMenuOpen())
+	{
+		return;   // leaving for the front end: the menu stays
+	}
+	if (IsPaused())
+	{
+		return;   // the taunt keys don't play while paused either
+	}
+	PlayTaunt(TauntIndex);
+}
+
+bool AWoTPlayerController::BeginChatTextEntry()
+{
+	if (!bChatTyping || !ChatInputWidget.IsValid())
+	{
+		return false;
+	}
+	int32 SlateUserIndex = 0;
+	if (FSlateApplication::IsInitialized())
+	{
+		SlateUserIndex = FSlateApplication::Get().GetUserIndexForKeyboard();
+		if (const ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
+		{
+			if (const TSharedPtr<const FSlateUser> SlateUser = LocalPlayer->GetSlateUser())
+			{
+				SlateUserIndex = SlateUser->GetUserIndex();
+			}
+		}
+	}
+	return ChatInputWidget->BeginTextEntry(SlateUserIndex);
+}
+
 void AWoTPlayerController::BeginChatInput(const FString& InitialText)
 {
 	if (bChatTyping || !IsLocalController() || IsInGameMenuOpen()
@@ -3205,9 +3340,14 @@ void AWoTPlayerController::CreateChatInputWidget()
 	}
 
 	ChatInputViewport = GEngine->GameViewport;
+	FVector2D ChatViewportSize = FVector2D::ZeroVector;
+	ChatInputViewport->GetViewportSize(ChatViewportSize);
+	ChatInputPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ChatInputWidget = SNew(SWoTChatInputOverlay)
 		.PlayerController(this)
-		.InitialText(ChatInputText);
+		.InitialText(ChatInputText)
+		.InitialPhysicalSize(ChatViewportSize)
+		.PresentationAuthority(ChatInputPresentationAuthority);
 	ChatInputViewport->AddViewportWidgetContent(
 		ChatInputWidget.ToSharedRef(), /*ZOrder*/ 2200);
 
@@ -3257,9 +3397,19 @@ void AWoTPlayerController::CreateChatInputWidget()
 		}
 	}
 
-	bShowMouseCursor = false;
 	const bool bRetainMouseCapture = ChatInputPreProcessor.IsValid()
 		&& ChatInputPreProcessor->HasHeldGameplayMouseButton();
+	ApplyChatInputMode(bRetainMouseCapture, ViewportWidget, SlateUserIndex);
+}
+
+void AWoTPlayerController::ApplyChatInputMode(bool bRetainMouseCapture,
+	const TSharedPtr<SViewport>& ViewportWidget, uint32 SlateUserIndex)
+{
+	if (!ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	bShowMouseCursor = false;
 	FInputModeGameAndUI InputMode;
 	InputMode.SetWidgetToFocus(ChatInputWidget->TextWidget());
 	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
@@ -3272,8 +3422,11 @@ void AWoTPlayerController::CreateChatInputWidget()
 		InputSettings->bShouldFlushPressedKeysOnViewportFocusLost;
 	InputSettings->bShouldFlushPressedKeysOnViewportFocusLost = false;
 	SetInputMode(InputMode);
-	ChatInputViewport->SetIgnoreInput(true);
-	ChatInputViewport->SetMouseCaptureMode(EMouseCaptureMode::NoCapture);
+	if (UGameViewportClient* Viewport = ChatInputViewport.Get())
+	{
+		Viewport->SetIgnoreInput(true);
+		Viewport->SetMouseCaptureMode(EMouseCaptureMode::NoCapture);
+	}
 	if (FSlateApplication::IsInitialized())
 	{
 		FSlateApplication& Slate = FSlateApplication::Get();
@@ -3301,8 +3454,84 @@ void AWoTPlayerController::CreateChatInputWidget()
 		bPreviouslyFlushOnFocusLost;
 }
 
+void AWoTPlayerController::SuspendChatInputForTextEntry(const TSharedRef<SWidget>& Panel)
+{
+	if (!bChatTyping || bChatInputSuspended || !ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	bChatInputSuspended = true;
+	// Controller chat is not a parity path (spec r3 [I7]): every held gameplay
+	// key is released here, so no release is owed while the panel has input.
+	FlushPressedKeys();
+	if (ChatInputPreProcessor.IsValid() && FSlateApplication::IsInitialized())
+	{
+		ChatInputPreProcessor->SetSuspended(FSlateApplication::Get(), true);
+	}
+	// UI-only: the panel takes keys, taps and clicks; the viewport ignores
+	// input. The pointer shows for touch and mouse; a controller's cursor lease
+	// hides it again in Controller mode.
+	bShowMouseCursor = true;
+	FInputModeUIOnly InputMode;
+	InputMode.SetWidgetToFocus(Panel);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	SetInputMode(InputMode);
+}
+
+void AWoTPlayerController::ResumeChatInputAfterTextEntry()
+{
+	if (!bChatInputSuspended)
+	{
+		return;
+	}
+	bChatInputSuspended = false;
+	if (ChatInputPreProcessor.IsValid() && FSlateApplication::IsInitialized())
+	{
+		ChatInputPreProcessor->SetSuspended(FSlateApplication::Get(), false);
+	}
+	if (!bChatTyping || !ChatInputWidget.IsValid())
+	{
+		return;
+	}
+	// Exactly as CreateChatInputWidget set it; nothing is held after the flush,
+	// so no gameplay mouse capture is retained.
+	uint32 SlateUserIndex = 0;
+	if (FSlateApplication::IsInitialized())
+	{
+		SlateUserIndex = static_cast<uint32>(
+			FSlateApplication::Get().GetUserIndexForKeyboard());
+		if (const ULocalPlayer* LocalPlayer = Cast<ULocalPlayer>(Player))
+		{
+			if (const TSharedPtr<const FSlateUser> SlateUser = LocalPlayer->GetSlateUser())
+			{
+				SlateUserIndex = static_cast<uint32>(SlateUser->GetUserIndex());
+			}
+		}
+	}
+	const UGameViewportClient* Viewport = ChatInputViewport.Get();
+	ApplyChatInputMode(/*bRetainMouseCapture*/ false,
+		Viewport ? Viewport->GetGameViewportWidget() : nullptr, SlateUserIndex);
+}
+
+#if WITH_AUTOMATION_TESTS
+bool AWoTPlayerController::IsChatInputRouterActiveForTesting() const
+{
+	return ChatInputPreProcessor.IsValid() && !ChatInputPreProcessor->IsSuspended();
+}
+#endif
+
 void AWoTPlayerController::RemoveChatInputWidget(bool bRestoreGameInput)
 {
+	if (ChatInputWidget.IsValid())
+	{
+		// The chat line is going away: so is any keyboard panel over it.
+		FWoTTextEntry::AbandonWithin(ChatInputWidget.ToSharedRef());
+	}
+	if (bChatInputSuspended)
+	{
+		bChatInputSuspended = false;
+		bShowMouseCursor = false;
+	}
 	const bool bHadWidget = ChatInputWidget.IsValid();
 	if (ChatInputPreProcessor.IsValid())
 	{
@@ -3322,6 +3551,7 @@ void AWoTPlayerController::RemoveChatInputWidget(bool bRestoreGameInput)
 		}
 		ChatInputWidget.Reset();
 	}
+	ChatInputPresentationAuthority.Reset();
 	ChatInputViewport.Reset();
 	bChatTyping = false;
 	ChatInputText.Reset();
@@ -3345,6 +3575,9 @@ void AWoTPlayerController::SubmitChatInput(const FString& Line)
 	{
 		return;
 	}
+#if WITH_AUTOMATION_TESTS
+	LastSubmittedChatLineForTesting = Line;
+#endif
 	ChatInputText = Line;
 	RemoveChatInputWidget(/*bRestoreGameInput*/ true);
 
@@ -3642,6 +3875,9 @@ FName AWoTPlayerController::TauntSlotForIndex(int32 TauntIndex)
 
 void AWoTPlayerController::PlayTaunt(int32 TauntIndex)
 {
+#if WITH_AUTOMATION_TESTS
+	PlayTauntRequestsForTesting.Add(TauntIndex);
+#endif
 	ServerPlayTaunt(TauntIndex);
 }
 
@@ -3947,9 +4183,14 @@ void AWoTPlayerController::CreateItemInfoWidget(AWoTInventory* Item)
 		return;
 	}
 	ItemInfoViewport = GEngine->GameViewport;
+	FVector2D ItemInfoViewportSize = FVector2D::ZeroVector;
+	ItemInfoViewport->GetViewportSize(ItemInfoViewportSize);
+	ItemInfoPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ItemInfoWidget = SNew(SWoTItemInfoOverlay)
 		.PlayerController(this)
-		.Item(Item);
+		.Item(Item)
+		.InitialPhysicalSize(ItemInfoViewportSize)
+		.PresentationAuthority(ItemInfoPresentationAuthority);
 	ItemInfoViewport->AddViewportWidgetContent(
 		ItemInfoWidget.ToSharedRef(), /*ZOrder*/ 1900);
 }
@@ -3964,6 +4205,7 @@ void AWoTPlayerController::RemoveItemInfoWidget(bool bCloseWindow)
 		}
 		ItemInfoWidget.Reset();
 	}
+	ItemInfoPresentationAuthority.Reset();
 	ItemInfoViewport.Reset();
 	ItemInfoItem.Reset();
 	if (bCloseWindow)

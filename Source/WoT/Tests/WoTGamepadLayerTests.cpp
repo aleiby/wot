@@ -632,4 +632,187 @@ bool FWoTGamepadTeamSelectSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+namespace
+{
+/** Holds D-pad up for about Seconds, then releases it. */
+void Gamepad_PressDPadUp(FGamepad_Fixture& Fx, float Seconds)
+{
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Pressed, 1.0f);
+	Fx.Frames(FMath::Max(1, FMath::RoundToInt(Seconds * 60.0f)));
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Released, 0.0f);
+	Fx.Frames(2);
+}
+
+/** True when the context maps Key to Action. */
+bool Gamepad_ContextMaps(const UWoTGamepadLayer& Layer, EWoTGamepadContext Context,
+	const FKey& Key, EWoTGamepadAction Action)
+{
+	for (const FEnhancedActionKeyMapping& Mapping : Layer.GetContext(Context)->GetMappings())
+	{
+		if (Mapping.Key == Key && Mapping.Action == Layer.GetAction(Action)) { return true; }
+	}
+	return false;
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadChatTapHoldSpec,
+	"WoT.Input.Gamepad.ChatTapHold", Gamepad_WorldFlags)
+
+bool FWoTGamepadChatTapHoldSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	UWoTGamepadLayer* Layer = Fx.Controller->GetGamepadLayerForTest();
+	// Spec r3 section 4: D-pad up taps chat and holds team chat, timed by the
+	// one HoldSeconds that FaceLeft's drop / drop tainted uses too.
+	TestTrue(TEXT("gameplay D-pad up taps Chat"),
+		Gamepad_ContextMaps(*Layer, EWoTGamepadContext::Gameplay, EKeys::Gamepad_DPad_Up,
+			EWoTGamepadAction::Chat)
+		&& WoTGamepadActionTrigger(EWoTGamepadAction::Chat) == EWoTGamepadTrigger::Tap);
+	TestTrue(TEXT("and holds TeamChat"),
+		Gamepad_ContextMaps(*Layer, EWoTGamepadContext::Gameplay, EKeys::Gamepad_DPad_Up,
+			EWoTGamepadAction::TeamChat)
+		&& WoTGamepadActionTrigger(EWoTGamepadAction::TeamChat) == EWoTGamepadTrigger::Hold);
+	for (EWoTGamepadAction Chat : {EWoTGamepadAction::Chat, EWoTGamepadAction::TeamChat})
+	{
+		TestTrue(FString::Printf(TEXT("%s triggers while paused, as Talk and TeamTalk do"),
+			WoTGamepadActionName(Chat)), Layer->GetAction(Chat)->bTriggerWhenPaused);
+	}
+	const float HoldSeconds = WoTGamepadTuning().HoldSeconds;
+	TestTrue(TEXT("the hold time came from the tuning CSV"), HoldSeconds > 0.2f);
+
+	// A tap opens Talk's line, exactly as T does.
+	Gamepad_PressDPadUp(Fx, 0.1f);
+	TestTrue(TEXT("a tap opens chat"), Fx.Controller->IsChatTyping());
+	TestEqual(TEXT("the line Talk (T) opens"), Fx.Controller->GetChatTextForTesting(),
+		FString(TEXT("Say ")));
+	TestEqual(TEXT("chat takes the controller's context away"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::None));
+	Fx.Controller->CancelChatInput();
+	Fx.Frames(2);
+	TestEqual(TEXT("closing chat restores gameplay"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::Gameplay));
+
+	// Released before HoldSeconds is still a tap.
+	Gamepad_PressDPadUp(Fx, HoldSeconds - 0.15f);
+	TestEqual(TEXT("a press shorter than the hold time is a tap"),
+		Fx.Controller->GetChatTextForTesting(), FString(TEXT("Say ")));
+	Fx.Controller->CancelChatInput();
+	Fx.Frames(2);
+
+	// A hold opens TeamTalk's line as soon as the hold time passes.
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Pressed, 1.0f);
+	Fx.Frames(FMath::CeilToInt((HoldSeconds + 0.1f) * 60.0f));
+	TestTrue(TEXT("a hold opens chat before the release"), Fx.Controller->IsChatTyping());
+	TestEqual(TEXT("the line TeamTalk (Y) opens"), Fx.Controller->GetChatTextForTesting(),
+		FString(TEXT("TeamSay ")));
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestEqual(TEXT("the release does not also tap"), Fx.Controller->GetChatTextForTesting(),
+		FString(TEXT("TeamSay ")));
+	Fx.Controller->CancelChatInput();
+	Fx.Frames(2);
+	TestFalse(TEXT("D-pad up plays no taunt"), Fx.Controller->GetPlayTauntRequestsForTesting()
+		.Num() > 0);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadDPadUpEditorSpec,
+	"WoT.Input.Gamepad.DPadUpEditorUnchanged", Gamepad_WorldFlags)
+
+bool FWoTGamepadDPadUpEditorSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this)) { return false; }
+	UWoTGamepadLayer* Layer = Fx.Controller->GetGamepadLayerForTest();
+	Fx.Controller->SetOwnerEditSessionTeamForTest(0);
+	Fx.Frames(2);
+	if (!TestEqual(TEXT("editing installs the editor context"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::CitadelEditor)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the editor keeps D-pad up on ViewUp"),
+		Gamepad_ContextMaps(*Layer, EWoTGamepadContext::CitadelEditor,
+			EKeys::Gamepad_DPad_Up, EWoTGamepadAction::ViewUp));
+	for (EWoTGamepadAction Chat : {EWoTGamepadAction::Chat, EWoTGamepadAction::TeamChat})
+	{
+		TestFalse(FString::Printf(TEXT("the editor has no %s"), WoTGamepadActionName(Chat)),
+			Gamepad_ContextMaps(*Layer, EWoTGamepadContext::CitadelEditor,
+				EKeys::Gamepad_DPad_Up, Chat));
+	}
+	UEnhancedPlayerInput* PlayerInput = Fx.Controller->GetLocalPlayer()
+		->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()->GetPlayerInput();
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Pressed, 1.0f);
+	Fx.Frames(1);
+	TestTrue(TEXT("D-pad up drives ViewUp in the editor"),
+		PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::ViewUp)).Get<bool>());
+	Fx.Frames(FMath::CeilToInt((WoTGamepadTuning().HoldSeconds + 0.1f) * 60.0f));
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestFalse(TEXT("a held D-pad up opens no chat in the editor"), Fx.Controller->IsChatTyping());
+	Gamepad_PressDPadUp(Fx, 0.1f);
+	TestFalse(TEXT("a tapped D-pad up opens no chat in the editor"), Fx.Controller->IsChatTyping());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTGamepadDPadUpTeamSelectSpec,
+	"WoT.Input.Gamepad.DPadUpTeamSelectUnchanged", Gamepad_WorldFlags)
+
+bool FWoTGamepadDPadUpTeamSelectSpec::RunTest(const FString&)
+{
+	FGamepad_Fixture Fx;
+	if (!Fx.Initialize(*this, AWoTBattleGameMode::StaticClass())) { return false; }
+	UWorld* World = Fx.World;
+	AWoTBattleGameMode* BattleMode = World->GetAuthGameMode<AWoTBattleGameMode>();
+	AWoTBattleInfo* BattleInfo = World->SpawnActorDeferred<AWoTBattleInfo>(
+		AWoTBattleInfo::StaticClass(), FTransform::Identity);
+	if (!TestTrue(TEXT("battle fixture"), BattleMode && BattleInfo))
+	{
+		return false;
+	}
+	BattleInfo->NumTeams = 2;
+	BattleInfo->TeamClass[0] = AWoTTestTeamAlpha::StaticClass();
+	BattleInfo->TeamClass[1] = AWoTTestTeamBravo::StaticClass();
+	BattleInfo->FinishSpawning(FTransform::Identity);
+	BattleInfo->bTeleportersDisabled = false;
+	BattleMode->Battle = BattleInfo;
+	Fx.Controller->ClientSetHUD_Implementation(AWoTHUD::StaticClass());
+	AWoTPlayerState* State = Fx.Controller->GetPlayerState<AWoTPlayerState>();
+	if (!TestNotNull(TEXT("player state"), State))
+	{
+		return false;
+	}
+	State->Team = 255;
+	Fx.Frames(2);
+	UWoTGamepadLayer* Layer = Fx.Controller->GetGamepadLayerForTest();
+	if (!TestEqual(TEXT("a player without a team is choosing one"),
+		static_cast<int32>(Layer->GetMode()), static_cast<int32>(EWoTGamepadMode::TeamSelect)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("team selection keeps D-pad up on team 3"),
+		Gamepad_ContextMaps(*Layer, EWoTGamepadContext::TeamSelect,
+			EKeys::Gamepad_DPad_Up, EWoTGamepadAction::JoinTeam3));
+	UEnhancedPlayerInput* PlayerInput = Fx.Controller->GetLocalPlayer()
+		->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>()->GetPlayerInput();
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Pressed, 1.0f);
+	Fx.Frames(1);
+	TestTrue(TEXT("D-pad up drives team 3"),
+		PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::JoinTeam3)).Get<bool>());
+	TestFalse(TEXT("team selection takes D-pad up from chat"),
+		PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::Chat)).Get<bool>()
+		|| PlayerInput->GetActionValue(Layer->GetAction(EWoTGamepadAction::TeamChat)).Get<bool>());
+	Fx.Frames(FMath::CeilToInt((WoTGamepadTuning().HoldSeconds + 0.1f) * 60.0f));
+	Fx.Send(EKeys::Gamepad_DPad_Up, IE_Released, 0.0f);
+	Fx.Frames(2);
+	TestFalse(TEXT("a held D-pad up opens no team chat while choosing a team"),
+		Fx.Controller->IsChatTyping());
+	Gamepad_PressDPadUp(Fx, 0.1f);
+	TestFalse(TEXT("a tapped D-pad up opens no chat while choosing a team"),
+		Fx.Controller->IsChatTyping());
+	TestEqual(TEXT("an absent team 3 is not joined"), static_cast<int32>(State->Team), 255);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS && WITH_EDITOR

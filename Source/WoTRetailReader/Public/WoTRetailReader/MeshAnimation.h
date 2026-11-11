@@ -106,6 +106,9 @@ public:
 
 	bool FindMeshSequences(FStringView SourceExport,
 		TArray<FWoTVertexMeshSequence>& Out) const;
+	/** Logical vertices omitted by triangle-based asset import, in mesh-local units. */
+	bool FindUnreferencedMeshFrames(FStringView SourceExport,
+		TArray<TArray<FVector>>& Out) const;
 
 private:
 	struct FImpl;

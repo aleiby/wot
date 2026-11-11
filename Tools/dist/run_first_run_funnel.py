@@ -1436,6 +1436,16 @@ def _resolve_release(
     ):
         raise FunnelFailure("release source-snapshot receipt is malformed")
     _validate_digest(source.get("sha256"), "source-snapshot digest")
+    # Checked before the receipts below, whose rules may have changed since
+    # the release was built: a stale release needs a rebuild, not a diagnosis.
+    if require_current_source:
+        current = _current_source_snapshot()
+        if source != current:
+            raise FunnelFailure(
+                "release Source/Tools snapshot differs from the current tree; "
+                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
+                f"(release {source.get('sha256')}, current {current['sha256']})"
+            )
     neutral_support = _validate_neutral_support_proof(
         manifest.get("neutral_support_authority"))
     products = manifest.get("products")
@@ -1566,14 +1576,6 @@ def _resolve_release(
     _validate_zen_lifetime_proof(
         manifest.get("zen_lifetime"), manifest["platform"])
 
-    if require_current_source:
-        current = _current_source_snapshot()
-        if source != current:
-            raise FunnelFailure(
-                "release Source/Tools snapshot differs from the current tree; "
-                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
-                f"(release {source.get('sha256')}, current {current['sha256']})"
-            )
     authority_path = REPO / neutral_support["authority_relative_path"]
     if (not authority_path.is_file()
             or _sha256_file(authority_path)
@@ -2434,6 +2436,142 @@ def _enumerate_win_process_ids() -> list[int]:
         raise FunnelFailure("Win32_Process id list is invalid")
     # Win32_Process lists the System Idle Process as pid 0.
     return [pid for pid in value if pid != 0]
+
+
+FIREWALL_RULES_FORMAT = "wot-funnel-firewall-rules-v2"
+_FIREWALL_QUERY_ERRORS = (FunnelFailure, OSError, subprocess.SubprocessError,
+                          ValueError)
+
+
+def _list_firewall_rules() -> list[dict]:
+    """Every Windows Firewall rule's InstanceID and program path, by a
+    read-only query, as ``{"instance_id": ..., "program": ...}``.
+
+    Answering (or dismissing) a firewall prompt leaves rules that name the
+    prompting executable, so a new rule naming a cell's executable means that
+    cell raised a prompt. Nothing here creates, changes or removes a rule.
+    """
+    powershell = (Path(os.environ.get("SystemRoot", r"C:\Windows"))
+                  / "System32" / "WindowsPowerShell" / "v1.0"
+                  / "powershell.exe")
+    script = (
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+        "ConvertTo-Json -Compress -InputObject "
+        "@(Get-NetFirewallApplicationFilter -ErrorAction Stop | "
+        "ForEach-Object {@{InstanceID = [string]$_.InstanceID; "
+        "Program = [string]$_.Program}})")
+    result = subprocess.run(
+        [str(powershell), "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120)
+    if result.returncode:
+        raise FunnelFailure(
+            "cannot list Windows Firewall rules: "
+            + (result.stderr or result.stdout).strip())
+    try:
+        value = json.loads(result.stdout.strip() or "[]")
+    except json.JSONDecodeError as exc:
+        raise FunnelFailure("cannot decode the Windows Firewall rule list") from exc
+    if isinstance(value, dict):
+        value = [value]
+    if (not isinstance(value, list)
+            or any(not isinstance(rule, dict)
+                   or not isinstance(rule.get("InstanceID"), str)
+                   or not isinstance(rule.get("Program"), str)
+                   for rule in value)):
+        raise FunnelFailure("the Windows Firewall rule list is invalid")
+    return [{"instance_id": rule["InstanceID"], "program": rule["Program"]}
+            for rule in value]
+
+
+def _windows_program_is_under(program: str, root: str) -> bool:
+    """Case-insensitive Windows containment on whole path components.
+
+    Pure text (PureWindowsPath), so it behaves the same on every host. Rule
+    entries that are not absolute paths ("Any", "System", %SystemRoot%...) are
+    never under a cell.
+    """
+    candidate = PureWindowsPath(program)
+    parent = PureWindowsPath(root)
+    if not candidate.is_absolute() or not parent.is_absolute():
+        return False
+    candidate_parts = [part.casefold() for part in candidate.parts]
+    parent_parts = [part.casefold() for part in parent.parts]
+    return (len(candidate_parts) >= len(parent_parts)
+            and candidate_parts[:len(parent_parts)] == parent_parts)
+
+
+def _firewall_rule_key(rule: dict) -> tuple[str, str]:
+    return rule["instance_id"], rule["program"]
+
+
+def _firewall_rules_under(rules: Sequence[dict],
+                          cell_roots: Sequence[str]) -> list[dict]:
+    """The rules whose program sits under any of ``cell_roots``, sorted."""
+    under = {
+        _firewall_rule_key(rule): rule for rule in rules
+        if any(_windows_program_is_under(rule["program"], root)
+               for root in cell_roots)
+    }
+    return [under[key] for key in sorted(under)]
+
+
+def _snapshot_firewall_rules() -> dict:
+    """Every rule before the first cell launches, or the query's error.
+
+    The whole list is kept: the clients' install roots are known only after
+    they launch, so the matching happens when the run ends."""
+    try:
+        return {"error": None, "rules": _list_firewall_rules()}
+    except _FIREWALL_QUERY_ERRORS as exc:
+        return {"error": str(exc), "rules": None}
+
+
+def _firewall_rule_check(roots: Sequence[Path | str],
+                         before: dict) -> dict:
+    """The read-only firewall evidence for the cells under ``roots``: both
+    snapshots (only the rules under the cells) and the rules that are new
+    since ``before`` (None when either snapshot failed)."""
+    cell_roots = sorted({str(root) for root in roots})
+
+    def snapshot(rules: list[dict] | None, error: str | None) -> dict:
+        if error is not None or rules is None:
+            return {"error": error or "the rules were not read",
+                    "rules_examined": None, "rules_under_cells": None}
+        return {"error": None, "rules_examined": len(rules),
+                "rules_under_cells": _firewall_rules_under(rules, cell_roots)}
+
+    before_record = snapshot(before.get("rules"), before.get("error"))
+    try:
+        after_record = snapshot(_list_firewall_rules(), None)
+    except _FIREWALL_QUERY_ERRORS as exc:
+        after_record = snapshot(None, str(exc))
+    new = None
+    if before_record["error"] is None and after_record["error"] is None:
+        known = {_firewall_rule_key(rule)
+                 for rule in before_record["rules_under_cells"]}
+        new = [rule for rule in after_record["rules_under_cells"]
+               if _firewall_rule_key(rule) not in known]
+    return {
+        "format": FIREWALL_RULES_FORMAT,
+        "cell_roots": cell_roots,
+        "before": before_record,
+        "after": after_record,
+        "new_rules_under_cells": new,
+    }
+
+
+def _record_cell_firewall_rules(evidence: Path,
+                                roots: Sequence[Path | str],
+                                before: dict) -> dict:
+    """Write ``safety/firewall-rules.json``; ``passed`` is false when a rule
+    naming a program under a cell root appeared during the run, or when either
+    query failed (fail closed: the run cannot then prove it raised no prompt).
+    Rules from earlier runs under a reused work root are not this run's."""
+    record = _firewall_rule_check(roots, before)
+    record["passed"] = record["new_rules_under_cells"] == []
+    _atomic_write_json(evidence / "safety" / "firewall-rules.json", record)
+    return record
 
 
 def _path_is_under(path: str, root: Path) -> bool:
@@ -5090,8 +5228,17 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
             "format": "wot-real-mac-preferences-guard-v1",
             "scope": "whole-run", "unchanged": None,
         })
+    # Windows Firewall rules before the first launch: a reused work root
+    # keeps the rules earlier runs left, so only rules that are new by the end
+    # of this run count against it.
+    check_firewall = platform_name == "Win64" and bool(selected) and _IS_WINDOWS
+    firewall_before = _snapshot_firewall_rules() if check_firewall else None
 
     try:
+        if firewall_before is not None and firewall_before["error"] is not None:
+            raise FunnelFailure(
+                "SAFETY: cannot read the Windows Firewall rules before the "
+                f"first cell: {firewall_before['error']}")
         if args.installer:
             installer = args.installer.expanduser().resolve()
             receipt["installer"] = _verify_installer(installer)
@@ -5921,6 +6068,27 @@ def _run_acceptance(args: argparse.Namespace) -> dict:
                     raise FunnelFailure(
                         "SAFETY: real Mac data roots changed during the run "
                         f"(inventory: {real_profile_guard_path})")
+        if firewall_before is not None:
+            # Every cell tree lives under the scratch root; the launched
+            # clients' install roots are listed too. A rule naming any of
+            # them that was not there before the first launch means a cell
+            # raised a Windows Firewall prompt.
+            firewall = _record_cell_firewall_rules(
+                evidence,
+                [scratch, *sorted(set(_WIN_INSTALL_ROOTS.values()), key=str)],
+                firewall_before)
+            if not firewall["passed"]:
+                receipt["verdict"] = "fail"
+                receipt["decisions"].append(
+                    "SAFETY: a new Windows Firewall rule names a cell's "
+                    "program (a cell raised a firewall prompt), or a "
+                    "read-only rule query failed")
+                save()
+                if sys.exc_info()[0] is None:
+                    raise FunnelFailure(
+                        "SAFETY: new Windows Firewall rules name cell programs "
+                        "or the rules could not be read (evidence: "
+                        f"{evidence / 'safety' / 'firewall-rules.json'})")
         cleanup_failed = any(row.get("action") in {
             "terminated", "aborted-identity-change", "mac-cleanup-error",
             "observer-close-error",

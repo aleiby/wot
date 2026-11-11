@@ -32,7 +32,12 @@ python3 Tools/deck/deck.py probe <wot_path_probe.exe> --app-id <shortcut id> <pr
 python3 Tools/deck/deck.py cells <remote folder> --app-id <shortcut id>
 python3 Tools/deck/deck.py lock-cell <remote folder> --app-id <shortcut id>
 python3 Tools/deck/deck.py update-cell <remote folder> <release zip on the Deck> --app-id <shortcut id>
+python3 Tools/deck/deck.py install-cell [--case fresh|repair|fallback ...] [--allow-steam-shutdown] [--keep]
 ```
+
+`deploy` streams the folder (`tar -cf - . | ssh ... tar -xf -`, nothing is
+held in memory), then lists the Deck's copy and fails unless every local file
+is there with its size.
 
 `probe` copies the probe into the shortcut's Proton prefix, runs it with the
 given arguments (for example `env`, `walk <Windows path>`, `census <dir>`),
@@ -58,10 +63,34 @@ game.
   build configuration (already copied to the Deck), launches, and passes when
   that release runs and its trial is retired.
 
+### SteamOS installer cell
+
+`install-cell` runs the SteamOS installer (`installer/`, the
+`Install-WoT-Reborn.desktop` release asset built from this checkout) on the
+Deck through the asset's own bootstrap, into `~/wot-install-cell` instead of
+`~/Games/WoT Reborn` (`--target`). It needs the original installer in the
+Deck's `~/Downloads`, and Steam running.
+
+- **Isolation:** the program searches only `~/wot-install-cell/dl`
+  (`--installer-search-dir` replaces Downloads, Desktop and removable media),
+  which holds a hard link to the Downloads installer. Before and after every
+  case the cell checks that `~/Downloads/<installer>` still exists with the
+  pinned size; if it went missing, the case fails and the file is linked back
+  from the scratch folder before any cleanup.
+- **Cases:** `fresh` (Steam running: the shortcut must come from
+  `steamos-add-to-steam`, and Steam is never shut down), then `repair` (one
+  deleted `Game/` file comes back and `Data/` is kept). `fallback` shuts Steam
+  down and writes `shortcuts.vdf` itself, so it refuses to run without
+  `--allow-steam-shutdown`, which needs the Deck owner's OK.
+- **Cleanup** (unless `--keep`): the scratch folder and the scratch
+  shortcut's grid art and Proton prefix. Steam keeps the shortcut itself until
+  it is removed in the Steam UI, so the cell prints which one to remove.
+
 ## Tests
 
 ```
-PYTHONPATH=Tools/deck python3 -m unittest Tools.deck.test_deck Tools.deck.test_cells
+PYTHONPATH=Tools/deck python3 -m unittest Tools.deck.test_deck Tools.deck.test_cells Tools.deck.test_install_cell
+python3 -m unittest discover -s Tools/deck/installer -p "test_*.py"
 ```
 
 The tests fake SSH and need no Deck.

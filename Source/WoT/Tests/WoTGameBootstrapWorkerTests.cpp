@@ -61,6 +61,7 @@
 #include "WoTTestWorld.h"
 #include "WoTWorldMaterializerTestData.h"
 #include "WoTFrontEndTestData.h"
+#include "WoTInstallerReceiverTestSupport.h"
 #include "WoTBootstrapCore/ProfileSession.h"
 
 #include "../WoTPayloadSubsystem.h"
@@ -6907,6 +6908,895 @@ bool FWoTGameBootstrapWorkerSpecRememberedMalformed::RunTest(const FString&)
 			WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("remembered"))));
 	TestEqual(TEXT("the remembered file is the only one hashed"),
 		ControlChecked.Hashes, 1);
+	return !HasAnyErrors();
+}
+
+// ---------------------------------------------------------------------------
+// LAN installer receiving (spec B5, B6): the received location in the sweep,
+// and the receiver's life inside the original-game wait. Every transfer here
+// is loopback only.
+
+namespace
+{
+/** Every progress event of one phase, collected from the worker's thread. */
+struct FWoTGameBootstrapWorkerSpecEventLog
+{
+	void Add(const FWoTBootstrapProgressEvent& Event)
+	{
+		FScopeLock Lock(&Guard);
+		Events.Add(Event);
+	}
+
+	TArray<FWoTBootstrapProgressEvent> Snapshot() const
+	{
+		FScopeLock Lock(&Guard);
+		return Events;
+	}
+
+	int32 Num() const
+	{
+		FScopeLock Lock(&Guard);
+		return Events.Num();
+	}
+
+	/** The first event matching Predicate, if any. */
+	TOptional<FWoTBootstrapProgressEvent> Find(
+		TFunctionRef<bool(const FWoTBootstrapProgressEvent&)> Predicate) const
+	{
+		FScopeLock Lock(&Guard);
+		for (const FWoTBootstrapProgressEvent& Event : Events)
+		{
+			if (Predicate(Event))
+			{
+				return Event;
+			}
+		}
+		return {};
+	}
+
+	mutable FCriticalSection Guard;
+	TArray<FWoTBootstrapProgressEvent> Events;
+};
+
+TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase>
+WoTGameBootstrapWorkerSpecStartLoggedPhase(IWoTBootstrapWorker& Worker,
+	EWoTBootstrapPhase Phase, uint64 Epoch,
+	TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Log)
+{
+	TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+		MakeShared<FWoTGameBootstrapWorkerSpecPendingPhase>();
+	Worker.StartPhase(WoTGameBootstrapWorkerSpecRequest(Phase, Epoch),
+		[Log](FWoTBootstrapProgressEvent&& Event)
+		{
+			Log->Add(Event);
+		},
+		[Pending](FWoTBootstrapWorkerCompletion&& Completion)
+		{
+			Pending->Completion = MoveTemp(Completion);
+			Pending->bCompleted.Store(true);
+			Pending->Done->Trigger();
+		});
+	return Pending;
+}
+
+bool WoTGameBootstrapWorkerSpecWaitUntil(TFunctionRef<bool()> Done,
+	double Seconds = WoTGameBootstrapWorkerSpecHangSeconds)
+{
+	const double Deadline = FPlatformTime::Seconds() + Seconds;
+	while (FPlatformTime::Seconds() < Deadline)
+	{
+		if (Done())
+		{
+			return true;
+		}
+		FPlatformProcess::Sleep(0.005f);
+	}
+	return Done();
+}
+
+FWoTInstallerReceiverOverridesForTesting WoTGameBootstrapWorkerSpecReceiver(
+	TSharedRef<WoTReceiverSpec::FLog> Log, bool bStartsAutomatically)
+{
+	FWoTInstallerReceiverOverridesForTesting Overrides;
+	Overrides.Network = MakeShared<WoTReceiverSpec::FRecordingNetwork>(Log);
+	Overrides.bStartsAutomatically = bStartsAutomatically;
+	Overrides.FreeBytes = []() { return TOptional<uint64>(MAX_uint64); };
+	Overrides.PublishIntervalSeconds = 0.01;
+	return Overrides;
+}
+
+FString WoTGameBootstrapWorkerSpecReceivedFolder(const FString& UserStateRoot)
+{
+	return FPaths::Combine(UserStateRoot, TEXT("OriginalGame"));
+}
+
+FString WoTGameBootstrapWorkerSpecReceivedPath(const FString& UserStateRoot)
+{
+	return FPaths::Combine(WoTGameBootstrapWorkerSpecReceivedFolder(UserStateRoot),
+		WoTGameBootstrapWorkerSpecInstallerPins().Name);
+}
+
+int32 WoTGameBootstrapWorkerSpecPartFiles(const FString& UserStateRoot)
+{
+	TArray<FString> Found;
+	IFileManager::Get().FindFiles(Found, *FPaths::Combine(
+		WoTGameBootstrapWorkerSpecReceivedFolder(UserStateRoot), TEXT("*.part")),
+		true, false);
+	return Found.Num();
+}
+
+bool WoTGameBootstrapWorkerSpecIsCopyEvent(const FWoTBootstrapProgressEvent& Event)
+{
+	return Event.StageId.StartsWith(WoTInstallerCopyStagePrefix)
+		&& Event.CompletedBytes.IsSet();
+}
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceivedAccepted,
+	"WoT.Update.Worker.ReceivedInstaller.AcceptedSilently",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceivedAccepted::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	// A copy an earlier run received, a leftover partial copy beside it, and
+	// the installer in Downloads too: the received copy comes first.
+	if (!WoTGameBootstrapWorkerSpecSave(
+			WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot),
+			WoTGameBootstrapWorkerSpecInstallerBytes())
+		|| !WoTGameBootstrapWorkerSpecSave(FPaths::Combine(
+			WoTGameBootstrapWorkerSpecReceivedFolder(Fixture.UserStateRoot),
+			TEXT("leftover.part")), WoTGameBootstrapWorkerSpecAscii(TEXT("abc")))
+		|| !WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(Fixture.InstallRoot,
+			WoTGameBootstrapWorkerSpecInstallerBytes()))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!TestTrue(TEXT("the content check completes"),
+		WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("a received copy routes straight to extraction"),
+		Checked.NextPhase, EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestTrue(TEXT("it came from the received folder, before Downloads"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("original-game-detected"),
+			WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("received"))));
+	TestEqual(TEXT("a leftover partial copy is deleted once one is accepted"),
+		WoTGameBootstrapWorkerSpecPartFiles(Fixture.UserStateRoot), 0);
+	TestTrue(TEXT("the received copy itself stays"), IFileManager::Get().FileExists(
+		*WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot)));
+	TestEqual(TEXT("zero network"), Hops->Requests.Num(), 0);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceivedUnavailable,
+	"WoT.Update.Worker.ReceivedInstaller.UnavailableFallsThroughToDownloads",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceivedUnavailable::RunTest(const FString&)
+{
+	// The location fault hook and the unavailable-slot heartbeat both carry
+	// the received source; an unreadable received copy falls through to
+	// Downloads like any other location.
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	if (!WoTGameBootstrapWorkerSpecSave(
+			WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot),
+			WoTGameBootstrapWorkerSpecInstallerBytes())
+		|| !WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(Fixture.InstallRoot,
+			WoTGameBootstrapWorkerSpecInstallerBytes()))
+	{
+		return false;
+	}
+	TAtomic<int32> ReceivedProbes{0};
+	auto ReceivedFault = [&ReceivedProbes](EWoTInstallerSource Source,
+		const FString&) -> TOptional<FWoTBootstrapError>
+	{
+		if (Source != EWoTInstallerSource::Received)
+		{
+			return {};
+		}
+		++ReceivedProbes;
+		return MakeWoTBootstrapError(EWoTBootstrapError::Io,
+			TEXT("received denied"));
+	};
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(
+			Fixture.InstallRoot, Hops, {},
+			WoTGameBootstrapWorkerSpecAnnouncementUrl, {}, {}, {}, {}, {},
+			{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, ReceivedFault);
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked))
+	{
+		return false;
+	}
+	TestTrue(TEXT("the fault hook saw the received source"), ReceivedProbes.Load() > 0);
+	TestEqual(TEXT("still routes to extraction"), Checked.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestEqual(TEXT("an unreadable received copy changes no reason"),
+		Checked.OriginalGameNeededReason, EWoTOriginalGameNeededReason::Missing);
+	TestTrue(TEXT("its slot is recorded unavailable"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("installer-location-unavailable"),
+			FString::Printf(TEXT("source=received leaf=%s detail=Io"),
+				*WoTGameBootstrapWorkerSpecInstallerPins().Name)));
+	TestTrue(TEXT("Downloads supplies the installer"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("original-game-detected"),
+			WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("downloads"))));
+	TestTrue(TEXT("the received copy is untouched"), IFileManager::Get().FileExists(
+		*WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot)));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceivedBroken,
+	"WoT.Update.Worker.ReceivedInstaller.BrokenIsDeletedSilently",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceivedBroken::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	const FString ReceivedPath =
+		WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot);
+	if (!WoTGameBootstrapWorkerSpecSave(ReceivedPath,
+			WoTGameBootstrapWorkerSpecBadInstallerBytes()))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!TestTrue(TEXT("the content check completes"),
+		WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("a broken received copy leaves the original game needed"),
+		Checked.NextPhase, EWoTBootstrapPhase::OriginalGameNeeded);
+	TestEqual(TEXT("and never changes the reason"),
+		Checked.OriginalGameNeededReason, EWoTOriginalGameNeededReason::Missing);
+	TestFalse(TEXT("it is deleted"), IFileManager::Get().FileExists(*ReceivedPath));
+	TestTrue(TEXT("received-installer-deleted reason=hash"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("received-installer-deleted"), TEXT("reason=hash result=deleted")));
+
+	// While waiting: a short file there is broken too (the receiver only ever
+	// renames a complete, verified copy in), then a good one is accepted.
+	TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Log =
+		MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+		WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+			EWoTBootstrapPhase::OriginalGameNeeded, 3, Log);
+	// Files appear there the way the receiver places them: complete, by a
+	// rename, so a sweep never sees one half written.
+	const FString Incoming = FPaths::Combine(
+		WoTGameBootstrapWorkerSpecReceivedFolder(Fixture.UserStateRoot),
+		TEXT("incoming.tmp"));
+	auto Place = [&Incoming, &ReceivedPath](TConstArrayView<uint8> Bytes)
+	{
+		return WoTGameBootstrapWorkerSpecSave(Incoming, Bytes)
+			&& IFileManager::Get().Move(*ReceivedPath, *Incoming, false);
+	};
+	TArray<uint8> Short = WoTGameBootstrapWorkerSpecInstallerBytes();
+	Short.SetNum(4);
+	TestTrue(TEXT("a short file is placed"), Place(Short));
+	Worker->RequestOriginalGameRecheck();
+	TestTrue(TEXT("the short file is deleted"), WoTGameBootstrapWorkerSpecWaitUntil(
+		[&ReceivedPath]() { return !IFileManager::Get().FileExists(*ReceivedPath); }));
+	TestTrue(TEXT("received-installer-deleted reason=short"),
+		WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+			TEXT("received-installer-deleted"), TEXT("reason=short")));
+	TestTrue(TEXT("a good copy is placed"),
+		Place(WoTGameBootstrapWorkerSpecInstallerBytes()));
+	Worker->RequestOriginalGameRecheck();
+	if (!TestTrue(TEXT("the good copy is accepted"),
+		Pending->Done->Wait(FTimespan::FromSeconds(
+			WoTGameBootstrapWorkerSpecHangSeconds))))
+	{
+		Worker->CancelAndJoin();
+		return false;
+	}
+	TestEqual(TEXT("to extraction"), Pending->Completion.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestFalse(TEXT("the waiting reason never moved"), Log->Find(
+		[](const FWoTBootstrapProgressEvent& Event)
+		{
+			return Event.OriginalGameNeededReason.IsSet()
+				&& Event.OriginalGameNeededReason.GetValue()
+					!= EWoTOriginalGameNeededReason::Missing;
+		}).IsSet());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceivedFolderChanged,
+	"WoT.Update.Worker.ReceivedInstaller.ChangedFolderIsDroppedNotFatal",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceivedFolderChanged::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	const FString Folder =
+		WoTGameBootstrapWorkerSpecReceivedFolder(Fixture.UserStateRoot);
+	if (!IFileManager::Get().MakeDirectory(*Folder, true))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked)
+		|| !TestEqual(TEXT("waiting"), Checked.NextPhase,
+			EWoTBootstrapPhase::OriginalGameNeeded))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Log =
+		MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+		WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+			EWoTBootstrapPhase::OriginalGameNeeded, 3, Log);
+	// Another folder takes its place, holding a valid installer: it is a
+	// different object, so it is never searched, and nothing fails.
+	TestTrue(TEXT("folder removed"), IFileManager::Get().DeleteDirectory(*Folder, false, true));
+	TestTrue(TEXT("a replacement with an installer"), WoTGameBootstrapWorkerSpecSave(
+		WoTGameBootstrapWorkerSpecReceivedPath(Fixture.UserStateRoot),
+		WoTGameBootstrapWorkerSpecInstallerBytes()));
+	Worker->RequestOriginalGameRecheck();
+	TestTrue(TEXT("the change is recorded as unavailable"),
+		WoTGameBootstrapWorkerSpecWaitUntil([&Fixture]()
+		{
+			return WoTGameBootstrapWorkerSpecHeartbeatHas(Fixture.UserStateRoot,
+				TEXT("installer-location-unavailable"), TEXT("source=received"));
+		}));
+	const int32 Seen = Log->Num();
+	TestTrue(TEXT("the wait keeps polling"), WoTGameBootstrapWorkerSpecWaitUntil(
+		[&Log, Seen]() { return Log->Num() >= Seen + 5; }));
+	TestFalse(TEXT("not fatal, and the replacement is not used"),
+		Pending->bCompleted.Load());
+	TestTrue(TEXT("Downloads still works"), WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(
+		Fixture.InstallRoot, WoTGameBootstrapWorkerSpecInstallerBytes()));
+	Worker->RequestOriginalGameRecheck();
+	if (!TestTrue(TEXT("the Downloads installer is accepted"),
+		Pending->Done->Wait(FTimespan::FromSeconds(
+			WoTGameBootstrapWorkerSpecHangSeconds))))
+	{
+		Worker->CancelAndJoin();
+		return false;
+	}
+	TestTrue(TEXT("succeeded"), Pending->Completion.bSucceeded);
+	TestEqual(TEXT("to extraction"), Pending->Completion.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestTrue(TEXT("from Downloads"), WoTGameBootstrapWorkerSpecHeartbeatHas(
+		Fixture.UserStateRoot, TEXT("original-game-detected"),
+		WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("downloads"))));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceiverDormancy,
+	"WoT.Update.Worker.InstallerReceiver.Dormancy",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceiverDormancy::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	const FString Folder =
+		WoTGameBootstrapWorkerSpecReceivedFolder(Fixture.UserStateRoot);
+	// Windows and Mac: no socket before the original game is needed, and none
+	// at that screen until the player's click.
+	{
+		TSharedRef<WoTReceiverSpec::FLog> Log = MakeShared<WoTReceiverSpec::FLog>();
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+		Worker->SetInstallerReceiverForTesting(
+			WoTGameBootstrapWorkerSpecReceiver(Log, /*bStartsAutomatically*/ false));
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Updates;
+		FWoTBootstrapWorkerCompletion Checked;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingGameUpdates, 2, Updates)
+			|| !WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 3, Checked)
+			|| !TestEqual(TEXT("waiting"), Checked.NextPhase,
+				EWoTBootstrapPhase::OriginalGameNeeded))
+		{
+			return false;
+		}
+		TestEqual(TEXT("no socket before the original game is needed"),
+			Log->DatagramsCreated.Load() + Log->StreamsCreated.Load(), 0);
+		TestFalse(TEXT("no received folder before a receiver"),
+			IFileManager::Get().DirectoryExists(*Folder));
+		TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Events =
+			MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+			WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+				EWoTBootstrapPhase::OriginalGameNeeded, 4, Events);
+		TestTrue(TEXT("the wait polls"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Events]() { return Events->Num() >= 10; }));
+		TestEqual(TEXT("no socket at the screen until the button"),
+			Log->DatagramsCreated.Load() + Log->StreamsCreated.Load(), 0);
+		TestFalse(TEXT("still no folder"), IFileManager::Get().DirectoryExists(*Folder));
+		const TArray<FWoTBootstrapProgressEvent> Before = Events->Snapshot();
+		TestTrue(TEXT("the screen is told: off, with a button"),
+			Before.Num() > 0 && Before.Last().InstallerCopy.IsSet()
+			&& Before.Last().InstallerCopy->Status == EWoTInstallerCopyStatus::Off
+			&& !Before.Last().InstallerCopy->bAutomatic);
+		Worker->RequestInstallerReceive();
+		TestTrue(TEXT("the button starts the receiver"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Log]() { return Log->DiscoveryPort.Load() != 0; }));
+		TestEqual(TEXT("one discovery socket"), Log->DatagramsCreated.Load(), 1);
+		TestTrue(TEXT("the folder exists before it listens"),
+			IFileManager::Get().DirectoryExists(*Folder));
+		TestTrue(TEXT("the screen is told it listens"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Events]()
+			{
+				return Events->Find([](const FWoTBootstrapProgressEvent& Event)
+				{
+					return Event.InstallerCopy.IsSet()
+						&& Event.InstallerCopy->Status == EWoTInstallerCopyStatus::Waiting;
+				}).IsSet();
+			}));
+		Worker->RequestInstallerReceive();
+		FPlatformProcess::Sleep(0.05f);
+		TestEqual(TEXT("a second click starts nothing more"),
+			Log->DatagramsCreated.Load(), 1);
+		Worker->CancelAndJoin();
+		TestEqual(TEXT("CancelAndJoin closes every socket"), Log->Open.Load(), 0);
+		TestFalse(TEXT("the cancelled wait never completes"),
+			Pending->bCompleted.Load());
+	}
+	// Wine on Linux (Proton): it listens by itself at that screen, still
+	// never before it.
+	{
+		TSharedRef<WoTReceiverSpec::FLog> Log = MakeShared<WoTReceiverSpec::FLog>();
+		TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+			MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+		TUniquePtr<FWoTGameBootstrapWorker> Worker =
+			WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+		Worker->SetInstallerReceiverForTesting(
+			WoTGameBootstrapWorkerSpecReceiver(Log, /*bStartsAutomatically*/ true));
+		if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker, 10))
+		{
+			return false;
+		}
+		FWoTBootstrapWorkerCompletion Checked;
+		if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+				EWoTBootstrapPhase::CheckingOriginalGameData, 11, Checked))
+		{
+			return false;
+		}
+		TestEqual(TEXT("automatic: still no socket before the screen"),
+			Log->DatagramsCreated.Load() + Log->StreamsCreated.Load(), 0);
+		TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Events =
+			MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+		TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+			WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+				EWoTBootstrapPhase::OriginalGameNeeded, 12, Events);
+		TestTrue(TEXT("it listens without a click"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Log]() { return Log->DiscoveryPort.Load() != 0; }));
+		TestTrue(TEXT("the screen is told: automatic"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Events]()
+			{
+				return Events->Find([](const FWoTBootstrapProgressEvent& Event)
+				{
+					return Event.InstallerCopy.IsSet() && Event.InstallerCopy->bAutomatic
+						&& Event.InstallerCopy->Status == EWoTInstallerCopyStatus::Waiting;
+				}).IsSet();
+			}));
+		Worker->RequestInstallerReceive();
+		FPlatformProcess::Sleep(0.05f);
+		TestEqual(TEXT("one receiver"), Log->DatagramsCreated.Load(), 1);
+		Worker->CancelAndJoin();
+		TestEqual(TEXT("closed on CancelAndJoin"), Log->Open.Load(), 0);
+		TestFalse(TEXT("cancelled"), Pending->bCompleted.Load());
+	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceiverProgress,
+	"WoT.Update.Worker.InstallerReceiver.ProgressAcrossADamagedCopy",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceiverProgress::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	// The screen's own model, at the same epoch as the worker's wait.
+	FWoTBootstrapViewModel Model;
+	Model.TransitionTo(EWoTBootstrapPhase::CheckingGameUpdates);
+	Model.TransitionTo(EWoTBootstrapPhase::CheckingOriginalGameData);
+	Model.TransitionTo(EWoTBootstrapPhase::OriginalGameNeeded);
+	const uint64 WaitEpoch = Model.Snapshot().OperationEpoch;
+
+	TSharedRef<WoTReceiverSpec::FLog> Log = MakeShared<WoTReceiverSpec::FLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+	Worker->SetInstallerReceiverForTesting(
+		WoTGameBootstrapWorkerSpecReceiver(Log, /*bStartsAutomatically*/ true));
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Events =
+		MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+		WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+			EWoTBootstrapPhase::OriginalGameNeeded, WaitEpoch, Events);
+	ON_SCOPE_EXIT
+	{
+		Worker->CancelAndJoin();
+	};
+	if (!TestTrue(TEXT("listening"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Log]() { return Log->DiscoveryPort.Load() != 0; })))
+	{
+		return false;
+	}
+	const uint16 Port = static_cast<uint16>(Log->DiscoveryPort.Load());
+	const FWoTInstallerAcquisitionPins Pins = WoTGameBootstrapWorkerSpecInstallerPins();
+	const TArray<uint8> Good = WoTGameBootstrapWorkerSpecInstallerBytes();
+	const TArray<uint8> Bad = WoTGameBootstrapWorkerSpecBadInstallerBytes();
+	auto Idle = []() { FPlatformProcess::Sleep(0.001f); };
+	auto Slice = [](const TArray<uint8>& Bytes, int32 From, int32 To)
+	{
+		return TArray<uint8>(Bytes.GetData() + From, To - From);
+	};
+
+	// Copy 1 arrives damaged, after its progress was on screen.
+	FString FirstStage;
+	{
+		WoTReceiverSpec::FPeer Peer(21);
+		TOptional<FWoTShareRequest> Request;
+		if (!TestTrue(TEXT("first peer"), Peer.Open()))
+		{
+			return false;
+		}
+		Request = Peer.OfferAndAwaitRequest(Port, Pins.Size, Pins.Sha256, Idle);
+		if (!TestTrue(TEXT("first REQUEST"), Request.IsSet())
+			|| !TestTrue(TEXT("connect"), Peer.Connect(Request->TcpPort))
+			|| !TestTrue(TEXT("header"), Peer.SendHeader(Request->Token, 0,
+				Pins.Size, Idle))
+			|| !TestTrue(TEXT("half"), Peer.Stream(Slice(Bad, 0, 4), Idle)))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the first copy's half is published"),
+			WoTGameBootstrapWorkerSpecWaitUntil([&Events]()
+			{
+				return Events->Find([](const FWoTBootstrapProgressEvent& Event)
+				{
+					return WoTGameBootstrapWorkerSpecIsCopyEvent(Event)
+						&& Event.CompletedBytes.GetValue() == 4;
+				}).IsSet();
+			}));
+		const TOptional<FWoTBootstrapProgressEvent> Half = Events->Find(
+			[](const FWoTBootstrapProgressEvent& Event)
+			{
+				return WoTGameBootstrapWorkerSpecIsCopyEvent(Event);
+			});
+		if (Half.IsSet())
+		{
+			FirstStage = Half->StageId;
+			TestEqual(TEXT("its total is the pinned size"), Half->TotalBytes.Get(0),
+				Pins.Size);
+			TestTrue(TEXT("its state says copying, from whom"),
+				Half->InstallerCopy.IsSet()
+				&& Half->InstallerCopy->Status == EWoTInstallerCopyStatus::Copying
+				&& Half->InstallerCopy->PeerLabel == WoTInstallerShare::LabelWindowsPC);
+		}
+		if (!TestTrue(TEXT("the rest"), Peer.Stream(Slice(Bad, 4, 8), Idle)))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the damaged copy is published"),
+			WoTGameBootstrapWorkerSpecWaitUntil([&Events]()
+			{
+				return Events->Find([](const FWoTBootstrapProgressEvent& Event)
+				{
+					return Event.InstallerCopy.IsSet()
+						&& Event.InstallerCopy->Status == EWoTInstallerCopyStatus::Damaged;
+				}).IsSet();
+			}));
+	}
+
+	// Copy 2 starts again from zero under a new stage, and completes.
+	{
+		WoTReceiverSpec::FPeer Peer(22);
+		if (!TestTrue(TEXT("second peer"), Peer.Open()))
+		{
+			return false;
+		}
+		const TOptional<FWoTShareRequest> Request =
+			Peer.OfferAndAwaitRequest(Port, Pins.Size, Pins.Sha256, Idle);
+		if (!TestTrue(TEXT("second REQUEST"), Request.IsSet()))
+		{
+			return false;
+		}
+		TestEqual(TEXT("the damaged bytes are not resumed"), Request->ResumeOffset,
+			static_cast<uint64>(0));
+		if (!TestTrue(TEXT("connect"), Peer.Connect(Request->TcpPort))
+			|| !TestTrue(TEXT("header"), Peer.SendHeader(Request->Token, 0,
+				Pins.Size, Idle))
+			|| !TestTrue(TEXT("a quarter"), Peer.Stream(Slice(Good, 0, 2), Idle)))
+		{
+			return false;
+		}
+		TestTrue(TEXT("the second copy restarts at a quarter"),
+			WoTGameBootstrapWorkerSpecWaitUntil([&Events, &FirstStage]()
+			{
+				return Events->Find([&FirstStage](const FWoTBootstrapProgressEvent& Event)
+				{
+					return WoTGameBootstrapWorkerSpecIsCopyEvent(Event)
+						&& Event.StageId != FirstStage
+						&& Event.CompletedBytes.GetValue() == 2;
+				}).IsSet();
+			}));
+		if (!TestTrue(TEXT("the rest"), Peer.Stream(Slice(Good, 2, 8), Idle)))
+		{
+			return false;
+		}
+		if (!TestTrue(TEXT("the received copy completes the wait"),
+			Pending->Done->Wait(FTimespan::FromSeconds(
+				WoTGameBootstrapWorkerSpecHangSeconds))))
+		{
+			return false;
+		}
+	}
+	TestTrue(TEXT("succeeded"), Pending->Completion.bSucceeded);
+	TestEqual(TEXT("to extraction"), Pending->Completion.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestTrue(TEXT("from the received folder"), WoTGameBootstrapWorkerSpecHeartbeatHas(
+		Fixture.UserStateRoot, TEXT("original-game-detected"),
+		WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("received"))));
+	TestTrue(TEXT("the damaged copy was recorded"), WoTGameBootstrapWorkerSpecHeartbeatHas(
+		Fixture.UserStateRoot, TEXT("lan-receive-failed"), TEXT("reason=damaged")));
+	TestTrue(TEXT("the good one too"), WoTGameBootstrapWorkerSpecHeartbeatHas(
+		Fixture.UserStateRoot, TEXT("lan-receive-verified")));
+	TestEqual(TEXT("no .part is left"),
+		WoTGameBootstrapWorkerSpecPartFiles(Fixture.UserStateRoot), 0);
+	TestEqual(TEXT("the receiver is gone with the wait"), Log->Open.Load(), 0);
+	TestEqual(TEXT("it never wrote to a data connection"),
+		Log->ConnectionSends.Load(), 0);
+
+	// One publisher: the screen's model takes every event in order, the
+	// second copy's lower byte count included.
+	const TArray<FWoTBootstrapProgressEvent> Published = Events->Snapshot();
+	int32 Accepted = 0;
+	bool bSawFirstHalf = false;
+	bool bSawRestart = false;
+	for (const FWoTBootstrapProgressEvent& Event : Published)
+	{
+		FWoTBootstrapProgressEvent Copy = Event;
+		if (!Model.UpdateProgress(MoveTemp(Copy)))
+		{
+			AddError(FString::Printf(TEXT("the screen refused stage '%s' bytes %llu"),
+				*Event.StageId, static_cast<unsigned long long>(
+					Event.CompletedBytes.Get(0))));
+			continue;
+		}
+		++Accepted;
+		const FWoTBootstrapSnapshot Snapshot = Model.Snapshot();
+		if (Snapshot.StageId == FirstStage && Snapshot.CompletedBytes.Get(0) == 4)
+		{
+			bSawFirstHalf = true;
+		}
+		if (bSawFirstHalf && !FirstStage.IsEmpty() && Snapshot.StageId != FirstStage
+			&& Snapshot.StageId.StartsWith(WoTInstallerCopyStagePrefix)
+			&& Snapshot.CompletedBytes.Get(0) == 2)
+		{
+			bSawRestart = true;
+			TestEqual(TEXT("the bar restarts with the copy"),
+				Snapshot.PhaseFraction.Get(-1.0f), 0.25f);
+		}
+		TestEqual(TEXT("the reason stays silent"), Snapshot.OriginalGameNeededReason,
+			EWoTOriginalGameNeededReason::Missing);
+	}
+	TestEqual(TEXT("every event is accepted"), Accepted, Published.Num());
+	TestTrue(TEXT("the first copy showed half"), bSawFirstHalf);
+	TestTrue(TEXT("the second copy restarted from below it"), bSawRestart);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FWoTGameBootstrapWorkerSpecReceiverPhaseExit,
+	"WoT.Update.Worker.InstallerReceiver.PhaseExitStopsTheListener",
+	WoTGameBootstrapWorkerSpecFlags)
+
+bool FWoTGameBootstrapWorkerSpecReceiverPhaseExit::RunTest(const FString&)
+{
+	FWoTGameBootstrapWorkerSpecFixture Fixture;
+	if (!Fixture.Initialize(*this))
+	{
+		return false;
+	}
+	SetWoTBootstrapHeartbeatRootForTesting(Fixture.UserStateRoot);
+	ON_SCOPE_EXIT
+	{
+		SetWoTBootstrapHeartbeatRootForTesting(FString());
+	};
+	TSharedRef<WoTReceiverSpec::FLog> Log = MakeShared<WoTReceiverSpec::FLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecHopState> Hops =
+		MakeShared<FWoTGameBootstrapWorkerSpecHopState>();
+	TUniquePtr<FWoTGameBootstrapWorker> Worker =
+		WoTGameBootstrapWorkerSpecMakeWorker(Fixture.InstallRoot, Hops);
+	Worker->SetInstallerReceiverForTesting(
+		WoTGameBootstrapWorkerSpecReceiver(Log, /*bStartsAutomatically*/ false));
+	if (!WoTGameBootstrapWorkerSpecEstablish(*this, *Worker))
+	{
+		return false;
+	}
+	FWoTBootstrapWorkerCompletion Checked;
+	if (!WoTGameBootstrapWorkerSpecRunPhase(*Worker,
+			EWoTBootstrapPhase::CheckingOriginalGameData, 2, Checked))
+	{
+		return false;
+	}
+	TSharedRef<FWoTGameBootstrapWorkerSpecEventLog> Events =
+		MakeShared<FWoTGameBootstrapWorkerSpecEventLog>();
+	TSharedRef<FWoTGameBootstrapWorkerSpecPendingPhase> Pending =
+		WoTGameBootstrapWorkerSpecStartLoggedPhase(*Worker,
+			EWoTBootstrapPhase::OriginalGameNeeded, 3, Events);
+	ON_SCOPE_EXIT
+	{
+		Worker->CancelAndJoin();
+	};
+	Worker->RequestInstallerReceive();
+	if (!TestTrue(TEXT("listening after the button"), WoTGameBootstrapWorkerSpecWaitUntil(
+			[&Log]() { return Log->DiscoveryPort.Load() != 0; })))
+	{
+		return false;
+	}
+	const uint16 Port = static_cast<uint16>(Log->DiscoveryPort.Load());
+	// A copy is mid-way, with a stale partial copy beside it, when the
+	// installer shows up in Downloads.
+	const FWoTInstallerAcquisitionPins Pins = WoTGameBootstrapWorkerSpecInstallerPins();
+	const TArray<uint8> Good = WoTGameBootstrapWorkerSpecInstallerBytes();
+	auto Idle = []() { FPlatformProcess::Sleep(0.001f); };
+	WoTReceiverSpec::FPeer Peer(31);
+	if (!TestTrue(TEXT("peer"), Peer.Open()))
+	{
+		return false;
+	}
+	const TOptional<FWoTShareRequest> Request =
+		Peer.OfferAndAwaitRequest(Port, Pins.Size, Pins.Sha256, Idle);
+	if (!TestTrue(TEXT("REQUEST"), Request.IsSet())
+		|| !TestTrue(TEXT("connect"), Peer.Connect(Request->TcpPort))
+		|| !TestTrue(TEXT("header"), Peer.SendHeader(Request->Token, 0, Pins.Size, Idle))
+		|| !TestTrue(TEXT("half"), Peer.Stream(
+			TArray<uint8>(Good.GetData(), 4), Idle)))
+	{
+		return false;
+	}
+	TestTrue(TEXT("copying"), WoTGameBootstrapWorkerSpecWaitUntil([&Events]()
+	{
+		return Events->Find([](const FWoTBootstrapProgressEvent& Event)
+		{
+			return WoTGameBootstrapWorkerSpecIsCopyEvent(Event)
+				&& Event.CompletedBytes.GetValue() == 4;
+		}).IsSet();
+	}));
+	TestTrue(TEXT("a stale partial copy"), WoTGameBootstrapWorkerSpecSave(FPaths::Combine(
+		WoTGameBootstrapWorkerSpecReceivedFolder(Fixture.UserStateRoot),
+		TEXT("stale.part")), WoTGameBootstrapWorkerSpecAscii(TEXT("ab"))));
+	TestTrue(TEXT("the installer lands in Downloads"),
+		WoTGameBootstrapWorkerSpecSaveDownloadsInstaller(Fixture.InstallRoot, Good));
+	Worker->RequestOriginalGameRecheck();
+	if (!TestTrue(TEXT("the Downloads installer ends the wait"),
+		Pending->Done->Wait(FTimespan::FromSeconds(
+			WoTGameBootstrapWorkerSpecHangSeconds))))
+	{
+		return false;
+	}
+	TestEqual(TEXT("to extraction"), Pending->Completion.NextPhase,
+		EWoTBootstrapPhase::ExtractingOriginalGame);
+	TestTrue(TEXT("from Downloads"), WoTGameBootstrapWorkerSpecHeartbeatHas(
+		Fixture.UserStateRoot, TEXT("original-game-detected"),
+		WoTGameBootstrapWorkerSpecDetectedFrom(TEXT("downloads"))));
+	TestEqual(TEXT("leaving the phase closes every socket"), Log->Open.Load(), 0);
+	TestTrue(TEXT("the discovery port is free"), WoTReceiverSpec::PortIsFree(Port));
+	bool bClosed = false;
+	TestEqual(TEXT("nothing came back on the copy's connection"),
+		Peer.BytesFromReceiver(bClosed, 2.0), 0);
+	TestTrue(TEXT("and it was closed"), bClosed);
+	TestEqual(TEXT("every partial copy is deleted once one is accepted"),
+		WoTGameBootstrapWorkerSpecPartFiles(Fixture.UserStateRoot), 0);
 	return !HasAnyErrors();
 }
 

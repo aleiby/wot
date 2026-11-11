@@ -5,6 +5,8 @@
 #include "WoTFrontEnd.h"
 #include "WoTGameInstance.generated.h"
 
+class FWoTControllerUIInputRegistration;
+
 // The menu world is intentionally controller-owned. Persistence belongs only
 // to UWoTPreferencesSubsystem; this object retains a non-config editor/test
 // fallback and a runtime-only cache override for legacy fixture construction.
@@ -14,6 +16,11 @@ class UWoTGameInstance : public UGameInstance
 	GENERATED_BODY()
 
 public:
+	// Registers the controller UI input preprocessor for this instance's game
+	// viewport (not on dedicated servers) and removes it at shutdown.
+	virtual void Init() override;
+	virtual void Shutdown() override;
+
 	EWoTPlayerFaction GetSelectedFaction() const;
 	EWoTPlayerSkinColor GetSelectedSkinColor() const;
 	EWoTPlayerSkinColor GetCitadelSkinColor() const;
@@ -33,6 +40,8 @@ private:
 	EWoTPlayerSkinColor SelectedSkinColor = EWoTPlayerSkinColor::Base;
 	EWoTPlayerSkinColor CitadelSkinColor = EWoTPlayerSkinColor::Base;
 	FString PlayerName;
+
+	TSharedPtr<FWoTControllerUIInputRegistration> ControllerUIInput;
 
 	// Non-persistent compatibility seam used by existing cache fixtures. Empty
 	// selects <ProjectSavedDir>/PayloadCache.
