@@ -3,14 +3,16 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "WoTAngrealGuide.h"
+#include "WoTOnboardingHints.h"
 
 #include "UObject/Package.h"
+#include "UObject/StrongObjectPtr.h"
 
 #include <initializer_list>
 
 // Synthetic fixtures throughout: invented class names and invented titles
 // only (the same fixture vocabulary as test_import_angreal_guide.py). The
-// real imported asset is touched solely by the load spec below, which asserts
+// real compiled rows are touched solely by the load spec below, which asserts
 // identifiers and counts, never retail prose.
 
 namespace
@@ -40,7 +42,7 @@ UWoTAngrealGuide* WoTOnboardingMakeFixtureGuide()
 	EmberLob.Roles = {FName(TEXT("Combat")), FName(TEXT("Offensive"))};
 	EmberLob.MaxInitialCharges = 4;
 	EmberLob.MaxCharges = 9;
-	EmberLob.HintText = TEXT("{title} - {counter} quenches it.");
+	EmberLob.HintText = TEXT("{counter:CinderWard} quenches it.");
 	Guide->Rows.Add(EmberLob);
 	Guide->Rows.Add(WoTOnboardingMakeRow(TEXT("EmberLobGreater"), {}));
 	Guide->Rows.Add(WoTOnboardingMakeRow(TEXT("CinderWard"),
@@ -48,27 +50,6 @@ UWoTAngrealGuide* WoTOnboardingMakeFixtureGuide()
 	Guide->Rows.Add(WoTOnboardingMakeRow(TEXT("BounceWard"),
 		{TEXT("EmberLob")}));
 	return Guide;
-}
-
-FString WoTOnboardingFixtureTitle(const FWoTAngrealGuideRow& Row)
-{
-	// The invented runtime titles the resolver seam would supply. EmberLob's
-	// title is a strict substring of EmberLobGreater's, which is what the
-	// longest-match rule exists for.
-	if (Row.ClassName == FName(TEXT("EmberLob")))
-	{
-		return TEXT("Ember Lob");
-	}
-	if (Row.ClassName == FName(TEXT("EmberLobGreater")))
-	{
-		return TEXT("Greater Ember Lob");
-	}
-	if (Row.ClassName == FName(TEXT("CinderWard")))
-	{
-		return TEXT("Cinder Ward");
-	}
-	// BounceWard deliberately resolves no title (absent retail text).
-	return FString();
 }
 } // namespace
 
@@ -93,47 +74,11 @@ bool FWoTOnboardingGuideFindByClassNameSpec::RunTest(const FString&)
 	TestEqual(TEXT("initial charges"), Row->MaxInitialCharges, 4);
 	TestEqual(TEXT("max charges"), Row->MaxCharges, 9);
 	TestEqual(TEXT("hint text"), Row->HintText,
-		FString(TEXT("{title} - {counter} quenches it.")));
+		FString(TEXT("{counter:CinderWard} quenches it.")));
 	TestNull(TEXT("unknown class finds nothing"),
 		Guide->FindByClassName(FName(TEXT("NeverARow"))));
 	TestNull(TEXT("NAME_None finds nothing"),
 		Guide->FindByClassName(NAME_None));
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideFindByTitleInSpec,
-	"WoT.Onboarding.GuideFindByTitleIn", WoTOnboardingGuideFlags)
-
-bool FWoTOnboardingGuideFindByTitleInSpec::RunTest(const FString&)
-{
-	UWoTAngrealGuide* Guide = WoTOnboardingMakeFixtureGuide();
-	const auto Resolve = [](const FWoTAngrealGuideRow& Row)
-	{
-		return WoTOnboardingFixtureTitle(Row);
-	};
-
-	const FWoTAngrealGuideRow* Longest = Guide->FindByTitleIn(
-		TEXT("Wanderer was slain by Greater Ember Lob."), Resolve);
-	if (TestNotNull(TEXT("longest contained title matches"), Longest))
-	{
-		// "Ember Lob" is contained too; the longer title names the line.
-		TestEqual(TEXT("longest match wins"), Longest->ClassName,
-			FName(TEXT("EmberLobGreater")));
-	}
-
-	const FWoTAngrealGuideRow* Folded = Guide->FindByTitleIn(
-		TEXT("wanderer was slain by CINDER WARD."), Resolve);
-	if (TestNotNull(TEXT("match is case-insensitive"), Folded))
-	{
-		TestEqual(TEXT("case-folded match"), Folded->ClassName,
-			FName(TEXT("CinderWard")));
-	}
-
-	TestNull(TEXT("text naming no title matches nothing"),
-		Guide->FindByTitleIn(TEXT("Wanderer fell from a ledge."), Resolve));
-	TestNull(TEXT("rows resolving empty titles never match"),
-		Guide->FindByTitleIn(TEXT("Anything at all."),
-			[](const FWoTAngrealGuideRow&) { return FString(); }));
 	return true;
 }
 
@@ -161,29 +106,65 @@ bool FWoTOnboardingGuideCounteredBySpec::RunTest(const FString&)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideAssetLoadSpec,
-	"WoT.Onboarding.GuideAssetLoad", WoTOnboardingGuideFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideCompiledRowsSpec,
+	"WoT.Onboarding.GuideCompiledRows", WoTOnboardingGuideFlags)
 
-bool FWoTOnboardingGuideAssetLoadSpec::RunTest(const FString&)
+bool FWoTOnboardingGuideCompiledRowsSpec::RunTest(const FString&)
 {
-	// Skip semantics: a tree whose import pipeline has not run carries no
-	// guide package, and Load() answers null quietly. That is a pass — the
-	// spec pins the asset only where it exists.
-	UWoTAngrealGuide* Guide = UWoTAngrealGuide::Load();
-	if (!Guide)
+	// No skip: the rows are compiled into the plugin, so every build (the
+	// guarded one included) carries them. The pins mirror the generator's
+	// (test_import_angreal_guide.py): the roster floor and the Fireball row.
+	const TStrongObjectPtr<UWoTAngrealGuide> Guide(UWoTAngrealGuide::Load());
+	if (!TestNotNull(TEXT("the compiled rows parse"), Guide.Get()))
 	{
-		AddInfo(FString::Printf(
-			TEXT("%s is not imported in this tree; skipping the content pins."),
-			UWoTAngrealGuide::AssetPath()));
-		return true;
+		return false;
 	}
-	TestTrue(TEXT("imported guide carries the roster"), Guide->Rows.Num() >= 25);
-	TestNotNull(TEXT("imported guide resolves the fireball row"),
-		Guide->FindByClassName(FName(TEXT("AngrealInvFireball"))));
-	return true;
+	TestTrue(TEXT("the compiled guide carries the roster"),
+		Guide->Rows.Num() >= 25);
+	const TStrongObjectPtr<UWoTAngrealGuide> Second(UWoTAngrealGuide::Load());
+	TestTrue(TEXT("each load is a fresh object"),
+		Second.IsValid() && Second.Get() != Guide.Get());
+	const FWoTAngrealGuideRow* Fireball =
+		Guide->FindByClassName(FName(TEXT("AngrealInvFireball")));
+	if (!TestNotNull(TEXT("the compiled guide resolves the fireball row"),
+		Fireball))
+	{
+		return false;
+	}
+	TestEqual(TEXT("fireball's C++ class"), Fireball->CppClass,
+		FName(TEXT("WoTAngrealInvFireball")));
+	TestEqual(TEXT("fireball is fire"), Fireball->Elements,
+		TArray<FName>{FName(TEXT("Fire"))});
+	TestEqual(TEXT("fireball is common"), Fireball->Rarity,
+		FName(TEXT("Common")));
+	TestEqual(TEXT("fireball's starting charges"), Fireball->MaxInitialCharges,
+		20);
+	TestEqual(TEXT("fireball's charge cap"), Fireball->MaxCharges, 35);
+	TestEqual(TEXT("each fireball cast spends a charge"), Fireball->ChargeCost, 1);
+	const FWoTAngrealGuideRow* AirPulse =
+		Guide->FindByClassName(FName(TEXT("AngrealInvAirBurst")));
+	if (TestNotNull(TEXT("the compiled guide resolves the air pulse row"),
+		AirPulse))
+	{
+		TestEqual(TEXT("air pulse never runs down"), AirPulse->ChargeCost, 0);
+	}
+	const FWoTAngrealGuideRow* Counter =
+		WoTOnboardingHints::HintCounter(*Guide, *Fireball);
+	if (TestNotNull(TEXT("fireball's hint names a counter the rows back"),
+		Counter))
+	{
+		TestTrue(TEXT("that counter counters fireball"),
+			Counter->Counters.Contains(Fireball->ClassName));
+	}
+	const TStrongObjectPtr<UWoTAngrealGuide> Reparsed(
+		NewObject<UWoTAngrealGuide>(GetTransientPackage()));
+	const FString Exported = Guide->ExportRowsAsJson();
+	TestEqual(TEXT("the compiled rows re-parse from their own export"),
+		Reparsed->ImportRowsFromJson(Exported), FString());
+	TestEqual(TEXT("and re-export identically"),
+		Reparsed->ExportRowsAsJson(), Exported);
+	return !HasAnyErrors();
 }
-
-#if WITH_EDITOR
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideImportJsonRoundTripSpec,
 	"WoT.Onboarding.GuideImportJsonRoundTrip", WoTOnboardingGuideFlags)
@@ -194,13 +175,13 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 		{"class_name":"EmberLob","cpp_class":"FxEmberLob",
 		 "elements":["Fire"],"rarity":"Common",
 		 "roles":["Combat","Offensive"],
-		 "max_initial_charges":4,"max_charges":9,
+		 "max_initial_charges":4,"max_charges":9,"charge_cost":1,
 		 "counters":[],
-		 "hint_text":"{title} - {counter} quenches it."},
+		 "hint_text":"{counter:CinderWard} quenches it."},
 		{"class_name":"PitSnare","cpp_class":"FxPitSnare",
 		 "elements":[],"rarity":"",
 		 "roles":[],
-		 "max_initial_charges":0,"max_charges":0,
+		 "max_initial_charges":0,"max_charges":0,"charge_cost":0,
 		 "counters":["EmberLob"],
 		 "hint_text":""}]})json");
 
@@ -215,15 +196,15 @@ bool FWoTOnboardingGuideImportJsonRoundTripSpec::RunTest(const FString&)
 	TestEqual(TEXT("class"), Ember.ClassName, FName(TEXT("EmberLob")));
 	TestEqual(TEXT("cpp"), Ember.CppClass, FName(TEXT("FxEmberLob")));
 	TestEqual(TEXT("charges"), Ember.MaxCharges, 9);
+	TestEqual(TEXT("charge cost"), Ember.ChargeCost, 1);
 	TestEqual(TEXT("hint keeps placeholders literal"), Ember.HintText,
-		FString(TEXT("{title} - {counter} quenches it.")));
+		FString(TEXT("{counter:CinderWard} quenches it.")));
 	TestTrue(TEXT("empty rarity folds to NAME_None"),
 		Guide->Rows[1].Rarity.IsNone());
 	TestEqual(TEXT("counters land"), Guide->Rows[1].Counters.Num(), 1);
 
-	// Export -> import into a second object -> identical export: the seam
-	// round-trips losslessly, which is what the importer's change detection
-	// and post-save verification compare on.
+	// Export -> import into a second object -> identical export: the JSON
+	// form round-trips losslessly.
 	const FString Exported = Guide->ExportRowsAsJson();
 	UWoTAngrealGuide* Second = NewObject<UWoTAngrealGuide>(GetTransientPackage());
 	TestEqual(TEXT("re-import succeeds"), Second->ImportRowsFromJson(Exported),
@@ -261,23 +242,29 @@ bool FWoTOnboardingGuideImportJsonRejectsSpec::RunTest(const FString&)
 	Rejects(TEXT("empty class_name"), TEXT(
 		R"({"rows":[{"class_name":"","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""}]})"));
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
 	Rejects(TEXT("negative charges"), TEXT(
 		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":-1,"max_charges":0,)"
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
+	Rejects(TEXT("negative charge cost"), TEXT(
+		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
+		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
+		R"("charge_cost":-1,"counters":[],"hint_text":""}]})"));
+	Rejects(TEXT("missing charge cost"), TEXT(
+		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
+		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
 		R"("counters":[],"hint_text":""}]})"));
 	Rejects(TEXT("duplicate class_name"), TEXT(
 		R"({"rows":[{"class_name":"A","cpp_class":"X","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""},)"
+		R"("charge_cost":0,"counters":[],"hint_text":""},)"
 		R"({"class_name":"A","cpp_class":"Y","elements":[],)"
 		R"("rarity":"","roles":[],"max_initial_charges":0,"max_charges":0,)"
-		R"("counters":[],"hint_text":""}]})"));
+		R"("charge_cost":0,"counters":[],"hint_text":""}]})"));
 	TestEqual(TEXT("surviving row is the original"),
 		Guide->Rows[0].ClassName, FName(TEXT("KeepMe")));
 	return true;
 }
-
-#endif // WITH_EDITOR
 
 #endif // WITH_AUTOMATION_TESTS

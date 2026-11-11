@@ -416,11 +416,32 @@ bool FWoTUpdateBannerVersionLabelSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+/** Empties the live onboarding menu-row registry; restores on exit. The
+    banner's focus/navigation contract is with the LAST RETAIL entry (Quit),
+    so an installed improvement module's appended row must not become the
+    neighbor under test. */
+struct FWoTUpdateBannerMenuRowsGuard
+{
+	TArray<FWoTOnboardingRow> Saved;
+
+	FWoTUpdateBannerMenuRowsGuard()
+	{
+		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
+		FWoTOnboardingSeams::Get().MenuRows.Reset();
+	}
+
+	~FWoTUpdateBannerMenuRowsGuard()
+	{
+		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+	}
+};
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUpdateBannerLiveActionSpec,
 	"WoT.FrontEnd.UpdateBanner.LiveActions", UpdateBannerSpecFlags)
 
 bool FWoTUpdateBannerLiveActionSpec::RunTest(const FString&)
 {
+	FWoTUpdateBannerMenuRowsGuard MenuRowsGuard;
 	UWoTBootstrapSubsystem* Bootstrap = UpdateBannerBootstrap();
 	int32 Launches = 0;
 	FString LaunchedUrl;
@@ -558,6 +579,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTUpdateBannerModalGeometrySpec,
 
 bool FWoTUpdateBannerModalGeometrySpec::RunTest(const FString&)
 {
+	FWoTUpdateBannerMenuRowsGuard MenuRowsGuard;
 	if (!TestTrue(TEXT("Slate application is initialized"),
 		FSlateApplication::IsInitialized())) return false;
 	FSlateApplication& SlateApp = FSlateApplication::Get();

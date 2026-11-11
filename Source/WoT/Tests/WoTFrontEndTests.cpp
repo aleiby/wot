@@ -819,12 +819,33 @@ bool FWoTFrontEndEscapeOverlaySpec::RunTest(const FString&)
 	return true;
 }
 
+/** Empties the live onboarding menu-row registry; restores on exit. The
+    retail-composition specs pin today's menu tree, so an installed
+    improvement module's registered rows (the onboarding plugin's Field Guide
+    entry) must not count as retail entries. */
+struct FWoTFrontEndTestsMenuRowsGuard
+{
+	TArray<FWoTOnboardingRow> Saved;
+
+	FWoTFrontEndTestsMenuRowsGuard()
+	{
+		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
+		FWoTOnboardingSeams::Get().MenuRows.Reset();
+	}
+
+	~FWoTFrontEndTestsMenuRowsGuard()
+	{
+		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+	}
+};
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuSettingsSpec,
 	"WoT.FrontEnd.InGameMenu.SettingsNavigation",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 
 bool FWoTInGameMenuSettingsSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	UWorld* World = WoTFrontEndTests_CreateWorld();
 	if (!TestNotNull(TEXT("in-game menu world exists"), World))
 	{
@@ -990,6 +1011,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuKeyboardNavSpec,
 
 bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	if (!TestTrue(TEXT("Slate application is initialized"),
 		FSlateApplication::IsInitialized()))
 	{
@@ -1141,6 +1163,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuControllerNavSpec,
 
 bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	if (!TestTrue(TEXT("Slate application is initialized"),
 		FSlateApplication::IsInitialized()))
 	{
@@ -1261,6 +1284,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInGameMenuStableActionSpec,
 
 bool FWoTInGameMenuStableActionSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	UWorld* World = WoTFrontEndTests_CreateWorld();
 	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
 	AWoTBattleInfo* Battle = World->SpawnActorDeferred<AWoTBattleInfo>(
@@ -2025,6 +2049,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndRootCompositionSpec,
 
 bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	TSharedRef<SWoTFrontEndRoot> UnavailableRoot =
 		SNew(SWoTFrontEndRoot).PlayerController(nullptr);
 	FChildren* RootChildren = UnavailableRoot->GetChildren();
@@ -2219,6 +2244,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndPresentationAuthoritySpec,
 
 bool FWoTFrontEndPresentationAuthoritySpec::RunTest(const FString&)
 {
+	// The authenticated fixture faces shape only the retail entry labels; an
+	// improvement module's registered row would trip missing-glyph warnings.
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	AddExpectedError(TEXT("Cannot read payload manifest"),
 		EAutomationExpectedErrorFlags::Contains, 3);
 	FWoTFrontEndStageProductionFixture GenerationA;
@@ -2520,6 +2548,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndSlateInputSpec,
 
 bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	// Entering Play auto-fetches: pin the platform path where that search
 	// really starts (on a Mac the LAN heads-up would answer first), so Back
 	// is exercised against an in-flight search on every host.

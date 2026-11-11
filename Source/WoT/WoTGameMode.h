@@ -212,6 +212,12 @@ public:
 	// A killer-less (environment) death first checks the victim's SuicideInstigator: someone
 	// who displaced it into the hazard within SuicideInstigationRelevance is credited instead.
 	void ScoreKill(AController* Killer, AWoTCharacter* Victim);
+	// The controller a killer-less death of VictimPawn is credited to: its SuicideInstigator
+	// while the displacement is younger than SuicideInstigationRelevance, else null.
+	AController* ActiveSuicideInstigator(const AWoTCharacter& VictimPawn) const;
+	// The item the optional death recap names to Victim (WoTKillingItem): the killing
+	// blow's item, else the displacing angreal of a death ScoreKill credits to its caster.
+	FName KillingItemFor(const AController* Killer, const AWoTCharacter& Victim) const;
 
 	// MashadarManager.HurtMashadar calls Game.Killed for its named synthetic
 	// focus victim. It shares ScoreKill's owner-credit, friendly-fire, accident,

@@ -1,37 +1,42 @@
 #!/usr/bin/env python3
-"""Derive the angreal field-guide facts and build the guide data asset.
+"""Derive the angreal field-guide facts and compile the guide rows.
 
-Parse, derivation and editor halves of the guide importer
+Parse, derivation and render halves of the guide generator
 (docs/plans/2026-11-06-onboarding-aids.md, Tasks 1-3). Walks the private
 reference export `exports/script/<Package>/*.uc`, records each class header
 (`class X expands Y`) with its defaultproperties scalars and `Name(index)=`
 arrays, and resolves inherited values through the parent chain the way the
 original property system did. On top of the parse, `build_guide_rows` derives
-the counter matrix and facts rows the plan specifies, `render_facts_csv`
-renders them deterministically, and `--facts-only` regenerates the checked-in
-`Tools/import/data/angreal_guide_facts.csv` and stops (pure python).
+the counter matrix and facts rows the plan specifies, and `render_facts_csv`
+renders them deterministically into the checked-in
+`Tools/import/data/angreal_guide_facts.csv`.
 
-Without the flag the editor half then builds, from the facts CSV plus the
-hint templates resolved onto rows as HintText:
-  /Game/WoT/UI/Guide/DA_WoTAngrealGuide
+The guarded build cooks no project data assets, so the rows ship in the
+plugin's code: the facts CSV plus the hint templates resolved onto rows as
+HintText render into the generated include
+`Plugins/WoTOnboarding/Source/WoTOnboarding/Private/Generated/
+WoTAngrealGuideRows.inl`, which WoTAngrealGuide.cpp compiles. Pure python,
+no Unreal:
 
-UnrealEditor-Cmd WoT.uproject -run=pythonscript
-  -script=".../Tools/import/import_angreal_guide.py" -unattended -nullrhi
+    python3 Tools/import/import_angreal_guide.py              # facts + rows
+    python3 Tools/import/import_angreal_guide.py --rows-only  # rows from the CSVs
+    python3 Tools/import/import_angreal_guide.py --check      # verify only
 
-Completion is recorded in Saved/import_angreal_guide_result.json because
-commandlet stdout is not a reliable completion signal on the parent hosts.
+Only the default mode reads the reference export; `--rows-only` and `--check`
+need nothing but the checked-in CSVs.
 
 The angreal census (Tools/test/angreal/angreal_census.py) walks the same tree
 with the same conventions (latin-1 reads, `class X expands|extends Y`
-headers, lowercase class keys), but its parsing is census-specific — it
+headers, lowercase class keys), but its parsing is census-specific (it
 resolves the reference root at import time and only extracts spawn-pool
-properties — so this module carries the standalone parser the plan specifies
+properties), so this module carries the standalone parser the plan specifies
 instead of importing it.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 import sys
@@ -141,7 +146,7 @@ def ancestors(classes: Dict[str, UcClass], name: str) -> List[str]:
 
     The walk stops at the first class missing from the map (engine packages
     ship stripped, so every chain ends where the export does), at a cycle, or
-    immediately — an empty list — when the class itself is unknown.
+    immediately (an empty list) when the class itself is unknown.
     """
     chain: List[str] = []
     current = name.lower()
@@ -205,13 +210,15 @@ EXPECTATIONS_JSON_PATH = (
     REPO / "Tools" / "test" / "angreal" / "angreal_expectations.json")
 
 FACTS_COLUMNS = ("Class", "CppClass", "Elements", "Rarity", "Roles",
-                 "MaxInitialCharges", "MaxCharges", "Counters", "HintKey")
+                 "MaxInitialCharges", "MaxCharges", "ChargeCost", "Counters",
+                 "HintKey")
 OVERRIDE_COLUMNS = ("Class", "Field", "Value", "Supersedes", "Citation")
 HINT_COLUMNS = ("HintKey", "Template")
 MULTI_VALUE_FIELDS = ("Counters", "Elements", "Roles")
 SCALAR_FIELD_ATTRS = {"Rarity": "rarity",
                       "MaxInitialCharges": "max_initial_charges",
                       "MaxCharges": "max_charges",
+                      "ChargeCost": "charge_cost",
                       "HintKey": "hint_key"}
 
 ELEMENT_BY_FLAG = {"bElementAir": "Air", "bElementEarth": "Earth",
@@ -237,8 +244,14 @@ ROLE_BY_FLAG = {"bCombat": "Combat", "bDefensive": "Defensive",
 # - ReflectSeekerReflector counters the Seeker (ReflectSeekerReflector.uc
 #   redirects a seeker at its originator; no shipped ReflectorClasses entry
 #   names it, so on retail data this rule contributes no edge).
-# - Trap detection counters every placeable trap row (TrapDetectLeech.uc:208
-#   keys off the Trap base class every placed WoTTraps actor descends from).
+# - Trap detection counters the rows whose placed pieces the detector keeps.
+#   It keeps a deployed Trap or an armed explosive ward only when the piece's
+#   trap ID is in its own TrapIconInfos table (TrapDetectLeech.uc:203-233,
+#   table at :286-291). The ID is a Trap's TrapType when set, else the class
+#   name, and no shipped trap sets TrapType, so a subclass the table does not
+#   name (FireWallSlab under WallSlab, Alarm) goes undetected. A trap row
+#   places its ResourceClass plus that actor's SlabClass (Wall.uc builds the
+#   barrier from slabs); a launcher row places its ProjectileClassName.
 # - Curse removal counters the Taint (AngrealInvRemoveCurse.uc stops artifact
 #   effects in radius, the lift for the Taint's permanent artifact curse).
 IGNORE_REFLECTOR_ELEMENT = {
@@ -250,6 +263,8 @@ PROJECTILE_LAUNCHER_CLASS = "projectilelauncher"
 SEEKER_CLASS = "angrealinvseeker"
 TAINT_CLASS = "angrealinvtaint"
 TRAP_DETECT_CLASS = "angrealinvtrapdetect"
+TRAP_DETECT_LEECH_CLASS = "trapdetectleech"
+EXP_WARD_PROJECTILE_CLASS = "angrealexpwardprojectile"
 REMOVE_CURSE_CLASS = "angrealinvremovecurse"
 
 TRAPS_PACKAGE = "wottraps"
@@ -260,10 +275,19 @@ TRAP_ROW_SUFFIX = "Inventory"
 OFFENSIVE_ROLE = "Offensive"
 
 CLASS_REF_RE = re.compile(r"Class'(?:\w+\.)?(\w+)'", re.I)
+TRAP_TYPE_RE = re.compile(r"\bTrapType=(\w+)", re.I)
 BUDGET_ENTRY_RE = re.compile(
     r"ResourcePackageName=(\w+).*?ResourceAdapterName=(\w+)", re.I)
-HINT_PLACEHOLDER_RE = re.compile(r"\{(\w*)\}")
-HINT_PLACEHOLDERS = ("counter", "title")
+# A template names the counter its sentence was written for, by class:
+# {counter:AngrealInvFireShield}. A bare {counter} is refused: the wording
+# fits one counter, and a rule picking among several picked the wrong one.
+HINT_PLACEHOLDER_RE = re.compile(r"\{([^{}]*)\}")
+HINT_COUNTER_RE = re.compile(r"\{counter:(\w+)\}")
+
+
+def hint_counters(template: str) -> List[str]:
+    """The counter classes a hint template names, in order."""
+    return HINT_COUNTER_RE.findall(template)
 
 
 class GenerationError(ValueError):
@@ -290,6 +314,7 @@ class GuideRow:
     roles: List[str]
     max_initial_charges: str
     max_charges: str
+    charge_cost: str
     counters: List[str]
     hint_key: str
 
@@ -445,11 +470,12 @@ def load_hints_csv(path: Optional[PathLike] = None) -> Dict[str, str]:
         if not template.isascii():
             raise GenerationError("%s: hint template must be ASCII" % where)
         for match in HINT_PLACEHOLDER_RE.finditer(template):
-            if match.group(1) not in HINT_PLACEHOLDERS:
+            inner = match.group(1)
+            if inner != "title" and not re.fullmatch(r"counter:\w+", inner):
                 raise GenerationError(
                     "%s: unknown placeholder {%s} (templates resolve only "
-                    "{title} and {counter} at runtime)"
-                    % (where, match.group(1)))
+                    "{title} and {counter:<Class>} at runtime)"
+                    % (where, inner))
         hints[key] = template
     return hints
 
@@ -464,13 +490,59 @@ def _derived_hint_key(entry: RosterEntry) -> str:
     return name
 
 
+def _placed_pieces(classes: Dict[str, UcClass], name: str) -> List[str]:
+    """The actors a roster row puts in the world for the trap detector to find.
+
+    A trap row places its ResourceClass and, for a wall, that actor's
+    SlabClass; a launcher row places its ProjectileClassName.
+    """
+    pieces: List[str] = []
+    actor = _class_ref_name(resolved_prop(classes, name, "ResourceClass") or "")
+    if actor is not None:
+        pieces.append(actor)
+        slab = _class_ref_name(resolved_prop(classes, actor, "SlabClass") or "")
+        if slab is not None:
+            pieces.append(slab)
+    projectile = resolved_prop(classes, name, "ProjectileClassName")
+    if projectile:
+        pieces.append(projectile.split(".")[-1])
+    return pieces
+
+
+def _trap_detect_ids(classes: Dict[str, UcClass]) -> List[str]:
+    """The lowercase trap IDs the detector's TrapIconInfos table names."""
+    ids: List[str] = []
+    for entry in resolved_array(classes, TRAP_DETECT_LEECH_CLASS,
+                                "TrapIconInfos"):
+        match = TRAP_TYPE_RE.search(entry)
+        if match:
+            ids.append(match.group(1).lower())
+    return ids
+
+
+def _trap_detect_finds(classes: Dict[str, UcClass], name: str,
+                       detectable: List[str]) -> bool:
+    """True when the detector keeps one of the row's placed pieces."""
+    for piece in _placed_pieces(classes, name):
+        chain = ancestors(classes, piece)
+        if TRAP_BASE_CLASS in chain:
+            trap_id = resolved_prop(classes, piece, "TrapType") or piece
+        elif EXP_WARD_PROJECTILE_CLASS in chain:
+            trap_id = piece
+        else:
+            continue
+        if trap_id.lower() in detectable:
+            return True
+    return False
+
+
 def _derive_counters(classes: Dict[str, UcClass],
-                     rows: Dict[str, GuideRow],
-                     trap_names: List[str]) -> None:
+                     rows: Dict[str, GuideRow]) -> None:
     """Apply the plan's counter rules; see the anchor-constant comment."""
     offensive = [row for row in rows.values()
                  if OFFENSIVE_ROLE in row.roles]
     names_by_lower = {name.lower(): name for name in rows}
+    detectable = _trap_detect_ids(classes)
     for row in rows.values():
         links = set()
         for reference in resolved_array(classes, row.class_name,
@@ -497,7 +569,9 @@ def _derive_counters(classes: Dict[str, UcClass],
                 and SEEKER_CLASS in names_by_lower):
             counters.append(names_by_lower[SEEKER_CLASS])
         if row.class_name.lower() == TRAP_DETECT_CLASS:
-            counters.extend(trap_names)
+            counters.extend(
+                other.class_name for other in rows.values()
+                if _trap_detect_finds(classes, other.class_name, detectable))
         if (row.class_name.lower() == REMOVE_CURSE_CLASS
                 and TAINT_CLASS in names_by_lower):
             counters.append(names_by_lower[TAINT_CLASS])
@@ -582,13 +656,13 @@ def build_guide_rows(classes: Dict[str, UcClass],
     override supplying the value; an override that is a no-op, contradicts a
     derived fact without Supersedes=yes, or names unknown classes; an
     offensive or trap row without a resolving hint; a hint row nothing uses;
-    a {counter} template on a row that no other row counters.
+    a template naming a {counter:<Class>} that is not a row or does not
+    counter the row.
     """
     errors: List[str] = []
     rows: Dict[str, GuideRow] = {}
     rarity_unresolved: Dict[str, str] = {}
-    trap_names = [entry.class_name for entry in roster if entry.is_trap]
-    trap_set = set(trap_names)
+    trap_set = {entry.class_name for entry in roster if entry.is_trap}
 
     for entry in sorted(roster, key=lambda item: item.class_name.lower()):
         name = entry.class_name
@@ -619,13 +693,14 @@ def build_guide_rows(classes: Dict[str, UcClass],
             max_initial_charges=resolved_prop(
                 classes, name, "MaxInitialCharges") or "",
             max_charges=resolved_prop(classes, name, "MaxCharges") or "",
+            charge_cost=resolved_prop(classes, name, "ChargeCost") or "",
             counters=[],
             hint_key="")
     if errors:
         raise GenerationError("guide generation failed:\n  "
                               + "\n  ".join(errors))
 
-    _derive_counters(classes, rows, trap_names)
+    _derive_counters(classes, rows)
     for entry in roster:
         if entry.is_trap or OFFENSIVE_ROLE in rows[entry.class_name].roles:
             rows[entry.class_name].hint_key = _derived_hint_key(entry)
@@ -637,12 +712,9 @@ def build_guide_rows(classes: Dict[str, UcClass],
             "bCommon/bUncommon/bRare must hold, so an override must supply "
             "Rarity with a citation" % (name, rarity_unresolved[name]))
 
-    # {counter} resolves at runtime to a counter OF the row (the countered-by
-    # relation the loader later derives by inverting the Counters column), so
-    # a template may use it only when some other row counters this one.
-    countered = set()
-    for row in rows.values():
-        countered.update(row.counters)
+    # {counter:<Class>} names a counter OF the row: the named row's Counters
+    # must hold this one (the runtime applies the same gate and drops the
+    # line when the data stops backing it).
     used_keys: Dict[str, List[str]] = {}
     for name in sorted(rows, key=str.lower):
         row = rows[name]
@@ -651,11 +723,16 @@ def build_guide_rows(classes: Dict[str, UcClass],
             if row.hint_key not in hints:
                 errors.append("%s: HintKey %s is not in the hints CSV"
                               % (name, row.hint_key))
-            elif ("{counter}" in hints[row.hint_key]
-                    and name not in countered):
-                errors.append(
-                    "%s: hint %s uses {counter} but nothing counters the row"
-                    % (name, row.hint_key))
+                continue
+            for counter in hint_counters(hints[row.hint_key]):
+                if counter not in rows:
+                    errors.append("%s: hint %s names counter %s, which is "
+                                  "not a guide row"
+                                  % (name, row.hint_key, counter))
+                elif name not in rows[counter].counters:
+                    errors.append("%s: hint %s names counter %s, which does "
+                                  "not counter the row"
+                                  % (name, row.hint_key, counter))
         elif name in trap_set or OFFENSIVE_ROLE in row.roles:
             errors.append("%s: offensive and trap rows need a HintKey"
                           % name)
@@ -688,7 +765,8 @@ def render_facts_csv(rows: List[GuideRow]) -> str:
         lines.append(",".join(_csv_field(value) for value in (
             row.class_name, row.cpp_class, ";".join(row.elements),
             row.rarity, ";".join(row.roles), row.max_initial_charges,
-            row.max_charges, ";".join(row.counters), row.hint_key)))
+            row.max_charges, row.charge_cost, ";".join(row.counters),
+            row.hint_key)))
     text = "\n".join(lines) + "\n"
     if not text.isascii():
         raise GenerationError("facts CSV must be ASCII")
@@ -703,20 +781,20 @@ def generate_rows() -> List[GuideRow]:
                             load_hints_csv())
 
 
-# --- Task 3: guide data asset (editor half) ----------------------------------
+# --- Task 3: compiled guide rows ---------------------------------------------
 
-RESULT_FILE = REPO / "Saved" / "import_angreal_guide_result.json"
-GUIDE_DESTINATION = "/Game/WoT/UI/Guide"
-GUIDE_ASSET_NAME = "DA_WoTAngrealGuide"
-GUIDE_ASSET_PATH = "%s/%s" % (GUIDE_DESTINATION, GUIDE_ASSET_NAME)
-# The asset class lives in the WoTOnboarding plugin, not the game module.
-GUIDE_CLASS_PATH = "/Script/WoTOnboarding.WoTAngrealGuide"
+COMPILED_ROWS_RELATIVE = ("Plugins/WoTOnboarding/Source/WoTOnboarding/Private/"
+                          "Generated/WoTAngrealGuideRows.inl")
+COMPILED_ROWS_PATH = REPO / COMPILED_ROWS_RELATIVE
+FACTS_CSV_RELATIVE = "Tools/import/data/angreal_guide_facts.csv"
+HINTS_CSV_RELATIVE = "Tools/import/data/angreal_guide_hints.csv"
+COMPILED_ROW_RE = re.compile(r'^\tTEXT\("((?:[^"\\]|\\.)*)"\),$')
 
-# Result-file pins: the roster can only grow, and the Fireball facts are the
-# plan's representative row (identifiers and derived numbers, no retail
-# prose). The hint text is our own wording, pinned by its placeholders rather
-# than its sentence so the template stays tunable.
-MIN_ASSET_ROWS = 25
+# Render pins: the roster can only grow, and the Fireball facts are the plan's
+# representative row (identifiers and derived numbers, no retail prose). The
+# hint text is our own wording, pinned by the counter it names (which must
+# counter Fireball) rather than its sentence, so the template stays tunable.
+MIN_GUIDE_ROWS = 25
 FIREBALL_CLASS = "AngrealInvFireball"
 FIREBALL_FACTS = {
     "cpp_class": "WoTAngrealInvFireball",
@@ -725,6 +803,7 @@ FIREBALL_FACTS = {
     "roles": ["Combat", "Offensive"],
     "max_initial_charges": 20,
     "max_charges": 35,
+    "charge_cost": 1,
     "counters": [],
 }
 
@@ -752,7 +831,8 @@ def load_facts_csv(path: Optional[PathLike] = None) -> List[GuideRow]:
     seen = set()
     for number, cells in _read_csv_rows(source, FACTS_COLUMNS):
         (class_name, cpp_class, elements, rarity, roles,
-         max_initial_charges, max_charges, counters, hint_key) = cells
+         max_initial_charges, max_charges, charge_cost, counters,
+         hint_key) = cells
         where = "%s:%d" % (source.name, number)
         if not class_name:
             raise GenerationError("%s: empty Class" % where)
@@ -765,18 +845,19 @@ def load_facts_csv(path: Optional[PathLike] = None) -> List[GuideRow]:
             elements=_split_multi(elements), rarity=rarity,
             roles=_split_multi(roles),
             max_initial_charges=max_initial_charges,
-            max_charges=max_charges, counters=_split_multi(counters),
+            max_charges=max_charges, charge_cost=charge_cost,
+            counters=_split_multi(counters),
             hint_key=hint_key))
     return rows
 
 
-def asset_rows(rows: List[GuideRow], hints: Dict[str, str]) -> List[dict]:
-    """The plain asset-row payload: facts plus HintText resolved per HintKey.
+def payload_rows(rows: List[GuideRow], hints: Dict[str, str]) -> List[dict]:
+    """The plain row payload: facts plus HintText resolved per HintKey.
 
-    One dict per facts row, keyed by the asset's property names; `{title}` and
-    `{counter}` stay literal in HintText (they resolve at runtime). The
-    payload is the single shape the importer sets, extracts and verifies, so
-    the independent re-verification compares like with like.
+    One dict per facts row, keyed like the JSON rows UWoTAngrealGuide parses;
+    `{title}` and `{counter:<Class>}` stay literal in HintText (they resolve at
+    runtime). The payload is the single shape the generator renders, parses
+    back and verifies, so the check compares like with like.
     """
     payload = []
     for row in rows:
@@ -792,150 +873,166 @@ def asset_rows(rows: List[GuideRow], hints: Dict[str, str]) -> List[dict]:
             "max_initial_charges": _charges_int(
                 row.max_initial_charges, row.class_name),
             "max_charges": _charges_int(row.max_charges, row.class_name),
+            "charge_cost": _charges_int(row.charge_cost, row.class_name),
             "counters": list(row.counters),
             "hint_text": hints[row.hint_key] if row.hint_key else "",
         })
     return payload
 
 
-def verify_asset_payload(actual: List[dict], desired: List[dict]):
-    """(ok, pins, counts) for the re-loaded asset against the desired payload."""
+def verify_payload(actual: List[dict], desired: List[dict]):
+    """(ok, pins, counts) for parsed rows against the desired payload."""
     by_class = {row["class_name"]: row for row in actual}
     fireball = by_class.get(FIREBALL_CLASS, {})
     pins = {
-        "row_count_at_least_%d" % MIN_ASSET_ROWS:
-            len(actual) >= MIN_ASSET_ROWS,
+        "row_count_at_least_%d" % MIN_GUIDE_ROWS:
+            len(actual) >= MIN_GUIDE_ROWS,
         "fireball_present": FIREBALL_CLASS in by_class,
     }
     for key, expected in sorted(FIREBALL_FACTS.items()):
         pins["fireball_%s" % key] = fireball.get(key) == expected
-    hint_text = fireball.get("hint_text") or ""
-    pins["fireball_hint_has_placeholders"] = (
-        "{title}" in hint_text and "{counter}" in hint_text)
+    named = hint_counters(fireball.get("hint_text") or "")
+    pins["fireball_hint_names_a_backed_counter"] = bool(named) and all(
+        FIREBALL_CLASS in by_class.get(counter, {}).get("counters", [])
+        for counter in named)
     counts = {"rows": len(actual), "unique_classes": len(by_class)}
     ok = actual == desired and all(pins.values())
     return ok, pins, counts
 
 
-def write_result(result: dict) -> None:
-    RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    RESULT_FILE.write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def _lf_text(path: Path) -> str:
+    """A checked-in text file with CRLF folded to LF (hash and parse input)."""
+    return path.read_bytes().decode("utf-8").replace("\r\n", "\n")
 
 
-def payload_json(payload: List[dict]) -> str:
-    """The {"rows": [...]} document UWoTAngrealGuide.ImportRowsFromJson eats."""
-    return json.dumps({"rows": payload}, sort_keys=True)
+def _cpp_literal_body(text: str) -> str:
+    """text as the body of a C++ string literal (ASCII in, ASCII out)."""
+    if not text.isascii():
+        raise GenerationError("compiled guide rows must be ASCII")
+    return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def payload_from_json(text: str) -> List[dict]:
-    """ExportRowsAsJson back to the payload shape (row order preserved)."""
-    document = json.loads(text)
-    if not isinstance(document, dict) or not isinstance(
-            document.get("rows"), list):
-        raise GenerationError("asset export carries no rows array")
-    return document["rows"]
+def render_compiled_rows(payload: List[dict], facts_text: str,
+                         hints_text: str) -> str:
+    """The generated include: identical inputs always give identical bytes.
+
+    One compact JSON object per row (sorted keys) as one TEXT() literal per
+    line, so a changed row is a one-line diff. The source hashes cover the
+    LF-normalized CSV text the payload came from.
+    """
+    if not payload:
+        raise GenerationError("compiled guide rows need at least one row")
+    lines = [
+        "// Generated by Tools/import/import_angreal_guide.py; do not edit.",
+        "// Source: %s" % FACTS_CSV_RELATIVE,
+        "// SHA-256: %s" % hashlib.sha256(
+            facts_text.encode("utf-8")).hexdigest(),
+        "// Source: %s" % HINTS_CSV_RELATIVE,
+        "// SHA-256: %s" % hashlib.sha256(
+            hints_text.encode("utf-8")).hexdigest(),
+        "//",
+        "// The angreal field-guide rows, one JSON object per row (hashes cover",
+        "// LF-normalized text). The guarded build cooks no project data assets,",
+        "// so the rows ship compiled in: derived facts and our own hint",
+        "// templates, never retail text. Included once, by WoTAngrealGuide.cpp.",
+        "#pragma once",
+        "",
+        "namespace WoTAngrealGuideGenerated",
+        "{",
+        "static const TCHAR* const RowsJson[] = {",
+    ]
+    for row in payload:
+        body = _cpp_literal_body(
+            json.dumps(row, sort_keys=True, separators=(",", ":")))
+        lines.append('\tTEXT("%s"),' % body)
+    lines += ["};", "} // namespace WoTAngrealGuideGenerated", ""]
+    return "\n".join(lines)
 
 
-def import_asset(payload: List[dict]):
-    import unreal
+def parse_compiled_rows(text: str) -> List[dict]:
+    """The rows a rendered include carries, back in the payload shape."""
+    rows = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        match = COMPILED_ROW_RE.match(line)
+        if not match:
+            continue
+        body, out, index = match.group(1), [], 0
+        while index < len(body):
+            char = body[index]
+            if char == "\\":
+                escaped = body[index + 1]
+                if escaped not in "\\\"":
+                    raise GenerationError(
+                        "compiled guide row has an unknown escape \\%s"
+                        % escaped)
+                out.append(escaped)
+                index += 2
+                continue
+            out.append(char)
+            index += 1
+        rows.append(json.loads("".join(out)))
+    if not rows:
+        raise GenerationError("compiled guide include carries no rows")
+    return rows
 
-    eal = unreal.EditorAssetLibrary
-    tools = unreal.AssetToolsHelpers.get_asset_tools()
-    asset_class = unreal.load_class(None, GUIDE_CLASS_PATH)
-    if not asset_class:
-        raise RuntimeError(
-            "UWoTAngrealGuide is not loaded; build the editor with the "
-            "WoTOnboarding plugin enabled first")
 
-    if not eal.does_directory_exist(GUIDE_DESTINATION):
-        eal.make_directory(GUIDE_DESTINATION)
-    created = not eal.does_asset_exist(GUIDE_ASSET_PATH)
-    if created:
-        factory = unreal.DataAssetFactory()
-        factory.set_editor_property("data_asset_class", asset_class)
-        asset = tools.create_asset(
-            GUIDE_ASSET_NAME, GUIDE_DESTINATION, asset_class, factory)
-    else:
-        asset = unreal.load_asset(GUIDE_ASSET_PATH)
-    if not asset:
-        raise RuntimeError("failed to create or load %s" % GUIDE_ASSET_PATH)
-
-    # Rows cross the seam as JSON through reflection-callable methods on the
-    # asset itself: the editor's python glue generates no wrapper types for a
-    # plugin module loaded after it (unreal.WoTAngrealGuideRow does not
-    # exist), while call_method needs only the reflection registry.
-    changed = created
-    if payload_from_json(str(asset.call_method("ExportRowsAsJson"))) != payload:
-        error = str(asset.call_method(
-            "ImportRowsFromJson", args=(payload_json(payload),)))
-        if error:
-            raise RuntimeError("row import failed: %s" % error)
-        changed = True
-    if not eal.save_asset(GUIDE_ASSET_PATH):
-        raise RuntimeError("save failed for %s" % GUIDE_ASSET_PATH)
-
-    package = asset.get_outermost()
-    reloaded, reload_error = unreal.EditorLoadingAndSavingUtils.reload_packages(
-        [package], unreal.ReloadPackagesInteractionMode.ASSUME_NEGATIVE)
-    if not reloaded:
-        raise RuntimeError("post-save reload failed for %s: %s"
-                           % (GUIDE_ASSET_PATH, reload_error))
-
-    # Result-file verification reads the reloaded package, including the
-    # roster and Fireball pins, rather than trusting the live edited object.
-    verified = unreal.load_asset(GUIDE_ASSET_PATH)
-    if not verified:
-        raise RuntimeError("post-save load failed for %s" % GUIDE_ASSET_PATH)
-    ok, pins, counts = verify_asset_payload(
-        payload_from_json(str(verified.call_method("ExportRowsAsJson"))),
-        payload)
+def compiled_rows_from_csvs(facts_path: PathLike = None,
+                            hints_path: PathLike = None) -> str:
+    """Render the include from the checked-in CSVs, enforcing the pins."""
+    facts_path = Path(facts_path) if facts_path is not None else FACTS_CSV_PATH
+    hints_path = Path(hints_path) if hints_path is not None else HINTS_CSV_PATH
+    payload = payload_rows(load_facts_csv(facts_path),
+                           load_hints_csv(hints_path))
+    ok, pins, counts = verify_payload(payload, payload)
     if not ok:
-        raise RuntimeError(
-            "post-save verification failed for %s: pins=%s, counts=%s"
-            % (GUIDE_ASSET_PATH, pins, counts))
-    return changed, pins, counts
+        failed = sorted(name for name, held in pins.items() if not held)
+        raise GenerationError("guide rows fail their pins %s (counts %s)"
+                              % (", ".join(failed), counts))
+    return render_compiled_rows(payload, _lf_text(facts_path),
+                                _lf_text(hints_path))
+
+
+def check(output: PathLike = None) -> bool:
+    """Whether the committed include is current with the checked-in CSVs."""
+    output = Path(output) if output is not None else COMPILED_ROWS_PATH
+    if not output.is_file():
+        return False
+    return _lf_text(output) == compiled_rows_from_csvs()
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="derive the guide facts CSV and build the guide data "
-                    "asset (--facts-only stops after the CSV, no Unreal)")
-    parser.add_argument("--facts-only", action="store_true",
-                        help="regenerate %s from the exported script and the "
-                             "authored data CSVs, then stop"
-                             % FACTS_CSV_PATH.relative_to(REPO))
+        description="derive the guide facts CSV and compile the guide rows")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--rows-only", action="store_true",
+                      help="re-render %s from the checked-in CSVs without "
+                           "regenerating the facts (no reference export)"
+                           % COMPILED_ROWS_RELATIVE)
+    mode.add_argument("--check", action="store_true",
+                      help="verify the committed include against the "
+                           "checked-in CSVs instead of writing anything")
     args = parser.parse_args(argv)
-    rows = generate_rows()
-    csv_changed = write_if_changed(FACTS_CSV_PATH, render_facts_csv(rows))
-    print("facts CSV %s: %d rows, %s"
-          % (FACTS_CSV_PATH.relative_to(REPO), len(rows),
-             "updated" if csv_changed else "no change"))
-    if args.facts_only:
-        return 0
-    result = {
-        "asset": GUIDE_ASSET_PATH,
-        "csv": str(FACTS_CSV_PATH),
-        "csv_changed": csv_changed,
-        "status": "running",
-    }
-    write_result(result)
+    if not (args.rows_only or args.check):
+        rows = generate_rows()
+        csv_changed = write_if_changed(FACTS_CSV_PATH, render_facts_csv(rows))
+        print("facts CSV %s: %d rows, %s"
+              % (FACTS_CSV_RELATIVE, len(rows),
+                 "updated" if csv_changed else "no change"))
     try:
-        payload = asset_rows(load_facts_csv(), load_hints_csv())
-        result["rows"] = len(payload)
-        changed, pins, imported_counts = import_asset(payload)
-        result.update({
-            "asset_changed": changed,
-            "imported_counts": imported_counts,
-            "pins": pins,
-            "status": "ok",
-        })
-    except Exception as exc:
-        result["status"] = "failed"
-        result["error"] = str(exc)
-        write_result(result)
-        raise
-    write_result(result)
+        expected = compiled_rows_from_csvs()
+    except GenerationError as error:
+        print("guide rows rejected: %s" % error, file=sys.stderr)
+        return 1
+    if args.check:
+        if not check():
+            print("compiled guide rows are stale: %s (run this script with "
+                  "--rows-only)" % COMPILED_ROWS_RELATIVE, file=sys.stderr)
+            return 1
+        print("compiled guide rows OK: %s" % COMPILED_ROWS_RELATIVE)
+        return 0
+    rows_changed = write_if_changed(COMPILED_ROWS_PATH, expected)
+    print("compiled rows %s: %s" % (COMPILED_ROWS_RELATIVE,
+                                    "updated" if rows_changed else "no change"))
     return 0
 
 
