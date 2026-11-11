@@ -835,6 +835,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Multiplayer menus use the port's dark charcoal and gold skin with the original Tahoma face. Menu text uses exact 2x pixel copies of the original fonts, and slider artwork is enlarged evenly.
 - **Why:** Readability at modern resolutions, with no stretching and no outside fonts. The skin is a presentation choice.
 
+### Small text meets the Steam Deck legibility floor
+- **Original:** Help text could select an 8-pixel font, and the item info window drew its element names in an 8-pixel font. Both were sized for 640x480 screens.
+- **Port:** No text in these windows is under 9 screen pixels tall at 1280x800 or 1280x720. The Help window keeps its 640x480 layout and whole-number scale. Where it draws at 1x (below 1280x960), lines set in the 8-pixel font use the original 14-pixel font of the same family instead, so nothing is stretched or blurred; its letters are about a tenth wider and its lines 6 pixels taller, which only matters for help text that selects the 8-pixel font. The shipped English help never selects the 8-pixel font, so it looks the same. From 1280x960 up the window draws at 2x and nothing changes. The item info window's element names grow from size 8 to 10 at 1280x800 and to 11 at 1280x720, follow a resize, and stay at 8 from 1080p up.
+- **Why:** Steam Deck verification requires on-screen text of at least 9 pixels at 1280x800. The original drew 8-pixel text only because its screens were 640x480. Presentation only.
+
 ### Menu slider travel and host-setting stops
 - **Original:** The slider knob stopped a few pixels short of each end. The host screen's kill limit, time limit and max players were numbers stepped by one.
 - **Port:** The knob reaches the track's end borders. Those host settings are sliders with one stop per unit, and max players spans 2 to 16.

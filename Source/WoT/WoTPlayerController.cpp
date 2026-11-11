@@ -4053,9 +4053,12 @@ void AWoTPlayerController::CreateItemInfoWidget(AWoTInventory* Item)
 		return;
 	}
 	ItemInfoViewport = GEngine->GameViewport;
+	FVector2D ItemInfoViewportSize = FVector2D::ZeroVector;
+	ItemInfoViewport->GetViewportSize(ItemInfoViewportSize);
 	ItemInfoWidget = SNew(SWoTItemInfoOverlay)
 		.PlayerController(this)
-		.Item(Item);
+		.Item(Item)
+		.InitialPhysicalSize(ItemInfoViewportSize);
 	ItemInfoViewport->AddViewportWidgetContent(
 		ItemInfoWidget.ToSharedRef(), /*ZOrder*/ 1900);
 }

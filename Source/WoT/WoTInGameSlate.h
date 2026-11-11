@@ -14,6 +14,7 @@ class FWoTBackStackEntryHandle;
 class FWoTCursorLease;
 class FWoTFrontEndPresentationAuthority;
 class SBox;
+class SConstraintCanvas;
 class SEditableText;
 class SWoTMenuButton;
 class SWoTSettingsScreen;
@@ -260,9 +261,26 @@ struct FWoTHelpLayoutLine
 	float Height = 0.0f;
 };
 
+/** One Help page in the window's 512x432 text clip, in window units: the
+ * title on top, the content lines, and the subtitle below them. */
+struct FWoTHelpPageLayout
+{
+	FVector2D TitleSize = FVector2D::ZeroVector;
+	TArray<FWoTHelpLayoutLine> Lines;
+	float SubTitleY = 0.0f;
+	FVector2D SubTitleSize = FVector2D::ZeroVector;
+
+	/** The title, every line and the subtitle lie inside the clip. */
+	bool FitsClip() const;
+};
+
 /** Runtime-only projection of the purchaser's localized [WOTHelpInfo] data. */
 struct FWoTHelpContent
 {
+	// uiWindow: 640x480 less WindowBorderX (64) and WindowBorderY (24) each side.
+	static constexpr float ClipWidth = 512.0f;
+	static constexpr float ClipHeight = 432.0f;
+
 	FString Title;
 	FString SubTitle;
 	TArray<FString> Content;
@@ -270,9 +288,28 @@ struct FWoTHelpContent
 	static bool ParseRetailInt(TConstArrayView<uint8> Bytes,
 		FWoTHelpContent& Out);
 	static bool LoadRuntime(FWoTHelpContent& Out);
-	static TArray<FWoTHelpLayoutLine> Layout(const FWoTHelpContent& In);
+	/** The retail face a %f= font index draws in (WOTTextWindow.GetStrFont),
+	 * with one legibility change: indices 0 and 1, the 8-pixel F_WOTReg08,
+	 * draw in F_WOTReg14 whenever the whole-number PixelScale would put them
+	 * under FWoTMenuStyle::MinimumLegiblePixels: at 1x, on any screen narrower
+	 * than 1280 or shorter than 960 pixels. */
+	static FName FaceFor(int32 FontIndex, int32 PixelScale);
+	/** The retail bitmap line height of a Help face (WOT.u), in window units. */
+	static int32 RetailLineHeight(FName Face);
+	/** A line's size in window units from the retail face metrics: the face's
+	 * line height and a rough advance per character. */
+	static FVector2D MeasureRetail(const FString& Text, int32 FontIndex,
+		int32 PixelScale);
+	/** Lines laid out with MeasureRetail at PixelScale. */
+	static TArray<FWoTHelpLayoutLine> Layout(const FWoTHelpContent& In,
+		int32 PixelScale = 1);
 	static TArray<FWoTHelpLayoutLine> Layout(const FWoTHelpContent& In,
 		const TFunction<FVector2D(const FString&, int32)>& Measure);
+	/** The whole page as SWoTHelpOverlay places it. */
+	static FWoTHelpPageLayout LayoutPage(const FWoTHelpContent& In,
+		const TFunction<FVector2D(const FString&, int32)>& Measure);
+	static FWoTHelpPageLayout LayoutPage(const FWoTHelpContent& In,
+		int32 PixelScale);
 };
 
 // WOTHelpWindow/WOTTextWindow's fixed 640x480 code-only projection. Content
@@ -288,7 +325,7 @@ public:
 		/** The viewport the window opens in, in pixels, and its UI DPI scale, so
 		 * the first frame already draws at the whole-number scale (Tick keeps it
 		 * current across resizes). Zero size: 1x until the first Tick. */
-		SLATE_ARGUMENT(FVector2D, InitialPhysicalSize)
+		SLATE_ARGUMENT_DEFAULT(FVector2D, InitialPhysicalSize) = FVector2D::ZeroVector;
 		SLATE_ARGUMENT_DEFAULT(float, InitialDpiScale) = 1.0f;
 		SLATE_ARGUMENT(TSharedPtr<FWoTFrontEndPresentationAuthority>,
 			PresentationAuthority)
@@ -309,6 +346,10 @@ public:
 	int32 PixelScaleForTesting() const { return PixelScale; }
 	float WindowScaleForTesting() const { return WindowScale(); }
 	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+	/** The page as the canvas currently places it, measured in its own fonts. */
+	const FWoTHelpPageLayout& PageLayoutForTesting() const { return PageLayout; }
+	FSlateFontInfo FontForIndexForTesting(int32 FontIndex) const
+		{ return FontForIndex(FontIndex); }
 #endif
 
 	/** The whole-number scale the 640x480 window draws at on a screen of
@@ -319,10 +360,17 @@ public:
 private:
 	FReply Close();
 	FSlateFontInfo FontForIndex(int32 FontIndex) const;
+	/** Lays the page out in the fonts of the current PixelScale and places it
+	 * on the canvas. A scale change can swap a face (FWoTHelpContent::FaceFor),
+	 * so Tick lays the page out again whenever the scale changes. */
+	void RebuildPage();
 	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
 	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
+	TSharedPtr<SConstraintCanvas> Canvas;
+	FWoTHelpPageLayout PageLayout;
 	float WindowScale() const { return PixelScale / FMath::Max(DpiScale, 0.01f); }
 	int32 PixelScale = 1;
+	int32 PageLayoutPixelScale = 0;
 	float DpiScale = 1.0f;
 	FWoTHelpContent HelpContent;
 	FSimpleDelegate OnClose;
@@ -360,17 +408,29 @@ public:
 	SLATE_BEGIN_ARGS(SWoTItemInfoOverlay) {}
 		SLATE_ARGUMENT(AWoTPlayerController*, PlayerController)
 		SLATE_ARGUMENT(AWoTInventory*, Item)
+		/** The viewport the overlay opens in, in pixels, so the first frame
+		 * already sizes the element gems for its DPI scale (Tick keeps it
+		 * current across resizes). Zero size: 1080p sizes until the first Tick. */
+		SLATE_ARGUMENT_DEFAULT(FVector2D, InitialPhysicalSize) = FVector2D::ZeroVector;
 #if WITH_AUTOMATION_TESTS
 		SLATE_ARGUMENT(TSharedPtr<const FWoTRequiredMenuFonts>, RequiredFontsForTesting)
 #endif
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual void Tick(const FGeometry& AllottedGeometry,
+		const double InCurrentTime, const float InDeltaTime) override;
 	static EVisibility VisibilityForFonts(bool bFontsValid);
+#if WITH_AUTOMATION_TESTS
+	float DpiScaleForTesting() const { return DpiScale; }
+#endif
 
 private:
 	TWeakObjectPtr<AWoTPlayerController> PlayerController;
 	TWeakObjectPtr<AWoTInventory> Item;
 	FWoTItemInfoContent Content;
 	FSlateBrush IconBrush;
+	/** The viewport's UI DPI scale; the element gems' small face is floored
+	 * against it (FWoTMenuStyle::LegibleSmallFont). */
+	float DpiScale = 1.0f;
 };

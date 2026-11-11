@@ -294,8 +294,28 @@ public:
 	 * Callers must hide/drop dependent widgets instead of constructing an empty
 	 * FSlateFontInfo, because pinned Slate maps empty infos to last resort. */
 	TOptional<FWoTRequiredMenuFonts> ResolveRequiredFonts() const;
+	/** The base small face at its retail size 8. Its one user, the item-info
+	 * element gems, draws it through LegibleSmallFont instead. */
 	const FSlateFontInfo& SmallFont() const { return Small; }
 	const FSlateFontInfo& ItalicFont() const { return Italic; }
+
+	/** Steam Deck verification, Display > Text Legibility: no on-screen
+	 * character under 9 physical pixels at 1280x800. */
+	static constexpr float MinimumLegiblePixels = 9.0f;
+	/** The layout scale the game viewport applies at PhysicalSize pixels: the
+	 * engine's UI DPI curve (UUserInterfaceSettings, ShortestSide). */
+	static float ViewportDpiScale(const FVector2D& PhysicalSize);
+	/** Physical pixels of Slate text of Size points under LayoutScale:
+	 * Size x 96/72 x LayoutScale. */
+	static float PhysicalTextPixels(float Size, float LayoutScale);
+	/** The smallest whole point size, never below Size, whose text is at least
+	 * MinimumLegiblePixels tall under LayoutScale. */
+	static float LegibleFontSize(float Size, float LayoutScale);
+	/** SmallFont raised to the legibility floor under LayoutScale (10 at
+	 * 1280x800, 11 at 1280x720, unchanged 8 from 1080p up). The style is built
+	 * once, so callers pass their live layout scale on every draw and a resize
+	 * never leaves a stale size. */
+	FSlateFontInfo LegibleSmallFont(float LayoutScale) const;
 
 	const FSlateBrush* Background() const { return &BackgroundBrush; }
 	const FSlateBrush* Blackout() const { return &BlackoutBrush; }
@@ -362,6 +382,10 @@ public:
 	 * package (which ships no menu strings), so specs see what players see. */
 	void SetEditorMenuStringsHiddenForTesting(bool bHidden)
 		{ bEditorMenuStringsHiddenForTesting = bHidden; }
+	/** The editor's small face is its offline F_WOTReg08 asset, which Slate
+	 * cannot shape (it draws LastResort boxes); specs that measure layout swap
+	 * in the face a guarded build resolves. */
+	void SetSmallFontForTesting(const FSlateFontInfo& Font) { Small = Font; }
 #endif
 
 private:
