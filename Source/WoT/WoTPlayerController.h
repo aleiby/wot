@@ -18,6 +18,8 @@ class SWoTInGameMenuOverlay;
 class SWoTChatInputOverlay;
 class SWoTItemInfoOverlay;
 class SWoTHelpOverlay;
+class SViewport;
+class SWidget;
 class UGameViewportClient;
 
 UENUM()
@@ -340,11 +342,49 @@ public:
 	bool IsChatTyping() const { return bChatTyping; }
 	void CancelChatInput();
 	void SubmitChatInput(const FString& Line);
+	/**
+	 * The keyboard panel opened over chat (spec r3 section 3 [I7]). Controller
+	 * chat is not a parity path: held gameplay keys are flushed, retained mouse
+	 * capture is released, chat's input router is suspended and input routes
+	 * UI-only to the panel.
+	 */
+	void SuspendChatInputForTextEntry(const TSharedRef<SWidget>& Panel);
+	/** The panel closed: chat's input mode is restored exactly as it opened. */
+	void ResumeChatInputAfterTextEntry();
+	bool IsChatInputSuspendedForTextEntry() const { return bChatInputSuspended; }
+	/** The open chat line's widget, if chat is open with one. */
+	TSharedPtr<SWoTChatInputOverlay> GetChatInputWidget() const { return ChatInputWidget; }
+	/**
+	 * Chat by controller (spec r3 section 4): D-pad up's tap (Say) and hold
+	 * (TeamSay). Talk or TeamTalk opens the line exactly as T and Y do, so the
+	 * line sent is the same; the line's text entry (the keyboard panel, or
+	 * Steam's keyboard when that route is on) starts in the same step.
+	 */
+	void ChatByController(bool bTeam);
+	/**
+	 * The in-game menu's Chat and Team Chat (spec r3 section 4): the menu
+	 * closes, then chat opens as T and Y open it. After controller input the
+	 * text entry starts with it; after mouse or keyboard input it is plain
+	 * keyboard chat [M6].
+	 */
+	void ChatFromInGameMenu(bool bTeam);
+	/**
+	 * The in-game menu's Taunts page (spec r3 section 4): the menu closes, then
+	 * PlayTaunt(1..6), or PlayTaunt(-1) for Random, exactly as the taunt keys
+	 * call it.
+	 */
+	void TauntFromInGameMenu(int32 TauntIndex);
 #if WITH_AUTOMATION_TESTS
 	FString GetChatTextForTesting() const;
 	void SetChatTextForTesting(const FString& Text);
 	void SubmitChatForTesting();
 	void EnableChatWidgetForTesting() { bEnableChatWidgetForTesting = true; }
+	/** True while chat's input router is registered and not suspended. */
+	bool IsChatInputRouterActiveForTesting() const;
+	/** The line the last SubmitChatInput received, as typed or sent. */
+	const FString& GetLastSubmittedChatLineForTesting() const
+		{ return LastSubmittedChatLineForTesting; }
+	void ResetChatCaptureForTesting() { LastSubmittedChatLineForTesting.Reset(); }
 #endif
 
 	// Engine.PlayerPawn SShot/ToggleFullscreen direct features plus
@@ -363,6 +403,9 @@ public:
 	UFUNCTION(Server, Reliable) void ServerRequestPause();
 #if WITH_AUTOMATION_TESTS
 	FName GetLastTauntSlotForTesting() const { return LastTauntSlotForTesting; }
+	/** Every PlayTaunt argument, in call order. */
+	const TArray<int32>& GetPlayTauntRequestsForTesting() const
+		{ return PlayTauntRequestsForTesting; }
 	void HandlePauseRequestForTesting(ENetMode NetMode) { HandlePauseRequest(NetMode); }
 #endif
 	bool IsHelpOpen() const { return bHelpOpen; }
@@ -470,8 +513,9 @@ public:
 	// PlayerPawn.ServerRestartPlayer: Level.Game.RestartPlayer(self) unconditionally.
 	// BattleHUD's team select (BattleHUD.uc:63-64) depends on it restarting a LIVE
 	// player at a team start; the engine's retained ServerRestartPlayer RPC no-ops for
-	// a live pawn, so this WoT RPC consumes the current body first (the port replaces
-	// pawns instead of reusing them — same divergence as ServerRespawnPlayer).
+	// a live pawn, so this WoT RPC replaces the pawn (the port replaces pawns instead
+	// of moving them — same divergence as ServerRespawnPlayer). The live pawn is kept
+	// until its replacement exists, and kept outright when every start refuses.
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRestartPlayerWoT();
 
@@ -620,7 +664,14 @@ private:
 	void RemoveInGameMenuWidget(bool bRestoreGameInput);
 	void BeginChatInput(const FString& InitialText);
 	void CreateChatInputWidget();
+	/** Chat's input mode: game-and-UI with the line focused, the viewport
+	 * ignoring input, and gameplay mouse capture retained when asked. */
+	void ApplyChatInputMode(bool bRetainMouseCapture,
+		const TSharedPtr<SViewport>& ViewportWidget, uint32 SlateUserIndex);
 	void RemoveChatInputWidget(bool bRestoreGameInput);
+	/** Starts the open chat line's text entry (controller chat); false when no
+	 * line with a widget is open. */
+	bool BeginChatTextEntry();
 	void BroadcastSay(const FString& Message);
 	void ServerEditCitadelInput();
 	void CreateHelpWidget(const struct FWoTHelpContent& Content);
@@ -717,12 +768,19 @@ private:
 		InGameMenuPresentationAuthority;
 	TSharedPtr<SWoTInGameMenuOverlay> InGameMenuWidget;
 	TWeakObjectPtr<UGameViewportClient> InGameMenuViewport;
+	/** The chat line's and the item info window's crisp whole-number font
+	 * strikes on Deck-class screens (FWoTMenuStyle::LegibleStrikeFont). */
+	TSharedPtr<FWoTFrontEndPresentationAuthority> ChatInputPresentationAuthority;
 	TSharedPtr<SWoTChatInputOverlay> ChatInputWidget;
 	TWeakObjectPtr<UGameViewportClient> ChatInputViewport;
 	FString ChatInputText;
 	bool bChatTyping = false;
+	/** The keyboard panel is open over chat. */
+	bool bChatInputSuspended = false;
 #if WITH_AUTOMATION_TESTS
 	bool bEnableChatWidgetForTesting = false;
+	FString LastSubmittedChatLineForTesting;
+	TArray<int32> PlayTauntRequestsForTesting;
 #endif
 	TSharedPtr<FWoTChatInputPreProcessor> ChatInputPreProcessor;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> HelpPresentationAuthority;
@@ -732,6 +790,7 @@ private:
 	float NextTauntTime = 0.0f;
 	FName LastTauntSlotForTesting = NAME_None;
 	TWeakObjectPtr<AWoTInventory> ItemInfoItem;
+	TSharedPtr<FWoTFrontEndPresentationAuthority> ItemInfoPresentationAuthority;
 	TSharedPtr<SWoTItemInfoOverlay> ItemInfoWidget;
 	TWeakObjectPtr<UGameViewportClient> ItemInfoViewport;
 	bool bItemInfoOpen = false;

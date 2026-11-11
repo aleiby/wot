@@ -32,7 +32,9 @@
 #include "WoTBootstrapHeartbeat.h"
 #include "WoTRetailText.h"
 
+#include "Algo/StableSort.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/ScopeExit.h"
 #include "Engine/NetConnection.h"
 #include "Modules/ModuleManager.h"
 
@@ -1682,9 +1684,16 @@ bool AWoTGameMode::CanPawnSeeStartForScoring(const APawn* Viewer,
 		Viewer, Start, WoTSight::VisibilityOf(Start));
 }
 
-AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
+void AWoTGameMode::RankPlayerStarts(AController* Player, TArray<AActor*>& OutRanked,
+	bool* bOutBestAboveFloor)
 {
-	// giCombatBase.FindPlayerStart — score every PlayerStart and take the best.
+	// giCombatBase.FindPlayerStart — score every PlayerStart once, in the level's
+	// actor order, drawing one random base per start exactly as retail does.
+	OutRanked.Reset();
+	if (bOutBestAboveFloor)
+	{
+		*bOutBestAboveFloor = false;
+	}
 	UWorld* World = GetWorld();
 	APawn* PlayerPawn = Player ? Player->GetPawn() : nullptr;
 
@@ -1692,8 +1701,9 @@ AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
 	const AWoTPlayerState* PlayerPS = Player ? Player->GetPlayerState<AWoTPlayerState>() : nullptr;
 	const uint8 InTeam = PlayerPS ? PlayerPS->Team : uint8(255);
 
-	float BestScore = -100000.0f;
-	APlayerStart* BestStart = nullptr;
+	// Retail's BestScore floor: a start rated at or below it is never chosen.
+	constexpr float RetailBestScoreFloor = -100000.0f;
+	TArray<TPair<float, APlayerStart*>> Rated;
 	const AWoTLeafMap* LeafMap = nullptr;
 	if (TActorIterator<AWoTLeafMap> It(World); It)
 	{
@@ -1706,8 +1716,7 @@ AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
 		// Intentional divergence (PORT_NOTES): retail FindPlayerStart can pick a
 		// start whose spawn always fails (Battle3_01 PlayerStart27/28 sit in
 		// solid BSP), and GameInfo.Login then rejects the joining player with
-		// FailedSpawnMessage. Such a start is never chosen here, so a join or
-		// restart lands on one of the map's spawnable starts.
+		// FailedSpawnMessage. Such a start is never rated here.
 		if (LeafMap != nullptr && LeafMap->IsPointInSolid(Start->GetActorLocation()))
 		{
 			continue;
@@ -1782,16 +1791,32 @@ AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
 			}
 		}
 
-		if (Score > BestScore)
-		{
-			BestScore = Score;
-			BestStart = Start;
-		}
+		Rated.Emplace(Score, Start);
 	}
 
+	// Best first. The stable sort keeps actor order between equal ratings, so the
+	// head is exactly the start retail's `Score > BestScore` scan keeps.
+	Algo::StableSortBy(Rated, [](const TPair<float, APlayerStart*>& Entry)
+		{ return Entry.Key; }, TGreater<float>());
+	OutRanked.Reserve(Rated.Num());
+	for (const TPair<float, APlayerStart*>& Entry : Rated)
+	{
+		OutRanked.Add(Entry.Value);
+	}
+	if (bOutBestAboveFloor)
+	{
+		*bOutBestAboveFloor = !Rated.IsEmpty() && Rated[0].Key > RetailBestScoreFloor;
+	}
+}
+
+AActor* AWoTGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	TArray<AActor*> Ranked;
+	bool bBestAboveFloor = false;
+	RankPlayerStarts(Player, Ranked, &bBestAboveFloor);
 	// Fall back to the engine's picker only in the degenerate all-occupied / no-start case
 	// (the original would return None here); never hand back a null start.
-	return BestStart ? BestStart : Super::ChoosePlayerStart_Implementation(Player);
+	return bBestAboveFloor ? Ranked[0] : Super::ChoosePlayerStart_Implementation(Player);
 }
 
 void AWoTGameMode::SetPlayerDefaults(APawn* PlayerPawn)
@@ -1866,65 +1891,220 @@ void AWoTGameMode::RestartPlayerAtPlayerStart(AController* NewPlayer,
 	RestartStartSpot.Reset();
 }
 
+const TCHAR* WoTStartSpawnRejectionName(EWoTStartSpawnRejection Rejection)
+{
+	switch (Rejection)
+	{
+	case EWoTStartSpawnRejection::None: return TEXT("spawned");
+	case EWoTStartSpawnRejection::SpawnFailed: return TEXT("spawn-failed");
+	case EWoTStartSpawnRejection::NoFreeSpot: return TEXT("no-free-spot");
+	case EWoTStartSpawnRejection::Encroaches: return TEXT("encroaches");
+	}
+	return TEXT("unknown");
+}
+
+APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
+	FWoTStartSpawnResult* OutResult)
+{
+	FWoTStartSpawnResult Result;
+	Result.ResolvedLocation = SpawnTransform.GetLocation();
+	ON_SCOPE_EXIT
+	{
+		if (OutResult)
+		{
+			*OutResult = Result;
+		}
+	};
+	if (!PawnClass)
+	{
+		Result.Rejection = EWoTStartSpawnRejection::SpawnFailed;
+		return nullptr;
+	}
+	// UE1 spawns at the authored NavigationPoint transform. SpawnActor then
+	// calls FindSpot for the NEW pawn cylinder: shallow
+	// world penetration is pushed clear, while an already-free high start is
+	// left floating and falls normally. Do not infer a floor from the
+	// PlayerStart's own 40uu cylinder and do not force Walking. The pawn is
+	// placed first and fitted after: FindSpot looks only at the level.
+	FActorSpawnParameters SpawnInfo;
+	SpawnInfo.Instigator = SpawnInstigator;
+	SpawnInfo.ObjectFlags |= RF_Transient;
+	SpawnInfo.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	FTransform RetailSpawn = SpawnTransform;
+	APawn* Spawned = World.SpawnActor<APawn>(PawnClass, RetailSpawn, SpawnInfo);
+	if (!Spawned)
+	{
+		Result.Rejection = EWoTStartSpawnRejection::SpawnFailed;
+		return nullptr;
+	}
+	// UE1 FindSpot against the level for the pawn's cylinder extent, as a box
+	// (SpawnActor: bAssumeFit; SetLocation's FarMoveActor: not). It ends with a
+	// level point check of the adjusted box, which also fails a centre in solid
+	// BSP: Battle3_01's PlayerStart27/28 sit 44-90 uu under a semisolid floor,
+	// so retail never seats a pawn there.
+	FVector ResolvedLocation = RetailSpawn.GetLocation();
+	if (!WoTUE1Collision::FindSpotLevelOnly(World,
+		Spawned->GetSimpleCollisionCylinderExtent(), ResolvedLocation, bAssumeFit))
+	{
+		Result.Rejection = EWoTStartSpawnRejection::NoFreeSpot;
+		Spawned->Destroy();
+		return nullptr;
+	}
+	Result.ResolvedLocation = ResolvedLocation;
+	RetailSpawn.SetLocation(ResolvedLocation);
+	Spawned->SetActorTransform(RetailSpawn, false, nullptr,
+		ETeleportType::TeleportPhysics);
+	// UE1 SpawnActor rejects actor encroachment after its level-only
+	// FindSpot.  This preserves login/restart failure (and therefore the
+	// dying-state retry) instead of seating two players at one start.
+	if (const AActor* Blocker = WoTUE1Collision::FindEncroachedBlockingActor(*Spawned))
+	{
+		Result.Rejection = EWoTStartSpawnRejection::Encroaches;
+		Result.Blocker = Blocker->GetName();
+		Spawned->Destroy();
+		return nullptr;
+	}
+	return Spawned;
+}
+
 APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
 	AController* NewPlayer, const FTransform& SpawnTransform)
 {
-	FTransform RetailSpawn = SpawnTransform;
-	if (const APlayerStart* Start = Cast<APlayerStart>(RestartStartSpot.Get()))
+	if (Cast<APlayerStart>(RestartStartSpot.Get()))
 	{
 		UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
-		// UE1 spawns at the authored NavigationPoint transform. SpawnActor then
-		// calls FindSpot for the NEW pawn cylinder: shallow
-		// world penetration is pushed clear, while an already-free high start is
-		// left floating and falls normally. Do not infer a floor from the
-		// PlayerStart's own 40uu cylinder and do not force Walking.
 		if (UWorld* World = GetWorld(); World && PawnClass)
 		{
-			FActorSpawnParameters SpawnInfo;
-			SpawnInfo.Instigator = GetInstigator();
-			SpawnInfo.ObjectFlags |= RF_Transient;
-			SpawnInfo.SpawnCollisionHandlingOverride =
-				ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-			APawn* Spawned = World->SpawnActor<APawn>(
-				PawnClass, RetailSpawn, SpawnInfo);
-			if (Spawned)
-			{
-				FVector ResolvedLocation = RetailSpawn.GetLocation();
-				const FRotator ResolvedRotation = RetailSpawn.Rotator();
-				if (!WoTUE1Collision::FindTeleportSpotWorldOnly(
-					*World, *Spawned, ResolvedLocation, ResolvedRotation))
-				{
-					Spawned->Destroy();
-					return nullptr;
-				}
-				// UE1 FindSpot ends with a level point check of the adjusted
-				// cylinder and moves it at most sqrt(1.5)*|Extent|,
-				// so a start whose center lies in solid BSP never
-				// spawns: Battle3_01's PlayerStart27/28 sit 44-90 uu under a
-				// semisolid floor, and retail's RestartPlayer picks another start.
-				// UE5's FindTeleportSpot resolves only the one-sided collision
-				// mesh and pushed such a pawn out of the floor's underside: it
-				// fell out of the world.
-				if (TActorIterator<AWoTLeafMap> It(World);
-					It && It->IsPointInSolid(ResolvedLocation))
-				{
-					Spawned->Destroy();
-					return nullptr;
-				}
-				RetailSpawn.SetLocation(ResolvedLocation);
-				Spawned->SetActorTransform(RetailSpawn, false, nullptr,
-					ETeleportType::TeleportPhysics);
-				// UE1 SpawnActor rejects actor encroachment after its level-only
-				// FindSpot.  This preserves login/restart failure (and therefore the
-				// dying-state retry) instead of seating two players at one start.
-				if (WoTUE1Collision::EncroachesBlockingActor(*Spawned))
-				{
-					Spawned->Destroy();
-					return nullptr;
-				}
-			}
-			return Spawned;
+			// GameInfo.Login spawns the PlayerPawn (SpawnActor: FindSpot with
+			// bAssumeFit); GameInfo.RestartPlayer moves it (SetLocation ->
+			// FarMoveActor: FindSpot without bAssumeFit).
+			return SpawnPawnAtRetailStart(*World, PawnClass, SpawnTransform,
+				GetInstigator(), /*bAssumeFit*/ !bRestartMovesPlayerPawn,
+				&LastStartSpawn);
 		}
 	}
-	return Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, RetailSpawn);
+	return Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, SpawnTransform);
+}
+
+void AWoTGameMode::RestartPlayer(AController* NewPlayer)
+{
+	if (NewPlayer == nullptr || NewPlayer->IsPendingKillPending())
+	{
+		return;
+	}
+	// The engine path keeps a pawn the controller still owns.
+	if (NewPlayer->GetPawn() != nullptr)
+	{
+		Super::RestartPlayer(NewPlayer);
+		return;
+	}
+	RestartPlayerAtRatedStarts(NewPlayer, nullptr);
+}
+
+bool AWoTGameMode::ServerReStartPlayer(AController* Player)
+{
+	if (Player == nullptr || Player->IsPendingKillPending())
+	{
+		return false;
+	}
+	TGuardValue<bool> MovesPlayerPawn(bRestartMovesPlayerPawn, true);
+	APawn* Outgoing = Player->GetPawn();
+	if (!IsValid(Outgoing))
+	{
+		RestartPlayer(Player);
+		return IsValid(Player->GetPawn());
+	}
+	return RestartPlayerAtRatedStarts(Player, Outgoing);
+}
+
+bool AWoTGameMode::RestartPlayerAtRatedStarts(AController* NewPlayer, APawn* Outgoing)
+{
+	// The engine's own refusals (spectator-only, no pawn class) and the no-start
+	// case keep the engine path, which never gives up a live pawn: it keeps the
+	// pawn where it stands, as retail's RestartPlayer does without a start.
+	TArray<AActor*> Ranked;
+	bool bBestAboveFloor = false;
+	if (!MustSpectate(Cast<APlayerController>(NewPlayer))
+		&& GetDefaultPawnClassForController(NewPlayer) != nullptr)
+	{
+		// giCombatBase.FindPlayerStart. A live Outgoing pawn is still possessed
+		// here, so the rating skips it like retail's `OtherPlayer != Player`.
+		RankPlayerStarts(NewPlayer, Ranked, &bBestAboveFloor);
+	}
+	if (Ranked.IsEmpty())
+	{
+		Super::RestartPlayer(NewPlayer);
+		return IsValid(NewPlayer->GetPawn()) && NewPlayer->GetPawn() != Outgoing;
+	}
+	if (!bBestAboveFloor)
+	{
+		// Every rating is under retail's floor (every start occupied): the first
+		// choice stays the engine picker's, as ChoosePlayerStart returns it.
+		if (AActor* EnginePick = Super::ChoosePlayerStart_Implementation(NewPlayer))
+		{
+			Ranked.Remove(EnginePick);
+			Ranked.Insert(EnginePick, 0);
+		}
+	}
+
+	// The outgoing pawn must neither be seen nor block its replacement while the
+	// starts are tried (retail moves the one pawn, so it never meets itself).
+	const bool bOutgoingWasHidden = Outgoing && Outgoing->IsHidden();
+	const bool bOutgoingCollided = Outgoing && Outgoing->GetActorEnableCollision();
+	if (Outgoing)
+	{
+		Outgoing->SetActorHiddenInGame(true);
+		Outgoing->SetActorEnableCollision(false);
+	}
+	for (AActor* Start : Ranked)
+	{
+		RestartStartSpot = Start;
+		LastStartSpawn = FWoTStartSpawnResult();
+		APawn* NewPawn = SpawnDefaultPawnFor(NewPlayer, Start);
+		RestartStartSpot.Reset();
+		if (!IsValid(NewPawn))
+		{
+#if !UE_BUILD_SHIPPING
+			UE_LOG(LogGameMode, Log,
+				TEXT("RestartPlayer: %s refused the pawn (%s%s%s); trying the next rated start"),
+				*GetNameSafe(Start), WoTStartSpawnRejectionName(LastStartSpawn.Rejection),
+				LastStartSpawn.Blocker.IsEmpty() ? TEXT("") : TEXT(" by "),
+				*LastStartSpawn.Blocker);
+#endif
+			continue;
+		}
+		if (Outgoing)
+		{
+			NewPlayer->UnPossess();
+			Outgoing->Destroy();
+		}
+		// AGameModeBase::RestartPlayerAtPlayerStart's spawn branch, for this start.
+		NewPlayer->SetPawn(NewPawn);
+		InitStartSpot(Start, NewPlayer);
+		FinishRestartPlayer(NewPlayer, Start->GetActorRotation());
+		return IsValid(NewPlayer->GetPawn());
+	}
+
+	if (Outgoing)
+	{
+		// PlayerPawn.ServerReStartPlayer: "Restartplayer failed". The live pawn
+		// stays where it stood and the player keeps control of it.
+		Outgoing->SetActorEnableCollision(bOutgoingCollided);
+		Outgoing->SetActorHiddenInGame(bOutgoingWasHidden);
+#if !UE_BUILD_SHIPPING
+		UE_LOG(LogGameMode, Warning,
+			TEXT("Restartplayer failed: every start refused %s; %s keeps its pawn"),
+			*GetNameSafe(GetDefaultPawnClassForController(NewPlayer)),
+			*GetNameSafe(NewPlayer));
+#endif
+		return false;
+	}
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogGameMode, Warning, TEXT("Restartplayer failed: every start refused %s for %s"),
+		*GetNameSafe(GetDefaultPawnClassForController(NewPlayer)), *GetNameSafe(NewPlayer));
+#endif
+	FailedToRestartPlayer(NewPlayer);
+	return false;
 }

@@ -199,6 +199,15 @@ private:
 	// the local player BEFORE world BeginPlay, so the login chain must locate on demand.
 	void LocateBattle();
 
+	// giMPBattle.PostBeginPlay's battle setup (giMPBattle.uc:40-59): locate the
+	// BattleInfo, apply the host's seal settings, then ResetBattle, which opens the
+	// editing phase. UE1 always ran it before any Login. UE5's LoadMap logs the
+	// listen host in before world BeginPlay, so whichever comes first (that login
+	// or BeginPlay) runs it, once. Without it the host joined while the battle
+	// still read as begun, and LeaveTeam armed a join countdown that could not run.
+	void PrepareBattle();
+	bool bBattlePrepared = false;
+
 	// giMPBattle.JoinTeam / LeaveTeam: the NumPlayers accounting lives in ChangeTeam (as in the
 	// original); these carry the pawn/presentation side: faction morph, loadout strip/grant,
 	// owner teleporter/overview flags, collision, and the replicated neutral ghost look.

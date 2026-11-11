@@ -12,9 +12,13 @@ WOT_API void WoTDevRetailFamiliesEnsureActivated();
 /** Development/editor view of the same authenticated class-default closure.
  * Guarded builds instead obtain this from the active payload generation. */
 WOT_API const FWoTRuntimeClassDefaults* WoTDevRetailClassDefaults();
+/** Recover omitted asset vertices, caching decoded frames per identity until reset. */
+WOT_API bool WoTDevRetailUnreferencedMeshFrames(FStringView Identity,
+	TArray<TArray<FVector>>& Out);
 
 #if WITH_AUTOMATION_TESTS
 WOT_API void WoTDevRetailFamiliesResetForTesting();
+WOT_API int32 WoTDevRetailUnreferencedMeshDecodeCountForTesting();
 WOT_API void WoTDevRetailFamiliesSetCacheRootForTesting(FString CacheRoot);
 WOT_API bool WoTDevRetailFamiliesLastDecodeSucceededForTesting();
 WOT_API int32 WoTDevRetailFamiliesLastDecodedObjectCountForTesting();

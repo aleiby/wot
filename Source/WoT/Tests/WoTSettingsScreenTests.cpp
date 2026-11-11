@@ -6,10 +6,14 @@
 #include "../Settings/WoTSettingsSlate.h"
 #include "../WoTFrontEndSlate.h"
 #include "../WoTGameInstance.h"
+#include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
+#include "../Online/WoTInstallerSharingSubsystem.h"
+#include "../Online/WoTLocalNetworkAccess.h"
+#include "../Updater/WoTLocalInstallerForSharing.h"
 #include "WoTFrontEndTestData.h"
 
 #include "Framework/Application/SlateApplication.h"
@@ -459,7 +463,8 @@ bool FWoTSettingsControlsCaptureSpec::RunTest(const FString&)
 		EWoTSettingsPage::Controls, Fixture.Owner, Authority, BackCallbacks);
 	Second->BeginCaptureForTesting(EWoTManagedBinding::ShowScores, EWoTBindingSlot::Primary);
 	Second->OnPreviewKeyDown(FGeometry(), KeyEvent(EKeys::F9));
-	TestTrue(TEXT("Back handled"), Second->HandleBack());
+	// The Back button drops a dirty draft at once (B and Escape ask first).
+	TestTrue(TEXT("Back handled"), Second->BackForTesting().IsEventHandled());
 	TestEqual(TEXT("Back navigates"), BackCallbacks.BackCount, 1);
 	TestTrue(TEXT("Back discarded the pending rebind"),
 		Fixture.Owner->GetGameSettings().FindBinding(EWoTManagedBinding::ShowScores)->Primary == EKeys::F4);
@@ -518,6 +523,102 @@ bool FWoTSettingsControllerLookSpec::RunTest(const FString&)
 		Fixture.Owner->GetGameSettings().ControllerLookSensitivity, 1.5f);
 	TestTrue(TEXT("owner persisted the controller invert"),
 		Fixture.Owner->GetGameSettings().bControllerInvertY);
+	return !HasAnyErrors();
+}
+
+// menuOptions' Crosshair row is MainHUD.ChangeCrosshair over 21 crosshairs (the
+// 21st draws nothing), not a slider; View Bob steps Bob by 0.004 from 0 to 0.032.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsCrosshairAndViewBobSpec,
+	"WoT.FrontEnd.Settings.CrosshairAndViewBob", ScreenFlags)
+
+bool FWoTSettingsCrosshairAndViewBobSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	const TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, Callbacks);
+	Screen->SlatePrepass(1.0f);
+	const FWoTGameSettings Confirmed = Fixture.Owner->GetGameSettings();
+	const TSharedPtr<SWoTCrosshairSelector> Crosshair = Screen->CrosshairSelectorForTesting();
+	const TSharedPtr<SWoTRetailSlider> ViewBob = Screen->ViewBobSliderForTesting();
+	if (!TestTrue(TEXT("both rows exist"), Crosshair.IsValid() && ViewBob.IsValid()))
+		return false;
+
+	// Crosshair: User.ini Crosshair=13 is shown with the HUD's own art for it.
+	TestEqual(TEXT("the default crosshair is 13"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	TestTrue(TEXT("the row draws the art the HUD draws for crosshair 13"),
+		Crosshair->CrosshairBrush()->GetResourceObject()
+			== AWoTHUD::ResolveCrosshairTexture(13));
+	TestTrue(TEXT("Left is handled"),
+		Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left)).IsEventHandled());
+	TestEqual(TEXT("Left steps to 12"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 12);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right returns to 13"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	TestTrue(TEXT("Left then Right leaves the draft unchanged"),
+		Screen->DraftForTesting() == Confirmed);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Gamepad_DPad_Right));
+	TestEqual(TEXT("the D-pad steps like Right"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 14);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Gamepad_DPad_Left));
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Enter));
+	TestEqual(TEXT("Enter steps forward, as PlayerPawn.ChangeCrosshair does"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 14);
+	Crosshair->OnNavigation(FGeometry(), FNavigationEvent(FModifierKeysState(), 0,
+		EUINavigation::Left, ENavigationGenesis::Controller));
+	TestEqual(TEXT("the stick steps like the D-pad"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 13);
+	// MainHUD.ChangeCrosshair wraps past the 21st entry (none) to 0 and back.
+	FWoTGameSettings Edge = Screen->DraftForTesting();
+	Edge.Crosshair = 0;
+	Screen->SetDraftForTesting(Edge);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left));
+	TestEqual(TEXT("Left from 0 wraps to the no-crosshair entry"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 20);
+	TestTrue(TEXT("the no-crosshair entry draws nothing"),
+		Crosshair->CrosshairBrush()->GetResourceObject() == nullptr
+		&& Crosshair->CrosshairBrush()->DrawAs == ESlateBrushDrawType::NoDrawType);
+	Crosshair->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right from the last entry wraps to 0"),
+		static_cast<int32>(Screen->DraftForTesting().Crosshair), 0);
+	TestEqual(TEXT("the HUD wraps the same way"), AWoTHUD::WrapCrosshair(20, 1), 0);
+	TestEqual(TEXT("the HUD wraps down the same way"), AWoTHUD::WrapCrosshair(0, -1), 20);
+	Edge.Crosshair = Confirmed.Crosshair;
+	Screen->SetDraftForTesting(Edge);
+
+	// View Bob: nine stops, each visited once in each direction, and the knob
+	// shows the stored step at every one of them.
+	auto Step = [&Screen]()
+	{
+		return FMath::RoundToInt(Screen->DraftForTesting().ViewBob / 0.004f);
+	};
+	TestEqual(TEXT("the default bob 0.016 is step 4"), Step(), 4);
+	TestEqual(TEXT("the default bob shows on the fifth stop"), ViewBob->KnobStopForTesting(), 5);
+	ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Home));
+	TestEqual(TEXT("Home stores no bob"), Screen->DraftForTesting().ViewBob, 0.0f);
+	TestEqual(TEXT("no bob shows on the first stop"), ViewBob->KnobStopForTesting(), 1);
+	for (int32 Expected = 1; Expected <= 8; ++Expected)
+	{
+		ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+		TestEqual(FString::Printf(TEXT("Right reaches step %d"), Expected), Step(), Expected);
+		TestEqual(FString::Printf(TEXT("step %d stores %d x 0.004"), Expected, Expected),
+			Screen->DraftForTesting().ViewBob, 0.004f * static_cast<float>(Expected));
+		TestEqual(FString::Printf(TEXT("step %d shows on stop %d"), Expected, Expected + 1),
+			ViewBob->KnobStopForTesting(), Expected + 1);
+	}
+	ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Right));
+	TestEqual(TEXT("Right at the top stays at 0.032"), Step(), 8);
+	for (int32 Expected = 7; Expected >= 0; --Expected)
+	{
+		ViewBob->OnKeyDown(FGeometry(), KeyEvent(EKeys::Left));
+		TestEqual(FString::Printf(TEXT("Left reaches step %d"), Expected), Step(), Expected);
+		TestEqual(FString::Printf(TEXT("step %d shows on stop %d going down"),
+			Expected, Expected + 1), ViewBob->KnobStopForTesting(), Expected + 1);
+	}
 	return !HasAnyErrors();
 }
 
@@ -621,7 +722,7 @@ bool FWoTSettingsHardwareConfirmationSpec::RunTest(const FString&)
 	FWoTGameSettingsAdapter::ApplyBrightness(BrightnessDraft.Brightness);
 	ProjectedBrightness.Reset();
 	TestTrue(TEXT("Back handles a live brightness preview"),
-		BrightnessScreen->HandleBack());
+		BrightnessScreen->BackForTesting().IsEventHandled());
 	TestEqual(TEXT("Back reapplies brightness once"), ProjectedBrightness.Num(), 1);
 	if (ProjectedBrightness.Num() == 1)
 	{
@@ -852,6 +953,177 @@ bool FWoTParityFix18SettingsLabelsSpec::RunTest(const FString&)
 				HasText(Texts, Label));
 		}
 	}
+	return !HasAnyErrors();
+}
+
+namespace
+{
+/** A sharer source that never finds an installer. */
+class FSettingsNothingToShareSource final : public IWoTInstallerShareSource
+{
+public:
+	virtual FString Find() override { return FString(); }
+	virtual TUniquePtr<IWoTInstallerShareReader> Open() override { return nullptr; }
+};
+} // namespace
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareSettingsRowSpec,
+	"WoT.InstallerShare.SettingsRow", ScreenFlags)
+
+bool FWoTInstallerShareSettingsRowSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	TestTrue(TEXT("sharing is on by default"), Screen->SharingDraftForTesting());
+	const TSharedPtr<SCheckBox> Box = Screen->SharingCheckBoxForTesting();
+	if (!TestTrue(TEXT("the Hardware page has the sharing row"), Box.IsValid())) return false;
+	TestTrue(TEXT("the row shows checked"), Box->IsChecked());
+	Box->ToggleCheckedState();
+	TestFalse(TEXT("toggling changes the draft"), Screen->SharingDraftForTesting());
+	TestTrue(TEXT("the sharing change counts as unsaved"), Screen->HasUnsavedChanges());
+	// The back action asks "Save changes?" first (the Deck session feedback);
+	// Discard, like the Back button, then leaves and drops the draft.
+	TestTrue(TEXT("Back asks before leaving"),
+		Screen->HandleBack() && Screen->IsConfirmingUnsaved());
+	TestFalse(TEXT("asking keeps the change"), Screen->SharingDraftForTesting());
+	Screen->BackForTesting();
+	TestTrue(TEXT("leaving without saving discards the change"),
+		Screen->SharingDraftForTesting());
+	TestTrue(TEXT("and writes nothing"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+
+	UWoTInstallerSharingSubsystem* Sharing =
+		NewObject<UWoTInstallerSharingSubsystem>(Fixture.Instance);
+	Sharing->AddToRoot();
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT
+	{
+		Sharing->ApplySharingSwitch(false);
+		Sharing->RemoveFromRoot();
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
+	};
+	FWoTInstallerSharingTestConfig Config;
+	Config.IsBootstrapReady = []() { return true; };
+	Config.SharerConfig.Label = TEXT("a Windows PC");
+	Config.SharerConfig.Size = 8;
+	Config.MakeDependencies = []()
+	{
+		FWoTInstallerSharer::FDependencies Dependencies;
+		Dependencies.Source = MakeShared<FSettingsNothingToShareSource>();
+		return Dependencies;
+	};
+	Sharing->ConfigureForTesting(MoveTemp(Config), true);
+	Sharing->EvaluateForTesting();
+	Sharing->PumpForTesting();
+	TestTrue(TEXT("the sharer searched and found nothing"), Sharing->HasNothingToShare());
+
+	FScreenCallbacks SaveCallbacks;
+	TSharedRef<SWoTSettingsScreen> Saving = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, SaveCallbacks);
+	Saving->SetSharingSubsystemForTesting(Sharing);
+	TestTrue(TEXT("the hint shows while sharing is on and nothing was found"),
+		Saving->IsSharingHintVisibleForTesting());
+	Saving->SharingCheckBoxForTesting()->ToggleCheckedState();
+	TestFalse(TEXT("the hint hides while the switch is off"),
+		Saving->IsSharingHintVisibleForTesting());
+	Saving->SaveForTesting();
+	TestEqual(TEXT("Save closes the screen"), SaveCallbacks.SavedCount, 1);
+	TestFalse(TEXT("Save persisted off"), UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+	TestFalse(TEXT("the confirmed switch is off"), Saving->SharingConfirmedForTesting());
+	TestFalse(TEXT("Save stopped the sharer"), Sharing->IsSharerRunning());
+
+	// A reopened page reads the side file again.
+	FScreenCallbacks ReloadCallbacks;
+	TSharedRef<SWoTSettingsScreen> Reloaded = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, ReloadCallbacks);
+	TestFalse(TEXT("a reopened page shows sharing off"), Reloaded->SharingDraftForTesting());
+	Reloaded->SetSharingSubsystemForTesting(Sharing);
+	Reloaded->SharingCheckBoxForTesting()->ToggleCheckedState();
+	Reloaded->SaveForTesting();
+	TestTrue(TEXT("switching it back on persists"),
+		UWoTInstallerSharingSubsystem::LoadSharingSwitch());
+	TestTrue(TEXT("and restarts the sharer"), Sharing->IsSharerRunning());
+
+	FScreenCallbacks ControlsCallbacks;
+	TSharedRef<SWoTSettingsScreen> ControlsScreen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, ControlsCallbacks);
+	TestFalse(TEXT("Controls has no sharing row"),
+		ControlsScreen->SharingCheckBoxForTesting().IsValid());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInstallerShareSettingsHintSpec,
+	"WoT.InstallerShare.SettingsHintWhereDownloadsIsSkipped", ScreenFlags)
+
+bool FWoTInstallerShareSettingsHintSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	UWoTInstallerSharingSubsystem* Sharing =
+		NewObject<UWoTInstallerSharingSubsystem>(Fixture.Instance);
+	Sharing->AddToRoot();
+	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
+	ON_SCOPE_EXIT
+	{
+		Sharing->ApplySharingSwitch(false);
+		Sharing->RemoveFromRoot();
+		WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({});
+		WoTSetSharingFinderSkipsDownloadsForTesting({});
+	};
+	FWoTInstallerSharingTestConfig Config;
+	Config.IsBootstrapReady = []() { return true; };
+	Config.SharerConfig.Label = TEXT("a Mac");
+	Config.SharerConfig.Size = 8;
+	Config.MakeDependencies = []()
+	{
+		FWoTInstallerSharer::FDependencies Dependencies;
+		Dependencies.Source = MakeShared<FSettingsNothingToShareSource>();
+		return Dependencies;
+	};
+	Sharing->ConfigureForTesting(MoveTemp(Config), true);
+	Sharing->EvaluateForTesting();
+	Sharing->PumpForTesting();
+	if (!TestTrue(TEXT("the sharer found nothing"), Sharing->HasNothingToShare())) return false;
+
+	const FString MacHint(TEXT(
+		"On a Mac, keep the original installer beside WoT Reborn or choose it with Browse to share it."));
+	const FString DefaultHint(TEXT("No original installer found on this computer to share."));
+	struct FHintCase
+	{
+		bool bSkipsDownloads;
+		const FString* Expected;
+	};
+	for (const FHintCase& Case : {FHintCase{true, &MacHint}, FHintCase{false, &DefaultHint}})
+	{
+		WoTSetSharingFinderSkipsDownloadsForTesting(Case.bSkipsDownloads);
+		if (Case.bSkipsDownloads)
+		{
+			// The hint follows the finder: this search only looks up the
+			// Downloads path (it never opens Downloads).
+			TestTrue(TEXT("the production search skips Downloads"),
+				WoTProductionLocalInstallerSearch({}).DownloadsDirectory.IsEmpty());
+		}
+		FScreenCallbacks Callbacks;
+		TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+			EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+		Screen->SetSharingSubsystemForTesting(Sharing);
+		TestTrue(TEXT("the hint shows"), Screen->IsSharingHintVisibleForTesting());
+		const TSharedPtr<STextBlock> Hint = Screen->SharingHintForTesting();
+		TestTrue(Case.bSkipsDownloads
+				? TEXT("where Downloads is skipped, the hint names where to keep it")
+				: TEXT("elsewhere, the hint says nothing was found"),
+			Hint.IsValid() && Hint->GetText().ToString() == *Case.Expected);
+	}
+	WoTSetSharingFinderSkipsDownloadsForTesting({});
+	TestEqual(TEXT("unset, the platform decides: only a Mac skips Downloads"),
+		WoTSharingFinderSkipsDownloads(), PLATFORM_MAC != 0);
+	TestEqual(TEXT("and the hint follows it"),
+		UWoTInstallerSharingSubsystem::NothingToShareHint(),
+		PLATFORM_MAC ? MacHint : DefaultHint);
 	return !HasAnyErrors();
 }
 

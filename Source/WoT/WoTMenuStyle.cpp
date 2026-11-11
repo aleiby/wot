@@ -7,6 +7,7 @@
 #include "Components/AudioComponent.h"
 #include "Engine/Font.h"
 #include "Engine/Texture2D.h"
+#include "Engine/UserInterfaceSettings.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GameFramework/PlayerController.h"
@@ -32,6 +33,7 @@
 #include "Payload/WoTFrontEndFontOwner.h"
 #include "Payload/WoTRuntimeLocalizationDefaults.h"
 #include "Payload/WoTRuntimeRegistry.h"
+#include "UI/WoTControllerUIInput.h"
 #include "World/WoTRuntimeClassDefaults.h"
 #include "World/WoTRuntimeWorldProperties.h"
 #include "World/WoTWorldMaterializer.h"
@@ -827,6 +829,79 @@ TOptional<FWoTRequiredMenuFonts> FWoTMenuStyle::ResolveRequiredFonts() const
 		Owner->FontGeneration()};
 	return Result.IsValid() ? TOptional<FWoTRequiredMenuFonts>(MoveTemp(Result))
 		: TOptional<FWoTRequiredMenuFonts>();
+}
+
+float FWoTMenuStyle::ViewportDpiScale(const FVector2D& PhysicalSize)
+{
+	// SGameLayerManager scales the game layer by this curve value for the
+	// viewport's pixel size (the platform DPI it divides out is reapplied by the
+	// window), so it is the layout scale of every viewport overlay.
+	// Rounded: a widget's local size times its layout scale can land a hair
+	// under the viewport's whole pixel count.
+	return GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(FIntPoint(
+		FMath::RoundToInt32(PhysicalSize.X), FMath::RoundToInt32(PhysicalSize.Y)));
+}
+
+float FWoTMenuStyle::PhysicalTextPixels(float Size, float LayoutScale)
+{
+	return Size * FontConstants::RenderDPI / 72.0f * LayoutScale;
+}
+
+float FWoTMenuStyle::LegibleFontSize(float Size, float LayoutScale)
+{
+	const float PixelsPerPoint =
+		PhysicalTextPixels(1.0f, FMath::Max(LayoutScale, 0.01f));
+	// The tolerance keeps a size that lands exactly on the floor from rounding
+	// up a whole point through float error.
+	const float Floor = FMath::CeilToFloat(
+		MinimumLegiblePixels / PixelsPerPoint - UE_KINDA_SMALL_NUMBER);
+	return FMath::Max(Size, Floor);
+}
+
+FSlateFontInfo FWoTMenuStyle::LegibleSmallFont(float LayoutScale) const
+{
+	FSlateFontInfo Font = Small;
+	Font.Size = LegibleFontSize(Small.Size, LayoutScale);
+	return Font;
+}
+
+int32 FWoTMenuStyle::RetailFaceLineHeight(FName Face)
+{
+	// Tallest glyph cell of each shipped face, which the runtime font owner
+	// uses as the line height (WoT.UI.Legibility.HelpRetailGlyphs pins the
+	// WOT.u faces against the converted retail ones).
+	if (Face == FName(TEXT("F_WOTReg08"))) return 8;
+	if (Face == FName(TEXT("F_WOTReg30"))) return 30;
+	if (Face == FName(TEXT("Tahoma20"))) return 24;
+	return 14; // F_WOTReg14, F_WOTIta14
+}
+
+int32 FWoTMenuStyle::LegibleStrikeScale(FName Face)
+{
+	const int32 LineHeight = FMath::Max(RetailFaceLineHeight(Face), 1);
+	return FMath::Clamp(FMath::CeilToInt(
+		PrimaryLegiblePixels / static_cast<float>(LineHeight)), 1, 2);
+}
+
+FSlateFontInfo FWoTMenuStyle::LegibleStrikeFont(
+	const FWoTFrontEndPresentationAuthority* Authority, FName Face,
+	const FSlateFontInfo& Fallback, float LayoutScale)
+{
+	const float Scale = FMath::IsFinite(LayoutScale) && LayoutScale > 0.0f
+		? LayoutScale : 1.0f;
+	const int32 Strike = LegibleStrikeScale(Face);
+	if (Authority != nullptr && Authority->IsReady())
+	{
+		const FSlateFontInfo Authenticated =
+			Authority->MultiplayerFont(Face, Scale, Strike);
+		if (Authenticated.HasValidFont()) return Authenticated;
+	}
+	// The same size the authenticated strike gets: its line height in
+	// pixels, as points under Scale (Size x 96/72 x Scale = line x strike).
+	FSlateFontInfo Font = Fallback;
+	Font.Size *= static_cast<float>(Strike) * 72.0f
+		/ (static_cast<float>(FontConstants::RenderDPI) * Scale);
+	return Font;
 }
 
 FWoTRetailBrowserStyle& FWoTRetailBrowserStyle::Get()
@@ -2194,7 +2269,9 @@ void SWoTMenuButton::OnMouseEnter(
 	const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	SButton::OnMouseEnter(MyGeometry, MouseEvent);
-	if (bUsesExternalSelection)
+	// In Controller mode the pointer never selects: the D-pad owns the one
+	// highlight, and a hidden cursor must not steal it (spec r3 section 1).
+	if (bUsesExternalSelection && !FWoTControllerUIInput::IsControllerMode())
 	{
 		OnSelected.ExecuteIfBound();
 		// Hover is a real retail selection change. Keep Slate's navigation origin
@@ -2213,9 +2290,12 @@ void SWoTMenuButton::Tick(
 	const float InDeltaTime)
 {
 	SButton::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// Hover draws the highlight only for the pointer; keyboard focus always
+	// does (the existing keyboard cue, spec r3 [N3]).
+	const bool bHoverLook = IsHovered() && !FWoTControllerUIInput::IsControllerMode();
 	const bool bSelected = bUsesExternalSelection
 		? ExternalSelection.Get(false)
-		: IsHovered() || HasKeyboardFocus();
+		: bHoverLook || HasKeyboardFocus();
 	SetForegroundColor(IsEnabled()
 		? FWoTMenuStyle::MenuColor(bSelected)
 		: FSlateColor(FWoTMenuStyle::DisabledColor()));
@@ -2292,7 +2372,7 @@ void SWoTRetailSlider::Construct(const FArguments& InArgs)
 	OnValueChanged = InArgs._OnValueChanged;
 	MinValue = InArgs._MinValue;
 	StepSize = FMath::Max(InArgs._StepSize, UE_SMALL_NUMBER);
-	Positions = FMath::Max(InArgs._Positions, 2);
+	Positions = InArgs._Positions;
 	SetCanTick(false);
 
 	TSharedRef<SHorizontalBox> Strip = SNew(SHorizontalBox);
@@ -2335,10 +2415,16 @@ FSlateColor SWoTRetailSlider::SelectionColor() const
 	return FWoTMenuStyle::MenuColor(IsHovered() || HasKeyboardFocus());
 }
 
+int32 SWoTRetailSlider::PositionCount() const
+{
+	return FMath::Max(Positions.Get(8), 2);
+}
+
 int32 SWoTRetailSlider::ValueCell() const
 {
 	const float CurrentValue = Value.Get(MinValue);
-	if (Positions == 8)
+	const int32 Stops = PositionCount();
+	if (Stops == 8)
 	{
 		// menuWOT.DrawSlider: the knob takes the first cell whose upper bound
 		// (StepSize * i + sMin) exceeds the value, else the last.
@@ -2353,7 +2439,7 @@ int32 SWoTRetailSlider::ValueCell() const
 	}
 	const float Fraction = (CurrentValue - MinValue) / (StepSize * 8.0f);
 	return FMath::Clamp(
-		FMath::RoundToInt(Fraction * static_cast<float>(Positions - 1)) + 1, 1, Positions);
+		FMath::RoundToInt(Fraction * static_cast<float>(Stops - 1)) + 1, 1, Stops);
 }
 
 namespace
@@ -2398,7 +2484,7 @@ float SWoTRetailSlider::KnobLeft(float AllottedWidth) const
 	const float Travel = FMath::Max(AllottedWidth - Metrics.TrackStart
 		- Metrics.TrackEndInset - Metrics.Knob.X, 0.0f);
 	const float Fraction = static_cast<float>(ValueCell() - 1)
-		/ static_cast<float>(Positions - 1);
+		/ static_cast<float>(PositionCount() - 1);
 	return Metrics.TrackStart + Travel * Fraction;
 }
 
@@ -2432,15 +2518,16 @@ int32 SWoTRetailSlider::CellFromMouse(
 	const float LocalX = MyGeometry.AbsoluteToLocal(ScreenPosition).X;
 	const float Fraction = FMath::Clamp(
 		(LocalX - Metrics.TrackStart - Metrics.Knob.X * 0.5f) / Travel, 0.0f, 1.0f);
-	return FMath::RoundToInt(Fraction * static_cast<float>(Positions - 1)) + 1;
+	return FMath::RoundToInt(Fraction * static_cast<float>(PositionCount() - 1)) + 1;
 }
 
 void SWoTRetailSlider::CommitCell(int32 CellIndex)
 {
-	CellIndex = FMath::Clamp(CellIndex, 1, Positions);
+	const int32 Stops = PositionCount();
+	CellIndex = FMath::Clamp(CellIndex, 1, Stops);
 	// The stops span the complete authored eight-step range.
 	const float NewValue = MinValue + StepSize * 8.0f
-		* static_cast<float>(CellIndex - 1) / static_cast<float>(Positions - 1);
+		* static_cast<float>(CellIndex - 1) / static_cast<float>(Stops - 1);
 	OnValueChanged.ExecuteIfBound(NewValue);
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
@@ -2466,10 +2553,38 @@ FReply SWoTRetailSlider::OnKeyDown(
 	}
 	if (Key == EKeys::End)
 	{
-		CommitCell(Positions);
+		CommitCell(PositionCount());
 		return FReply::Handled();
 	}
+	// D-pad Left/Right step by the keyboard's step, one stop. On a two-column
+	// screen they would otherwise switch columns (spec r3 section 2).
+	if (Key == EKeys::Gamepad_DPad_Left)
+	{
+		CommitCell(ValueCell() - 1);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Gamepad_DPad_Right)
+	{
+		CommitCell(ValueCell() + 1);
+		return FReply::Handled();
+	}
+	// D-pad Up/Down navigate as usual.
 	return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+}
+
+FNavigationReply SWoTRetailSlider::OnNavigation(
+	const FGeometry& MyGeometry, const FNavigationEvent& InNavigationEvent)
+{
+	if (InNavigationEvent.GetNavigationGenesis() == ENavigationGenesis::Controller)
+	{
+		const EUINavigation Direction = InNavigationEvent.GetNavigationType();
+		if (Direction == EUINavigation::Left || Direction == EUINavigation::Right)
+		{
+			CommitCell(ValueCell() + (Direction == EUINavigation::Right ? 1 : -1));
+			return FNavigationReply::Stop();
+		}
+	}
+	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
 }
 
 FReply SWoTRetailSlider::OnMouseButtonDown(

@@ -23,7 +23,16 @@ Publication order (each step is a `gh` command, printed in dry-run):
   3. the draft's asset list is read back and compared by name and size (and by
      GitHub's sha256 digest when the API reports one);
   4. `gh release edit <tag> --draft=false --latest` -- the single step that makes
-     /releases/latest/download/ serve the new announcement pair.
+     /releases/latest/download/ serve the new announcement pair;
+  5. post-publish check: HEAD requests (curl, redirects not followed) prove that
+     /releases/latest/download/Install-WoT-Reborn.desktop now redirects to this
+     tag's copy and that GitHub serves it.
+
+Beside the signed set, every release carries the unsigned release-notes asset,
+the fixed-name player downloads and Install-WoT-Reborn.desktop, the SteamOS
+installer, which is built at the release commit with
+Tools/deck/installer/build_desktop_entry.py (steamos_installer_asset.py: stdlib
+only, the committed art, no keys). None of them is ever signed.
 
 This tool never deletes, re-tags, or edits an already-published release.
 
@@ -44,11 +53,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import release_crypto as crypto  # noqa: E402
 import release_formats as formats  # noqa: E402
+import steamos_installer_asset as steamos_installer  # noqa: E402
 import verify_release  # noqa: E402
+from qualify_announcement_transport import ALLOWED_REDIRECT_HOSTS  # noqa: E402
 
 PUBLISH_RECEIPT_FORMAT = "wot-release-publish-receipt-v1"
 DEFAULT_EVIDENCE = formats.REPOSITORY_ROOT / "Saved" / "ReleaseEvidence" / "release"
@@ -78,8 +90,12 @@ class Plan:
     player_downloads: Dict[str, str]
     notes: str
     release_notes_asset: bytes = b""
+    # Install-WoT-Reborn.desktop, built at steamos_installer_commit.
+    steamos_installer: bytes = b""
+    steamos_installer_commit: str = ""
     local_failures: List[str] = field(default_factory=list)
     steps: List[Dict[str, object]] = field(default_factory=list)
+    post_publish_failures: List[str] = field(default_factory=list)
 
 
 def git_checks(repository: Path, build_commit: str, runner: Runner) -> tuple:
@@ -267,6 +283,16 @@ def prepare_release_notes_asset(plan: Plan, runner: Runner, gh: str,
         previous, verified.release_sequence, notes_text)
 
 
+def prepare_steamos_installer(plan: Plan, repository: Path, release_commit: str) -> None:
+    """Build Install-WoT-Reborn.desktop from the release commit's own files."""
+    plan.steamos_installer = steamos_installer.build_at_commit(repository, release_commit)
+    plan.steamos_installer_commit = release_commit
+    plan.steps.append({
+        "step": "build-steamos-installer", "commit": release_commit,
+        "size": len(plan.steamos_installer),
+        "sha256": hashlib.sha256(plan.steamos_installer).hexdigest()})
+
+
 def remote_preflight(plan: Plan, runner: Runner, gh: str, trust, compiled,
                      verified: verify_release.VerifiedSet,
                      allow_staging_sequence: bool, allow_test: bool = False,
@@ -319,6 +345,9 @@ def _asset_rows(view_stdout: str) -> Dict[str, dict]:
 
 def publish(plan: Plan, runner: Runner, gh: str,
             verified: verify_release.VerifiedSet) -> None:
+    if not plan.steamos_installer:
+        raise PublishError(f"{formats.STEAMOS_INSTALLER_ASSET} was not built; nothing "
+                           "was created")
     with tempfile.TemporaryDirectory(
             prefix="wot-publish-", dir=verified.directory.parent) as scratch_name:
         scratch = Path(scratch_name)
@@ -326,6 +355,9 @@ def publish(plan: Plan, runner: Runner, gh: str,
         notes.write_text(plan.notes, encoding="utf-8")
         notes_asset = scratch / formats.RELEASE_NOTES_ASSET
         notes_asset.write_bytes(plan.release_notes_asset)
+        # Staged beside the notes, never inside the signed set's directory.
+        steamos_asset = scratch / formats.STEAMOS_INSTALLER_ASSET
+        steamos_asset.write_bytes(plan.steamos_installer)
         staged_downloads = []
         for fixed_name, source_name in sorted(plan.player_downloads.items()):
             source = verified.directory / source_name
@@ -340,7 +372,7 @@ def publish(plan: Plan, runner: Runner, gh: str,
                    "--target", plan.target, "--title", plan.title, "--notes-file",
                    str(notes), *[str(path) for path in plan.assets],
                    *[str(path) for path in staged_downloads],
-                   str(notes_asset)])
+                   str(steamos_asset), str(notes_asset)])
     view = _run_step(plan, runner, "read-back-draft",
                      [gh, "release", "view", plan.tag, "--repo", plan.repo, "--json",
                       "assets,isDraft,tagName"])
@@ -350,11 +382,16 @@ def publish(plan: Plan, runner: Runner, gh: str,
         "size": len(plan.release_notes_asset),
         "sha256": hashlib.sha256(plan.release_notes_asset).hexdigest(),
     }
+    expected[formats.STEAMOS_INSTALLER_ASSET] = {
+        "size": len(plan.steamos_installer),
+        "sha256": hashlib.sha256(plan.steamos_installer).hexdigest(),
+    }
     for fixed_name, source_name in plan.player_downloads.items():
         expected[fixed_name] = dict(verified.assets[source_name])
     if set(rows) != set(expected):
         raise PublishError(f"draft assets {sorted(rows)} differ from the verified set "
-                           f"plus release notes {sorted(expected)}; the draft was left "
+                           f"plus release notes, {formats.STEAMOS_INSTALLER_ASSET} and "
+                           f"player downloads {sorted(expected)}; the draft was left "
                            "unpublished")
     for name, row in expected.items():
         uploaded = rows[name]
@@ -369,6 +406,57 @@ def publish(plan: Plan, runner: Runner, gh: str,
                "--latest"])
 
 
+def latest_download_url(asset: str) -> str:
+    formats.validate_asset_name(asset)
+    return f"https://github.com/{formats.REPOSITORY}/releases/latest/download/{asset}"
+
+
+def head_command(url: str) -> List[str]:
+    """One HEAD request; redirects are reported, never followed."""
+    return ["curl", "--head", "--silent", "--show-error", "--max-time", "30",
+            "--output", os.devnull, "--write-out", "%{http_code} %{redirect_url}", url]
+
+
+def _head(plan: Plan, runner: Runner, name: str, url: str) -> tuple:
+    try:
+        result = _run_step(plan, runner, name, head_command(url), expect_success=False)
+    except OSError as exc:
+        return None, f"HEAD {url}: curl could not run: {exc}"
+    if result.returncode != 0:
+        return None, f"HEAD {url} failed ({result.returncode}): " \
+                     f"{(result.stderr or result.stdout or '').strip()}"
+    status, _, location = (result.stdout or "").strip().partition(" ")
+    if not status.isdigit():
+        return None, f"HEAD {url} returned no status: {result.stdout!r}"
+    return (int(status), location.strip()), ""
+
+
+def check_latest_steamos_installer(plan: Plan, runner: Runner) -> List[str]:
+    """The README's link must now serve this release's Install-WoT-Reborn.desktop.
+
+    The latest URL must redirect to this tag's copy, and that copy must
+    redirect to GitHub's release-asset host (a missing asset is a 404 there).
+    The asset host itself is not requested: its signed URLs are made for GET.
+    """
+    asset = formats.STEAMOS_INSTALLER_ASSET
+    latest = latest_download_url(asset)
+    tagged = formats.release_download_url(plan.tag, asset)
+    answer, failure = _head(plan, runner, "head-latest-steamos-installer", latest)
+    if failure:
+        return [failure]
+    if answer[0] not in (301, 302, 303, 307, 308) or answer[1] != tagged:
+        return [f"HEAD {latest} answered {answer[0]} {answer[1] or '(no redirect)'}; "
+                f"expected a redirect to {tagged}"]
+    answer, failure = _head(plan, runner, "head-tagged-steamos-installer", tagged)
+    if failure:
+        return [failure]
+    host = urlsplit(answer[1]).hostname or ""
+    if answer[0] not in (301, 302, 303, 307, 308) or host not in ALLOWED_REDIRECT_HOSTS:
+        return [f"HEAD {tagged} answered {answer[0]} {answer[1] or '(no redirect)'}; "
+                "expected a redirect to the release-asset host"]
+    return []
+
+
 def dry_run_commands(plan: Plan, gh: str) -> List[List[str]]:
     return [
         [gh, "release", "download", "--repo", plan.repo, "--pattern",
@@ -381,11 +469,15 @@ def dry_run_commands(plan: Plan, gh: str) -> List[List[str]]:
          plan.target, "--title", plan.title, "--notes-file", "<generated notes>",
          *[str(path) for path in plan.assets],
          *[f"<staged {name}>" for name in sorted(plan.player_downloads)],
+         f"<generated {formats.STEAMOS_INSTALLER_ASSET}>",
          f"<generated {formats.RELEASE_NOTES_ASSET}>"],
         [gh, "release", "view", plan.tag, "--repo", plan.repo, "--json",
          "assets,isDraft,tagName"],
         [gh, "release", "edit", plan.tag, "--repo", plan.repo, "--draft=false",
          "--latest"],
+        head_command(latest_download_url(formats.STEAMOS_INSTALLER_ASSET)),
+        head_command(formats.release_download_url(
+            plan.tag, formats.STEAMOS_INSTALLER_ASSET)),
     ]
 
 
@@ -480,6 +572,9 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
               file=sys.stderr)
         return 1
     target, failures = git_checks(repository_root, verified.build_commit, runner)
+    # The resolved release commit: proven clean HEAD, and the commit the
+    # SteamOS installer is built from even when --public-target names the tag.
+    release_commit = target
     if args.public_target is not None:
         if re.fullmatch(r"[0-9a-f]{40}", args.public_target) is None:
             failures.append("--public-target must be a full lowercase commit sha")
@@ -495,6 +590,7 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
     error = None
     if not failures:
         try:
+            prepare_steamos_installer(plan, repository_root, release_commit)
             prepare_release_notes_asset(
                 plan, runner, args.gh, verified, notes_text)
             if args.publish or args.check_remote:
@@ -508,6 +604,8 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
         except (PublishError, verify_release.VerifyError, formats.FormatError) as exc:
             error = str(exc)
             outcome = "failed"
+        if outcome == "published":
+            plan.post_publish_failures = check_latest_steamos_installer(plan, runner)
 
     release_notes_summary = None
     if plan.release_notes_asset:
@@ -537,6 +635,12 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
             for fixed_name, source_name in plan.player_downloads.items()
         },
         "release_notes_asset": release_notes_summary,
+        "steamos_installer": {
+            "build_commit": plan.steamos_installer_commit,
+            "sha256": hashlib.sha256(plan.steamos_installer).hexdigest(),
+            "size": len(plan.steamos_installer),
+        } if plan.steamos_installer else None,
+        "post_publish_failures": plan.post_publish_failures,
         "steps": plan.steps,
     }
     receipt_path = Path(args.receipt) if args.receipt else \
@@ -547,6 +651,8 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
         print(f"REFUSED: {failure}", file=sys.stderr)
     if error:
         print(f"publish_release: {error}", file=sys.stderr)
+    for failure in plan.post_publish_failures:
+        print(f"POST-PUBLISH CHECK FAILED: {failure}", file=sys.stderr)
     if not args.publish:
         print("publish_release: DRY RUN -- nothing was created. Commands --publish runs:")
         for command in dry_run_commands(plan, args.gh):
@@ -554,7 +660,13 @@ def main(argv: Optional[Sequence[str]] = None, runner: Runner = run_command) -> 
     print("Then qualify the live transport (docs/RELEASE-RUNBOOK.md step 8):")
     for command in qualifier_commands(Path(args.repository_root), plan.tag):
         print("  " + subprocess.list2cmdline(command))
+    if plan.post_publish_failures:
+        print(f"publish_release: {plan.tag} IS published and latest, but "
+              f"{formats.STEAMOS_INSTALLER_ASSET} is not served as expected; check the "
+              "release page", file=sys.stderr)
     print(f"publish_release: {outcome}; receipt {receipt_path}")
+    if plan.post_publish_failures:
+        return 1
     return 0 if outcome in ("planned", "published") else 1
 
 

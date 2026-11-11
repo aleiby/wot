@@ -9,6 +9,7 @@
 
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/Texture.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 
 namespace
@@ -78,9 +79,19 @@ bool FWoTShieldParticleCloudSpec::RunTest(const FString&)
 			UTexture* BoundTexture = Effect->GetBoundTextureForTesting();
 			if (TestNotNull(TEXT("shield quad has a bound retail texture"), BoundTexture))
 			{
-				const FIntPoint Dims(
+				FIntPoint Dims(
 					static_cast<int32>(BoundTexture->GetSurfaceWidth()),
 					static_cast<int32>(BoundTexture->GetSurfaceHeight()));
+#if WITH_EDITORONLY_DATA
+				// Fresh editor assets under null RHI have no platform resource.
+				// Compare with the authored source rather than accepting zero-size quads.
+				if (const UTexture2D* Imported = Cast<UTexture2D>(BoundTexture);
+					Imported && Imported->Source.IsValid())
+				{
+					Dims = FIntPoint(Imported->Source.GetSizeX(), Imported->Source.GetSizeY());
+				}
+#endif
+				TestTrue(TEXT("shield texture has nonzero authored dimensions"), Dims.X > 0 && Dims.Y > 0);
 				TestEqual(TEXT("renderer records the bound texture USize/VSize"),
 					Effect->GetParticleTextureSizeForTesting(), Dims);
 				const float DrawScale = 0.25f;
