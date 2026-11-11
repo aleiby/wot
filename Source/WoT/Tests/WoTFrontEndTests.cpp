@@ -34,6 +34,8 @@
 #include "../WoTBootstrapHeartbeat.h"
 #include "../Settings/WoTSettingsSlate.h"
 #include "../Payload/WoTPayloadActivation.h"
+#include "../UI/SWoTListCombo.h"
+#include "../UI/WoTControllerUIInput.h"
 #include "WoTFrontEndTestData.h"
 
 #include "Engine/Engine.h"
@@ -2009,7 +2011,35 @@ bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 		return false;
 	}
 
-	const TSharedRef<SWidget> RootChild = RootChildren->GetChildAt(0);
+	// Controller sub-project 3: the root's one child is the transparent focus
+	// outline layer around a column of the content host and the controller
+	// prompt strip (collapsed, with no prompts, while nothing is presented).
+	const TSharedRef<SWidget> LayerChild = RootChildren->GetChildAt(0);
+	if (!TestEqual(TEXT("front-end root child is the transparent focus outline layer"),
+		LayerChild->GetType(), FName(TEXT("SWoTFocusOutlineLayer"))))
+	{
+		return false;
+	}
+	FChildren* LayerChildren = LayerChild->GetChildren();
+	if (!TestTrue(TEXT("the layer holds one overlay"),
+		LayerChildren != nullptr && LayerChildren->Num() == 1))
+	{
+		return false;
+	}
+	FChildren* ColumnChildren = LayerChildren->GetChildAt(0)->GetChildren();
+	if (!TestTrue(TEXT("the overlay holds the content host and the prompt strip"),
+		ColumnChildren != nullptr && ColumnChildren->Num() == 2))
+	{
+		return false;
+	}
+	TestEqual(TEXT("the footer is the controller prompt strip"),
+		ColumnChildren->GetChildAt(1)->GetType(), FName(TEXT("SWoTButtonPrompts")));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	TestTrue(TEXT("the prompt strip shows nothing while nothing is presented"),
+		StaticCastSharedRef<SWoTButtonPrompts>(ColumnChildren->GetChildAt(1))
+			->GetShownPrompts().IsEmpty());
+	FWoTControllerUIInput::ResetForTesting();
+	const TSharedRef<SWidget> RootChild = ColumnChildren->GetChildAt(0);
 	if (!TestEqual(TEXT("front-end root child is a transparent content host"),
 		RootChild->GetType(), FName(TEXT("SBox"))))
 	{
@@ -2569,10 +2599,12 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			EKeys::Gamepad_FaceButton_Right);
 	}
 
+	// The map list is the touch-friendly SWoTListCombo (spec r3 section 2).
+	// With its dropdown open, Escape closes only the dropdown and a second
+	// Escape backs the screen (owner ruling 2026-11-08, spec r3 [N1]).
 	Root->ActivateMainMenuEntryForTesting(0);
 	TSharedPtr<SWidget> Combo = Root->MapComboBoxForTesting();
-	TSharedPtr<SComboBox<TSharedPtr<FWoTFrontEndMapEntry>>> TypedCombo =
-		StaticCastSharedPtr<SComboBox<TSharedPtr<FWoTFrontEndMapEntry>>>(Combo);
+	TSharedPtr<SWoTListCombo> TypedCombo = Root->MapListComboForTesting();
 	TArray<TSharedRef<SWidget>> ComboButtons;
 	CollectWidgetsOfType(Combo.ToSharedRef(), FName(TEXT("SButton")), ComboButtons);
 	TestTrue(TEXT("map combo opens through a real pointer click"),
@@ -2586,8 +2618,8 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		PopupFocus.IsValid() ? *PopupFocus->GetType().ToString() : TEXT("<none>"),
 		PopupFocus == Combo ? TEXT("true") : TEXT("false")));
 	TestTrue(TEXT("open map combo genuinely focuses its popup list"),
-		PopupFocus.IsValid() && PopupFocus != Combo
-			&& PopupFocus->GetType() == FName(TEXT("SComboListType")));
+		PopupFocus.IsValid() && PopupFocus != Combo && TypedCombo.IsValid()
+			&& PopupFocus == TypedCombo->GetPopupWidget());
 	const FString ComboSnapshot = Authority->SnapshotIdentity();
 	const uint64 BeforeComboBack = Root->ScreenRebuildCountForTesting();
 	Feedback->Events.Reset();
@@ -2596,9 +2628,22 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			MakeFrontEndKeyEvent(EKeys::Escape)));
 	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
 	FSlateApplication::Get().Tick();
-	TestTrue(TEXT("popup-list Escape returns Play directly to Main"),
+	TestFalse(TEXT("popup-list Escape closes the dropdown"),
+		TypedCombo.IsValid() && TypedCombo->IsOpen());
+	TestTrue(TEXT("popup-list Escape closes only the dropdown: still on Play"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Play);
+	TestEqual(TEXT("closing the dropdown rebuilds nothing"),
+		Root->ScreenRebuildCountForTesting(), BeforeComboBack);
+	TestTrue(TEXT("focus returns from the dropdown to the map list"),
+		FSlateApplication::Get().GetKeyboardFocusedWidget() == Combo);
+	TestTrue(TEXT("a second Escape is handled"),
+		FSlateApplication::Get().ProcessKeyDownEvent(
+			MakeFrontEndKeyEvent(EKeys::Escape)));
+	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
+	FSlateApplication::Get().Tick();
+	TestTrue(TEXT("a second Escape returns Play to Main"),
 		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
-	TestEqual(TEXT("popup-list Escape causes one transition"),
+	TestEqual(TEXT("the two Escapes cause one transition"),
 		Root->ScreenRebuildCountForTesting(), BeforeComboBack + 1);
 	TestTrue(TEXT("popup-list Escape emits no feedback"),
 		Feedback->Events.IsEmpty());
@@ -2608,8 +2653,11 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		FSlateApplication::Get().GetKeyboardFocusedWidget()
 			== Root->MainMenuButtonForTesting(0));
 
+	// The B/View half: B on the open dropdown closes it (consumed, spec r3
+	// section 1a), and a second B backs Play to Main.
 	Root->ActivateMainMenuEntryForTesting(0);
 	TSharedPtr<SWidget> ControllerCombo = Root->MapComboBoxForTesting();
+	TSharedPtr<SWoTListCombo> TypedControllerCombo = Root->MapListComboForTesting();
 	TArray<TSharedRef<SWidget>> ControllerComboButtons;
 	CollectWidgetsOfType(ControllerCombo.ToSharedRef(), FName(TEXT("SButton")),
 		ControllerComboButtons);
@@ -2621,7 +2669,8 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		FSlateApplication::Get().GetKeyboardFocusedWidget();
 	TestTrue(TEXT("controller-back case genuinely focuses popup list"),
 		ControllerPopupFocus.IsValid() && ControllerPopupFocus != ControllerCombo
-			&& ControllerPopupFocus->GetType() == FName(TEXT("SComboListType")));
+			&& TypedControllerCombo.IsValid()
+			&& ControllerPopupFocus == TypedControllerCombo->GetPopupWidget());
 	const uint64 BeforeControllerComboBack =
 		Root->ScreenRebuildCountForTesting();
 	Feedback->Events.Reset();
@@ -2630,9 +2679,22 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			MakeFrontEndKeyEvent(EKeys::Gamepad_FaceButton_Right)));
 	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
 	FSlateApplication::Get().Tick();
-	TestTrue(TEXT("popup-list controller back returns Play directly to Main"),
+	TestFalse(TEXT("popup-list controller back closes the dropdown"),
+		TypedControllerCombo.IsValid() && TypedControllerCombo->IsOpen());
+	TestTrue(TEXT("popup-list controller back never also backs the screen"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Play);
+	TestEqual(TEXT("closing the dropdown by B rebuilds nothing"),
+		Root->ScreenRebuildCountForTesting(), BeforeControllerComboBack);
+	TestTrue(TEXT("B returns focus to the map list"),
+		FSlateApplication::Get().GetKeyboardFocusedWidget() == ControllerCombo);
+	TestTrue(TEXT("a second controller back is handled"),
+		FSlateApplication::Get().ProcessKeyDownEvent(
+			MakeFrontEndKeyEvent(EKeys::Gamepad_FaceButton_Right)));
+	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
+	FSlateApplication::Get().Tick();
+	TestTrue(TEXT("a second controller back returns Play to Main"),
 		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
-	TestEqual(TEXT("popup-list controller back causes one transition"),
+	TestEqual(TEXT("the two backs cause one transition"),
 		Root->ScreenRebuildCountForTesting(), BeforeControllerComboBack + 1);
 	TestTrue(TEXT("popup-list controller back emits no feedback"),
 		Feedback->Events.IsEmpty());

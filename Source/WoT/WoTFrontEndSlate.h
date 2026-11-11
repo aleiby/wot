@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Online/WoTKeychainAccess.h"
-#include "Widgets/Input/SComboBox.h"
+#include "UI/SWoTButtonPrompts.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 #include "UI/WoTUpdateBanner.h"
@@ -30,6 +30,8 @@ class FWoTFrontEndPresentationAuthority;
 class FWoTFrontEndBackInputProcessor;
 class FWoTBackStackEntryHandle;
 class FWoTCursorLease;
+class SWoTFocusOutlineLayer;
+class SWoTListCombo;
 
 enum class EWoTFrontEndMainMenuAction : uint8
 {
@@ -98,7 +100,14 @@ public:
 	float MainMenuSafeWidthForTesting() const { return MainMenuSafeWidth; }
 	TSharedPtr<SWoTMenuButton> MainMenuButtonForTesting(int32 Index) const
 		{ return MainMenuButtons.IsValidIndex(Index) ? MainMenuButtons[Index] : nullptr; }
-	TSharedPtr<SWidget> MapComboBoxForTesting() const { return MapComboBox; }
+	TSharedPtr<SWidget> MapComboBoxForTesting() const;
+	TSharedPtr<SWoTListCombo> MapListComboForTesting() const { return MapComboBox; }
+	/** The footer prompt strip and the focus outline layer around every screen. */
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+	TSharedPtr<SWoTFocusOutlineLayer> FocusOutlineLayerForTesting() const
+		{ return FocusOutlineLayer; }
+	/** The prompt set for the window showing now (spec r3 section 1a). */
+	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
 	TSharedPtr<SWidget> HostScrollBoxForTesting() const { return HostScrollBox; }
 	TSharedPtr<SWidget> HostMatchButtonForTesting() const { return HostMatchButton; }
 	/** Selects the first catalog map of the requested kind, as the map picker does. */
@@ -415,6 +424,9 @@ private:
 	/** A Play overlay is up: the panels and the footer behind it are disabled. */
 	bool IsPlayOverlayVisible() const;
 	bool IsPasswordPromptVisible() const;
+	/** The prompt strip's set for the window showing now (spec r3 section 1a). */
+	TArray<FWoTButtonPrompt> ControllerPrompts() const;
+	FSlateFontInfo PromptFont() const;
 	/** The top visible Play overlay's first control, or null. */
 	TSharedPtr<SWidget> PlayOverlayFocusTarget() const;
 	/** Moves focus into an overlay that just appeared, and back out of one
@@ -514,7 +526,9 @@ private:
 	TArray<TSharedPtr<SWoTMenuButton>> MainMenuButtons;
 	TArray<FMapItem> MapItems;
 	FMapItem SelectedMapItem;
-	TSharedPtr<SComboBox<FMapItem>> MapComboBox;
+	TSharedPtr<SWoTListCombo> MapComboBox;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
+	TSharedPtr<SWoTFocusOutlineLayer> FocusOutlineLayer;
 	TSharedPtr<class SScrollBox> HostScrollBox;
 	TSharedPtr<SWidget> HostMatchButton;
 	TArray<FSessionItem> SessionItems;

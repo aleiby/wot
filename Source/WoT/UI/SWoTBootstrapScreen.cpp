@@ -1,5 +1,7 @@
 #include "SWoTBootstrapScreen.h"
 
+#include "SWoTButtonPrompts.h"
+#include "SWoTFocusOutline.h"
 #include "WoTSetupBackdrop.h"
 #include "WoTBackStack.h"
 #include "WoTControllerUIInput.h"
@@ -94,14 +96,26 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 	// Centred in both axes and width-limited: the slots are all AutoHeight, so
 	// filling the window stranded the whole screen in the top-left corner and
 	// left the rest as dead black space.
-	// The backdrop fills the window behind it.
+	// The backdrop fills the window behind it. The focus outline layer and
+	// the prompt strip (A Select) appear only for a controller.
 	ChildSlot
 	[
+		SNew(SWoTFocusOutlineLayer)
+		[
 		SNew(SOverlay)
 		+ SOverlay::Slot()
 		[
 			SNew(SImage)
 			.Image(BackdropBrush.Get())
+		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(WoTBootstrapOuterPadding))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(FWoTButtonPromptSets::Select())
+			.Font(WoTBootstrapFont(TEXT("Regular"), WoTBootstrapDetailFontSize))
 		]
 		+ SOverlay::Slot()
 		.HAlign(HAlign_Center)
@@ -253,6 +267,7 @@ void SWoTBootstrapScreen::Construct(const FArguments& InArgs)
 					&SWoTBootstrapScreen::OriginalGameActionVisibility)
 				.OnClicked(this, &SWoTBootstrapScreen::GetOriginalGame)
 			]
+		]
 		]
 		]
 		]

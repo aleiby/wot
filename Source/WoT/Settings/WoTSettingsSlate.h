@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Styling/SlateTypes.h"
+#include "UI/SWoTButtonPrompts.h"
 #include "WoTGameSettings.h"
 #include "Widgets/SCompoundWidget.h"
 
@@ -59,6 +60,9 @@ public:
 	bool IsCapturingBinding() const { return CaptureAction.IsSet(); }
 	/** The first control of the page: initial focus in Controller mode. */
 	TSharedPtr<SWidget> InitialControllerFocusWidget() const;
+	/** The prompt strip's set for this page now (spec r3 section 1a): the
+	 * settings set, the video Keep/Revert strip's, or a live key capture's. */
+	TArray<FWoTButtonPrompt> ControllerPrompts() const;
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnPreviewKeyDown(

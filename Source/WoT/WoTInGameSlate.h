@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Settings/WoTGameSettings.h"
+#include "UI/SWoTButtonPrompts.h"
 #include "WoTFrontEnd.h"
 #include "Styling/SlateBrush.h"
 #include "Widgets/SCompoundWidget.h"
@@ -112,6 +113,8 @@ public:
 			? MainMenuButtons[EntryIndex] : nullptr; }
 	int32 SelectedMainMenuIndexForTesting() const
 		{ return SelectedMainMenuIndex; }
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
 #endif
 
 private:
@@ -141,6 +144,8 @@ private:
 	FSlateFontInfo ItemFont() const;
 	FText ResolveRetailText(FName Id) const;
 	bool HasUsableFonts() const;
+	/** The prompt strip's set for the page showing now (spec r3 section 1a). */
+	TArray<FWoTButtonPrompt> ControllerPrompts() const;
 
 	TWeakObjectPtr<AWoTPlayerController> PlayerController;
 	TWeakObjectPtr<UWoTPreferencesSubsystem> Preferences;
@@ -156,6 +161,7 @@ private:
 	/** B/View: as Escape on every page (spec r3 section 1a, in-game menu). */
 	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
 	TSharedPtr<FWoTCursorLease> CursorLease;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	bool bUsingFallbackFonts = false;
 	float LiveViewportScale = 1.0f;
 	float EntryHeight = 0.0f;
@@ -230,6 +236,7 @@ public:
 #if WITH_AUTOMATION_TESTS
 	int32 PixelScaleForTesting() const { return PixelScale; }
 	float WindowScaleForTesting() const { return WindowScale(); }
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
 #endif
 
 	/** The whole-number scale the 640x480 window draws at on a screen of
@@ -241,6 +248,7 @@ private:
 	FReply Close();
 	FSlateFontInfo FontForIndex(int32 FontIndex) const;
 	TSharedPtr<FWoTBackStackEntryHandle> BackStackEntry;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
 	float WindowScale() const { return PixelScale / FMath::Max(DpiScale, 0.01f); }
 	int32 PixelScale = 1;
 	float DpiScale = 1.0f;
