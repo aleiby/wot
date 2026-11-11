@@ -12,6 +12,8 @@ Gameplay,LeftShoulder,PrevItem,
 Gameplay,RightShoulder,NextItem,
 Gameplay,DPadLeft,PrevHand,
 Gameplay,DPadRight,NextHand,
+Gameplay,DPadUp,Chat,Tap
+Gameplay,DPadUp,TeamChat,Hold
 Gameplay,DPadDown,RandomTaunt,
 Gameplay,LeftThumb,WalkToggle,
 Gameplay,RightThumb,CenterView,

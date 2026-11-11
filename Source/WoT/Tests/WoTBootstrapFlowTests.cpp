@@ -243,6 +243,8 @@ struct FWoTBootstrapFlowWorkerState
 	int32 CancelCalls = 0;
 	int32 ReleaseNotesCalls = 0;
 	int32 BackgroundCalls = 0;
+	int32 InstallerReceiveRequests = 0;
+	int32 InstallerReceiveCancels = 0;
 	TArray<FString> ReadyServiceOrder;
 	TArray<FString> ShutdownOrder;
 	bool bPersistResult = true;
@@ -440,6 +442,16 @@ public:
 			Ready.ReleaseSequence = 2;
 			Callback(MoveTemp(Ready));
 		}
+	}
+
+	void RequestInstallerReceive() override
+	{
+		++State->InstallerReceiveRequests;
+	}
+
+	void CancelInstallerReceive() override
+	{
+		++State->InstallerReceiveCancels;
 	}
 
 	void CancelAndJoin() override
@@ -1626,6 +1638,78 @@ bool FWoTBootstrapProgressSchedulingSpec::RunTest(const FString&)
 			Bootstrap->ProgressDeliveryCountForTesting(), BeforeShutdown);
 	}
 	World->SetGameInstance(nullptr);
+	WoTTest::DestroySpecWorld(World);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTBootstrapInstallerCopyRoutingSpec,
+	"WoT.Bootstrap.Flow.InstallerCopyReachesTheWorker", WoTBootstrapFlowSpecFlags)
+
+bool FWoTBootstrapInstallerCopyRoutingSpec::RunTest(const FString&)
+{
+	// "Copy from another computer" and Cancel follow the Browse chain: the
+	// screen's event, the controller, this subsystem method, then the worker,
+	// and only while the original game is needed.
+	FWoTBootstrapFlowGlobalCleanup Cleanup;
+	ResetWoTPayloadActivationForTesting();
+	UWoTBootstrapSubsystem::ResetTestingAuthorityAndAdapters();
+	UWoTBootstrapSubsystem::SetCreationEnabledForTesting(true);
+	UWoTPreferencesSubsystem::SetCreationEnabledForTesting(true);
+	if (!TestTrue(TEXT("EarlyUI publishes"), WoTBootstrapFlow_PublishEarlyUI()))
+	{
+		return false;
+	}
+	TSharedRef<FWoTBootstrapFlowWorkerState> State =
+		MakeShared<FWoTBootstrapFlowWorkerState>();
+	State->PausePhase = EWoTBootstrapPhase::DownloadingUpdate;
+	UWoTBootstrapSubsystem::SetAdaptersForTesting(
+		[State]() -> TUniquePtr<IWoTBootstrapWorker>
+		{
+			return MakeUnique<FWoTBootstrapFlowWorker>(State);
+		},
+		[]() -> TUniquePtr<IWoTFreeSpaceProbe>
+		{
+			return MakeUnique<FWoTBootstrapFixedProbe>(MAX_uint64);
+		});
+	WoTTest::FSpecWorldOptions Options;
+	Options.GameInstanceClass = UWoTGameInstance::StaticClass();
+	Options.bStartPlay = false;
+	Options.bActivatePayload = false;
+	UWorld* World = WoTTest::CreateSpecWorld(Options);
+	if (!TestNotNull(TEXT("world"), World))
+	{
+		return false;
+	}
+	UWoTBootstrapSubsystem* Bootstrap = World->GetGameInstance()
+		->GetSubsystem<UWoTBootstrapSubsystem>();
+	if (TestNotNull(TEXT("subsystem"), Bootstrap))
+	{
+		TestEqual(TEXT("paused while downloading"), Bootstrap->Snapshot().Phase,
+			EWoTBootstrapPhase::DownloadingUpdate);
+		Bootstrap->RequestInstallerCopy();
+		Bootstrap->CancelInstallerCopy();
+		TestEqual(TEXT("no receiver outside the waiting screen"),
+			State->InstallerReceiveRequests + State->InstallerReceiveCancels, 0);
+		State->PausePhase = EWoTBootstrapPhase::OriginalGameNeeded;
+		FWoTBootstrapWorkerCompletion Completion;
+		Completion.OperationEpoch = Bootstrap->Snapshot().OperationEpoch;
+		Completion.CompletedPhase = EWoTBootstrapPhase::DownloadingUpdate;
+		Completion.NextPhase = EWoTBootstrapPhase::CheckingOriginalGameData;
+		Completion.bSucceeded = true;
+		if (TestTrue(TEXT("the download's completion is captured"),
+			static_cast<bool>(State->PausedCompletion)))
+		{
+			State->PausedCompletion(MoveTemp(Completion));
+		}
+		TestEqual(TEXT("now waiting for the original game"),
+			Bootstrap->Snapshot().Phase, EWoTBootstrapPhase::OriginalGameNeeded);
+		Bootstrap->RequestInstallerCopy();
+		TestEqual(TEXT("the click reaches the worker"),
+			State->InstallerReceiveRequests, 1);
+		Bootstrap->CancelInstallerCopy();
+		TestEqual(TEXT("Cancel reaches the worker"),
+			State->InstallerReceiveCancels, 1);
+	}
 	WoTTest::DestroySpecWorld(World);
 	return !HasAnyErrors();
 }

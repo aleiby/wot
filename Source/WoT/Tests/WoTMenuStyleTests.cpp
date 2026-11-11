@@ -1214,9 +1214,13 @@ bool FWoTUnavailableMultiplayerResourcesSpec::RunTest(const FString&)
 			bUnavailableBrowser |= Label == TEXT("Refresh Sessions");
 			if (Label != TEXT("Multiplayer resources are unavailable.")) continue;
 			bError = true;
-			TestTrue(TEXT("recovery uses available authenticated menu font"),
+			// The Steam Deck legibility pass (SP3 PR 7): the failure lines draw
+			// the authenticated body face at its 2x strike (LargeBodyFont, 28
+			// physical pixels), as every other multiplayer screen does; they
+			// were the only 14-pixel text there.
+			TestTrue(TEXT("recovery uses the authenticated menu font's 2x strike"),
 				Text->GetFont().FontObject == Authority->MultiplayerFont(
-					FName(TEXT("F_WOTReg14")), 1.0f).FontObject
+					FName(TEXT("F_WOTReg14")), 1.0f, 2).FontObject
 				&& Text->GetFont().FontFallback == EFontFallback::FF_NoFallback);
 		}
 		TestTrue(FString(Context) + TEXT(" shows the resource failure"), bError);

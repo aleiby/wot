@@ -876,7 +876,7 @@ void AWoTParticleSprayer::UpdateInstances()
 {
 	APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const FQuat Face = Cam
-		? FRotationMatrix::MakeFromZ(-Cam->GetCameraRotation().Vector()).ToQuat()
+		? WoTSpriteFacing::ScreenAlignedQuat(Cam->GetCameraRotation())
 		: FQuat::Identity;
 
 	// Slot i of every ISM mirrors Pool[i]; non-matching templates collapse

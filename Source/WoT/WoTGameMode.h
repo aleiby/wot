@@ -34,6 +34,31 @@ struct FWoTHostBan
 	FString Address;
 };
 
+// Which step of UE1's player placement refused a pawn at a start (SpawnActor:
+// FindSpot against the level, then CheckEncroachment against actors).
+enum class EWoTStartSpawnRejection : uint8
+{
+	None,
+	// SpawnActor itself returned no pawn.
+	SpawnFailed,
+	// FindSpot: no nearby spot where the cylinder fits the level (including a
+	// start whose centre stays in solid BSP).
+	NoFreeSpot,
+	// CheckEncroachment: the placed cylinder overlaps a blocking actor.
+	Encroaches,
+};
+
+struct FWoTStartSpawnResult
+{
+	EWoTStartSpawnRejection Rejection = EWoTStartSpawnRejection::None;
+	// Where FindSpot put the cylinder (the authored point when it already fit).
+	FVector ResolvedLocation = FVector::ZeroVector;
+	// The actor the cylinder encroached (Encroaches only).
+	FString Blocker;
+};
+
+const TCHAR* WoTStartSpawnRejectionName(EWoTStartSpawnRejection Rejection);
+
 // Bring-up game mode: spawns AWoTCharacter at the original PlayerStarts.
 // The real rules triad (giWOT/giMPArena/giMPBattle ports) replaces this
 // in the game-rules phase. PickupQuery/ShouldRespawn are the
@@ -248,6 +273,44 @@ public:
 		AActor* StartSpot) override;
 	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(
 		AController* NewPlayer, const FTransform& SpawnTransform) override;
+
+	// GameInfo.RestartPlayer for a pawnless controller (login, death respawn): the
+	// start retail's FindPlayerStart rates best is tried first. Divergence
+	// (PORT_NOTES): when that start refuses the pawn, the remaining starts are
+	// tried in rating order before the restart fails. A controller that still
+	// owns a pawn takes the engine path, which keeps that pawn.
+	virtual void RestartPlayer(AController* NewPlayer) override;
+
+	// PlayerPawn.ServerReStartPlayer -> GameInfo.RestartPlayer: the death respawn
+	// and the Battle team-select restart. Retail moves the player's one PlayerPawn
+	// to the rated start (SetLocation, i.e. FarMoveActor); the port spawns a pawn
+	// there with the same FindSpot rule. A live pawn is hidden and collisionless
+	// while the starts are tried, and destroyed only once its replacement exists.
+	// When every start refuses, the live pawn is restored where it stood and the
+	// player keeps control (retail's "Restartplayer failed"). Returns true when a
+	// new pawn was possessed.
+	bool ServerReStartPlayer(AController* Player);
+
+	// UE1 placement of a player pawn at a PlayerStart transform: FindSpot against
+	// the level for the pawn's cylinder (bAssumeFit for SpawnActor, not for
+	// FarMoveActor), then actor encroachment. Returns the pawn, or null with the
+	// refusing step in OutResult.
+	static APawn* SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+		const FTransform& SpawnTransform, APawn* SpawnInstigator,
+		bool bAssumeFit = true, FWoTStartSpawnResult* OutResult = nullptr);
+
+	// giCombatBase.FindPlayerStart's rating of every eligible start, best first;
+	// equal ratings keep the level's actor order, as retail's strict `>` does.
+	// bOutBestAboveFloor reports whether the best rating clears retail's -100000
+	// floor; when it does not, ChoosePlayerStart falls back to the engine picker.
+	void RankPlayerStarts(AController* Player, TArray<AActor*>& OutRanked,
+		bool* bOutBestAboveFloor = nullptr);
+
+	// The most recent refused start spawn (diagnostics).
+	const FWoTStartSpawnResult& LastStartSpawnResult() const
+	{
+		return LastStartSpawn;
+	}
 	FString LastInitialSpawnFailureReason;
 	/** Record remote-client departure before the engine invalidates its PlayerState. */
 	virtual void Logout(AController* Exiting) override;
@@ -360,6 +423,13 @@ private:
 	FWoTPlayerRemovalHook PlayerRemovalHookForTesting;
 #endif
 	TWeakObjectPtr<AActor> RestartStartSpot;
+	FWoTStartSpawnResult LastStartSpawn;
+	// Set while ServerReStartPlayer runs: retail moves the existing PlayerPawn
+	// (FarMoveActor) instead of spawning one (SpawnActor).
+	bool bRestartMovesPlayerPawn = false;
+	// Tries the rated starts in order. Outgoing (when set) is the live pawn the
+	// replacement supersedes. False when every start refused the pawn.
+	bool RestartPlayerAtRatedStarts(AController* NewPlayer, APawn* Outgoing);
 	// Engine.GameInfo.SentText. Timer resets it every second, including matches
 	// with no time limit; suppressed messages still consume budget.
 	UPROPERTY(Transient)

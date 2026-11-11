@@ -14,6 +14,7 @@
 #include "Widgets/Layout/SConstraintCanvas.h"
 #include "Widgets/Layout/SScaleBox.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Layout/SSpacer.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/SOverlay.h"
@@ -31,6 +32,13 @@
 #include "WoTFactionCharacters.h"
 #include "WoTRetailText.h"
 #include "Settings/WoTSettingsSlate.h"
+#include "UI/SWoTFocusOutline.h"
+#include "UI/SWoTListCombo.h"
+#include "UI/SWoTOnScreenKeyboard.h"
+#include "UI/SWoTTextFieldActivator.h"
+#include "UI/WoTBackStack.h"
+#include "UI/WoTControllerUIInput.h"
+#include "UI/WoTTextEntry.h"
 #include "GameFramework/PlayerState.h"
 
 namespace
@@ -40,10 +48,16 @@ namespace
 		return FText::FromString(Text);
 	}
 
-	enum class EWoTInGameMenuEntry : uint8
-	{
-		Resume, Scoreboard, Help, EditCitadel, PlayerConfig, Controls, Hardware, Quit
-	};
+	// The game menu's chrome around its pages: the background border's padding
+	// (SBorder's default, written out) and the frame's.
+	constexpr float WoTInGameMenu_BorderPadding = 2.0f;
+	constexpr float WoTInGameMenu_FramePadding = 36.0f;
+	// The least room kept between the menu and the screen's top and bottom.
+	constexpr float WoTInGameMenu_ScreenMargin = 24.0f;
+	// The settings, player and taunt pages' panel height, as before.
+	constexpr float WoTInGameMenu_PageHeight = 620.0f;
+	// The heading's gap above the entries.
+	constexpr float WoTInGameMenu_HeadingGap = 24.0f;
 
 	// Seam extension rows (FWoTOnboardingSeams::MenuRows) append after the
 	// retail entries; their ids carry the row index offset past the retail
@@ -56,6 +70,25 @@ namespace
 		EWoTInGameMenuEntry Id;
 		FString Label;
 	};
+
+	/** The Taunts page: PlayTaunt's argument per entry (-1 picks at random). */
+	struct FWoTInGameTauntEntry
+	{
+		const TCHAR* Label;
+		int32 TauntIndex;
+	};
+	const FWoTInGameTauntEntry WoTInGameSlate_TauntEntries[] = {
+		{TEXT("Taunt 1"), 1}, {TEXT("Taunt 2"), 2}, {TEXT("Taunt 3"), 3},
+		{TEXT("Taunt 4"), 4}, {TEXT("Taunt 5"), 5}, {TEXT("Taunt 6"), 6},
+		{TEXT("Random"), -1}
+	};
+
+	/** One wrapping step through a list of Count entries. */
+	int32 WoTInGameSlate_WrapStep(int32 Current, int32 Count, int32 Direction)
+	{
+		const int32 From = Current >= 0 && Current < Count ? Current : 0;
+		return (From + (Direction < 0 ? -1 : 1) + Count) % Count;
+	}
 
 	FString WoTInGameSlate_KeyLabel(const FWoTGameSettings& Settings,
 		EWoTManagedBinding Binding)
@@ -96,6 +129,26 @@ namespace
 		return EWoTPlayerFaction::AesSedai;
 	}
 
+	// Talk's and TeamTalk's retail prefills (UE1 Console.Talk / TeamTalk).
+	const TCHAR* const WoTInGameSlate_SayPrefix = TEXT("Say ");
+	const TCHAR* const WoTInGameSlate_TeamSayPrefix = TEXT("TeamSay ");
+
+	/** Splits a chat line into its Say/TeamSay prefix and the typed text. */
+	FString WoTInGameSlate_SplitChatPrefix(const FString& Line, FString& OutPrefix)
+	{
+		for (const TCHAR* Candidate : {WoTInGameSlate_SayPrefix, WoTInGameSlate_TeamSayPrefix})
+		{
+			if (Line.StartsWith(Candidate, ESearchCase::IgnoreCase))
+			{
+				const int32 Length = FCString::Strlen(Candidate);
+				OutPrefix = Line.Left(Length);
+				return Line.Mid(Length);
+			}
+		}
+		OutPrefix.Reset();
+		return Line;
+	}
+
 	FText WoTInGameSlate_SkinLabel(EWoTPlayerSkinColor Current, int32 Offset)
 	{
 		const TArray<FWoTSkinChoice>& Choices = FWoTFrontEndModel::SkinChoices();
@@ -123,7 +176,12 @@ namespace
 			{EWoTInGameMenuEntry::Scoreboard, FString::Printf(TEXT("Scoreboard (%s)"),
 				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowScores))},
 			{EWoTInGameMenuEntry::Help, FString::Printf(TEXT("Help (%s)"),
-				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowHelp))}
+				*WoTInGameSlate_KeyLabel(Settings, EWoTManagedBinding::ShowHelp))},
+			// Chat and taunts by menu (spec r3 section 4): after Help, before
+			// any onboarding seam rows and Quit [I9].
+			{EWoTInGameMenuEntry::Chat, TEXT("Chat")},
+			{EWoTInGameMenuEntry::TeamChat, TEXT("Team Chat")},
+			{EWoTInGameMenuEntry::Taunts, TEXT("Taunts")}
 		};
 		if (Controller && Controller->CanRequestCitadelEdit())
 		{
@@ -161,6 +219,14 @@ namespace
 void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 {
 	PlayerController = InArgs._PlayerController;
+	PresentationAuthority = InArgs._PresentationAuthority;
+	if (InArgs._InitialPhysicalSize.X > 0.0f && InArgs._InitialPhysicalSize.Y > 0.0f)
+	{
+		// The game layer's scale is the DPI curve's (UIScale aside); Tick
+		// takes the live values from the first frame on.
+		DpiScale = FWoTMenuStyle::ViewportDpiScale(InArgs._InitialPhysicalSize);
+		LayoutScale = DpiScale;
+	}
 	const TOptional<FWoTRequiredMenuFonts> ResolvedFonts =
 		FWoTMenuStyle::Get().ResolveRequiredFonts();
 	if (ResolvedFonts.IsSet())
@@ -176,16 +242,34 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 		RequiredFonts = Fallback;
 	}
 
+	// The Say/TeamSay prefill shows as a label; the line keeps it (GetText).
+	const FString Typed = WoTInGameSlate_SplitChatPrefix(InArgs._InitialText, Prefix);
+
 	// UE5 action delegates run after the platform has delivered the key's
 	// character event, so the T/Y opener cannot arrive at this newly focused
 	// widget. Accept the first event unconditionally; a timing heuristic would
 	// instead discard a fast user's first actual message character.
 	TSharedRef<SEditableText> Editable = SNew(SEditableText)
-		.Text(FText::FromString(InArgs._InitialText))
-		.Font(RequiredFonts->List)
+		.Text(FText::FromString(Typed))
+		.Font(this, &SWoTChatInputOverlay::LineFont)
 		.ColorAndOpacity(FLinearColor::White)
 		.IsCaretMovedWhenGainFocus(true)
-		.SelectAllTextWhenFocused(false);
+		.SelectAllTextWhenFocused(false)
+		.OnKeyCharHandler_Lambda([this](const FGeometry&, const FCharacterEvent& Event)
+		{
+			// Backspace on an empty line takes the label back into the text,
+			// as retail's Backspace over the "Say " prefill did ("Say").
+			if (Event.GetCharacter() == TCHAR(8) && !Prefix.IsEmpty() && Input.IsValid()
+				&& Input->GetText().IsEmpty())
+			{
+				const FString Unfolded = Prefix.LeftChop(1);
+				Prefix.Reset();
+				Input->SetText(FText::FromString(Unfolded));
+				Input->GoTo(ETextLocation::EndOfDocument);
+				return FReply::Handled();
+			}
+			return FReply::Unhandled();
+		});
 	Editable->GoTo(ETextLocation::EndOfDocument);
 	Input = Editable;
 
@@ -193,29 +277,231 @@ void SWoTChatInputOverlay::Construct(const FArguments& InArgs)
 	[
 		SNew(SOverlay)
 		+ SOverlay::Slot()
-		.VAlign(VAlign_Bottom)
-		.Padding(2.0f)
 		[
-			SNew(SBorder)
-			.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
-			.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
-			.Padding(FMargin(3.0f, 1.0f))
+			// Hosts the keyboard panel over chat (spec r3 section 3 [I7]).
+			SAssignNew(EntryLayer, SWoTTextEntryLayer)
+			.Font(this, &SWoTChatInputOverlay::LineFont)
+			// The dark strip behind the prompt strip below: its 8-unit
+			// bottom padding, and as much again above it.
+			.PromptBarMargin(FMargin(0.0f, 8.0f, 0.0f, 8.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				SNew(SOverlay)
+				+ SOverlay::Slot()
+				.VAlign(VAlign_Bottom)
+				.Padding(2.0f)
 				[
-					SNew(STextBlock)
-					.Text(WoTInGameSlate_Text(TEXT("(> ")))
-					.Font(RequiredFonts->List)
-					.ColorAndOpacity(FLinearColor::White)
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					Editable
+					SAssignNew(LineStrip, SBorder)
+					.BorderImage(FCoreStyle::Get().GetBrush(TEXT("WhiteBrush")))
+					.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.72f))
+					.Padding(FMargin(3.0f, 1.0f))
+					[
+						SNew(SBox)
+						.MinDesiredHeight(this, &SWoTChatInputOverlay::LineStripMinHeight)
+						.VAlign(VAlign_Center)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[
+								SNew(STextBlock)
+								.Text(WoTInGameSlate_Text(TEXT("(> ")))
+								.Font(this, &SWoTChatInputOverlay::LineFont)
+								.ColorAndOpacity(FLinearColor::White)
+							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+								.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+							[
+								// "Say:" / "Team say:" (owner ruling 2026-11-08).
+								SNew(STextBlock)
+								.Text(this, &SWoTChatInputOverlay::GetLabel)
+								.Visibility_Lambda([this]()
+								{
+									return Prefix.IsEmpty() ? EVisibility::Collapsed
+										: EVisibility::HitTestInvisible;
+								})
+								.Font(this, &SWoTChatInputOverlay::LineFont)
+								.ColorAndOpacity(FLinearColor(0.94f, 0.77f, 0.36f, 1.0f))
+							]
+							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+							[
+								SAssignNew(Activator, SWoTTextFieldActivator)
+								.Request(MakeEntryRequest())
+								[
+									Editable
+								]
+							]
+							+ SHorizontalBox::Slot().AutoWidth()
+							[
+								// Keeps the typed text clear of the prompt strip.
+								SNew(SSpacer)
+								.Size(this, &SWoTChatInputOverlay::PromptRoom)
+							]
+						]
+					]
 				]
 			]
 		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(0.0f, 0.0f, 16.0f, 8.0f))
+		[
+			// The keyboard's prompts while it is open over chat; on the bare
+			// line, A types and B closes chat.
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts_Lambda([this]()
+			{
+				return FWoTTextEntry::IsActiveWithin(AsShared())
+					? FWoTTextEntry::ControllerPrompts() : FWoTButtonPromptSets::Password();
+			})
+			.Font(this, &SWoTChatInputOverlay::LineFont)
+		]
 	];
+	RegisterControllerBack();
+}
+
+void SWoTChatInputOverlay::Tick(const FGeometry& AllottedGeometry,
+	const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// The overlay fills the game viewport, so its size at the accumulated
+	// layout scale is the viewport's pixel size.
+	const float Scale = AllottedGeometry.GetAccumulatedLayoutTransform().GetScale();
+	const FVector2D Physical = AllottedGeometry.GetLocalSize() * Scale;
+	if (Physical.X > 0.0 && Physical.Y > 0.0)
+	{
+		LayoutScale = FMath::Max(Scale, 0.01f);
+		DpiScale = FWoTMenuStyle::ViewportDpiScale(Physical);
+	}
+}
+
+FSlateFontInfo SWoTChatInputOverlay::LineFont() const
+{
+	if (!RequiredFonts.IsValid())
+	{
+		return FSlateFontInfo();
+	}
+	if (FWoTMenuStyle::IsCompactScreen(DpiScale))
+	{
+		// The Steam Deck legibility pass: the 14-pixel strike scaled by Slate
+		// drew 13.8 soft pixels at 1280x800; the 2x strike is 28, crisp.
+		return FWoTMenuStyle::LegibleStrikeFont(PresentationAuthority.Get(),
+			FName(TEXT("F_WOTReg14")), RequiredFonts->List, LayoutScale);
+	}
+	return RequiredFonts->List;
+}
+
+FOptionalSize SWoTChatInputOverlay::LineStripMinHeight() const
+{
+	if (!FWoTMenuStyle::IsCompactScreen(DpiScale) || !ButtonPrompts.IsValid()
+		|| ButtonPrompts->GetShownPrompts().IsEmpty())
+	{
+		return FOptionalSize();
+	}
+	// The prompt strip stands 8 units above the screen's bottom edge and the
+	// line's strip 2 (plus 1 of padding): this keeps the prompts inside the
+	// strip with about 6 units of it below them and 7 above.
+	return FOptionalSize(
+		SWoTButtonPrompts::BarHeightFor(LineFont(), LayoutScale) + 12.0f);
+}
+
+FVector2D SWoTChatInputOverlay::PromptRoom() const
+{
+	if (!FWoTMenuStyle::IsCompactScreen(DpiScale) || !ButtonPrompts.IsValid()
+		|| ButtonPrompts->GetShownPrompts().IsEmpty())
+	{
+		return FVector2D::ZeroVector;
+	}
+	// The strip's width, its 16-unit right margin less the line's own 5, and
+	// a 12-unit gap before it.
+	return FVector2D(ButtonPrompts->GetDesiredSize().X + 23.0f, 0.0f);
+}
+
+void SWoTChatInputOverlay::RegisterControllerBack()
+{
+	// A controller backs out of chat one level per press, as Escape does from
+	// the keyboard: the on-screen keyboard closes first (its own session entry
+	// sits above this one), then B or View on the bare line closes chat
+	// without sending anything.
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(),
+		[this]() { return !FWoTTextEntry::IsActiveWithin(AsShared()); },
+		[WeakController = PlayerController]()
+		{
+			if (AWoTPlayerController* Controller = WeakController.Get())
+			{
+				Controller->CancelChatInput();
+			}
+			return true;
+		});
+}
+
+FText SWoTChatInputOverlay::GetLabel() const
+{
+	if (Prefix.Equals(WoTInGameSlate_SayPrefix, ESearchCase::IgnoreCase))
+	{
+		return WoTInGameSlate_Text(TEXT("Say:"));
+	}
+	if (Prefix.Equals(WoTInGameSlate_TeamSayPrefix, ESearchCase::IgnoreCase))
+	{
+		return WoTInGameSlate_Text(TEXT("Team say:"));
+	}
+	return FText::GetEmpty();
+}
+
+FWoTTextEntryRequest SWoTChatInputOverlay::MakeEntryRequest()
+{
+	FWoTTextEntryRequest Request;
+	Request.Title = TAttribute<FText>::CreateLambda([this]()
+	{
+		const FText Label = GetLabel();
+		return Label.IsEmpty() ? WoTInGameSlate_Text(TEXT("Chat"))
+			: FText::FromString(Label.ToString().LeftChop(1));
+	});
+	// The typed text after the prefix; the line sent keeps the prefix.
+	Request.MaxLength = AWoTPlayerController::MaxChatMessageLength;
+	Request.GetText = [this]() { return TypedText(); };
+	Request.SetText = [this](const FString& Text)
+	{
+		if (Input.IsValid())
+		{
+			Input->SetText(FText::FromString(Text));
+			Input->GoTo(ETextLocation::EndOfDocument);
+		}
+	};
+	const TWeakObjectPtr<AWoTPlayerController> WeakController = PlayerController;
+	Request.Commit = [this, WeakController]()
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->SubmitChatInput(GetText());
+		}
+	};
+	// Controller chat is not a parity path: the panel suspends chat's input
+	// router and routes UI-only; closing restores chat's input mode [I7].
+	Request.OnPanelOpened = [WeakController](const TSharedRef<SWidget>& Panel)
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->SuspendChatInputForTextEntry(Panel);
+		}
+	};
+	Request.OnPanelClosed = [WeakController]()
+	{
+		if (AWoTPlayerController* Controller = WeakController.Get())
+		{
+			Controller->ResumeChatInputAfterTextEntry();
+		}
+	};
+	return Request;
+}
+
+bool SWoTChatInputOverlay::BeginTextEntry(int32 UserIndex)
+{
+	return Activator.IsValid() && Activator->BeginEntry(UserIndex);
+}
+
+FString SWoTChatInputOverlay::TypedText() const
+{
+	return Input.IsValid() ? Input->GetText().ToString() : FString();
 }
 
 FReply SWoTChatInputOverlay::HandleKey(const FKey& Key)
@@ -242,6 +528,16 @@ FReply SWoTChatInputOverlay::HandleKey(const FKey& Key)
 FReply SWoTChatInputOverlay::OnPreviewKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel (or Steam's keyboard) takes the keys; Escape
+		// cancels it first and chat stays open (spec r3 [M3]).
+		if (InKeyEvent.GetKey() == EKeys::Escape && FWoTTextEntry::CancelWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+	}
 	const FReply Reply = HandleKey(InKeyEvent.GetKey());
 	return Reply.IsEventHandled() ? Reply
 		: SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
@@ -250,6 +546,10 @@ FReply SWoTChatInputOverlay::OnPreviewKeyDown(
 FReply SWoTChatInputOverlay::OnKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+	}
 	const FReply Reply = HandleKey(InKeyEvent.GetKey());
 	return Reply.IsEventHandled() ? Reply
 		: SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
@@ -262,14 +562,15 @@ TSharedPtr<SWidget> SWoTChatInputOverlay::TextWidget() const
 
 FString SWoTChatInputOverlay::GetText() const
 {
-	return Input.IsValid() ? Input->GetText().ToString() : FString();
+	return Prefix + TypedText();
 }
 
 void SWoTChatInputOverlay::SetText(const FString& Text)
 {
 	if (Input.IsValid())
 	{
-		Input->SetText(FText::FromString(Text));
+		Input->SetText(FText::FromString(WoTInGameSlate_SplitChatPrefix(Text, Prefix)));
+		Input->GoTo(ETextLocation::EndOfDocument);
 	}
 }
 
@@ -333,9 +634,19 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 	{
 		PresentationAuthority->BindWidget(AsShared());
 	}
+	// A modal surface: the controller hides the pointer while it is up, and
+	// B/View back out one page at a time like Escape.
+	CursorLease = FWoTControllerUIInput::AcquireCursorLease();
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
+		[this]() { return BackOneLevel(); });
 
+	// The focus outline layer draws the controller focus outline on every
+	// page; the prompt strip shows in Controller mode only. The text entry
+	// layer hosts the keyboard panel over the pages, under the prompt strip.
 	ChildSlot
 	[
+		SNew(SWoTFocusOutlineLayer)
+		[
 		SNew(SOverlay)
 		.Visibility_Lambda([this]()
 		{
@@ -349,28 +660,58 @@ void SWoTInGameMenuOverlay::Construct(const FArguments& InArgs)
 			.ColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.72f))
 		]
 		+ SOverlay::Slot()
-		.HAlign(HAlign_Center)
-		.VAlign(VAlign_Center)
 		[
-			SNew(SBorder)
+			SAssignNew(TextEntryLayer, SWoTTextEntryLayer)
+			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+			// The dark strip behind the prompt strip below (24 under it).
+			.PromptBarMargin(FMargin(0.0f, 12.0f, 0.0f, 24.0f))
+			[
+			SNew(SBox)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+			SAssignNew(MenuBackground, SBorder)
 			.BorderImage(FWoTMenuStyle::Get().Background())
+			.Padding(WoTInGameMenu_BorderPadding)
 			[
 			SNew(SBorder)
 			.BorderImage(FWoTMenuStyle::Get().Frame())
 			.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-			.Padding(36.0f)
+			.Padding(WoTInGameMenu_FramePadding)
 			[
+				// The main menu sizes to its entries, which Tick fits to the
+				// screen; the pages keep their fixed panel.
 				SNew(SBox)
 				.WidthOverride_Lambda([this]()
 				{
 					return ActiveSettingsScreen.IsValid() || bShowingPlayerConfig
-						? 760.0f : 420.0f;
+						? FOptionalSize(760.0f) : FOptionalSize();
 				})
-				.MaxDesiredHeight(620.0f)
+				.MinDesiredWidth_Lambda([this]()
+				{
+					return ActiveSettingsScreen.IsValid() || bShowingPlayerConfig
+						? FOptionalSize() : FOptionalSize(420.0f);
+				})
+				.MaxDesiredHeight_Lambda([this]()
+				{
+					return FOptionalSize(PageMaxHeight());
+				})
 				[
 					SAssignNew(ContentHost, SBox)
 				]
 			]
+			]
+			]
+			]
+		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(this, &SWoTInGameMenuOverlay::ControllerPrompts)
+			.Font(this, &SWoTInGameMenuOverlay::ItemFont)
 		]
 		]
 	];
@@ -452,7 +793,7 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildMainMenu()
 
 	return SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight()
-		.Padding(0.0f, 0.0f, 0.0f, 24.0f)
+		.Padding(0.0f, 0.0f, 0.0f, WoTInGameMenu_HeadingGap)
 		[
 			SNew(STextBlock)
 			.Text(WoTInGameSlate_Text(TEXT("Game Menu")))
@@ -511,15 +852,41 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildPlayerConfigPage()
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f)
 			[
-				SAssignNew(PlayerNameInput, SEditableText)
-				.Text(FText::FromString(PendingPlayerName))
-				.Font(this, &SWoTInGameMenuOverlay::ItemFont)
-				.ColorAndOpacity(FSlateColor::UseForeground())
-				.OnTextChanged_Lambda([this](const FText& Text)
+				SNew(SWoTTextFieldActivator)
+				.Request([this]()
 				{
-					PendingPlayerName =
-						FWoTFrontEndModel::FilterPlayerNameInput(Text.ToString());
-				})
+					// The page's Save path commits the pending name, as for
+					// keyboard typing (spec r3 section 3).
+					FWoTTextEntryRequest Request;
+					Request.Title = ResolveRetailText(FName(TEXT("menuPlayer.MenuList[1]")));
+					Request.MaxLength = 20;
+					Request.GetField = [this]() { return StaticCastSharedPtr<SWidget>(PlayerNameInput); };
+					Request.GetText = [this]() { return PendingPlayerName; };
+					Request.SetText = [this](const FString& Text)
+					{
+						PendingPlayerName = FWoTFrontEndModel::FilterPlayerNameInput(Text);
+						if (PlayerNameInput.IsValid())
+						{
+							PlayerNameInput->SetText(FText::FromString(PendingPlayerName));
+						}
+					};
+					Request.Filter = [](const FString& Text)
+					{
+						return FWoTFrontEndModel::FilterPlayerNameInput(Text);
+					};
+					return Request;
+				}())
+				[
+					SAssignNew(PlayerNameInput, SEditableText)
+					.Text(FText::FromString(PendingPlayerName))
+					.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+					.ColorAndOpacity(FSlateColor::UseForeground())
+					.OnTextChanged_Lambda([this](const FText& Text)
+					{
+						PendingPlayerName =
+							FWoTFrontEndModel::FilterPlayerNameInput(Text.ToString());
+					})
+				]
 			]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 12.0f, 0.0f, 5.0f)
@@ -635,6 +1002,127 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildPlayerConfigPage()
 		];
 }
 
+TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildTauntsPage()
+{
+	TSharedRef<SVerticalBox> Entries = SNew(SVerticalBox);
+	TauntButtons.Reset();
+	TauntLabels.Reset();
+	const int32 EntryCount = static_cast<int32>(UE_ARRAY_COUNT(WoTInGameSlate_TauntEntries));
+	for (int32 EntryIndex = 0; EntryIndex < EntryCount; ++EntryIndex)
+	{
+		const FWoTInGameTauntEntry& Entry = WoTInGameSlate_TauntEntries[EntryIndex];
+		const int32 TauntIndex = Entry.TauntIndex;
+		TauntLabels.Add(Entry.Label);
+		TSharedPtr<SWoTMenuButton> Button;
+		Entries->AddSlot().AutoHeight().Padding(0.0f, 4.0f)
+		[
+			SAssignNew(Button, SWoTMenuButton)
+			.IsEnabled_Lambda([this]() { return CanInteract(); })
+			.ContentPadding(FMargin(28.0f, 0.0f))
+			.HAlign(HAlign_Center)
+			.IsSelected_Lambda([this, EntryIndex]()
+			{
+				return SelectedTauntIndex == EntryIndex;
+			})
+			.OnSelected_Lambda([this, EntryIndex]()
+			{
+				SelectTauntEntry(EntryIndex);
+			})
+			.OnClicked_Lambda([this, TauntIndex]()
+			{
+				return ActivateTaunt(TauntIndex);
+			})
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Entry.Label))
+				.Font(this, &SWoTInGameMenuOverlay::ItemFont)
+				.ColorAndOpacity(FSlateColor::UseForeground())
+			]
+		];
+		TauntButtons.Add(Button);
+	}
+	SelectedTauntIndex = TauntButtons.IsEmpty() ? INDEX_NONE : 0;
+
+	return SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		.Padding(0.0f, 0.0f, 0.0f, 24.0f)
+		[
+			SNew(STextBlock)
+			.Text(WoTInGameSlate_Text(TEXT("Taunts")))
+			.Font(this, &SWoTInGameMenuOverlay::HeadingFont)
+			.ColorAndOpacity(FSlateColor::UseForeground())
+			.Justification(ETextJustify::Center)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			Entries
+		];
+}
+
+FReply SWoTInGameMenuOverlay::OpenTaunts()
+{
+	if (!CanInteract() || !ContentHost.IsValid()) return FReply::Handled();
+	ActiveSettingsScreen.Reset();
+	PlayerNameInput.Reset();
+	bShowingPlayerConfig = false;
+	bShowingTaunts = true;
+	ResumeButton.Reset();
+	ContentHost->SetContent(BuildTauntsPage());
+	Invalidate(EInvalidateWidgetReason::Layout);
+	// Taunt 1 first (spec r3 section 1a) for every input: a new page has no
+	// earlier focus to keep, and the arrows need a focused entry.
+	if (FSlateApplication::IsInitialized() && TauntButtons.IsValidIndex(0))
+	{
+		SelectTauntEntry(0);
+		FSlateApplication::Get().SetKeyboardFocus(
+			TauntButtons[0], EFocusCause::SetDirectly);
+	}
+	return FReply::Handled();
+}
+
+FReply SWoTInGameMenuOverlay::ActivateChat(bool bTeam)
+{
+	if (AWoTPlayerController* Controller = PlayerController.Get())
+	{
+		Controller->ChatFromInGameMenu(bTeam);
+	}
+	return FReply::Handled();
+}
+
+FReply SWoTInGameMenuOverlay::ActivateTaunt(int32 TauntIndex)
+{
+	if (AWoTPlayerController* Controller = PlayerController.Get())
+	{
+		Controller->TauntFromInGameMenu(TauntIndex);
+	}
+	return FReply::Handled();
+}
+
+bool SWoTInGameMenuOverlay::MoveTauntSelection(int32 Direction)
+{
+	if (!CanInteract() || TauntButtons.IsEmpty() || Direction == 0)
+	{
+		return false;
+	}
+	const int32 NewIndex = WoTInGameSlate_WrapStep(
+		SelectedTauntIndex, TauntButtons.Num(), Direction);
+	SelectTauntEntry(NewIndex);
+	if (FSlateApplication::IsInitialized() && TauntButtons[NewIndex].IsValid())
+	{
+		FSlateApplication::Get().SetKeyboardFocus(
+			TauntButtons[NewIndex], EFocusCause::Navigation);
+	}
+	return true;
+}
+
+void SWoTInGameMenuOverlay::SelectTauntEntry(int32 EntryIndex)
+{
+	if (TauntButtons.IsValidIndex(EntryIndex))
+	{
+		SelectedTauntIndex = EntryIndex;
+	}
+}
+
 FReply SWoTInGameMenuOverlay::OpenPlayerConfig()
 {
 	if (!CanInteract() || !ContentHost.IsValid()) return FReply::Handled();
@@ -651,6 +1139,8 @@ FReply SWoTInGameMenuOverlay::OpenPlayerConfig()
 				: Preferences->GetPreferences().SelectedSkinColor)
 		: EWoTPlayerSkinColor::Base;
 	ActiveSettingsScreen.Reset();
+	bShowingTaunts = false;
+	TauntButtons.Reset();
 	bShowingPlayerConfig = true;
 	ResumeButton.Reset();
 	ContentHost->SetContent(BuildPlayerConfigPage());
@@ -729,11 +1219,19 @@ FReply SWoTInGameMenuOverlay::OpenSettings(EWoTSettingsPage Page)
 	if (CanInteract() && ContentHost.IsValid())
 	{
 		ResumeButton.Reset();
+		bShowingTaunts = false;
+		TauntButtons.Reset();
 		ContentHost->SetContent(BuildSettingsPage(Page));
 		if (FSlateApplication::IsInitialized() && ActiveSettingsScreen.IsValid())
 		{
+			// Controller mode starts on the page's first control (spec r3
+			// section 1a); the pointer keeps today's focus on the page.
+			const TSharedPtr<SWidget> InitialFocus =
+				FWoTControllerUIInput::IsControllerMode()
+					? ActiveSettingsScreen->InitialControllerFocusWidget()
+					: StaticCastSharedPtr<SWidget>(ActiveSettingsScreen);
 			FSlateApplication::Get().SetKeyboardFocus(
-				ActiveSettingsScreen, EFocusCause::SetDirectly);
+				InitialFocus, EFocusCause::SetDirectly);
 		}
 		Invalidate(EInvalidateWidgetReason::Layout);
 	}
@@ -749,6 +1247,10 @@ void SWoTInGameMenuOverlay::ReturnToMainMenu()
 	ActiveSettingsScreen.Reset();
 	PlayerNameInput.Reset();
 	bShowingPlayerConfig = false;
+	bShowingTaunts = false;
+	TauntButtons.Reset();
+	TauntLabels.Reset();
+	SelectedTauntIndex = INDEX_NONE;
 	ContentHost->SetContent(BuildMainMenu());
 	Invalidate(EInvalidateWidgetReason::Layout);
 	FocusResumeButton();
@@ -767,11 +1269,14 @@ void SWoTInGameMenuOverlay::Tick(
 		return;
 	}
 	const float PreviousViewportScale = LiveViewportScale;
+	const float PreviousScreenHeight = LiveScreenHeight;
 	LiveViewportScale = FMath::Max(
 		AllottedGeometry.GetAccumulatedLayoutTransform().GetScale(), 0.01f);
-	if (ActiveSettingsScreen.IsValid() || bShowingPlayerConfig)
+	LiveScreenHeight = AllottedGeometry.GetLocalSize().Y;
+	if (ActiveSettingsScreen.IsValid() || bShowingPlayerConfig || bShowingTaunts)
 	{
-		if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale))
+		if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale)
+			|| !FMath::IsNearlyEqual(PreviousScreenHeight, LiveScreenHeight))
 		{
 			Invalidate(EInvalidateWidgetReason::Layout);
 		}
@@ -803,19 +1308,46 @@ void SWoTInGameMenuOverlay::Tick(
 		FWoTMenuLayout::MeasureFontHeight(ItemFont());
 	const float TitleArea =
 		FWoTMenuLayout::MeasureFontHeight(HeadingFont())
-		+ 24.0f;
+		+ WoTInGameMenu_HeadingGap;
 	const int32 EntryCount = MainMenuEntryCount();
+	// menuWOT's spacing over the room the entries really have: the screen
+	// less its margins, the menu's chrome and the heading. Where the ideal
+	// spacing does not fit (a Battle edit phase has the most entries), the
+	// spacing compacts and the text keeps its size, so the background always
+	// encloses the last entry on screen.
 	EntrySpacing = FWoTMenuLayout::CalculateSpacing(
-		EntryCount, EntryHeight, AllottedGeometry.GetLocalSize().Y - TitleArea);
+		EntryCount, EntryHeight, MainMenuContentRoom() - TitleArea);
 	ListHeight = FWoTMenuLayout::CalculateListHeight(
 		EntryCount, EntryHeight, EntrySpacing);
 	if (!FMath::IsNearlyEqual(PreviousViewportScale, LiveViewportScale)
+		|| !FMath::IsNearlyEqual(PreviousScreenHeight, LiveScreenHeight)
 		|| !FMath::IsNearlyEqual(PreviousEntryHeight, EntryHeight)
 		|| !FMath::IsNearlyEqual(PreviousSpacing, EntrySpacing)
 		|| !FMath::IsNearlyEqual(PreviousListHeight, ListHeight))
 	{
 		Invalidate(EInvalidateWidgetReason::Layout);
 	}
+}
+
+TArray<FWoTButtonPrompt> SWoTInGameMenuOverlay::ControllerPrompts() const
+{
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		return FWoTTextEntry::ControllerPrompts();
+	}
+	if (SWoTListCombo::IsAnyOpenWithin(AsShared()))
+	{
+		return FWoTButtonPromptSets::Dropdown();
+	}
+	if (ActiveSettingsScreen.IsValid())
+	{
+		return ActiveSettingsScreen->ControllerPrompts();
+	}
+	if (bShowingTaunts)
+	{
+		return FWoTButtonPromptSets::Taunts();
+	}
+	return FWoTButtonPromptSets::SelectBack();
 }
 
 TSharedPtr<SWidget> SWoTInGameMenuOverlay::InitialFocusWidget() const
@@ -837,14 +1369,30 @@ void SWoTInGameMenuOverlay::FocusResumeButton()
 FReply SWoTInGameMenuOverlay::OnKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel owns every key; Escape cancels it first [M3].
+		if (InKeyEvent.GetKey() == EKeys::Escape)
+		{
+			FWoTTextEntry::CancelWithin(AsShared());
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnKeyDown(MyGeometry, InKeyEvent);
+	}
 	if (IsHelpKey(InKeyEvent.GetKey())
 		&& (!ActiveSettingsScreen.IsValid()
 			|| !ActiveSettingsScreen->IsCapturingBinding()))
 	{
 		return ActivateHelp();
 	}
-	if (WoTIsMenuBackKey(InKeyEvent.GetKey()))
+	// Escape keeps its own path; B and View arrive through the back stack.
+	if (InKeyEvent.GetKey() == EKeys::Escape)
 	{
+		// An open dropdown closes first (spec r3 [N1]).
+		if (SWoTListCombo::CloseOpenWithin(AsShared()))
+		{
+			return FReply::Handled();
+		}
 		if (CanInteract())
 		{
 			return Resume();
@@ -857,6 +1405,17 @@ FReply SWoTInGameMenuOverlay::OnKeyDown(
 FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 	const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (FWoTTextEntry::IsActiveWithin(AsShared()))
+	{
+		// The keyboard panel owns every key: physical typing never opens Help.
+		// Escape cancels the panel first, and the page stays (spec r3 [M3]).
+		if (InKeyEvent.GetKey() == EKeys::Escape)
+		{
+			FWoTTextEntry::CancelWithin(AsShared());
+			return FReply::Handled();
+		}
+		return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+	}
 	if (IsHelpKey(InKeyEvent.GetKey())
 		&& (!ActiveSettingsScreen.IsValid()
 			|| !ActiveSettingsScreen->IsCapturingBinding()))
@@ -864,30 +1423,47 @@ FReply SWoTInGameMenuOverlay::OnPreviewKeyDown(
 		return ActivateHelp();
 	}
 	const FKey Key = InKeyEvent.GetKey();
-	if (IsShowingMainMenu()
+	if ((IsShowingMainMenu() || bShowingTaunts)
 		&& (Key == EKeys::Up || Key == EKeys::Down
 			|| Key == EKeys::Gamepad_DPad_Up || Key == EKeys::Gamepad_DPad_Down))
 	{
 		const int32 Direction = Key == EKeys::Up || Key == EKeys::Gamepad_DPad_Up ? -1 : 1;
-		return MoveMainMenuSelection(Direction)
-			? FReply::Handled() : FReply::Unhandled();
+		const bool bMoved = bShowingTaunts
+			? MoveTauntSelection(Direction) : MoveMainMenuSelection(Direction);
+		return bMoved ? FReply::Handled() : FReply::Unhandled();
 	}
-	if (WoTIsMenuBackKey(Key))
+	if (Key == EKeys::Escape)
 	{
-		if (ActiveSettingsScreen.IsValid())
+		// With a dropdown open, Escape closes only the dropdown; a second
+		// Escape backs out as before (owner ruling 2026-11-08, spec r3 [N1]).
+		if (!SWoTListCombo::CloseOpenWithin(AsShared()))
 		{
-			const TSharedPtr<SWoTSettingsScreen> Screen = ActiveSettingsScreen;
-			Screen->HandleBack();
-			return FReply::Handled();
+			BackOneLevel();
 		}
-		if (bShowingPlayerConfig)
-		{
-			ReturnToMainMenu();
-			return FReply::Handled();
-		}
-		return CanInteract() ? Resume() : FReply::Handled();
+		return FReply::Handled();
 	}
 	return SCompoundWidget::OnPreviewKeyDown(MyGeometry, InKeyEvent);
+}
+
+bool SWoTInGameMenuOverlay::BackOneLevel()
+{
+	if (ActiveSettingsScreen.IsValid())
+	{
+		const TSharedPtr<SWoTSettingsScreen> Screen = ActiveSettingsScreen;
+		Screen->HandleBack();
+		return true;
+	}
+	if (bShowingPlayerConfig || bShowingTaunts)
+	{
+		// Escape, B and View on the Taunts page return to the menu [M3].
+		ReturnToMainMenu();
+		return true;
+	}
+	if (CanInteract())
+	{
+		Resume();
+	}
+	return true;
 }
 
 FNavigationReply SWoTInGameMenuOverlay::OnNavigation(
@@ -896,18 +1472,21 @@ FNavigationReply SWoTInGameMenuOverlay::OnNavigation(
 	// The stick navigates by analog events rather than keys; it moves the same
 	// wrapping selection as the arrows and the D-pad.
 	const EUINavigation Direction = InNavigationEvent.GetNavigationType();
-	if (IsShowingMainMenu()
-		&& (Direction == EUINavigation::Up || Direction == EUINavigation::Down)
-		&& MoveMainMenuSelection(Direction == EUINavigation::Up ? -1 : 1))
+	if (Direction == EUINavigation::Up || Direction == EUINavigation::Down)
 	{
-		return FNavigationReply::Stop();
+		const int32 Step = Direction == EUINavigation::Up ? -1 : 1;
+		if ((IsShowingMainMenu() && MoveMainMenuSelection(Step))
+			|| (bShowingTaunts && MoveTauntSelection(Step)))
+		{
+			return FNavigationReply::Stop();
+		}
 	}
 	return SCompoundWidget::OnNavigation(MyGeometry, InNavigationEvent);
 }
 
 bool SWoTInGameMenuOverlay::IsShowingMainMenu() const
 {
-	return !ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig;
+	return !ActiveSettingsScreen.IsValid() && !bShowingPlayerConfig && !bShowingTaunts;
 }
 
 FReply SWoTInGameMenuOverlay::Resume()
@@ -983,6 +1562,9 @@ FReply SWoTInGameMenuOverlay::ActivateMainMenuEntryById(uint8 EntryId)
 	case EWoTInGameMenuEntry::Resume: return Resume();
 	case EWoTInGameMenuEntry::Scoreboard: return ActivateScoreboard();
 	case EWoTInGameMenuEntry::Help: return ActivateHelp();
+	case EWoTInGameMenuEntry::Chat: return ActivateChat(/*bTeam*/ false);
+	case EWoTInGameMenuEntry::TeamChat: return ActivateChat(/*bTeam*/ true);
+	case EWoTInGameMenuEntry::Taunts: return OpenTaunts();
 	case EWoTInGameMenuEntry::EditCitadel: return ActivateCitadel();
 	case EWoTInGameMenuEntry::PlayerConfig: return OpenPlayerConfig();
 	case EWoTInGameMenuEntry::Controls:
@@ -1057,6 +1639,25 @@ int32 SWoTInGameMenuOverlay::MainMenuEntryCount() const
 	return MainMenuEntryIds.Num();
 }
 
+float SWoTInGameMenuOverlay::MainMenuContentRoom() const
+{
+	// The screen less a margin top and bottom and the menu's chrome.
+	constexpr float Chrome = 2.0f * (WoTInGameMenu_BorderPadding + WoTInGameMenu_FramePadding);
+	return FMath::Max(0.0f, LiveScreenHeight - 2.0f * WoTInGameMenu_ScreenMargin - Chrome);
+}
+
+FOptionalSize SWoTInGameMenuOverlay::PageMaxHeight() const
+{
+	const bool bPage = ActiveSettingsScreen.IsValid() || bShowingPlayerConfig || bShowingTaunts;
+	if (LiveScreenHeight <= 0.0f)
+	{
+		// Before the first Tick: the pages' panel, the main menu unbounded.
+		return bPage ? FOptionalSize(WoTInGameMenu_PageHeight) : FOptionalSize();
+	}
+	const float Room = MainMenuContentRoom();
+	return FOptionalSize(bPage ? FMath::Min(WoTInGameMenu_PageHeight, Room) : Room);
+}
+
 FMargin SWoTInGameMenuOverlay::EntryPadding(int32 EntryIndex) const
 {
 	const float HalfSpacing = EntrySpacing * 0.5f;
@@ -1127,7 +1728,15 @@ void SWoTInGameMenuOverlay::OpenSettingsForTesting(EWoTSettingsPage Page)
 bool SWoTInGameMenuOverlay::IsShowingMainMenuForTesting() const
 {
 	return ContentHost.IsValid() && !ActiveSettingsScreen.IsValid()
-		&& !bShowingPlayerConfig;
+		&& !bShowingPlayerConfig && !bShowingTaunts;
+}
+
+FReply SWoTInGameMenuOverlay::ActivateTauntEntryForTesting(int32 EntryIndex)
+{
+	const int32 EntryCount = static_cast<int32>(UE_ARRAY_COUNT(WoTInGameSlate_TauntEntries));
+	return bShowingTaunts && EntryIndex >= 0 && EntryIndex < EntryCount
+		? ActivateTaunt(WoTInGameSlate_TauntEntries[EntryIndex].TauntIndex)
+		: FReply::Handled();
 }
 
 TArray<FString> SWoTInGameMenuOverlay::MenuLabelsForTesting() const
@@ -1143,6 +1752,11 @@ FReply SWoTInGameMenuOverlay::ActivateScoreboardForTesting()
 FReply SWoTInGameMenuOverlay::ActivateHelpForTesting()
 {
 	return ActivateHelp();
+}
+
+TSharedPtr<SWidget> SWoTInGameMenuOverlay::PlayerNameInputForTesting() const
+{
+	return PlayerNameInput;
 }
 
 FReply SWoTInGameMenuOverlay::ActivateCitadelForTesting()
@@ -1171,9 +1785,129 @@ FSlateFontInfo SWoTInGameMenuOverlay::ItemFontForTesting() const
 float SWoTInGameMenuOverlay::MainMenuDesiredHeightForTesting() const
 {
 	return FWoTMenuLayout::MeasureFontHeight(HeadingFont())
-		+ 24.0f + ListHeight;
+		+ WoTInGameMenu_HeadingGap + ListHeight;
 }
 #endif
+
+namespace
+{
+	/** WOTTextWindow's inline command interpreter (WOTTextWindow.uc): the
+	 * state one command leaves for the next, and the lines it lays out in a
+	 * clip ClipWidth wide. */
+	struct FWoTHelpInterpreter
+	{
+		int32 FontIndex = 3;
+		bool bCentered = true;
+		float ForcedX = -1.0f;
+		float ForcedY = -1.0f;
+		float CurrentY = 0.0f;
+
+		void Run(TConstArrayView<FString> Commands, float ClipWidth,
+			const TFunction<FVector2D(const FString&, int32)>& Measure,
+			TArray<FWoTHelpLayoutLine>& Out)
+		{
+			for (const FString& Command : Commands)
+			{
+				if (Command.StartsWith(TEXT("%f=")))
+				{
+					FontIndex = FCString::Atoi(*Command.Mid(3));
+					continue;
+				}
+				if (Command.StartsWith(TEXT("%s=")))
+				{
+					CurrentY += FCString::Atoi(*Command.Mid(3));
+					continue;
+				}
+				if (Command.StartsWith(TEXT("%c=")))
+				{
+					bCentered = FCString::Atoi(*Command.Mid(3)) != 0;
+					continue;
+				}
+				if (Command.StartsWith(TEXT("%x=")))
+				{
+					ForcedX = FCString::Atoi(*Command.Mid(3));
+					continue;
+				}
+				if (Command.StartsWith(TEXT("%y=")))
+				{
+					ForcedY = FCString::Atoi(*Command.Mid(3));
+					continue;
+				}
+				if (Command.StartsWith(TEXT("%d=")))
+				{
+					const int32 SeparatorType = FCString::Atoi(*Command.Mid(3));
+					CurrentY += SeparatorType == 1 ? 40.0f : 24.0f;
+					continue;
+				}
+
+				FString Remaining = Command.StartsWith(TEXT("%b "))
+					? Command.Mid(3) : Command;
+				float LineX = ForcedX < 0.0f ? 0.0f : ForcedX;
+				float LineY = ForcedY < 0.0f ? CurrentY : ForcedY;
+				while (!Remaining.IsEmpty())
+				{
+					int32 CleanEnd = 0;
+					bool bGotWord = false;
+					for (int32 Index = 0; Index < Remaining.Len()
+						&& Remaining[Index] != TEXT('\n'); ++Index)
+					{
+						const int32 TestEnd = Index + 1;
+						if (LineX + Measure(Remaining.Left(TestEnd), FontIndex).X
+							> ClipWidth)
+						{
+							break;
+						}
+						const bool bWordBreak = TestEnd == Remaining.Len()
+							|| Remaining[TestEnd] == TEXT(' ')
+							|| Remaining[TestEnd] == TEXT('\n');
+						if (bWordBreak || !bGotWord)
+						{
+							CleanEnd = TestEnd;
+							bGotWord |= bWordBreak;
+						}
+					}
+					if (CleanEnd == 0)
+					{
+						break;
+					}
+
+					FWoTHelpLayoutLine& Line = Out.AddDefaulted_GetRef();
+					Line.Text = Remaining.Left(CleanEnd);
+					Line.FontIndex = FontIndex;
+					Line.bCentered = bCentered;
+					const FVector2D Size = Measure(Line.Text, FontIndex);
+					Line.Width = FMath::Max(1.0f, Size.X);
+					Line.Height = FMath::Max(1.0f, Size.Y);
+					Line.X = bCentered
+						? LineX + (ClipWidth - Line.Width) * 0.5f : LineX;
+					Line.Y = LineY;
+					CurrentY = Line.Y + Line.Height;
+
+					Remaining.RightChopInline(CleanEnd, EAllowShrinking::No);
+					while (!Remaining.IsEmpty()
+						&& (Remaining[0] == TEXT(' ') || Remaining[0] == TEXT('\n')))
+					{
+						Remaining.RightChopInline(1, EAllowShrinking::No);
+					}
+					LineX = 0.0f; // UCanvas::WrappedPrint resets CurX after each row.
+					LineY = CurrentY;
+				}
+			}
+		}
+	};
+
+	/** The lowest line bottom of Lines from index First on; Top when none. */
+	float WoTHelp_LinesBottom(const TArray<FWoTHelpLayoutLine>& Lines,
+		int32 First, float Top)
+	{
+		float Bottom = Top;
+		for (int32 Index = First; Index < Lines.Num(); ++Index)
+		{
+			Bottom = FMath::Max(Bottom, Lines[Index].Y + Lines[Index].Height);
+		}
+		return Bottom;
+	}
+}
 
 bool FWoTHelpContent::ParseRetailInt(TConstArrayView<uint8> Bytes,
 	FWoTHelpContent& Out)
@@ -1222,118 +1956,247 @@ bool FWoTHelpContent::LoadRuntime(FWoTHelpContent& Out)
 	return true;
 }
 
-TArray<FWoTHelpLayoutLine> FWoTHelpContent::Layout(
-	const FWoTHelpContent& In)
+FName FWoTHelpContent::FaceFor(int32 FontIndex, int32 PixelScale)
 {
-	return Layout(In, [](const FString& Text, int32 Index)
+	// WOTTextWindow.uc:57-78 (GetStrFont).
+	if (FontIndex == 0 || FontIndex == 1)
 	{
-		const float Height = (Index == 0 || Index == 1) ? 8.0f
-			: ((Index == 4 || Index == 5) ? 30.0f : 14.0f);
-		const float AverageWidth = (Index == 0 || Index == 1) ? 5.0f
-			: ((Index == 4 || Index == 5) ? 18.0f : 8.0f);
-		return FVector2D(Text.Len() * AverageWidth, Height);
+		// Steam Deck legibility: the 8-pixel face at a 1x strike is under the
+		// 12-pixel floor, and a fractional strike would blur it. F_WOTReg14 is
+		// the next face of the family; its letters are about a tenth wider and
+		// its lines 6 px taller, which only matters for help text that selects
+		// fonts 0/1 (the shipped English help never does).
+		const FName SmallFace(TEXT("F_WOTReg08"));
+		return RetailLineHeight(SmallFace) * FMath::Max(PixelScale, 1)
+				< FWoTMenuStyle::FloorLegiblePixels
+			? FName(TEXT("F_WOTReg14")) : SmallFace;
+	}
+	if (FontIndex == 2) return FName(TEXT("F_WOTIta14"));
+	if (FontIndex == 4 || FontIndex == 5) return FName(TEXT("F_WOTReg30"));
+	return FName(TEXT("F_WOTReg14"));
+}
+
+int32 FWoTHelpContent::RetailLineHeight(FName Face)
+{
+	// Tallest glyph cell of each shipped WOT.u face, which the runtime font
+	// owner uses as the line height (WoT.UI.Legibility.HelpRetailGlyphs pins
+	// these against the converted retail faces).
+	return FWoTMenuStyle::RetailFaceLineHeight(Face);
+}
+
+FVector2D FWoTHelpContent::MeasureRetail(const FString& Text, int32 FontIndex,
+	int32 PixelScale)
+{
+	const FName Face = FaceFor(FontIndex, PixelScale);
+	// Rough advances kept from the original spec metric; the shipped faces
+	// average about 5.2 (Reg08), 5.8 (Reg14), 6.1 (Ita14) and 9.7 (Reg30)
+	// pixels a glyph. WoT.UI.Legibility.HelpRetailGlyphs lays the page out
+	// in the real advances.
+	const float AverageWidth = Face == FName(TEXT("F_WOTReg08")) ? 5.0f
+		: (Face == FName(TEXT("F_WOTReg30")) ? 18.0f : 8.0f);
+	return FVector2D(Text.Len() * AverageWidth,
+		static_cast<float>(RetailLineHeight(Face)));
+}
+
+TArray<FWoTHelpLayoutLine> FWoTHelpContent::Layout(
+	const FWoTHelpContent& In, int32 PixelScale)
+{
+	return Layout(In, [PixelScale](const FString& Text, int32 Index)
+	{
+		return MeasureRetail(Text, Index, PixelScale);
 	});
+}
+
+FWoTHelpPageLayout FWoTHelpContent::LayoutPage(const FWoTHelpContent& In,
+	int32 PixelScale)
+{
+	return LayoutPage(In, [PixelScale](const FString& Text, int32 Index)
+	{
+		return MeasureRetail(Text, Index, PixelScale);
+	});
+}
+
+FWoTHelpPageLayout FWoTHelpContent::LayoutReflow(const FWoTHelpContent& In,
+	int32 PixelScale, const FVector2D& ClipSize)
+{
+	return LayoutReflow(In, [PixelScale](const FString& Text, int32 Index)
+	{
+		return MeasureRetail(Text, Index, PixelScale);
+	}, ClipSize);
+}
+
+FWoTHelpPageLayout FWoTHelpContent::LayoutReflow(const FWoTHelpContent& In,
+	const TFunction<FVector2D(const FString&, int32)>& Measure,
+	const FVector2D& ClipSize)
+{
+	FWoTHelpPageLayout Page;
+	Page.ClipSize = ClipSize;
+	Page.TitleSize = Measure(In.Title, 3);
+	Page.TitleSize.Y = FMath::Max(1.0f, Page.TitleSize.Y);
+	const TConstArrayView<FString> Commands(In.Content);
+
+	// The absolutely placed block starts at the first %y= that places a line
+	// (the retail F-key table, %y=325); everything before it flows.
+	int32 BlockStart = Commands.Num();
+	for (int32 Index = 0; Index < Commands.Num(); ++Index)
+	{
+		if (Commands[Index].StartsWith(TEXT("%y="))
+			&& FCString::Atoi(*Commands[Index].Mid(3)) >= 0)
+		{
+			BlockStart = Index;
+			break;
+		}
+	}
+	// Each headed section opens with the italic heading face (%f=2).
+	TArray<int32> SectionStarts;
+	for (int32 Index = 0; Index < BlockStart; ++Index)
+	{
+		if (Commands[Index].StartsWith(TEXT("%f="))
+			&& FCString::Atoi(*Commands[Index].Mid(3)) == 2)
+		{
+			SectionStarts.Add(Index);
+		}
+	}
+	const bool bColumns = SectionStarts.Num() >= 2;
+
+	// DrawTextAt(Title, bCR=false) still advances CurY through WrappedPrint.
+	FWoTHelpInterpreter Interpreter;
+	Interpreter.CurrentY = Page.TitleSize.Y;
+	const int32 IntroEnd = bColumns ? SectionStarts[0] : BlockStart;
+	Interpreter.Run(Commands.Slice(0, IntroEnd), ClipSize.X, Measure, Page.Lines);
+	float FlowBottom = WoTHelp_LinesBottom(Page.Lines, 0, Page.TitleSize.Y);
+	if (bColumns)
+	{
+		// Two columns: the first Split sections on the left, the rest on the
+		// right, split where the taller column is shortest.
+		const float ColumnTop = FlowBottom;
+		const float ColumnWidth = FMath::Max(1.0f, (ClipSize.X - ReflowColumnGap) * 0.5f);
+		TArray<FWoTHelpLayoutLine> BestLines;
+		FWoTHelpInterpreter BestState;
+		float BestBottom = TNumericLimits<float>::Max();
+		for (int32 Split = 1; Split < SectionStarts.Num(); ++Split)
+		{
+			TArray<FWoTHelpLayoutLine> Lines;
+			FWoTHelpInterpreter Column = Interpreter;
+			Column.CurrentY = ColumnTop;
+			Column.Run(Commands.Slice(IntroEnd, SectionStarts[Split] - IntroEnd),
+				ColumnWidth, Measure, Lines);
+			const float LeftBottom = WoTHelp_LinesBottom(Lines, 0, ColumnTop);
+			const int32 RightFirst = Lines.Num();
+			Column.CurrentY = ColumnTop;
+			Column.Run(Commands.Slice(SectionStarts[Split],
+				BlockStart - SectionStarts[Split]), ColumnWidth, Measure, Lines);
+			for (int32 Index = RightFirst; Index < Lines.Num(); ++Index)
+			{
+				Lines[Index].X += ColumnWidth + ReflowColumnGap;
+			}
+			const float Bottom = FMath::Max(LeftBottom,
+				WoTHelp_LinesBottom(Lines, RightFirst, ColumnTop));
+			if (Bottom < BestBottom)
+			{
+				BestBottom = Bottom;
+				BestLines = MoveTemp(Lines);
+				BestState = Column;
+			}
+		}
+		Page.Lines.Append(MoveTemp(BestLines));
+		Interpreter = BestState;
+		FlowBottom = BestBottom;
+	}
+
+	// The block keeps its own %x offsets and line order, moved up to sit one
+	// gap below the flowing text.
+	if (BlockStart < Commands.Num())
+	{
+		TArray<FWoTHelpLayoutLine> Block;
+		Interpreter.Run(Commands.Slice(BlockStart, Commands.Num() - BlockStart),
+			ClipSize.X, Measure, Block);
+		float BlockTop = TNumericLimits<float>::Max();
+		for (const FWoTHelpLayoutLine& Line : Block)
+		{
+			BlockTop = FMath::Min(BlockTop, Line.Y);
+		}
+		const float Offset = FlowBottom + ReflowBlockGap - BlockTop;
+		for (FWoTHelpLayoutLine& Line : Block)
+		{
+			Line.Y += Offset;
+		}
+		Page.Lines.Append(MoveTemp(Block));
+	}
+
+	const float ContentEndY = WoTHelp_LinesBottom(Page.Lines, 0, Page.TitleSize.Y);
+	Page.SubTitleSize = Measure(In.SubTitle, 3);
+	Page.SubTitleSize.Y = FMath::Max(1.0f, Page.SubTitleSize.Y);
+	// WOTTextWindow.uc:334: Max(CurY + SubTitleMarginY, ClipY - SubTitleOffsetY),
+	// the offset never less than the subtitle's own height, so a face taller
+	// than the retail 14 pixels still ends inside the clip.
+	Page.SubTitleY = FMath::Max(ContentEndY + 8.0f,
+		ClipSize.Y - FMath::Max(16.0f, Page.SubTitleSize.Y + 2.0f));
+	return Page;
+}
+
+FWoTHelpPageLayout FWoTHelpContent::LayoutPage(const FWoTHelpContent& In,
+	const TFunction<FVector2D(const FString&, int32)>& Measure)
+{
+	FWoTHelpPageLayout Page;
+	Page.TitleSize = Measure(In.Title, 3);
+	Page.TitleSize.Y = FMath::Max(1.0f, Page.TitleSize.Y);
+	Page.Lines = Layout(In, Measure);
+	float ContentEndY = Page.TitleSize.Y;
+	for (const FWoTHelpLayoutLine& Line : Page.Lines)
+	{
+		ContentEndY = Line.Y + Line.Height;
+	}
+	// WOTTextWindow.uc:334: Max(CurY + SubTitleMarginY, ClipY - SubTitleOffsetY).
+	Page.SubTitleY = FMath::Max(ContentEndY + 8.0f, ClipHeight - 16.0f);
+	Page.SubTitleSize = Measure(In.SubTitle, 3);
+	Page.SubTitleSize.Y = FMath::Max(1.0f, Page.SubTitleSize.Y);
+	return Page;
+}
+
+bool FWoTHelpPageLayout::FitsClip() const
+{
+	const auto Inside = [this](float Left, float Top, float Width, float Height)
+	{
+		constexpr float Tolerance = 0.5f;
+		return Left >= -Tolerance && Top >= -Tolerance
+			&& Left + Width <= ClipSize.X + Tolerance
+			&& Top + Height <= ClipSize.Y + Tolerance;
+	};
+	// The title and subtitle are centred across the clip's full width.
+	if (!Inside((ClipSize.X - TitleSize.X) * 0.5f, 0.0f,
+			TitleSize.X, TitleSize.Y)
+		|| !Inside((ClipSize.X - SubTitleSize.X) * 0.5f,
+			SubTitleY, SubTitleSize.X, SubTitleSize.Y))
+	{
+		return false;
+	}
+	for (const FWoTHelpLayoutLine& Line : Lines)
+	{
+		if (!Inside(Line.X, Line.Y, Line.Width, Line.Height)) return false;
+	}
+	return true;
+}
+
+float FWoTHelpPageLayout::ContentBottom() const
+{
+	float Bottom = FMath::Max(TitleSize.Y, SubTitleY + SubTitleSize.Y);
+	for (const FWoTHelpLayoutLine& Line : Lines)
+	{
+		Bottom = FMath::Max(Bottom, Line.Y + Line.Height);
+	}
+	return Bottom;
 }
 
 TArray<FWoTHelpLayoutLine> FWoTHelpContent::Layout(
 	const FWoTHelpContent& In,
 	const TFunction<FVector2D(const FString&, int32)>& Measure)
 {
-	constexpr float ClipWidth = 512.0f; // uiWindow: 640 - 2*WindowBorderX(64)
 	TArray<FWoTHelpLayoutLine> Lines;
-	int32 FontIndex = 3;
-	bool bCentered = true;
-	float ForcedX = -1.0f;
-	float ForcedY = -1.0f;
+	FWoTHelpInterpreter Interpreter;
 	// DrawTextAt(Title, bCR=false) still advances CurY through WrappedPrint.
-	float CurrentY = FMath::Max(1.0f, Measure(In.Title, 3).Y);
-	for (const FString& Command : In.Content)
-	{
-		if (Command.StartsWith(TEXT("%f=")))
-		{
-			FontIndex = FCString::Atoi(*Command.Mid(3));
-			continue;
-		}
-		if (Command.StartsWith(TEXT("%s=")))
-		{
-			CurrentY += FCString::Atoi(*Command.Mid(3));
-			continue;
-		}
-		if (Command.StartsWith(TEXT("%c=")))
-		{
-			bCentered = FCString::Atoi(*Command.Mid(3)) != 0;
-			continue;
-		}
-		if (Command.StartsWith(TEXT("%x=")))
-		{
-			ForcedX = FCString::Atoi(*Command.Mid(3));
-			continue;
-		}
-		if (Command.StartsWith(TEXT("%y=")))
-		{
-			ForcedY = FCString::Atoi(*Command.Mid(3));
-			continue;
-		}
-		if (Command.StartsWith(TEXT("%d=")))
-		{
-			const int32 SeparatorType = FCString::Atoi(*Command.Mid(3));
-			CurrentY += SeparatorType == 1 ? 40.0f : 24.0f;
-			continue;
-		}
-
-		FString Remaining = Command.StartsWith(TEXT("%b "))
-			? Command.Mid(3) : Command;
-		float LineX = ForcedX < 0.0f ? 0.0f : ForcedX;
-		float LineY = ForcedY < 0.0f ? CurrentY : ForcedY;
-		while (!Remaining.IsEmpty())
-		{
-			int32 CleanEnd = 0;
-			bool bGotWord = false;
-			for (int32 Index = 0; Index < Remaining.Len()
-				&& Remaining[Index] != TEXT('\n'); ++Index)
-			{
-				const int32 TestEnd = Index + 1;
-				if (LineX + Measure(Remaining.Left(TestEnd), FontIndex).X
-					> ClipWidth)
-				{
-					break;
-				}
-				const bool bWordBreak = TestEnd == Remaining.Len()
-					|| Remaining[TestEnd] == TEXT(' ')
-					|| Remaining[TestEnd] == TEXT('\n');
-				if (bWordBreak || !bGotWord)
-				{
-					CleanEnd = TestEnd;
-					bGotWord |= bWordBreak;
-				}
-			}
-			if (CleanEnd == 0)
-			{
-				break;
-			}
-
-			FWoTHelpLayoutLine& Line = Lines.AddDefaulted_GetRef();
-			Line.Text = Remaining.Left(CleanEnd);
-			Line.FontIndex = FontIndex;
-			Line.bCentered = bCentered;
-			const FVector2D Size = Measure(Line.Text, FontIndex);
-			Line.Width = FMath::Max(1.0f, Size.X);
-			Line.Height = FMath::Max(1.0f, Size.Y);
-			Line.X = bCentered
-				? LineX + (ClipWidth - Line.Width) * 0.5f : LineX;
-			Line.Y = LineY;
-			CurrentY = Line.Y + Line.Height;
-
-			Remaining.RightChopInline(CleanEnd, EAllowShrinking::No);
-			while (!Remaining.IsEmpty()
-				&& (Remaining[0] == TEXT(' ') || Remaining[0] == TEXT('\n')))
-			{
-				Remaining.RightChopInline(1, EAllowShrinking::No);
-			}
-			LineX = 0.0f; // UCanvas::WrappedPrint resets CurX after each row.
-			LineY = CurrentY;
-		}
-	}
+	Interpreter.CurrentY = FMath::Max(1.0f, Measure(In.Title, 3).Y);
+	Interpreter.Run(In.Content, ClipWidth, Measure, Lines);
 	return Lines;
 }
 
@@ -1349,6 +2212,7 @@ void SWoTHelpOverlay::Construct(const FArguments& InArgs)
 		// Slate prepasses before it ticks: without this the first frame drew
 		// at 1x and jumped to 2x on the next.
 		DpiScale = FMath::Max(InArgs._InitialDpiScale, 0.01f);
+		LivePhysicalSize = InArgs._InitialPhysicalSize;
 		PixelScale = PixelScaleFor(InArgs._InitialPhysicalSize);
 	}
 #if WITH_AUTOMATION_TESTS
@@ -1378,76 +2242,13 @@ void SWoTHelpOverlay::Construct(const FArguments& InArgs)
 	{
 		RequiredFonts->BindWidget(AsShared());
 	}
+	// B and View close Help through the back stack (held B closes it once).
+	BackStackEntry = FWoTBackStack::Get().Register(AsShared(), nullptr,
+		[this]() { Close(); return true; });
 
-	TFunction<FVector2D(const FString&, int32)> Measure =
-		[this](const FString& Text, int32 Index)
-		{
-			const FSlateFontInfo Font = FontForIndex(Index);
-			if (FSlateApplication::IsInitialized())
-			{
-				if (FSlateRenderer* Renderer =
-					FSlateApplication::Get().GetRenderer())
-				{
-					return FVector2D(Renderer->GetFontMeasureService()
-						->Measure(Text, Font));
-				}
-			}
-			return FVector2D(Text.Len() * FMath::Max(1, Font.Size / 2),
-				FMath::Max(1, Font.Size));
-		};
-	const TArray<FWoTHelpLayoutLine> Layout =
-		FWoTHelpContent::Layout(HelpContent, Measure);
-	const float TitleHeight = FMath::Max(1.0f, Measure(HelpContent.Title, 3).Y);
-	float ContentEndY = TitleHeight;
-	for (const FWoTHelpLayoutLine& Line : Layout)
-	{
-		ContentEndY = Line.Y + Line.Height;
-	}
-	const float SubTitleY = FMath::Max(ContentEndY + 8.0f, 432.0f - 16.0f);
-	const float SubTitleHeight = FMath::Max(1.0f,
-		Measure(HelpContent.SubTitle, 3).Y);
-
-	// Every slot is placed by its top-left corner, as the retail Canvas drew
-	// at CurX/CurY. SConstraintCanvas defaults to a (0.5, 0.5) alignment,
-	// which centred each line on its position: half of every left-aligned
-	// line fell off the window, headings and the F-key columns shifted and
-	// overlapped, and the title was cut in half.
-	const FVector2D TopLeft(0.0f, 0.0f);
-	TSharedRef<SConstraintCanvas> Canvas = SNew(SConstraintCanvas)
+	SAssignNew(Canvas, SConstraintCanvas)
 		.Clipping(EWidgetClipping::ClipToBounds);
-	Canvas->AddSlot()
-	.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 0.0f))
-	.Offset(FMargin(0.0f, 0.0f, 0.0f, TitleHeight))
-	.Alignment(TopLeft)
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(HelpContent.Title))
-		.Font_Lambda([this]() { return FontForIndex(3); })
-		.Justification(ETextJustify::Center)
-	];
-	for (const FWoTHelpLayoutLine& Line : Layout)
-	{
-		const int32 LineFont = Line.FontIndex;
-		Canvas->AddSlot()
-		.Anchors(FAnchors(0.0f, 0.0f))
-		.Offset(FMargin(Line.X, Line.Y, Line.Width, Line.Height))
-		.Alignment(TopLeft)
-		[
-			SNew(STextBlock)
-			.Text(FText::FromString(Line.Text))
-			.Font_Lambda([this, LineFont]() { return FontForIndex(LineFont); })
-		];
-	}
-	Canvas->AddSlot()
-	.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 0.0f))
-	.Offset(FMargin(0.0f, SubTitleY, 0.0f, SubTitleHeight))
-	.Alignment(TopLeft)
-	[
-		SNew(STextBlock)
-		.Text(FText::FromString(HelpContent.SubTitle))
-		.Font_Lambda([this]() { return FontForIndex(3); })
-		.Justification(ETextJustify::Center)
-	];
+	RebuildPage();
 
 	ChildSlot
 	[
@@ -1466,30 +2267,175 @@ void SWoTHelpOverlay::Construct(const FArguments& InArgs)
 			// factor (2.25 at 1080p) and smeared every glyph. The window now
 			// draws at the largest whole-number scale that fits, with the
 			// matching bitmap strike, so text lands 1:1 on screen pixels as
-			// the HUD and in-game menus do.
+			// the HUD and in-game menus do. Where that scale would be 1, the
+			// window fills the screen at 2x with its page reflowed.
 			SNew(SScaleBox)
 			.Stretch(EStretch::UserSpecified)
 			.UserSpecifiedScale_Lambda([this]() { return WindowScale(); })
 			[
 				SNew(SBox)
-				.WidthOverride(640.0f)
-				.HeightOverride(480.0f)
+				.WidthOverride_Lambda([this]() { return FOptionalSize(WindowSize().X); })
+				.HeightOverride_Lambda([this]() { return FOptionalSize(WindowSize().Y); })
 				[
 					SNew(SBorder)
 					.BorderImage(FWoTMenuStyle::Get().Frame())
 					.ForegroundColor(FWoTMenuStyle::MenuColor(false))
-					.Padding(FMargin(64.0f, 24.0f))
+					.Padding_Lambda([this]() { return WindowPadding(); })
 					[
 						SNew(SBox)
-						.WidthOverride(512.0f)
-						.HeightOverride(432.0f)
+						.WidthOverride_Lambda([this]()
+						{
+							return FOptionalSize(PageLayout.ClipSize.X);
+						})
+						.HeightOverride_Lambda([this]()
+						{
+							return FOptionalSize(PageLayout.ClipSize.Y);
+						})
 						[
-							Canvas
+							Canvas.ToSharedRef()
 						]
 					]
 				]
 			]
 		]
+		// Controller mode only: B closes Help (spec r3 section 1a).
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Bottom)
+		.Padding(FMargin(24.0f, 0.0f, 32.0f, 24.0f))
+		[
+			SAssignNew(ButtonPrompts, SWoTButtonPrompts)
+			.Prompts(FWoTButtonPromptSets::Close())
+			.Font_Lambda([this]() { return PromptFont(); })
+		]
+	];
+}
+
+bool SWoTHelpOverlay::ReflowsOn(const FVector2D& PhysicalSize)
+{
+	return PhysicalSize.X > 0.0 && PhysicalSize.Y > 0.0
+		&& PixelScaleFor(PhysicalSize) == 1;
+}
+
+FVector2D SWoTHelpOverlay::ReflowWindowSizeFor(const FVector2D& PhysicalSize)
+{
+	return FVector2D(
+		FMath::FloorToDouble(FMath::Max(PhysicalSize.X, 0.0) / ReflowDrawScale),
+		FMath::FloorToDouble(FMath::Max(PhysicalSize.Y, 0.0) / ReflowDrawScale));
+}
+
+FVector2D SWoTHelpOverlay::ReflowClipSizeFor(const FVector2D& PhysicalSize)
+{
+	const FVector2D Window = ReflowWindowSizeFor(PhysicalSize);
+	return FVector2D(FMath::Max(Window.X - 2.0 * ReflowPaddingX, 0.0),
+		FMath::Max(Window.Y - 2.0 * ReflowPaddingY, 0.0));
+}
+
+FVector2D SWoTHelpOverlay::WindowSize() const
+{
+	return bReflowed ? ReflowWindowSizeFor(PageLayoutPhysicalSize)
+		: FVector2D(640.0, 480.0);
+}
+
+FMargin SWoTHelpOverlay::WindowPadding() const
+{
+	// uiWindow's WindowBorderX/Y around the retail 512x432 clip.
+	return bReflowed ? FMargin(ReflowPaddingX, ReflowPaddingY)
+		: FMargin(64.0f, 24.0f);
+}
+
+FSlateFontInfo SWoTHelpOverlay::PromptFont() const
+{
+	if (PixelScale == 1 && RequiredFonts.IsValid())
+	{
+		// The strip sits outside the window's scale box, at the layout scale:
+		// the list face at its 2x strike, 1:1 there (28 physical pixels).
+		return FWoTMenuStyle::LegibleStrikeFont(PresentationAuthority.Get(),
+			FName(TEXT("F_WOTReg14")), RequiredFonts->List, DpiScale);
+	}
+	return FontForIndex(3);
+}
+
+void SWoTHelpOverlay::RebuildPage()
+{
+	PageLayoutPixelScale = PixelScale;
+	PageLayoutPhysicalSize = LivePhysicalSize;
+	const auto MeasureAt = [this](int32 Scale)
+	{
+		return [this, Scale](const FString& Text, int32 Index)
+		{
+			const FSlateFontInfo Font = FontForIndexAt(Index, Scale);
+			if (FSlateApplication::IsInitialized())
+			{
+				if (FSlateRenderer* Renderer =
+					FSlateApplication::Get().GetRenderer())
+				{
+					return FVector2D(Renderer->GetFontMeasureService()
+						->Measure(Text, Font));
+				}
+			}
+			return FVector2D(Text.Len() * FMath::Max(1, Font.Size / 2),
+				FMath::Max(1, Font.Size));
+		};
+	};
+	// The Steam Deck legibility pass: where the 640x480 window would draw at
+	// 1x, the page reflows across the whole screen at 2x when it fits there;
+	// a page that does not (none shipped) keeps the retail window at 1x.
+	bReflowed = false;
+	if (ReflowsOn(LivePhysicalSize))
+	{
+		FWoTHelpPageLayout Reflowed = FWoTHelpContent::LayoutReflow(HelpContent,
+			MeasureAt(ReflowDrawScale), ReflowClipSizeFor(LivePhysicalSize));
+		if (Reflowed.FitsClip())
+		{
+			PageLayout = MoveTemp(Reflowed);
+			bReflowed = true;
+		}
+	}
+	if (!bReflowed)
+	{
+		PageLayout = FWoTHelpContent::LayoutPage(HelpContent, MeasureAt(PixelScale));
+	}
+
+	// Every slot is placed by its top-left corner, as the retail Canvas drew
+	// at CurX/CurY. SConstraintCanvas defaults to a (0.5, 0.5) alignment,
+	// which centred each line on its position: half of every left-aligned
+	// line fell off the window, headings and the F-key columns shifted and
+	// overlapped, and the title was cut in half.
+	const FVector2D TopLeft(0.0f, 0.0f);
+	Canvas->ClearChildren();
+	Canvas->AddSlot()
+	.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 0.0f))
+	.Offset(FMargin(0.0f, 0.0f, 0.0f, PageLayout.TitleSize.Y))
+	.Alignment(TopLeft)
+	[
+		SNew(STextBlock)
+		.Text(FText::FromString(HelpContent.Title))
+		.Font_Lambda([this]() { return FontForIndex(3); })
+		.Justification(ETextJustify::Center)
+	];
+	for (const FWoTHelpLayoutLine& Line : PageLayout.Lines)
+	{
+		const int32 LineFont = Line.FontIndex;
+		Canvas->AddSlot()
+		.Anchors(FAnchors(0.0f, 0.0f))
+		.Offset(FMargin(Line.X, Line.Y, Line.Width, Line.Height))
+		.Alignment(TopLeft)
+		[
+			SNew(STextBlock)
+			.Text(FText::FromString(Line.Text))
+			.Font_Lambda([this, LineFont]() { return FontForIndex(LineFont); })
+		];
+	}
+	Canvas->AddSlot()
+	.Anchors(FAnchors(0.0f, 0.0f, 1.0f, 0.0f))
+	.Offset(FMargin(0.0f, PageLayout.SubTitleY, 0.0f, PageLayout.SubTitleSize.Y))
+	.Alignment(TopLeft)
+	[
+		SNew(STextBlock)
+		.Text(FText::FromString(HelpContent.SubTitle))
+		.Font_Lambda([this]() { return FontForIndex(3); })
+		.Justification(ETextJustify::Center)
 	];
 }
 
@@ -1505,27 +2451,42 @@ void SWoTHelpOverlay::Tick(const FGeometry& AllottedGeometry,
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 	DpiScale = FMath::Max(
 		AllottedGeometry.GetAccumulatedLayoutTransform().GetScale(), 0.01f);
-	PixelScale = PixelScaleFor(AllottedGeometry.GetLocalSize() * DpiScale);
+	LivePhysicalSize = AllottedGeometry.GetLocalSize() * DpiScale;
+	PixelScale = PixelScaleFor(LivePhysicalSize);
+	// The reflowed page's clip follows the screen.
+	if (PixelScale != PageLayoutPixelScale
+		|| (ReflowsOn(LivePhysicalSize)
+			&& !LivePhysicalSize.Equals(PageLayoutPhysicalSize, 0.5)))
+	{
+		RebuildPage();
+	}
 }
 
 FSlateFontInfo SWoTHelpOverlay::FontForIndex(int32 FontIndex) const
 {
-	const FName Face = (FontIndex == 0 || FontIndex == 1)
-		? FName(TEXT("F_WOTReg08"))
-		: (FontIndex == 2 ? FName(TEXT("F_WOTIta14"))
-			: ((FontIndex == 4 || FontIndex == 5)
-				? FName(TEXT("F_WOTReg30")) : FName(TEXT("F_WOTReg14"))));
+	return FontForIndexAt(FontIndex, DrawScale());
+}
+
+FSlateFontInfo SWoTHelpOverlay::FontForIndexAt(int32 FontIndex, int32 Scale) const
+{
+	const FName Face = FWoTHelpContent::FaceFor(FontIndex, Scale);
 	if (PresentationAuthority.IsValid() && PresentationAuthority->IsReady())
 	{
-		// The PixelScale strike at the window's own units: the box is drawn at
-		// PixelScale screen pixels per unit, so each glyph meets its strike 1:1.
+		// The Scale strike at the window's own units: the box is drawn at
+		// Scale screen pixels per unit, so each glyph meets its strike 1:1.
 		return PresentationAuthority->MultiplayerFont(Face,
-			static_cast<float>(PixelScale));
+			static_cast<float>(Scale));
 	}
-	FSlateFontInfo Font = (FontIndex == 4 || FontIndex == 5)
+	FSlateFontInfo Font = Face == FName(TEXT("F_WOTReg30"))
 		? RequiredFonts->Title : RequiredFonts->List;
-	if (FontIndex == 0 || FontIndex == 1) Font.Size = 8;
-	else if (FontIndex == 2) Font.TypefaceFontName = TEXT("Italic");
+	if (Face == FName(TEXT("F_WOTReg08")))
+	{
+		Font.Size = static_cast<float>(FWoTHelpContent::RetailLineHeight(Face));
+	}
+	else if (Face == FName(TEXT("F_WOTIta14")))
+	{
+		Font.TypefaceFontName = TEXT("Italic");
+	}
 	return Font;
 }
 
@@ -1611,6 +2572,13 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 {
 	PlayerController = InArgs._PlayerController;
 	Item = InArgs._Item;
+	PresentationAuthority = InArgs._PresentationAuthority;
+	if (InArgs._InitialPhysicalSize.X > 0.0f && InArgs._InitialPhysicalSize.Y > 0.0f)
+	{
+		DpiScale = FWoTMenuStyle::ViewportDpiScale(InArgs._InitialPhysicalSize);
+		LayoutScale = DpiScale;
+		ViewportWidthUnits = InArgs._InitialPhysicalSize.X / DpiScale;
+	}
 	TOptional<FWoTRequiredMenuFonts> RequiredFonts;
 #if WITH_AUTOMATION_TESTS
 	if (InArgs._RequiredFontsForTesting.IsValid())
@@ -1635,6 +2603,7 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 	// still live because the font generation collapses every bound widget.
 	SetVisibility(VisibilityForFonts(true));
 	CapturedFonts.BindWidget(AsShared());
+	MenuFonts = MakeShared<FWoTRequiredMenuFonts>(CapturedFonts);
 	Content = FWoTItemInfoContent::FromItem(InArgs._Item);
 	if (UTexture2D* IconTexture = UWoTRuntimeAssets::ResolveTexturePath(
 		Content.Icon.ToSoftObjectPath()))
@@ -1649,9 +2618,11 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 	.AutoHeight()
 	.Padding(0.0f, 0.0f, 0.0f, 14.0f)
 	[
-		SNew(SWoTMenuText)
+		// SWoTMenuText's large face, through TitleFont.
+		SNew(STextBlock)
 		.Text(FText::FromString(Content.Title))
-		.Large(true)
+		.Font(this, &SWoTItemInfoOverlay::TitleFont)
+		.ColorAndOpacity(FSlateColor::UseForeground())
 		.Justification(ETextJustify::Center)
 	];
 	Body->AddSlot()
@@ -1679,14 +2650,14 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 			[
 				SNew(STextBlock)
 				.Text(FText::FromString(Content.Rarity))
-				.Font(RequiredFonts->List)
+				.Font(this, &SWoTItemInfoOverlay::BodyFont)
 			]
 			+ SHorizontalBox::Slot()
 			.FillWidth(1.0f)
 			.HAlign(HAlign_Right)
 			[
 				SNew(STextBlock)
-				.Font(RequiredFonts->List)
+				.Font(this, &SWoTItemInfoOverlay::BodyFont)
 				.Text_Lambda([WeakItem = Item]()
 				{
 					return FText::FromString(
@@ -1704,7 +2675,9 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 			.HAlign(HAlign_Center)
 			[
 				SNew(STextBlock)
-				.Font(FWoTMenuStyle::Get().SmallFont())
+				// Size 8 is 7.1 to 7.9 pixels on a 720p or 800p screen, under
+				// the Steam Deck floors; GemFont follows live resizes.
+				.Font(this, &SWoTItemInfoOverlay::GemFont)
 				.Text_Lambda([WeakItem = Item, ElementIndex]()
 				{
 					const FWoTItemInfoContent Live =
@@ -1743,9 +2716,9 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 	[
 		SNew(STextBlock)
 		.Text(FText::FromString(Content.Description))
-		.Font(RequiredFonts->List)
+		.Font(this, &SWoTItemInfoOverlay::BodyFont)
 		.AutoWrapText(true)
-		.WrapTextAt(600.0f)
+		.WrapTextAt(this, &SWoTItemInfoOverlay::WrapWidth)
 		.Justification(ETextJustify::Center)
 	];
 	Body->AddSlot()
@@ -1760,9 +2733,9 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 	[
 		SNew(STextBlock)
 		.Text(FText::FromString(Content.Quote))
-		.Font(FWoTMenuStyle::Get().ItalicFont())
+		.Font(this, &SWoTItemInfoOverlay::QuoteFont)
 		.AutoWrapText(true)
-		.WrapTextAt(600.0f)
+		.WrapTextAt(this, &SWoTItemInfoOverlay::WrapWidth)
 		.Justification(ETextJustify::Center)
 	];
 
@@ -1789,7 +2762,7 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 			.Padding(40.0f, 32.0f)
 			[
 				SNew(SBox)
-				.WidthOverride(720.0f)
+				.WidthOverride(this, &SWoTItemInfoOverlay::ContentWidth)
 				[
 					Body
 				]
@@ -1797,6 +2770,86 @@ void SWoTItemInfoOverlay::Construct(const FArguments& InArgs)
 		]
 		]
 	];
+}
+
+void SWoTItemInfoOverlay::Tick(const FGeometry& AllottedGeometry,
+	const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	// The overlay fills the game viewport, so its size at the accumulated
+	// layout scale is the viewport's pixel size.
+	const float Scale = AllottedGeometry.GetAccumulatedLayoutTransform().GetScale();
+	const FVector2D PhysicalSize = AllottedGeometry.GetLocalSize() * Scale;
+	if (PhysicalSize.X > 0.0 && PhysicalSize.Y > 0.0)
+	{
+		DpiScale = FWoTMenuStyle::ViewportDpiScale(PhysicalSize);
+		LayoutScale = FMath::Max(Scale, 0.01f);
+		ViewportWidthUnits = AllottedGeometry.GetLocalSize().X;
+	}
+}
+
+bool SWoTItemInfoOverlay::IsCompact() const
+{
+	return FWoTMenuStyle::IsCompactScreen(DpiScale);
+}
+
+FSlateFontInfo SWoTItemInfoOverlay::BodyFont() const
+{
+	if (!MenuFonts.IsValid()) return FSlateFontInfo();
+	return IsCompact()
+		? FWoTMenuStyle::LegibleStrikeFont(PresentationAuthority.Get(),
+			FName(TEXT("F_WOTReg14")), MenuFonts->List, LayoutScale)
+		: MenuFonts->List;
+}
+
+FSlateFontInfo SWoTItemInfoOverlay::QuoteFont() const
+{
+	const FSlateFontInfo& Italic = FWoTMenuStyle::Get().ItalicFont();
+	return IsCompact()
+		? FWoTMenuStyle::LegibleStrikeFont(PresentationAuthority.Get(),
+			FName(TEXT("F_WOTIta14")), Italic, LayoutScale)
+		: Italic;
+}
+
+FSlateFontInfo SWoTItemInfoOverlay::TitleFont() const
+{
+	if (!MenuFonts.IsValid()) return FSlateFontInfo();
+	// F_WOTReg30 already passes 16 pixels at 1x: crisp at 30, never fractional.
+	return IsCompact()
+		? FWoTMenuStyle::LegibleStrikeFont(PresentationAuthority.Get(),
+			FName(TEXT("F_WOTReg30")), MenuFonts->Title, LayoutScale)
+		: MenuFonts->Title;
+}
+
+FSlateFontInfo SWoTItemInfoOverlay::GemFont() const
+{
+	// On Deck-class screens the element names take the body's 2x strike
+	// (replacing the floored small face); from 1080p up the retail size 8.
+	return IsCompact() ? BodyFont() : FWoTMenuStyle::Get().LegibleSmallFont(DpiScale);
+}
+
+FOptionalSize SWoTItemInfoOverlay::ContentWidth() const
+{
+	if (!IsCompact())
+	{
+		return FOptionalSize(RetailContentWidth);
+	}
+	// The frame's 40-unit padding and the background's 2 each side, and a
+	// 24-unit margin to the screen's edges.
+	const float Room = ViewportWidthUnits > 0.0f
+		? ViewportWidthUnits - 2.0f * (40.0f + 2.0f + 24.0f) : TNumericLimits<float>::Max();
+	return FOptionalSize(FMath::Max(RetailContentWidth,
+		FMath::Min(CompactContentPixels / FMath::Max(LayoutScale, 0.01f), Room)));
+}
+
+float SWoTItemInfoOverlay::WrapWidth() const
+{
+	if (!IsCompact())
+	{
+		return RetailWrapWidth;
+	}
+	return ContentWidth().Get()
+		* (CompactWrapPixels / CompactContentPixels);
 }
 
 EVisibility SWoTItemInfoOverlay::VisibilityForFonts(bool bFontsValid)

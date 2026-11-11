@@ -6,6 +6,7 @@
 #include "WoTMeshLight.h"
 #include "WoTMeshFX.h"
 #include "WoTParticleSprayer.h"
+#include "WoTSpriteBillboard.h"
 #include "WoTWeaveFX.h"
 #include "WoTVertexAnimComponent.h"
 #include "AI/WoTPathNode.h"
@@ -207,7 +208,7 @@ void AWoTBeamEffect::LayLine(const FVector& A, const FVector& B)
 	}
 	APlayerCameraManager* Cam = UGameplayStatics::GetPlayerCameraManager(this, 0);
 	const FQuat Face = Cam
-		? FRotationMatrix::MakeFromZ(-Cam->GetCameraRotation().Vector()).ToQuat()
+		? WoTSpriteFacing::ScreenAlignedQuat(Cam->GetCameraRotation())
 		: FQuat::Identity;
 	const float Glow = FadeTime > 0.0f ? FMath::Clamp(Remaining / FadeTime, 0.0f, 1.0f)
 	                                   : 1.0f;
