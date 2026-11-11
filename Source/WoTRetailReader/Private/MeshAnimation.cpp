@@ -2329,6 +2329,34 @@ bool FWoTDevelopmentMeshPackage::FindMeshSequences(
 	Out = Decoded.GetValue().Header.Sequences;
 	return true;
 }
+
+bool FWoTDevelopmentMeshPackage::FindUnreferencedMeshFrames(
+	FStringView SourceExport, TArray<TArray<FVector>>& Out) const
+{
+	Out.Reset();
+	if (!Impl.IsValid()) return false;
+	auto Export = WoTMeshFindExport(Impl->Source, SourceExport);
+	if (Export.IsError()) return false;
+	auto Decoded = WoTMeshDecode(Impl->Source, *Export.GetValue(), Impl->SourcePath);
+	if (Decoded.IsError()) return false;
+	const FWoTMeshDecoded& Mesh = Decoded.GetValue();
+	const FWoTVertexMeshObjectHeader& Header = Mesh.Header;
+	TSet<uint32> Referenced;
+	for (const FWoTVertexMeshTriangle& Triangle : Header.Triangles)
+		for (const uint32 Vertex : Triangle.VertexIndices) Referenced.Add(Vertex);
+	for (uint32 Frame = 0; Frame < Header.FrameCount; ++Frame)
+	{
+		TArray<FVector>& Positions = Out.AddDefaulted_GetRef();
+		for (uint32 Vertex = 0; Vertex < Header.VertexCount; ++Vertex)
+		{
+			if (!Referenced.Contains(Vertex))
+				Positions.Add(FVector(WoTMeshPosition(
+					Mesh.PackedVertices[Frame * Header.VertexCount + Vertex],
+					Header.Origin, Header.Scale, Header.RotationOrigin)));
+		}
+	}
+	return true;
+}
 #endif
 
 TWoTBootstrapResult<TArray<FWoTCacheBlob>> ImportMeshAnimation(

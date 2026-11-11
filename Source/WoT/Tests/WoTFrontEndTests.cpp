@@ -34,6 +34,8 @@
 #include "../WoTBootstrapHeartbeat.h"
 #include "../Settings/WoTSettingsSlate.h"
 #include "../Payload/WoTPayloadActivation.h"
+#include "../UI/SWoTListCombo.h"
+#include "../UI/WoTControllerUIInput.h"
 #include "WoTFrontEndTestData.h"
 
 #include "Engine/Engine.h"
@@ -856,8 +858,10 @@ bool FWoTInGameMenuSettingsSpec::RunTest(const FString&)
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 
+	// Chat, Team Chat and Taunts sit after Help (spec r3 section 4).
 	const TArray<FString> ExpectedLabels = {
 		TEXT("Resume"), TEXT("Scoreboard (F4)"), TEXT("Help (F1)"),
+		TEXT("Chat"), TEXT("Team Chat"), TEXT("Taunts"),
 		TEXT("Player Config"), TEXT("Controls"), TEXT("Hardware"),
 		TEXT("Quit to Main Menu")};
 	TestTrue(TEXT("menu items retain the required order and labels"),
@@ -1075,17 +1079,23 @@ bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 	TestTrue(TEXT("Up moves focus back to Resume"),
 		Slate.GetKeyboardFocusedWidget()
 			== Overlay->MainMenuButtonForTesting(0));
+	// Positions come from the runtime list (spec r3 section 4).
+	const int32 QuitIndex = Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit);
+	const int32 ControlsIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Controls);
+	TestEqual(TEXT("Quit is the last entry"), QuitIndex,
+		Overlay->MenuLabelsForTesting().Num() - 1);
 	TestTrue(TEXT("Up wraps from first to last"), PressKey(EKeys::Up));
 	TestTrue(TEXT("first-to-last wrap focuses Quit"),
 		Slate.GetKeyboardFocusedWidget()
-			== Overlay->MainMenuButtonForTesting(6));
+			== Overlay->MainMenuButtonForTesting(QuitIndex));
 	TestTrue(TEXT("Down wraps from last to first"), PressKey(EKeys::Down));
 	TestTrue(TEXT("last-to-first wrap focuses Resume"),
 		Slate.GetKeyboardFocusedWidget()
 			== Overlay->MainMenuButtonForTesting(0));
 
 	const TSharedPtr<SWoTMenuButton> Controls =
-		Overlay->MainMenuButtonForTesting(4);
+		Overlay->MainMenuButtonForTesting(ControlsIndex);
 	if (TestTrue(TEXT("Controls button exists for hover"), Controls.IsValid()))
 	{
 		const FVector2D Position =
@@ -1096,7 +1106,7 @@ bool FWoTInGameMenuKeyboardNavSpec::RunTest(const FString&)
 		TestTrue(TEXT("hover moves keyboard focus"),
 			Slate.GetKeyboardFocusedWidget() == Controls);
 		TestEqual(TEXT("hover leaves exactly Controls selected"),
-			Overlay->SelectedMainMenuIndexForTesting(), 4);
+			Overlay->SelectedMainMenuIndexForTesting(), ControlsIndex);
 	}
 	TestTrue(TEXT("Enter is handled by the focused entry"), PressKey(EKeys::Enter));
 	TestTrue(TEXT("Enter activates the focused Controls entry"),
@@ -1198,13 +1208,21 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 		return Slate.GetKeyboardFocusedWidget() == Overlay->MainMenuButtonForTesting(Index)
 			&& Overlay->SelectedMainMenuIndexForTesting() == Index;
 	};
+	// Positions come from the runtime list (spec r3 section 4).
+	const int32 Last = Overlay->MenuLabelsForTesting().Num() - 1;
+	const int32 ControlsIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Controls);
+	if (!TestTrue(TEXT("Controls is in the menu"), ControlsIndex > 0))
+	{
+		return false;
+	}
 	// The D-pad moves the one highlighted entry and wraps like the arrow keys.
 	PressKey(EKeys::Gamepad_DPad_Down);
 	TestTrue(TEXT("D-pad down selects the next entry"), FocusedIs(1));
 	PressKey(EKeys::Gamepad_DPad_Up);
 	TestTrue(TEXT("D-pad up returns to Resume"), FocusedIs(0));
 	PressKey(EKeys::Gamepad_DPad_Up);
-	TestTrue(TEXT("D-pad up wraps from first to last"), FocusedIs(6));
+	TestTrue(TEXT("D-pad up wraps from first to last"), FocusedIs(Last));
 	PressKey(EKeys::Gamepad_DPad_Down);
 	TestTrue(TEXT("D-pad down wraps from last to first"), FocusedIs(0));
 	// The stick arrives as analog navigation, not keys; it wraps the same way.
@@ -1212,7 +1230,7 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 		ENavigationGenesis::Controller);
 	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickUp);
 	Slate.Tick();
-	TestTrue(TEXT("stick up wraps from first to last"), FocusedIs(6));
+	TestTrue(TEXT("stick up wraps from first to last"), FocusedIs(Last));
 	const FNavigationEvent StickDown(FModifierKeysState(), 0, EUINavigation::Down,
 		ENavigationGenesis::Controller);
 	Overlay->OnNavigation(Overlay->GetCachedGeometry(), StickDown);
@@ -1220,11 +1238,11 @@ bool FWoTInGameMenuControllerNavSpec::RunTest(const FString&)
 	TestTrue(TEXT("stick down wraps from last to first"), FocusedIs(0));
 
 	// B backs out one level, then resumes, like Escape.
-	for (int32 Step = 0; Step < 4; ++Step)
+	for (int32 Step = 0; Step < ControlsIndex; ++Step)
 	{
 		PressKey(EKeys::Gamepad_DPad_Down);
 	}
-	TestTrue(TEXT("Controls is selected"), FocusedIs(4));
+	TestTrue(TEXT("Controls is selected"), FocusedIs(ControlsIndex));
 	PressKey(EKeys::Gamepad_FaceButton_Bottom);
 	TestTrue(TEXT("A opens Controls"), Overlay->SettingsScreenForTesting().IsValid());
 	TestTrue(TEXT("B is handled on Controls"), PressKey(EKeys::Gamepad_FaceButton_Right));
@@ -1257,8 +1275,17 @@ bool FWoTInGameMenuStableActionSpec::RunTest(const FString&)
 		SNew(SWoTInGameMenuOverlay).PlayerController(Controller);
 	TestTrue(TEXT("edit-phase menu includes the citadel row"),
 		Overlay->MenuLabelsForTesting().Contains(TEXT("Edit Citadel (F10)")));
+	// Positions come from the runtime list (spec r3 section 4): Hardware's
+	// row as rendered during the edit phase.
+	const int32 HardwareIndex =
+		Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Hardware);
+	const int32 EditPhaseRows = Overlay->RenderedMainMenuEntryCountForTesting();
+	TestTrue(TEXT("the citadel row sits above Hardware, so leaving the phase shifts it"),
+		HardwareIndex != INDEX_NONE
+		&& Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::EditCitadel) < HardwareIndex
+		&& Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::EditCitadel) != INDEX_NONE);
 	Battle->bTeleportersDisabled = false;
-	Overlay->ActivateVisibleMainMenuEntryForTesting(6);
+	Overlay->ActivateVisibleMainMenuEntryForTesting(HardwareIndex);
 	TestTrue(TEXT("phase changes cannot retarget a visible Hardware row to Quit"),
 		Overlay->SettingsScreenForTesting().IsValid());
 	TestFalse(TEXT("stable Hardware dispatch does not begin leaving"),
@@ -1267,18 +1294,20 @@ bool FWoTInGameMenuStableActionSpec::RunTest(const FString&)
 	{
 		Overlay->SettingsScreenForTesting()->HandleBack();
 	}
-	TestEqual(TEXT("post-transition menu rebuild has seven rendered rows"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 7);
+	TestEqual(TEXT("post-transition menu rebuild drops only the citadel row"),
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows - 1);
+	TestFalse(TEXT("the rebuilt menu has no citadel row"),
+		Overlay->MenuLabelsForTesting().Contains(TEXT("Edit Citadel (F10)")));
 	Battle->bTeleportersDisabled = true;
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 	TestEqual(TEXT("entering edit phase atomically adds the rendered row"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 8);
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows);
 	Battle->bTeleportersDisabled = false;
 	Overlay->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 	TestEqual(TEXT("leaving edit phase atomically removes the rendered row"),
-		Overlay->RenderedMainMenuEntryCountForTesting(), 7);
+		Overlay->RenderedMainMenuEntryCountForTesting(), EditPhaseRows - 1);
 	Controller->Destroy();
 	WoTFrontEndTests_DestroyWorld(World);
 	return !HasAnyErrors();
@@ -2009,7 +2038,52 @@ bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 		return false;
 	}
 
-	const TSharedRef<SWidget> RootChild = RootChildren->GetChildAt(0);
+	// Controller sub-project 3: the root's one child is the transparent focus
+	// outline layer around a column of the content host and the controller
+	// prompt strip (collapsed, with no prompts, while nothing is presented).
+	const TSharedRef<SWidget> LayerChild = RootChildren->GetChildAt(0);
+	if (!TestEqual(TEXT("front-end root child is the transparent focus outline layer"),
+		LayerChild->GetType(), FName(TEXT("SWoTFocusOutlineLayer"))))
+	{
+		return false;
+	}
+	FChildren* LayerChildren = LayerChild->GetChildren();
+	if (!TestTrue(TEXT("the layer holds one overlay"),
+		LayerChildren != nullptr && LayerChildren->Num() == 1))
+	{
+		return false;
+	}
+	FChildren* ColumnChildren = LayerChildren->GetChildAt(0)->GetChildren();
+	if (!TestTrue(TEXT("the overlay holds the content host and the prompt strip"),
+		ColumnChildren != nullptr && ColumnChildren->Num() == 2))
+	{
+		return false;
+	}
+	TestEqual(TEXT("the footer is the controller prompt strip"),
+		ColumnChildren->GetChildAt(1)->GetType(), FName(TEXT("SWoTButtonPrompts")));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	TestTrue(TEXT("the prompt strip shows nothing while nothing is presented"),
+		StaticCastSharedRef<SWoTButtonPrompts>(ColumnChildren->GetChildAt(1))
+			->GetShownPrompts().IsEmpty());
+	FWoTControllerUIInput::ResetForTesting();
+	// Controller sub-project 3, PR 3: the content host sits in the text entry
+	// layer, which hosts the keyboard panel over every screen (its overlay's
+	// first slot is the content; the backdrop and the panel follow).
+	const TSharedRef<SWidget> EntryLayer = ColumnChildren->GetChildAt(0);
+	if (!TestEqual(TEXT("the content column starts with the text entry layer"),
+		EntryLayer->GetType(), FName(TEXT("SWoTTextEntryLayer"))))
+	{
+		return false;
+	}
+	FChildren* EntryLayerChildren = EntryLayer->GetChildren();
+	FChildren* EntryOverlayChildren = EntryLayerChildren && EntryLayerChildren->Num() == 1
+		? EntryLayerChildren->GetChildAt(0)->GetChildren() : nullptr;
+	if (!TestTrue(TEXT("the text entry layer holds the content, its backdrop and its panel"),
+		EntryOverlayChildren != nullptr && EntryOverlayChildren->Num() == 3))
+	{
+		return false;
+	}
+	const TSharedRef<SWidget> RootChild = EntryOverlayChildren->GetChildAt(0);
 	if (!TestEqual(TEXT("front-end root child is a transparent content host"),
 		RootChild->GetType(), FName(TEXT("SBox"))))
 	{
@@ -2569,10 +2643,12 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			EKeys::Gamepad_FaceButton_Right);
 	}
 
+	// The map list is the touch-friendly SWoTListCombo (spec r3 section 2).
+	// With its dropdown open, Escape closes only the dropdown and a second
+	// Escape backs the screen (owner ruling 2026-11-08, spec r3 [N1]).
 	Root->ActivateMainMenuEntryForTesting(0);
 	TSharedPtr<SWidget> Combo = Root->MapComboBoxForTesting();
-	TSharedPtr<SComboBox<TSharedPtr<FWoTFrontEndMapEntry>>> TypedCombo =
-		StaticCastSharedPtr<SComboBox<TSharedPtr<FWoTFrontEndMapEntry>>>(Combo);
+	TSharedPtr<SWoTListCombo> TypedCombo = Root->MapListComboForTesting();
 	TArray<TSharedRef<SWidget>> ComboButtons;
 	CollectWidgetsOfType(Combo.ToSharedRef(), FName(TEXT("SButton")), ComboButtons);
 	TestTrue(TEXT("map combo opens through a real pointer click"),
@@ -2586,8 +2662,8 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		PopupFocus.IsValid() ? *PopupFocus->GetType().ToString() : TEXT("<none>"),
 		PopupFocus == Combo ? TEXT("true") : TEXT("false")));
 	TestTrue(TEXT("open map combo genuinely focuses its popup list"),
-		PopupFocus.IsValid() && PopupFocus != Combo
-			&& PopupFocus->GetType() == FName(TEXT("SComboListType")));
+		PopupFocus.IsValid() && PopupFocus != Combo && TypedCombo.IsValid()
+			&& PopupFocus == TypedCombo->GetPopupWidget());
 	const FString ComboSnapshot = Authority->SnapshotIdentity();
 	const uint64 BeforeComboBack = Root->ScreenRebuildCountForTesting();
 	Feedback->Events.Reset();
@@ -2596,9 +2672,22 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			MakeFrontEndKeyEvent(EKeys::Escape)));
 	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
 	FSlateApplication::Get().Tick();
-	TestTrue(TEXT("popup-list Escape returns Play directly to Main"),
+	TestFalse(TEXT("popup-list Escape closes the dropdown"),
+		TypedCombo.IsValid() && TypedCombo->IsOpen());
+	TestTrue(TEXT("popup-list Escape closes only the dropdown: still on Play"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Play);
+	TestEqual(TEXT("closing the dropdown rebuilds nothing"),
+		Root->ScreenRebuildCountForTesting(), BeforeComboBack);
+	TestTrue(TEXT("focus returns from the dropdown to the map list"),
+		FSlateApplication::Get().GetKeyboardFocusedWidget() == Combo);
+	TestTrue(TEXT("a second Escape is handled"),
+		FSlateApplication::Get().ProcessKeyDownEvent(
+			MakeFrontEndKeyEvent(EKeys::Escape)));
+	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
+	FSlateApplication::Get().Tick();
+	TestTrue(TEXT("a second Escape returns Play to Main"),
 		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
-	TestEqual(TEXT("popup-list Escape causes one transition"),
+	TestEqual(TEXT("the two Escapes cause one transition"),
 		Root->ScreenRebuildCountForTesting(), BeforeComboBack + 1);
 	TestTrue(TEXT("popup-list Escape emits no feedback"),
 		Feedback->Events.IsEmpty());
@@ -2608,8 +2697,11 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		FSlateApplication::Get().GetKeyboardFocusedWidget()
 			== Root->MainMenuButtonForTesting(0));
 
+	// The B/View half: B on the open dropdown closes it (consumed, spec r3
+	// section 1a), and a second B backs Play to Main.
 	Root->ActivateMainMenuEntryForTesting(0);
 	TSharedPtr<SWidget> ControllerCombo = Root->MapComboBoxForTesting();
+	TSharedPtr<SWoTListCombo> TypedControllerCombo = Root->MapListComboForTesting();
 	TArray<TSharedRef<SWidget>> ControllerComboButtons;
 	CollectWidgetsOfType(ControllerCombo.ToSharedRef(), FName(TEXT("SButton")),
 		ControllerComboButtons);
@@ -2621,7 +2713,8 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 		FSlateApplication::Get().GetKeyboardFocusedWidget();
 	TestTrue(TEXT("controller-back case genuinely focuses popup list"),
 		ControllerPopupFocus.IsValid() && ControllerPopupFocus != ControllerCombo
-			&& ControllerPopupFocus->GetType() == FName(TEXT("SComboListType")));
+			&& TypedControllerCombo.IsValid()
+			&& ControllerPopupFocus == TypedControllerCombo->GetPopupWidget());
 	const uint64 BeforeControllerComboBack =
 		Root->ScreenRebuildCountForTesting();
 	Feedback->Events.Reset();
@@ -2630,9 +2723,22 @@ bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 			MakeFrontEndKeyEvent(EKeys::Gamepad_FaceButton_Right)));
 	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
 	FSlateApplication::Get().Tick();
-	TestTrue(TEXT("popup-list controller back returns Play directly to Main"),
+	TestFalse(TEXT("popup-list controller back closes the dropdown"),
+		TypedControllerCombo.IsValid() && TypedControllerCombo->IsOpen());
+	TestTrue(TEXT("popup-list controller back never also backs the screen"),
+		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Play);
+	TestEqual(TEXT("closing the dropdown by B rebuilds nothing"),
+		Root->ScreenRebuildCountForTesting(), BeforeControllerComboBack);
+	TestTrue(TEXT("B returns focus to the map list"),
+		FSlateApplication::Get().GetKeyboardFocusedWidget() == ControllerCombo);
+	TestTrue(TEXT("a second controller back is handled"),
+		FSlateApplication::Get().ProcessKeyDownEvent(
+			MakeFrontEndKeyEvent(EKeys::Gamepad_FaceButton_Right)));
+	Root->Tick(Root->GetCachedGeometry(), 0.0, 0.0f);
+	FSlateApplication::Get().Tick();
+	TestTrue(TEXT("a second controller back returns Play to Main"),
 		Root->CurrentScreenForTesting() == EWoTFrontEndScreen::Main);
-	TestEqual(TEXT("popup-list controller back causes one transition"),
+	TestEqual(TEXT("the two backs cause one transition"),
 		Root->ScreenRebuildCountForTesting(), BeforeControllerComboBack + 1);
 	TestTrue(TEXT("popup-list controller back emits no feedback"),
 		Feedback->Events.IsEmpty());
@@ -3516,12 +3622,15 @@ bool FWoTParityFix18HelpWholePixelScaleSpec::RunTest(const FString&)
 	Fonts->Title = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 30);
 	Fonts->List = FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 14);
 	Fonts->Generation = Generation;
+	// Where the 640x480 window would draw at 1x (under 1280x960), Help now
+	// fills the screen at 2x with its page reflowed (SP3 PR 7, the Steam Deck
+	// legibility pass): still a whole-number scale, still on screen.
 	struct FCase { FVector2D PhysicalSize; float Dpi; float ExpectedScale; };
 	const FCase Cases[] = {
 		{FVector2D(1920.0f, 1080.0f), 1.0f, 2.0f},
-		{FVector2D(1280.0f, 720.0f), 1.0f, 1.0f},
+		{FVector2D(1280.0f, 720.0f), 1.0f, 2.0f},
 		{FVector2D(3840.0f, 2160.0f), 2.0f, 2.0f},
-		{FVector2D(1366.0f, 768.0f), 1.0f, 1.0f}};
+		{FVector2D(1366.0f, 768.0f), 1.0f, 2.0f}};
 	for (const FCase& Case : Cases)
 	{
 		const TSharedRef<SWoTHelpOverlay> Help = SNew(SWoTHelpOverlay)
@@ -3574,7 +3683,14 @@ bool FWoTParityFix18HelpWholePixelScaleSpec::RunTest(const FString&)
 			TestTrue(FString::Printf(TEXT("%s draws the help window at %g screen pixels per unit (actual %g)"),
 				*Label, Case.ExpectedScale, Scale),
 				FMath::IsNearlyEqual(Scale, Case.ExpectedScale, 0.001f));
-			const FVector2D Drawn = Canvases[0].GetLocalSize() * Scale + FVector2D(128.0f, 48.0f) * Scale;
+			// The text clip plus the frame's padding: the retail window's
+			// 64x24 a side, or the reflowed full-screen window's.
+			const FVector2D Padding = Help->IsReflowedForTesting()
+				? 2.0 * FVector2D(SWoTHelpOverlay::ReflowPaddingX, SWoTHelpOverlay::ReflowPaddingY)
+				: FVector2D(128.0f, 48.0f);
+			TestEqual(Label + TEXT(" reflows exactly where the window would draw at 1x"),
+				Help->IsReflowedForTesting(), SWoTHelpOverlay::ReflowsOn(Case.PhysicalSize));
+			const FVector2D Drawn = Canvases[0].GetLocalSize() * Scale + Padding * Scale;
 			TestTrue(Label + TEXT(" keeps the whole window on screen"),
 				Drawn.X <= Case.PhysicalSize.X + 0.5f && Drawn.Y <= Case.PhysicalSize.Y + 0.5f);
 			// Each line sits at its retail position by its top-left corner: the

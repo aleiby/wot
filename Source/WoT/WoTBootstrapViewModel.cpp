@@ -100,6 +100,7 @@ bool FWoTBootstrapViewModel::TransitionTo(
 	Current.DiagnosticCode = EWoTBootstrapDiagnosticCode::None;
 	Current.OriginalGameNeededReason = EWoTOriginalGameNeededReason::Missing;
 	Current.OriginalGameNeededDetail.Reset();
+	Current.InstallerCopy = FWoTInstallerCopyState();
 	Current.FailedPhase.Reset();
 	Current.FatalMessage.Reset();
 	Current.bCanExit = NextPhase != EWoTBootstrapPhase::StartingGame;
@@ -129,15 +130,25 @@ bool FWoTBootstrapViewModel::UpdateProgress(FWoTBootstrapProgressEvent&& Event)
 	{
 		return false;
 	}
+	// While the original game is needed, each LAN copy attempt publishes its
+	// bytes under its own stage id. A new id, or the end of a copy, restarts
+	// the byte baseline: a copy after a damaged one starts again from zero.
+	// Within one stage the bytes stay monotonic.
+	const bool bRestartsBytes =
+		Current.Phase == EWoTBootstrapPhase::OriginalGameNeeded
+		&& Event.StageId != Current.StageId;
+	const TOptional<uint64> BaselineBytes = bRestartsBytes
+		? TOptional<uint64>() : Current.CompletedBytes;
+	const TOptional<uint64> BaselineTotal = bRestartsBytes
+		? TOptional<uint64>() : Current.TotalBytes;
 	if (Event.CompletedBytes.IsSet() != Event.TotalBytes.IsSet()
 		|| (Event.CompletedBytes.IsSet()
-			&& (!IsBytePhase(Current.Phase)
+			&& (!IsBytePhase(Current.Phase, Event.StageId)
 				|| Event.CompletedBytes.GetValue() > Event.TotalBytes.GetValue()
-				|| (Current.CompletedBytes.IsSet()
-					&& Event.CompletedBytes.GetValue()
-						< Current.CompletedBytes.GetValue())
-				|| (Current.TotalBytes.IsSet()
-					&& Event.TotalBytes.GetValue() != Current.TotalBytes.GetValue())))
+				|| (BaselineBytes.IsSet()
+					&& Event.CompletedBytes.GetValue() < BaselineBytes.GetValue())
+				|| (BaselineTotal.IsSet()
+					&& Event.TotalBytes.GetValue() != BaselineTotal.GetValue())))
 		|| (!Event.CompletedBytes.IsSet() && IsBytePhase(Current.Phase)
 			&& (Event.CompletedUnits != 0 || Event.TotalUnits != 0))
 		|| Event.ElapsedSeconds < Current.ElapsedSeconds)
@@ -145,8 +156,12 @@ bool FWoTBootstrapViewModel::UpdateProgress(FWoTBootstrapProgressEvent&& Event)
 		return false;
 	}
 	const uint64 PreviousCompleted = Current.CompletedUnits;
-	const TOptional<uint64> PreviousCompletedBytes = Current.CompletedBytes;
+	const TOptional<uint64> PreviousCompletedBytes = BaselineBytes;
 	const double PreviousElapsed = Current.ElapsedSeconds;
+	if (bRestartsBytes)
+	{
+		Current.PhaseFraction.Reset();
+	}
 	Current.CompletedUnits = Event.CompletedUnits;
 	Current.TotalUnits = Event.TotalUnits;
 	Current.CompletedBytes = Event.CompletedBytes;
@@ -162,6 +177,11 @@ bool FWoTBootstrapViewModel::UpdateProgress(FWoTBootstrapProgressEvent&& Event)
 			Event.OriginalGameNeededReason.GetValue();
 		Current.OriginalGameNeededDetail =
 			MoveTemp(Event.OriginalGameNeededDetail);
+	}
+	if (Current.Phase == EWoTBootstrapPhase::OriginalGameNeeded
+		&& Event.InstallerCopy.IsSet())
+	{
+		Current.InstallerCopy = MoveTemp(Event.InstallerCopy.GetValue());
 	}
 	if (Current.ElapsedSeconds > PreviousElapsed)
 	{
@@ -379,6 +399,15 @@ bool FWoTBootstrapViewModel::IsBytePhase(EWoTBootstrapPhase Phase)
 	return Phase == EWoTBootstrapPhase::DownloadingUpdate;
 }
 
+bool FWoTBootstrapViewModel::IsBytePhase(EWoTBootstrapPhase Phase,
+	FStringView StageId)
+{
+	return IsBytePhase(Phase)
+		|| (Phase == EWoTBootstrapPhase::OriginalGameNeeded
+			&& StageId.StartsWith(WoTInstallerCopyStagePrefix,
+				ESearchCase::CaseSensitive));
+}
+
 bool FWoTBootstrapViewModel::IsItemPhase(EWoTBootstrapPhase Phase)
 {
 	return Phase == EWoTBootstrapPhase::BuildingContent;
@@ -437,6 +466,8 @@ FText FWoTBootstrapViewModel::StageText(FStringView StageId)
 		return LOCTEXT("RegistryLocalizationStage", "Processing game data and text");
 	if (StageId == TEXT("front-end-scene"))
 		return LOCTEXT("FrontEndSceneStage", "Finishing the main menu");
+	if (StageId.StartsWith(WoTInstallerCopyStagePrefix, ESearchCase::CaseSensitive))
+		return LOCTEXT("InstallerCopyStage", "Copying the original game installer");
 	return StageId.IsEmpty() ? FText::GetEmpty()
 		: LOCTEXT("UnknownStage", "Processing content");
 }

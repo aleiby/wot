@@ -29,6 +29,9 @@ int32 GWoTDevRetailFamiliesCacheHitCount = 0;
 double GWoTDevRetailFamiliesDecodeSeconds = 0.0;
 TUniquePtr<FWoTRuntimeClassDefaults> GWoTDevRetailClassDefaults;
 TUniquePtr<FWoTRetailBuildContext> GWoTDevRetailBuildContext;
+#if WITH_AUTOMATION_TESTS
+int32 GWoTDevUnreferencedMeshDecodeCount = 0;
+#endif
 
 struct FWoTDevRetailBuildState
 {
@@ -45,6 +48,9 @@ struct FWoTDevRetailBuildState
 	TSet<FString> MissingTextures;
 	TMap<FString, TArray<FWoTVertexMeshSequence>> MeshSequences;
 	TSet<FString> MissingMeshes;
+	// Shared by all heads in this process; the testing reset drops this state.
+	TMap<FString, TArray<TArray<FVector>>> UnreferencedMeshFrames;
+	TSet<FString> MissingUnreferencedMeshFrames;
 
 	const FWoTRequiredFact* FindFact(
 		EWoTFactDomain Domain, FStringView Identity) const
@@ -235,12 +241,55 @@ struct FWoTDevRetailBuildState
 		Out = MoveTemp(Decoded);
 		return true;
 	}
+
+	bool FindUnreferencedMeshFrames(FStringView Identity,
+		TArray<TArray<FVector>>& Out)
+	{
+		Out.Reset();
+		const FString Key = FString(Identity).ToLower();
+		if (const TArray<TArray<FVector>>* Existing = UnreferencedMeshFrames.Find(Key))
+		{
+			Out = *Existing;
+			return true;
+		}
+		if (MissingUnreferencedMeshFrames.Contains(Key)) return false;
+		// Sequence lookup already owns authenticated source loading and the
+		// package cache. Reuse it rather than opening a second retail path.
+		TArray<FWoTVertexMeshSequence> IgnoredSequences;
+		if (!FindMeshSequences(Identity, IgnoredSequences))
+		{
+			MissingUnreferencedMeshFrames.Add(Key);
+			return false;
+		}
+		const FWoTRequiredFact* Fact = FindFact(EWoTFactDomain::Mesh, Identity);
+		const auto* Package = Fact ? MeshPackages.Find(Fact->SourcePath) : nullptr;
+#if WITH_AUTOMATION_TESTS
+		if (Package) ++GWoTDevUnreferencedMeshDecodeCount;
+#endif
+		TArray<TArray<FVector>> Decoded;
+		if (!Package || !(*Package)->FindUnreferencedMeshFrames(Fact->SourceExport, Decoded))
+		{
+			MissingUnreferencedMeshFrames.Add(Key);
+			return false;
+		}
+		Out = UnreferencedMeshFrames.Add(Key, MoveTemp(Decoded));
+		return true;
+	}
 };
 
 TSharedPtr<FWoTDevRetailBuildState> GWoTDevRetailBuildState;
 #if WITH_AUTOMATION_TESTS
 TOptional<FString> GWoTDevRetailFamiliesCacheRootForTesting;
 #endif
+}
+
+bool WoTDevRetailUnreferencedMeshFrames(FStringView Identity,
+	TArray<TArray<FVector>>& Out)
+{
+	Out.Reset();
+	WoTDevRetailFamiliesEnsureActivated();
+	return GWoTDevRetailBuildState.IsValid()
+		&& GWoTDevRetailBuildState->FindUnreferencedMeshFrames(Identity, Out);
 }
 
 void WoTDevRetailFamiliesEnsureActivated()
@@ -412,6 +461,7 @@ void WoTDevRetailFamiliesResetForTesting()
 	GWoTDevRetailClassDefaults.Reset();
 	GWoTDevRetailBuildContext.Reset();
 	GWoTDevRetailBuildState.Reset();
+	GWoTDevUnreferencedMeshDecodeCount = 0;
 	GWoTDevRetailFamiliesAttempted = false;
 	GWoTDevRetailFamiliesDecodeSucceeded = false;
 	GWoTDevRetailFamiliesDecodedObjectCount = 0;
@@ -429,6 +479,11 @@ void WoTDevRetailFamiliesSetCacheRootForTesting(FString CacheRoot)
 bool WoTDevRetailFamiliesLastDecodeSucceededForTesting()
 {
 	return GWoTDevRetailFamiliesDecodeSucceeded;
+}
+
+int32 WoTDevRetailUnreferencedMeshDecodeCountForTesting()
+{
+	return GWoTDevUnreferencedMeshDecodeCount;
 }
 
 int32 WoTDevRetailFamiliesLastDecodedObjectCountForTesting()

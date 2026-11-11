@@ -76,7 +76,6 @@ public:
 
 private:
 	void BindDisplay();
-	void ApplyGlow();
 	void InitializeParticleRenderer();
 	void UpdateParticleQuads();
 	UWoTMeshParticleRenderer* GetParticleRenderer() const;
@@ -88,6 +87,10 @@ private:
 	float BaseDrawScale = 0.3f;
 	float DrawScaleNow = 0.3f;
 	bool bDisplayBound = false;
+#if !WOT_GUARDED_BOOTSTRAP
+	TArray<TArray<FVector>> UnreferencedVertexFrames;
+	TArray<FVector> UnreferencedPose;
+#endif
 
 public:
 	virtual void Destroyed() override;

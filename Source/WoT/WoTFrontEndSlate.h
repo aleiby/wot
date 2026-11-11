@@ -2,7 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Online/WoTKeychainAccess.h"
-#include "Widgets/Input/SComboBox.h"
+#include "UI/SWoTButtonPrompts.h"
+#include "UI/WoTTextEntry.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
 #include "UI/WoTUpdateBanner.h"
@@ -28,6 +29,11 @@ struct FWoTReleaseNotesResult;
 class FWoTFrontEndMenuSelection;
 class FWoTFrontEndPresentationAuthority;
 class FWoTFrontEndBackInputProcessor;
+class FWoTBackStackEntryHandle;
+class FWoTCursorLease;
+class SWoTFocusOutlineLayer;
+class SWoTListCombo;
+class SWoTTextEntryLayer;
 
 enum class EWoTFrontEndMainMenuAction : uint8
 {
@@ -96,7 +102,14 @@ public:
 	float MainMenuSafeWidthForTesting() const { return MainMenuSafeWidth; }
 	TSharedPtr<SWoTMenuButton> MainMenuButtonForTesting(int32 Index) const
 		{ return MainMenuButtons.IsValidIndex(Index) ? MainMenuButtons[Index] : nullptr; }
-	TSharedPtr<SWidget> MapComboBoxForTesting() const { return MapComboBox; }
+	TSharedPtr<SWidget> MapComboBoxForTesting() const;
+	TSharedPtr<SWoTListCombo> MapListComboForTesting() const { return MapComboBox; }
+	/** The footer prompt strip and the focus outline layer around every screen. */
+	TSharedPtr<SWoTButtonPrompts> ButtonPromptsForTesting() const { return ButtonPrompts; }
+	TSharedPtr<SWoTFocusOutlineLayer> FocusOutlineLayerForTesting() const
+		{ return FocusOutlineLayer; }
+	/** The prompt set for the window showing now (spec r3 section 1a). */
+	TArray<FWoTButtonPrompt> ControllerPromptsForTesting() const { return ControllerPrompts(); }
 	TSharedPtr<SWidget> HostScrollBoxForTesting() const { return HostScrollBox; }
 	TSharedPtr<SWidget> HostMatchButtonForTesting() const { return HostMatchButton; }
 	/** Selects the first catalog map of the requested kind, as the map picker does. */
@@ -196,6 +209,32 @@ public:
 	FString VersionLabelForTesting() const { return VersionLabel; }
 	TSharedPtr<SWidget> VersionLabelWidgetForTesting() const
 		{ return VersionLabelWidget; }
+	/** True while a Play overlay covers the panels (they are disabled). */
+	bool IsPlayOverlayVisibleForTesting() const { return IsPlayOverlayVisible(); }
+	TSharedPtr<SWidget> PlayerConfigSaveButtonForTesting() const
+		{ return PlayerConfigSaveButton; }
+	TSharedPtr<SWidget> PlayBackButtonForTesting() const { return PlayBackButton; }
+	TSharedPtr<SWidget> OnlineDisclosureCancelWidgetForTesting() const
+		{ return OnlineDisclosureCancelWidget; }
+	TSharedPtr<SWidget> OnlineDisclosurePrimaryWidgetForTesting() const
+		{ return OnlineDisclosurePrimaryWidget; }
+	TSharedPtr<SWidget> PasswordTextBoxForTesting() const { return PasswordTextBox; }
+	/** The text fields of spec r3 section 3, as last built. */
+	TSharedPtr<SWidget> PlayerNameTextBoxForTesting() const { return PlayerNameTextBox; }
+	TSharedPtr<SWidget> ServerNameTextBoxForTesting() const { return ServerNameTextBox; }
+	TSharedPtr<SWidget> AdminPasswordTextBoxForTesting() const { return AdminPasswordTextBox; }
+	TSharedPtr<SWidget> GamePasswordTextBoxForTesting() const { return GamePasswordTextBox; }
+	TSharedPtr<SWidget> DirectAddressTextBoxForTesting() const { return DirectAddressTextBox; }
+	const FString& DirectAddressForTesting() const { return DirectAddress; }
+	/** The layer that hosts the keyboard panel over every screen. */
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayerForTesting() const { return TextEntryLayer; }
+	/** Rebuilds the current screen, as a session event or overlay change does. */
+	void RebuildScreenForTesting() { RebuildScreen(); }
+	/** The Play focus graph's columns, as last built. */
+	const TArray<TArray<TSharedPtr<SWidget>>>& HostNavigationRowsForTesting() const
+		{ return HostNavigationRows; }
+	const TArray<TArray<TSharedPtr<SWidget>>>& JoinNavigationRowsForTesting() const
+		{ return JoinNavigationRows; }
 #endif
 
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
@@ -280,6 +319,18 @@ private:
 	void CommitServerPassword(const FText& Text,
 		ETextCommit::Type CommitType);
 	FString PasswordPromptText() const;
+	/** Wraps a text field for controller and touch entry (spec r3 section 3). */
+	TSharedRef<SWidget> TextField(const TSharedRef<SWidget>& Field,
+		const FWoTTextEntryRequest& Request);
+	// Each field's request, bound to the view model or the root, never to the
+	// field widget, so a Play rebuild during entry keeps the draft [M6].
+	FWoTTextEntryRequest PlayerNameEntryRequest();
+	FWoTTextEntryRequest ServerPasswordEntryRequest();
+	FWoTTextEntryRequest ServerNameEntryRequest();
+	FWoTTextEntryRequest HostPasswordEntryRequest(bool bAdmin);
+	FWoTTextEntryRequest DirectAddressEntryRequest();
+	/** SanitizeHostPassword as Done's rule: it rejects, naming the rule. */
+	static FWoTTextValidation ValidateHostPassword(const FString& Text);
 	FReply SelectBrowserSortColumn(EWoTBrowserSortColumn Column);
 
 	TSharedRef<SWidget> GenerateMapWidget(FMapItem Item) const;
@@ -307,8 +358,11 @@ private:
 	void AutoFetchSessions();
 	/** Drops a running search so Host or Direct Connect can go ahead. */
 	void CutSearchShort();
-	TSharedRef<SWidget> BuildNetworkModeRow(bool bBrowser);
-	TSharedRef<SWidget> BuildInternetOptions(bool bBrowser);
+	/** The LAN/Internet radios; their two check boxes join OutNavigationRow. */
+	TSharedRef<SWidget> BuildNetworkModeRow(bool bBrowser,
+		TArray<TSharedPtr<SWidget>>* OutNavigationRow = nullptr);
+	TSharedRef<SWidget> BuildInternetOptions(bool bBrowser,
+		TArray<TSharedPtr<SWidget>>* OutNavigationRow = nullptr);
 	TSharedRef<SWidget> BuildOnlineDisclosure();
 	ECheckBoxState InternetCheckState() const;
 	ECheckBoxState AlwaysUseEpicRelayState() const;
@@ -388,6 +442,21 @@ private:
 	FText RetailText(const TCHAR* Key) const;
 	FText RetailText(FName Key) const;
 	FReply HandleBackInput();
+	/** B/View on the screen itself (spec r3 section 1a). Overlays and
+	 * notices register their own entries above it. */
+	bool HandleControllerBack();
+	void RegisterBackStackEntries();
+	/** A Play overlay is up: the panels and the footer behind it are disabled. */
+	bool IsPlayOverlayVisible() const;
+	bool IsPasswordPromptVisible() const;
+	/** The prompt strip's set for the window showing now (spec r3 section 1a). */
+	TArray<FWoTButtonPrompt> ControllerPrompts() const;
+	FSlateFontInfo PromptFont() const;
+	/** The top visible Play overlay's first control, or null. */
+	TSharedPtr<SWidget> PlayOverlayFocusTarget() const;
+	/** Moves focus into an overlay that just appeared, and back out of one
+	 * that just closed (Controller mode), since no event fires for either. */
+	void SyncPlayOverlayFocus();
 	EActiveTimerReturnType RestoreFocusAfterBack(
 		double CurrentTime, float DeltaTime);
 
@@ -461,14 +530,35 @@ private:
 	TSharedPtr<SEditableTextBox> PlayerNameTextBox;
 	TSharedPtr<SWidget> PasswordPromptWidget;
 	TSharedPtr<SEditableTextBox> PasswordTextBox;
+	TSharedPtr<SEditableTextBox> ServerNameTextBox;
+	TSharedPtr<SEditableTextBox> AdminPasswordTextBox;
+	TSharedPtr<SEditableTextBox> GamePasswordTextBox;
+	TSharedPtr<SEditableTextBox> DirectAddressTextBox;
+	TSharedPtr<SWoTTextEntryLayer> TextEntryLayer;
 	TSharedPtr<SWidget> FirstFocusableWidget;
+	/** Initial focus in Controller mode where spec r3 section 1a differs from
+	 * today's (Pointer keeps FirstFocusableWidget). */
+	TSharedPtr<SWidget> ControllerFocusWidget;
+	TSharedPtr<SWidget> PlayBackButton;
+	TSharedPtr<SWidget> PlayerConfigSaveButton;
+	TSharedPtr<SWidget> OnlineDisclosureCancelWidget;
+	TWeakPtr<SWidget> LastPlayOverlayFocus;
+	/** What had keyboard focus when the first Play overlay opened; Pointer
+	 * mode returns focus there when the overlays close. */
+	TWeakPtr<SWidget> PrePlayOverlayFocus;
+	TArray<TArray<TSharedPtr<SWidget>>> HostNavigationRows;
+	TArray<TArray<TSharedPtr<SWidget>>> JoinNavigationRows;
+	TArray<TSharedPtr<FWoTBackStackEntryHandle>> BackStackEntries;
+	TSharedPtr<FWoTCursorLease> CursorLease;
 	TSharedPtr<FWoTFrontEndPresentationAuthority> PresentationAuthority;
 	TSharedPtr<FWoTFrontEndBackInputProcessor> BackInputProcessor;
 	TUniquePtr<FWoTFrontEndMenuSelection> MainMenuSelection;
 	TArray<TSharedPtr<SWoTMenuButton>> MainMenuButtons;
 	TArray<FMapItem> MapItems;
 	FMapItem SelectedMapItem;
-	TSharedPtr<SComboBox<FMapItem>> MapComboBox;
+	TSharedPtr<SWoTListCombo> MapComboBox;
+	TSharedPtr<SWoTButtonPrompts> ButtonPrompts;
+	TSharedPtr<SWoTFocusOutlineLayer> FocusOutlineLayer;
 	TSharedPtr<class SScrollBox> HostScrollBox;
 	TSharedPtr<SWidget> HostMatchButton;
 	TArray<FSessionItem> SessionItems;

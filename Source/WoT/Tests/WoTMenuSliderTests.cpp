@@ -437,4 +437,55 @@ bool FWoTSliderValueLabelSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+// The host's max team size runs from 1 to 16 / citadels in unit steps
+// (menuStartBattleServer.uc:130,196). With one stop per size, keyboard and
+// D-pad steps visit every size once in each direction on 2-, 3- and 4-citadel
+// maps, and the knob shows the stored size at each. Eight fixed stops put the
+// 3- and 4-citadel sizes on cell boundaries, where a step could not leave them.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailSliderLiveStopsSpec,
+	"WoT.Menu.Slider.LiveStops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTRetailSliderLiveStopsSpec::RunTest(const FString&)
+{
+	auto Key = [](const FKey& InKey)
+	{
+		return FKeyEvent(InKey, FModifierKeysState(), 0, false, 0, 0);
+	};
+	for (const int32 Citadels : {2, 3, 4})
+	{
+		const int32 Max = 16 / Citadels;
+		int32 TeamSize = 1;
+		const TSharedRef<SWoTRetailSlider> Slider = SNew(SWoTRetailSlider)
+			.Value_Lambda([&TeamSize, Max]()
+			{
+				return (TeamSize - 1) / static_cast<float>(Max - 1);
+			})
+			.Positions_Lambda([Max]() { return Max; })
+			.OnValueChanged_Lambda([&TeamSize, Max](float Value)
+			{
+				TeamSize = 1 + FMath::RoundToInt(Value * (Max - 1));
+			});
+		TestEqual(FString::Printf(TEXT("%d citadels: size 1 shows on the first stop"),
+			Citadels), Slider->KnobStopForTesting(), 1);
+		for (int32 Expected = 2; Expected <= Max; ++Expected)
+		{
+			Slider->OnKeyDown(FGeometry(), Key(EKeys::Right));
+			TestEqual(FString::Printf(TEXT("%d citadels: Right reaches size %d"),
+				Citadels, Expected), TeamSize, Expected);
+			TestEqual(FString::Printf(TEXT("%d citadels: size %d shows on stop %d"),
+				Citadels, Expected, Expected), Slider->KnobStopForTesting(), Expected);
+		}
+		for (int32 Expected = Max - 1; Expected >= 1; --Expected)
+		{
+			Slider->OnKeyDown(FGeometry(), Key(EKeys::Left));
+			TestEqual(FString::Printf(TEXT("%d citadels: Left reaches size %d"),
+				Citadels, Expected), TeamSize, Expected);
+			TestEqual(FString::Printf(TEXT("%d citadels: size %d shows on stop %d going down"),
+				Citadels, Expected, Expected), Slider->KnobStopForTesting(), Expected);
+		}
+	}
+	return !HasAnyErrors();
+}
+
 #endif

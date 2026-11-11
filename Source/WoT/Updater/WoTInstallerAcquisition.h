@@ -13,6 +13,10 @@ enum class EWoTInstallerSource : uint8
 	/** A Browse pick recorded after it built the cache; searched right after
 	 * the installer beside the game and before Downloads. */
 	Remembered,
+	/** A copy received over the local network from another WoT Reborn
+	 * (<user data root>/OriginalGame/<pinned name>); searched after the
+	 * remembered pick and before Downloads. */
+	Received,
 };
 
 /** The canonical spelling of a Browse pick: its parent directory resolved once
@@ -115,6 +119,15 @@ WoTTryAcquirePinnedAdjacentInstaller(const FString& CanonicalAdjacentPath,
 TWoTBootstrapResult<bool> WoTProbeAdjacentInstallerParentWritable(
 	const FString& CanonicalAdjacentPath,
 	const FWoTNativeFileIdentity* ExpectedParentIdentity = nullptr);
+
+/** Opens an inspected Candidate for streaming without hashing it (LAN
+ * installer sharing hashes while it sends). The parent is reopened against the
+ * location's identity, the leaf is opened exactly the way acquisition holds an
+ * installer, and the held object must still be the inspected one and fully
+ * local. The caller reads through ReadNativeFileAt. */
+TWoTBootstrapResult<FWoTNativeFileHandle> WoTOpenInspectedInstallerForStreaming(
+	FWoTInstallerLocation& Location,
+	const FWoTNativeFileIdentity& InspectedIdentity);
 
 /** Best-effort retirement of the removed download-resume directory. */
 void WoTRemoveLegacyInstallerStateBestEffort(const FString& StateDir);
