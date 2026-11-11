@@ -86,6 +86,8 @@ class FirstRunCellsTests(unittest.TestCase):
         self.assertIn("rm -f '/srv/games/WoT Reborn/Data'/UpdaterState/bootstrap-heartbeat-v1",
                       scripts[0])
         self.assertIn("systemd-run", scripts[1])
+        # A LAN sharer elsewhere must not feed a cell that judges source=downloads.
+        self.assertIn("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1", scripts[1])
         self.assertIn("'/srv/games/WoT Reborn/Data'/UpdaterState", scripts[2])
         self.assertIn("systemctl --user stop", scripts[-1])
 
@@ -173,6 +175,8 @@ class UpdateCellDriverTests(unittest.TestCase):
         self.assertNotIn("'WoT Reborn.exe'", scripts[2])  # not through the launcher
         self.assertIn("--unit=wotlaunch2", scripts[4])
         self.assertIn("'WoT Reborn.exe'", scripts[4])
+        for launch in (scripts[2], scripts[4]):
+            self.assertIn("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1", launch)
         self.assertEqual(scripts[-2:], ["systemctl --user stop wotlaunch2 || true",
                                         "systemctl --user stop wotgame || true"])
 
@@ -211,6 +215,7 @@ class UpdateCellDriverTests(unittest.TestCase):
         self.assertIn("/srv/z/s1.zip", stage)
         self.assertIn("release_sequence", stage)
         self.assertIn(".wot-update/ready", stage)
+        self.assertIn("--setenv=WOT_TEST_LAN_RECEIVER_OFF=1", runner.calls[2][1].decode())
         self.assertIn("systemctl --user stop wotdeck", runner.calls[-1][1].decode())
 
     def test_update_cell_refuses_a_candidate_without_a_positive_sequence(self):

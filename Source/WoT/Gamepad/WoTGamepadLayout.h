@@ -25,6 +25,8 @@ enum class EWoTGamepadAction : uint8
 	PrevItem, NextItem, PrevHand, NextHand, ViewUp, ViewDown,
 	RandomTaunt, WalkToggle, CenterView, Scoreboard, Menu, TurnAround,
 	JoinTeam1, JoinTeam2, JoinTeam3, JoinTeam4,
+	/** D-pad up: a tap opens chat (Say), a hold team chat (TeamSay). */
+	Chat, TeamChat,
 	Count
 };
 
@@ -46,7 +48,7 @@ struct FWoTGamepadTuning
 	float YawRate;         // degrees per second at full tilt
 	float PitchRate;       // degrees per second at full tilt
 	float LookExponent;    // look response curve
-	float DropHoldSeconds; // FaceLeft tap/hold split
+	float HoldSeconds;     // every tap/hold split (FaceLeft, D-pad up)
 	float TurnAroundSeconds; // LeftTrigger quick 180-degree turn
 };
 

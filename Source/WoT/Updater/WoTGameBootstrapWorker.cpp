@@ -37,7 +37,10 @@
 #include "WoTCacheBootstrapOperation.h"
 #include "WoTGameUpdateTransports.h"
 #include "WoTInstallerLocations.h"
+#include "WoTInstallerReceiver.h"
+#include "WoTLocalInstallerForSharing.h"
 #include "WoTRememberedInstaller.h"
+#include "Online/WoTInstallerShareProtocol.h"
 #include "WoTUpdateTransports/WoTPlatformHttpHop.h"
 
 #include <cstdlib>
@@ -1099,6 +1102,21 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			Tracked.Location.CanonicalPath = MoveTemp(Candidate);
 			Tracked.Location.bRequirePinnedName = false;
 		}
+		// <user data root>/OriginalGame/<pinned name>: where the LAN receiver
+		// places a verified copy. Like the adjacent location, only the pinned
+		// name is accepted there.
+		ReceivedInstaller.Location.Source = EWoTInstallerSource::Received;
+		ReceivedInstaller.Location.bRequirePinnedName = true;
+		if (!Deps.UserStateRoot.IsEmpty() && !FPaths::IsRelative(Deps.UserStateRoot))
+		{
+			ReceivedFolderPath = FPaths::Combine(
+				Deps.UserStateRoot, WoTReceivedInstallerDirectoryLeaf);
+			FPaths::NormalizeDirectoryName(ReceivedFolderPath);
+			FString ReceivedPath =
+				FPaths::Combine(ReceivedFolderPath, ReceivedPinnedName());
+			FPaths::NormalizeFilename(ReceivedPath);
+			ReceivedInstaller.Location.CanonicalPath = MoveTemp(ReceivedPath);
+		}
 		if (!Deps.NowSeconds)
 		{
 			Deps.NowSeconds = []()
@@ -1226,11 +1244,21 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		// drain the queue) while the first is still joining the run thread.
 		FScopeLock CancelScope(&CancelLock);
 		bAcceptPickedInstaller.Store(false);
+		bInstallerReceiveRequested.Store(false);
 		{
 			// Paired with the run loop's delivery gate (see Run): after this
 			// store no completion or restart-exit can begin.
 			FScopeLock DeliveryScope(&DeliveryLock);
 			bCancelled.Store(true);
+		}
+		{
+			// The receiver's loop ends at once; the worker thread joins it on
+			// its way out of the original-game wait.
+			FScopeLock ReceiverScope(&ReceiverLock);
+			if (InstallerReceiver.IsValid())
+			{
+				InstallerReceiver->Stop();
+			}
 		}
 		if (CancellableHops != nullptr)
 		{
@@ -1259,6 +1287,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Thread = nullptr;
 			}
 		}
+		// Normally already joined by the worker thread; never left running.
+		StopInstallerReceiver();
 		ResetCacheActivationState();
 		ResetContentOperationState();
 		TUniquePtr<FWork> Discarded;
@@ -1509,6 +1539,30 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		RequestOriginalGameRecheck();
 	}
 
+	/** "Copy from another computer" (game thread; the subsystem forwards it
+	 * only while the screen waits for the original game). The wait starts the
+	 * receiver on its next step, or as it begins if the click came first. */
+	void RequestInstallerReceive()
+	{
+		if (bCancelled.Load())
+		{
+			return;
+		}
+		bInstallerReceiveRequested.Store(true);
+		RequestOriginalGameRecheck();
+	}
+
+	/** Cancel during a copy (game thread): the copy stops at once, its .part
+	 * is kept and the receiver keeps listening. */
+	void CancelInstallerReceive()
+	{
+		FScopeLock ReceiverScope(&ReceiverLock);
+		if (InstallerReceiver.IsValid())
+		{
+			InstallerReceiver->RequestCancelCopy();
+		}
+	}
+
 	static const TCHAR* InstallerSourceName(EWoTInstallerSource Source)
 	{
 		switch (Source)
@@ -1519,6 +1573,8 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			return TEXT("picked");
 		case EWoTInstallerSource::Remembered:
 			return TEXT("remembered");
+		case EWoTInstallerSource::Received:
+			return TEXT("received");
 		case EWoTInstallerSource::Adjacent:
 		default:
 			return TEXT("adjacent");
@@ -1720,6 +1776,472 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				: FString(TEXT("result=saved")));
 	}
 
+	/** The pinned installer name: what the receiver places, the only name the
+	 * received location accepts. */
+	FString ReceivedPinnedName() const
+	{
+#if WITH_AUTOMATION_TESTS
+		if (Deps.InstallerPinsForTesting.IsSet())
+		{
+			return Deps.InstallerPinsForTesting->Name;
+		}
+#endif
+		return WoT::Bootstrap::InstallerName;
+	}
+
+	bool ReceiverPins(uint64& OutSize, FWoTSha256& OutSha256) const
+	{
+#if WITH_AUTOMATION_TESTS
+		if (Deps.InstallerPinsForTesting.IsSet())
+		{
+			OutSize = Deps.InstallerPinsForTesting->Size;
+			OutSha256 = Deps.InstallerPinsForTesting->Sha256;
+			return OutSize > 0;
+		}
+#endif
+		TWoTBootstrapResult<FWoTSha256> Parsed =
+			FWoTSha256::FromHex(WoT::Bootstrap::InstallerSha256);
+		if (Parsed.IsError())
+		{
+			return false;
+		}
+		OutSize = WoT::Bootstrap::InstallerSize;
+		OutSha256 = MoveTemp(Parsed).GetValue();
+		return true;
+	}
+
+	/** The adopted user data root, still the object this copy started with. */
+	TWoTBootstrapResult<FWoTNativeDirectoryHandle> OpenUserStateRoot() const
+	{
+		using FResult = TWoTBootstrapResult<FWoTNativeDirectoryHandle>;
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> Opened =
+			OpenNativeDirectoryNoFollow(Deps.UserStateRoot);
+		if (Opened.IsError())
+		{
+			return Opened;
+		}
+		if (Deps.bHasUserStateRootIdentity
+			&& !Opened.GetValue().GetIdentity().IsSameObject(
+				Deps.UserStateRootIdentity))
+		{
+			return FResult::Error(MakeWoTBootstrapError(
+				EWoTBootstrapError::UnsafePath,
+				TEXT("the data folder is no longer the one this copy started with")));
+		}
+		return Opened;
+	}
+
+	/** Starts searching <user data root>/OriginalGame once it exists, with its
+	 * identity pinned for the rest of this worker. Never creates it. */
+	void TrackExistingReceivedFolder()
+	{
+		if (bReceivedFolderTracked || ReceivedFolderPath.IsEmpty())
+		{
+			return;
+		}
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> UserRoot =
+			OpenUserStateRoot();
+		if (UserRoot.IsError())
+		{
+			return;
+		}
+		TWoTBootstrapResult<TOptional<EWoTTreeEntryType>> Type =
+			QueryNativeEntryTypeAtNoFollow(
+				UserRoot.GetValue(), WoTReceivedInstallerDirectoryLeaf);
+		if (Type.IsError() || !Type.GetValue().IsSet()
+			|| Type.GetValue().GetValue() != EWoTTreeEntryType::Directory)
+		{
+			return;
+		}
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> ReceivedFolder =
+			OpenNativeDirectoryAtNoFollow(
+				UserRoot.GetValue(), WoTReceivedInstallerDirectoryLeaf);
+		if (ReceivedFolder.IsError())
+		{
+			return;
+		}
+		ReceivedInstaller.Location.ParentIdentity =
+			ReceivedFolder.GetValue().GetIdentity();
+		bReceivedFolderTracked = true;
+	}
+
+	/** Creates OriginalGame/ for the receiver: before it starts, at most once
+	 * per worker, and never again while the worker runs (the sweep has pinned
+	 * its identity). */
+	bool EnsureReceivedFolder()
+	{
+		TrackExistingReceivedFolder();
+		if (bReceivedFolderTracked)
+		{
+			return ReceivedInstaller.Location.ParentIdentity.IsSet();
+		}
+		if (bReceivedFolderCreateAttempted || ReceivedFolderPath.IsEmpty())
+		{
+			return false;
+		}
+		bReceivedFolderCreateAttempted = true;
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> UserRoot =
+			OpenUserStateRoot();
+		if (UserRoot.IsError())
+		{
+			return false;
+		}
+		bool bCreated = false;
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> ReceivedFolder =
+			OpenOrCreateNativeDirectoryAtNoFollow(UserRoot.GetValue(),
+				WoTReceivedInstallerDirectoryLeaf, bCreated);
+		if (ReceivedFolder.IsError())
+		{
+			return false;
+		}
+		if (bCreated)
+		{
+			(void)FlushNativeDirectory(UserRoot.GetValue());
+		}
+		ReceivedInstaller.Location.ParentIdentity =
+			ReceivedFolder.GetValue().GetIdentity();
+		bReceivedFolderTracked = true;
+		return true;
+	}
+
+	/** The received folder, reopened and proven to be the tracked one. */
+	TWoTBootstrapResult<FWoTNativeDirectoryHandle> OpenReceivedFolder() const
+	{
+		using FResult = TWoTBootstrapResult<FWoTNativeDirectoryHandle>;
+		if (!bReceivedFolderTracked
+			|| !ReceivedInstaller.Location.ParentIdentity.IsSet())
+		{
+			return FResult::Error(MakeWoTBootstrapError(EWoTBootstrapError::Io,
+				TEXT("the received-installer folder is not tracked")));
+		}
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> Opened =
+			OpenNativeDirectoryNoFollow(ReceivedFolderPath);
+		if (!Opened.IsError()
+			&& !Opened.GetValue().GetIdentity().IsSameObject(
+				ReceivedInstaller.Location.ParentIdentity.GetValue()))
+		{
+			return FResult::Error(MakeWoTBootstrapError(
+				EWoTBootstrapError::UnsafePath,
+				TEXT("the received-installer folder changed")));
+		}
+		return Opened;
+	}
+
+	/** A received copy that fails verification is deleted, so the screen goes
+	 * back to waiting (and the receiver can place the next copy there). */
+	void DeleteBrokenReceivedInstaller(const FWork& Work,
+		const FWoTNativeFileIdentity& Identity, const TCHAR* Why)
+	{
+		ReceivedInstaller.PreviousCandidateIdentity.Reset();
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> ReceivedFolder =
+			OpenReceivedFolder();
+		const bool bDeleted = !ReceivedFolder.IsError()
+			&& !RemoveNativeEntryAtNoFollowIfIdentity(ReceivedFolder.GetValue(),
+				ReceivedPinnedName(), EWoTTreeEntryType::File, Identity).IsError();
+		if (!bDeleted)
+		{
+			// Never hashed again in this flow.
+			ReceivedInstaller.KnownWrongIdentity = Identity;
+		}
+		WoTRecordBootstrapHeartbeat(TEXT("received-installer-deleted"),
+			Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+			FString::Printf(TEXT("reason=%s result=%s"), Why,
+				bDeleted ? TEXT("deleted") : TEXT("failed")));
+	}
+
+	/** A received location whose folder changed identity mid-flow is dropped
+	 * silently, like a remembered one: nothing the player chose. */
+	void RejectReceivedInstaller(const FWork& Work,
+		const FWoTBootstrapError& Error, TSet<FString>& UnavailableThisSweep)
+	{
+		bReceivedInstallerRejected = true;
+		RecordInstallerLocationUnavailable(Work, EWoTInstallerSource::Received,
+			ReceivedInstaller.Location.CanonicalPath, Error, UnavailableThisSweep);
+	}
+
+	/** Once any installer is accepted, partial network copies are worthless. */
+	void DeleteLeftoverReceivedParts()
+	{
+		TWoTBootstrapResult<FWoTNativeDirectoryHandle> ReceivedFolder =
+			OpenReceivedFolder();
+		if (ReceivedFolder.IsError())
+		{
+			return;
+		}
+		TWoTBootstrapResult<TArray<FWoTNativeDirectoryEntry>> Entries =
+			EnumerateNativeDirectory(ReceivedFolder.GetValue());
+		if (Entries.IsError())
+		{
+			return;
+		}
+		for (const FWoTNativeDirectoryEntry& Entry : Entries.GetValue())
+		{
+			if (Entry.Type == EWoTTreeEntryType::File
+				&& Entry.Name.Len() > 5
+				&& Entry.Name.EndsWith(TEXT(".part"), ESearchCase::IgnoreCase))
+			{
+				(void)RemoveNativeEntryAtNoFollow(ReceivedFolder.GetValue(),
+					Entry.Name, EWoTTreeEntryType::File);
+			}
+		}
+	}
+
+	bool InstallerReceiverStartsAutomatically() const
+	{
+#if WITH_AUTOMATION_TESTS
+		if (Deps.InstallerReceiverForTesting.IsSet()
+			&& Deps.InstallerReceiverForTesting->bStartsAutomatically.IsSet())
+		{
+			return Deps.InstallerReceiverForTesting->bStartsAutomatically.GetValue();
+		}
+#endif
+		return WoTInstallerShare::ReceiverStartsAutomatically();
+	}
+
+	bool InstallerReceiverSwitchedOff() const
+	{
+#if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
+		if (WoTInstallerShare::HarnessReceiverOff())
+		{
+			return true;
+		}
+#endif
+		return ReceivedFolderPath.IsEmpty();
+	}
+
+	double InstallerReceiverPublishIntervalSeconds() const
+	{
+#if WITH_AUTOMATION_TESTS
+		if (Deps.InstallerReceiverForTesting.IsSet())
+		{
+			return FMath::Max(0.001,
+				Deps.InstallerReceiverForTesting->PublishIntervalSeconds);
+		}
+#endif
+		return 0.25;
+	}
+
+	/** Starts listening for a LAN sharer (spec B1): by itself under Wine on
+	 * Linux, otherwise only after the player's click. The receiver lives
+	 * only inside this original-game wait. */
+	void StartInstallerReceiver(const FWork& Work, const TCHAR* Trigger)
+	{
+		uint64 PinSize = 0;
+		FWoTSha256 PinSha256;
+		if (InstallerReceiver.IsValid())
+		{
+			return;
+		}
+		if (!ReceiverPins(PinSize, PinSha256) || !EnsureReceivedFolder())
+		{
+			bInstallerReceiverUnavailable = true;
+			WoTRecordBootstrapHeartbeat(TEXT("lan-receive-listen"),
+				Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+				FString::Printf(TEXT("result=folder-unavailable trigger=%s"),
+					Trigger));
+			return;
+		}
+		FWoTInstallerReceiver::FConfig ReceiverConfig;
+		ReceiverConfig.Label = WoTInstallerShare::LocalLabel();
+		ReceiverConfig.Size = PinSize;
+		ReceiverConfig.Sha256 = PinSha256;
+		ReceiverConfig.PinnedLeaf = ReceivedPinnedName();
+		ReceiverConfig.Directory = ReceivedFolderPath;
+		ReceiverConfig.DirectoryIdentity =
+			ReceivedInstaller.Location.ParentIdentity.GetValue();
+		FWoTInstallerReceiver::FDependencies ReceiverDeps;
+		ReceiverDeps.Network = WoTCreateProductionInstallerReceiveNetwork();
+#if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
+		if (WoTInstallerShare::HarnessLoopback())
+		{
+			ReceiverConfig.BindAddress = 0x7F000001u;
+			ReceiverConfig.bAllowLoopbackPeers = true;
+		}
+#endif
+#if WITH_AUTOMATION_TESTS
+		if (Deps.InstallerReceiverForTesting.IsSet())
+		{
+			const FWoTInstallerReceiverOverridesForTesting& Overrides =
+				Deps.InstallerReceiverForTesting.GetValue();
+			if (Overrides.Network.IsValid())
+			{
+				ReceiverDeps.Network = Overrides.Network;
+			}
+			ReceiverConfig.DiscoveryPort = Overrides.DiscoveryPort;
+			ReceiverConfig.BindAddress = Overrides.BindAddress;
+			ReceiverConfig.bAllowLoopbackPeers = Overrides.bAllowLoopbackPeers;
+			ReceiverConfig.ConnectTimeoutSeconds = Overrides.ConnectTimeoutSeconds;
+			ReceiverConfig.IdleTimeoutSeconds = Overrides.IdleTimeoutSeconds;
+			ReceiverDeps.FreeBytes = Overrides.FreeBytes;
+		}
+#endif
+		// Runs on the receiver's thread, which is joined before this worker
+		// goes away.
+		ReceiverDeps.OnPlaced = [this]()
+		{
+			RequestOriginalGameRecheck();
+		};
+		TUniquePtr<FWoTInstallerReceiverThread> Started =
+			MakeUnique<FWoTInstallerReceiverThread>(MakeUnique<FWoTInstallerReceiver>(
+				MoveTemp(ReceiverConfig), MoveTemp(ReceiverDeps)));
+		if (!Started->Start())
+		{
+			bInstallerReceiverUnavailable = true;
+			return;
+		}
+		WoTRecordBootstrapHeartbeat(TEXT("lan-receive-trigger"),
+			Work.Request.Phase, Work.Request.OperationEpoch, {}, {},
+			FString::Printf(TEXT("trigger=%s"), Trigger));
+		LastInstallerReceiverAttempt = 0;
+		FScopeLock ReceiverScope(&ReceiverLock);
+		InstallerReceiver = MoveTemp(Started);
+	}
+
+	void StopInstallerReceiver()
+	{
+		TUniquePtr<FWoTInstallerReceiverThread> Stopping;
+		{
+			FScopeLock ReceiverScope(&ReceiverLock);
+			Stopping = MoveTemp(InstallerReceiver);
+		}
+		if (Stopping.IsValid())
+		{
+			Stopping->StopAndJoin();
+		}
+	}
+
+	/** Rebuilds the copy state the screen sees from the receiver; true when it
+	 * changed. */
+	bool RefreshInstallerCopyState()
+	{
+		FWoTInstallerCopyState Next;
+		Next.bAutomatic = InstallerCopyState.bAutomatic;
+		Next.PeerLabel = InstallerCopyState.PeerLabel;
+		uint64 NextBytes = 0;
+		if (bInstallerReceiverSwitchedOff || bInstallerReceiverUnavailable)
+		{
+			Next.Status = EWoTInstallerCopyStatus::Disabled;
+		}
+		else if (!InstallerReceiver.IsValid())
+		{
+			Next.Status = bInstallerReceiverGaveUp
+				? EWoTInstallerCopyStatus::GaveUp : EWoTInstallerCopyStatus::Off;
+		}
+		else
+		{
+			const FWoTInstallerReceiveStatus Received = InstallerReceiver->Status();
+			if (Received.Attempt != LastInstallerReceiverAttempt)
+			{
+				// A new copy: its bytes restart under a new stage id.
+				LastInstallerReceiverAttempt = Received.Attempt;
+				++InstallerCopySerial;
+			}
+			if (!Received.PeerLabel.IsEmpty())
+			{
+				Next.PeerLabel = Received.PeerLabel;
+			}
+			switch (Received.State)
+			{
+			case EWoTInstallerReceiveState::Copying:
+				Next.Status = EWoTInstallerCopyStatus::Copying;
+				NextBytes = Received.CompletedBytes;
+				break;
+			case EWoTInstallerReceiveState::Placed:
+				// Copied and verified; the sweep accepts it next.
+				Next.Status = EWoTInstallerCopyStatus::Copying;
+				NextBytes = InstallerCopyTotalBytes;
+				break;
+			case EWoTInstallerReceiveState::GaveUp:
+				Next.Status = EWoTInstallerCopyStatus::GaveUp;
+				break;
+			case EWoTInstallerReceiveState::Unavailable:
+				Next.Status = EWoTInstallerCopyStatus::Disabled;
+				break;
+			case EWoTInstallerReceiveState::Starting:
+			case EWoTInstallerReceiveState::Listening:
+			default:
+				if (Received.NeededBytes.IsSet())
+				{
+					Next.Status = EWoTInstallerCopyStatus::NotEnoughSpace;
+					Next.NeededBytes = Received.NeededBytes.GetValue();
+				}
+				else if (Received.bLastCopyDamaged)
+				{
+					Next.Status = EWoTInstallerCopyStatus::Damaged;
+				}
+				else
+				{
+					Next.Status = EWoTInstallerCopyStatus::Waiting;
+				}
+				break;
+			}
+		}
+		const bool bChanged = Next != InstallerCopyState
+			|| NextBytes != InstallerCopyBytes;
+		InstallerCopyState = MoveTemp(Next);
+		InstallerCopyBytes = NextBytes;
+		return bChanged;
+	}
+
+	/** Enters the original-game wait's LAN receiving: auto-start under Wine
+	 * on Linux, otherwise wait for the button. */
+	void BeginInstallerReceiving(const FWork& Work)
+	{
+		uint64 PinSize = 0;
+		FWoTSha256 PinSha256;
+		InstallerCopyTotalBytes = ReceiverPins(PinSize, PinSha256) ? PinSize : 0;
+		InstallerCopyState = FWoTInstallerCopyState();
+		InstallerCopyState.bAutomatic = InstallerReceiverStartsAutomatically();
+		InstallerCopyBytes = 0;
+		LastInstallerReceiverAttempt = 0;
+		bInstallerReceiverGaveUp = false;
+		bInstallerReceiverUnavailable = false;
+		bInstallerReceiverSwitchedOff = InstallerReceiverSwitchedOff();
+		// A click that arrived before this wait began is kept: the first
+		// step starts the receiver.
+		if (!bInstallerReceiverSwitchedOff && InstallerCopyState.bAutomatic)
+		{
+			StartInstallerReceiver(Work, TEXT("auto"));
+		}
+		(void)RefreshInstallerCopyState();
+	}
+
+	void EndInstallerReceiving()
+	{
+		bInstallerReceiveRequested.Store(false);
+		StopInstallerReceiver();
+	}
+
+	/** One step of the original-game wait's receiving: the button, a give-up,
+	 * a folder that went away. True when the copy state changed. */
+	bool ServiceInstallerReceiver(const FWork& Work)
+	{
+		if (bInstallerReceiveRequested.Exchange(false)
+			&& !bInstallerReceiverSwitchedOff && !InstallerReceiver.IsValid())
+		{
+			// The player clicked again: three strikes and a missing folder
+			// both get a fresh try.
+			bInstallerReceiverGaveUp = false;
+			bInstallerReceiverUnavailable = false;
+			StartInstallerReceiver(Work, TEXT("button"));
+		}
+		if (InstallerReceiver.IsValid())
+		{
+			const EWoTInstallerReceiveState State =
+				InstallerReceiver->Status().State;
+			if (State == EWoTInstallerReceiveState::GaveUp
+				|| State == EWoTInstallerReceiveState::Unavailable)
+			{
+				StopInstallerReceiver();
+				bInstallerReceiverGaveUp =
+					State == EWoTInstallerReceiveState::GaveUp;
+				bInstallerReceiverUnavailable =
+					State == EWoTInstallerReceiveState::Unavailable;
+			}
+		}
+		return RefreshInstallerCopyState();
+	}
+
 	TWoTBootstrapResult<FWoTInstallerSweep> SweepInstallerLocations(
 		FWork& Work)
 	{
@@ -1750,6 +2272,19 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				}))
 		{
 			Locations.Add(&RememberedInstaller.GetValue());
+		}
+		// A copy received over the local network goes after the remembered
+		// pick and before Downloads, once its folder exists.
+		if (bReceivedFolderTracked && !bReceivedInstallerRejected
+			&& !ReceivedInstaller.Location.CanonicalPath.IsEmpty()
+			&& !Locations.ContainsByPredicate(
+				[this](const FTrackedInstallerLocation* Earlier)
+				{
+					return FPaths::IsSamePath(Earlier->Location.CanonicalPath,
+						ReceivedInstaller.Location.CanonicalPath);
+				}))
+		{
+			Locations.Add(&ReceivedInstaller);
 		}
 		for (FTrackedInstallerLocation& Downloads : DownloadsInstallers)
 		{
@@ -1821,12 +2356,16 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				Tracked->Location.Source, Tracked->Location.CanonicalPath));
 			const bool bRemembered =
 				Tracked->Location.Source == EWoTInstallerSource::Remembered;
-			// The remembered location is a silent shortcut: whatever it finds,
-			// the reason shown to the player comes only from the normal search.
-			auto MergeReason = [&Sweep, bRemembered](
+			const bool bReceived =
+				Tracked->Location.Source == EWoTInstallerSource::Received;
+			// The remembered and received locations are silent shortcuts:
+			// whatever they find, the reason shown to the player comes only
+			// from the normal search.
+			const bool bSilent = bRemembered || bReceived;
+			auto MergeReason = [&Sweep, bSilent](
 				EWoTOriginalGameNeededReason Reason, FString Detail = FString())
 			{
-				if (!bRemembered)
+				if (!bSilent)
 				{
 					MergeInstallerReason(Sweep, Reason, MoveTemp(Detail));
 				}
@@ -1841,6 +2380,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 					if (bRemembered)
 					{
 						RejectRememberedInstaller(
+							Work, Error, UnavailableThisSweep);
+						continue;
+					}
+					if (bReceived)
+					{
+						RejectReceivedInstaller(
 							Work, Error, UnavailableThisSweep);
 						continue;
 					}
@@ -1871,6 +2416,14 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::Downloading)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
+				// The receiver only ever renames a complete, verified copy
+				// there, so a short file is broken, not still arriving.
+				if (bReceived && Observation.Identity.IsSet())
+				{
+					DeleteBrokenReceivedInstaller(Work,
+						Observation.Identity.GetValue(), TEXT("short"));
+					continue;
+				}
 				MergeReason(
 					Tracked->Location.Source == EWoTInstallerSource::Picked
 						? WrongReason
@@ -1904,6 +2457,14 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
 				Tracked->PreviousCandidateIdentity.Reset();
+				if (bReceived && Observation.Identity.IsSet()
+					&& Observation.Identity->Type == EWoTTreeEntryType::File
+					&& Observation.Identity->LinkCount == 1)
+				{
+					DeleteBrokenReceivedInstaller(Work,
+						Observation.Identity.GetValue(), TEXT("size"));
+					continue;
+				}
 				MergeReason(WrongReason);
 				continue;
 			}
@@ -1945,6 +2506,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 							Work, Error, UnavailableThisSweep);
 						continue;
 					}
+					if (bReceived)
+					{
+						RejectReceivedInstaller(
+							Work, Error, UnavailableThisSweep);
+						continue;
+					}
 					RecordedInstallerUnavailable.Reset();
 					return FResult::Error(MoveTemp(Error));
 				}
@@ -1967,6 +2534,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			if (Result.State
 				== EWoTPinnedAdjacentInstallerProbe::NotTheInstaller)
 			{
+				if (bReceived)
+				{
+					// Failed its SHA-256: deleted, never a reason change.
+					DeleteBrokenReceivedInstaller(Work, Identity, TEXT("hash"));
+					continue;
+				}
 				Tracked->KnownWrongIdentity = Identity;
 				MergeReason(WrongReason);
 			}
@@ -2291,9 +2864,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			{
 				return CompleteGameUpdateCheck(Work, true);
 			}
-			// Bootstrap remains local-only. Adjacent original-game content is
-			// inspected only by CheckingOriginalGameData so there is exactly one
-			// stability and hashing policy.
+			// The bootstrap makes no internet traffic: nothing is fetched here.
+			// (Its only network use is the original-game wait's LAN installer
+			// receiver, which answers private addresses only.) Adjacent
+			// original-game content is inspected only by
+			// CheckingOriginalGameData so there is exactly one stability and
+			// hashing policy.
 			ResetContentOperationState();
 			ResetCacheActivationState();
 			// Critical cache verification belongs to CheckingOriginalGameData,
@@ -3114,6 +3690,9 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		}
 		bOriginalGameTranslocated = RunningTreeTranslocated();
 		LoadRememberedInstallerRecord(Work);
+		// A copy an earlier run received is searched once its folder exists;
+		// the folder itself is created only for a receiver.
+		TrackExistingReceivedFolder();
 		TWoTBootstrapResult<FWoTInstallerSweep> Swept =
 			SweepInstallerLocations(Work);
 		if (Swept.IsError())
@@ -3173,12 +3752,20 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 	 * which is remembered only once the cache it builds has been published. */
 	void AdoptContentInstaller(FWoTInstallerSweep& InstallerSweep)
 	{
+		// Nothing is received once an installer is accepted, and no partial
+		// network copy is worth keeping (spec B3).
+		StopInstallerReceiver();
+		DeleteLeftoverReceivedParts();
 		ContentInstaller = MoveTemp(InstallerSweep.Verified);
+		// Only a Browse pick is remembered: a received copy already lives in
+		// its own searched folder.
 		PickedInstallerPathToRemember =
 			InstallerSweep.FoundSource == EWoTInstallerSource::Picked
 				? InstallerSweep.FoundCanonicalPath : FString();
 	}
 
+	/** The one publisher of the original-game wait: the reason, the LAN copy
+	 * state, and during a copy its bytes under the attempt's own stage id. */
 	void PublishOriginalGameNeededState(FWork& Work,
 		EWoTOriginalGameNeededReason Reason, const FString& Detail)
 	{
@@ -3194,6 +3781,16 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			Deps.NowSeconds() - Work.PhaseStartedSeconds);
 		Event.OriginalGameNeededReason = Reason;
 		Event.OriginalGameNeededDetail = Detail;
+		Event.InstallerCopy = InstallerCopyState;
+		if (InstallerCopyState.Status == EWoTInstallerCopyStatus::Copying
+			&& InstallerCopyTotalBytes > 0)
+		{
+			Event.StageId = FString::Printf(TEXT("%s%d"),
+				WoTInstallerCopyStagePrefix, InstallerCopySerial);
+			Event.CompletedBytes =
+				FMath::Min(InstallerCopyBytes, InstallerCopyTotalBytes);
+			Event.TotalBytes = InstallerCopyTotalBytes;
+		}
 		Work.Progress(MoveTemp(Event));
 	}
 
@@ -3206,25 +3803,53 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 				LexToString(OriginalGameNeededReason),
 				bOriginalGameTranslocated ? 1 : 0,
 				Deps.DownloadsDirectory.IsEmpty() ? 0 : 1));
+		// No socket exists before this phase; under Wine on Linux the receiver
+		// starts here, elsewhere only on the player's click.
+		BeginInstallerReceiving(Work);
 		PublishOriginalGameNeededState(Work, OriginalGameNeededReason,
 			OriginalGameNeededDetail);
 		bool bFirstProbe = true;
+		double NextSweepSeconds = 0.0;
 		while (!bCancelled.Load())
 		{
 			if (!bFirstProbe && OriginalGameRecheckEvent != nullptr)
 			{
+				// Sweep on the probe cadence (or at once when asked); while a
+				// receiver runs, wake more often to publish its progress.
+				double WaitSeconds = FMath::Max(0.0,
+					NextSweepSeconds - FPlatformTime::Seconds());
+				if (InstallerReceiver.IsValid())
+				{
+					WaitSeconds = FMath::Min(WaitSeconds,
+						InstallerReceiverPublishIntervalSeconds());
+				}
 				const uint32 WaitMilliseconds = static_cast<uint32>(FMath::Clamp(
-					Deps.OriginalGameProbeIntervalSeconds * 1000.0, 1.0,
-					static_cast<double>(MAX_uint32)));
-				OriginalGameRecheckEvent->Wait(WaitMilliseconds);
+					WaitSeconds * 1000.0, 1.0, static_cast<double>(MAX_uint32)));
+				if (OriginalGameRecheckEvent->Wait(WaitMilliseconds))
+				{
+					NextSweepSeconds = 0.0;
+				}
 			}
 			bFirstProbe = false;
 			if (bCancelled.Load()) break;
+			const bool bCopyChanged = ServiceInstallerReceiver(Work);
+			if (FPlatformTime::Seconds() < NextSweepSeconds)
+			{
+				if (bCopyChanged)
+				{
+					PublishOriginalGameNeededState(Work, OriginalGameNeededReason,
+						OriginalGameNeededDetail);
+				}
+				continue;
+			}
+			NextSweepSeconds = FPlatformTime::Seconds()
+				+ Deps.OriginalGameProbeIntervalSeconds;
 			TWoTBootstrapResult<FWoTInstallerSweep> Swept =
 				SweepInstallerLocations(Work);
 			if (Swept.IsError())
 			{
 				bAcceptPickedInstaller.Store(false);
+				EndInstallerReceiving();
 				return Failure(Work, MoveTemp(Swept).GetError());
 			}
 			FWoTInstallerSweep InstallerSweep = MoveTemp(Swept).GetValue();
@@ -3233,6 +3858,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			if (InstallerSweep.Verified.IsValid())
 			{
 				bAcceptPickedInstaller.Store(false);
+				EndInstallerReceiving();
 				AdoptContentInstaller(InstallerSweep);
 				WoTRecordBootstrapHeartbeat(TEXT("original-game-detected"),
 					EWoTBootstrapPhase::OriginalGameNeeded,
@@ -3247,6 +3873,7 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 			}
 		}
 		bAcceptPickedInstaller.Store(false);
+		EndInstallerReceiving();
 		return Failure(Work, EWoTBootstrapDiagnosticCode::BootstrapFailure);
 	}
 
@@ -3268,6 +3895,12 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 		RememberedInstaller.Reset();
 		RememberedInstallerRecordPath.Reset();
 		bRememberedInstallerRejected = false;
+		// The received folder's pinned identity outlives the flow (it is never
+		// recreated while this worker runs); its candidates do not.
+		ReceivedInstaller.PreviousCandidateIdentity.Reset();
+		ReceivedInstaller.KnownWrongIdentity.Reset();
+		bReceivedInstallerRejected = false;
+		bInstallerReceiveRequested.Store(false);
 		PickedInstallerPathToRemember.Reset();
 		RecordedInstallerUnavailable.Reset();
 		FString DiscardedPickedPath;
@@ -3538,6 +4171,32 @@ struct FWoTGameBootstrapWorker::FImpl final : public FRunnable
 	/** Canonical path of the Browse pick feeding this flow's build, if any. */
 	FString PickedInstallerPathToRemember;
 	TSet<FString> RecordedInstallerUnavailable;
+	/** <user data root>/OriginalGame, where the LAN receiver places a copy. */
+	FString ReceivedFolderPath;
+	FTrackedInstallerLocation ReceivedInstaller;
+	/** The folder exists and its identity is pinned in ReceivedInstaller for
+	 * the rest of this worker. */
+	bool bReceivedFolderTracked = false;
+	/** The folder is created at most once per worker. */
+	bool bReceivedFolderCreateAttempted = false;
+	/** Skips the received location for the rest of this flow. */
+	bool bReceivedInstallerRejected = false;
+	// The LAN receiver lives only inside the original-game wait, on its own
+	// thread. The worker thread starts and joins it; ReceiverLock lets the game
+	// thread reach it for Cancel and for CancelAndJoin's stop.
+	FCriticalSection ReceiverLock;
+	TUniquePtr<FWoTInstallerReceiverThread> InstallerReceiver;
+	/** The player's click, consumed by the original-game wait. */
+	TAtomic<bool> bInstallerReceiveRequested{false};
+	FWoTInstallerCopyState InstallerCopyState;
+	uint64 InstallerCopyBytes = 0;
+	uint64 InstallerCopyTotalBytes = 0;
+	/** One per copy attempt in this worker: the "lan-copy-N" stage id. */
+	int32 InstallerCopySerial = 0;
+	int32 LastInstallerReceiverAttempt = 0;
+	bool bInstallerReceiverGaveUp = false;
+	bool bInstallerReceiverUnavailable = false;
+	bool bInstallerReceiverSwitchedOff = false;
 	TUniquePtr<FWoTRetailPackage> ContentPackage;
 	TUniquePtr<FWoTCacheStore> ContentCache;
 	TUniquePtr<FWoTCacheBootstrapOperation> ContentOperation;
@@ -3622,7 +4281,32 @@ void FWoTGameBootstrapWorker::RequestPickedInstaller(FString CanonicalPath)
 	}
 }
 
+void FWoTGameBootstrapWorker::RequestInstallerReceive()
+{
+	if (Impl.IsValid())
+	{
+		Impl->RequestInstallerReceive();
+	}
+}
+
+void FWoTGameBootstrapWorker::CancelInstallerReceive()
+{
+	if (Impl.IsValid())
+	{
+		Impl->CancelInstallerReceive();
+	}
+}
+
 #if WITH_AUTOMATION_TESTS
+void FWoTGameBootstrapWorker::SetInstallerReceiverForTesting(
+	FWoTInstallerReceiverOverridesForTesting Overrides)
+{
+	if (Impl.IsValid())
+	{
+		Impl->Deps.InstallerReceiverForTesting = MoveTemp(Overrides);
+	}
+}
+
 void FWoTGameBootstrapWorker::SetRunningReleaseSequenceForTesting(
 	uint64 ReleaseSequence)
 {

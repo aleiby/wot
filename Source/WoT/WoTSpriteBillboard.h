@@ -13,6 +13,18 @@ class UTexture;
 class UTexture2D;
 struct FWoTRuntimeTextureOptions;
 
+namespace WoTSpriteFacing
+{
+	inline FQuat ScreenAlignedQuat(const FRotator& CameraRotation)
+	{
+		// Engine Plane UVs run along local +X/+Y. UE1 DrawIcon puts U
+		// right and V down on screen: X=Right, Y=-Up, Z=-Forward.
+		const FRotationMatrix CameraBasis(CameraRotation);
+		return FRotationMatrix::MakeFromZX(-CameraBasis.GetUnitAxis(EAxis::X),
+			CameraBasis.GetUnitAxis(EAxis::Y)).ToQuat();
+	}
+}
+
 // UE5 records the world-time at which a primitive was actually submitted on
 // screen. Consumers treat an ADVANCE of that observed timestamp as a draw;
 // comparing it with a game-frame clock freezes under normal render-thread lag.

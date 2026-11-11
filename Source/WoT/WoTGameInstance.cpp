@@ -1,6 +1,51 @@
 #include "WoTGameInstance.h"
 
+#include "Engine/GameViewportClient.h"
+#include "Framework/Application/SlateApplication.h"
+#include "UI/WoTControllerUIInput.h"
+#include "Widgets/SViewport.h"
+#include "Widgets/SWindow.h"
 #include "WoTPreferencesSubsystem.h"
+
+void UWoTGameInstance::Init()
+{
+	Super::Init();
+	if (!FWoTControllerUIInput::ShouldRegisterForGameInstance(
+		IsDedicatedServerInstance(), FSlateApplication::IsInitialized(),
+		GIsAutomationTesting))
+	{
+		return;
+	}
+	// Scoped to this instance's game viewport, resolved per event (the
+	// viewport is created after Init): its window family in a game, and the
+	// viewport widget itself in the editor, where PIE shares the editor's
+	// window, so PIE never touches the editor's own UI.
+	TWeakObjectPtr<UWoTGameInstance> WeakInstance(this);
+	ControllerUIInput = FWoTControllerUIInput::Register(
+		[WeakInstance]() -> TSharedPtr<SWidget>
+		{
+			const UWoTGameInstance* Instance = WeakInstance.Get();
+			const UGameViewportClient* Viewport = Instance
+				? Instance->GetGameViewportClient() : nullptr;
+			if (Viewport == nullptr)
+			{
+				return nullptr;
+			}
+			if (GIsEditor)
+			{
+				return Viewport->GetGameViewportWidget();
+			}
+			return Viewport->GetWindow();
+		});
+}
+
+void UWoTGameInstance::Shutdown()
+{
+	// Dropping the registration unregisters the preprocessor and restores
+	// the default navigation config when it was the last one.
+	ControllerUIInput.Reset();
+	Super::Shutdown();
+}
 
 EWoTPlayerFaction UWoTGameInstance::GetSelectedFaction() const
 {

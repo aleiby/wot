@@ -22,32 +22,44 @@ namespace
 
 TArray<FWoTHUDDrawCmd> FWoTCitadelTeamOverview::Layout(
 	const FWoTCitadelTeamOverviewSnapshot& Snapshot, int32 LogicalWidth,
-	int32 LogicalHeight, float FontLineHeight) const
+	int32 LogicalHeight, float FontLineHeight,
+	const FWoTScoreboardLayoutOptions& Options) const
 {
 	TArray<FWoTHUDDrawCmd> Commands;
 	const FLinearColor White = FLinearColor::White;
 	const int32 LineHeight = FMath::Max(FMath::TruncToInt(FontLineHeight), 0);
-	const int32 HeaderLimit = LogicalHeight / 4 - LineHeight;
-	int32 HeaderY = LineHeight * 4;
 	const float CenterX = static_cast<float>(LogicalWidth) * 0.5f;
 
-	auto AddHeader = [&](const FString& Text)
+	// CitadelTeamOverview inherits ArenaScoreBoard.DrawHeader unchanged.
+	const int32 ClockSeconds = Snapshot.bDisplayRemaining
+		? FMath::Max(Snapshot.RemainingTime, 0) : Snapshot.ElapsedTime;
+	TArray<FString> Headers;
+	for (const FString& Header : {Snapshot.MapName,
+		FString(Snapshot.bDisplayRemaining
+			? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
+			FWoTArenaScoreboard::FormatTime(ClockSeconds)})
 	{
-		if (!Text.IsEmpty() && HeaderY < HeaderLimit)
+		if (!Header.IsEmpty())
 		{
-			CitadelOverviewAddText(Commands, Text, CenterX,
+			Headers.Add(Header);
+		}
+	}
+	// The legend's Y: a quarter of the board, moved down only when the
+	// options keep header lines that would reach it (as the scoreboards do).
+	const int32 LegendY = Options.bKeepHeaders
+		? FMath::Max(LogicalHeight / 4, LineHeight * 4 + Headers.Num() * LineHeight + 1)
+		: LogicalHeight / 4;
+	const int32 HeaderLimit = LegendY - LineHeight;
+	int32 HeaderY = LineHeight * 4;
+	for (const FString& Header : Headers)
+	{
+		if (HeaderY < HeaderLimit)
+		{
+			CitadelOverviewAddText(Commands, Header, CenterX,
 				static_cast<float>(HeaderY), White, EWoTTextAlignment::Center);
 			HeaderY += LineHeight;
 		}
-	};
-
-	// CitadelTeamOverview inherits ArenaScoreBoard.DrawHeader unchanged.
-	AddHeader(Snapshot.MapName);
-	const int32 ClockSeconds = Snapshot.bDisplayRemaining
-		? FMath::Max(Snapshot.RemainingTime, 0) : Snapshot.ElapsedTime;
-	AddHeader(FString(Snapshot.bDisplayRemaining
-		? TEXT("Remaining Time: ") : TEXT("Elapsed Time: ")) +
-		FWoTArenaScoreboard::FormatTime(ClockSeconds));
+	}
 
 	// CitadelTeamOverview.defaultproperties: index 0 retains Arena's LeftThird;
 	// indices 1..3 become LeftThird+16, Center+8, RightThird respectively.
@@ -68,7 +80,6 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelTeamOverview::Layout(
 		Snapshot.TeamLegend, FString(), Snapshot.PlayersLegend,
 		Snapshot.StatusLegend
 	};
-	const int32 LegendY = LogicalHeight / 4;
 	for (int32 Column = 0; Column < ColumnCount; ++Column)
 	{
 		if (!Legend[Column].IsEmpty())
@@ -112,4 +123,16 @@ TArray<FWoTHUDDrawCmd> FWoTCitadelTeamOverview::Layout(
 			CenterX, BeginY, White, EWoTTextAlignment::Center);
 	}
 	return Commands;
+}
+
+FWoTScoreboardBoard FWoTCitadelTeamOverview::LayoutBoard(
+	const FWoTCitadelTeamOverviewSnapshot& Snapshot, int32 CanvasSizeX,
+	int32 CanvasSizeY, float FontLineHeight, int32 TextScale) const
+{
+	return FWoTScoreboardBoardChoice::Choose(CanvasSizeX, CanvasSizeY,
+		FontLineHeight, TextScale, /*bHasCompactDensity*/ false, 0.0f,
+		[&](int32 Width, int32 Height, const FWoTScoreboardLayoutOptions& Options)
+		{
+			return Layout(Snapshot, Width, Height, FontLineHeight, Options);
+		});
 }

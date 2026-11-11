@@ -660,6 +660,14 @@ bool FWoTRetailDataDevMissingRootSpec::RunTest(const FString&)
 		EAutomationExpectedErrorFlags::Contains, 1);
 	WoTDevRetailFamiliesEnsureActivated();
 	WoTDevRetailFamiliesEnsureActivated();
+	TArray<TArray<FVector>> MissingFrames;
+	for (int32 Attempt = 0; Attempt < 2; ++Attempt)
+	{
+		MissingFrames.Add({FVector::OneVector});
+		TestFalse(TEXT("missing reference cannot recover extra vertices"),
+			WoTDevRetailUnreferencedMeshFrames(TEXT("WoTPawns.MashTip"), MissingFrames));
+		TestTrue(TEXT("missing reference leaves no extra vertex"), MissingFrames.IsEmpty());
+	}
 	TestEqual(TEXT("a missing root builds no family"), Builds, 0);
 	TestEqual(TEXT("a missing root installs no family"), Installs, 0);
 	TestFalse(TEXT("a missing root records no successful decode"),
@@ -842,6 +850,50 @@ bool FWoTRetailDataRealRetailBuildContextSpec::RunTest(const FString&)
 			{
 				return !Sequence.Notifies.IsEmpty();
 			}));
+	WoTDevRetailFamiliesResetForTesting();
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailDataUnreferencedMeshCacheSpec,
+	"WoT.RetailData.UnreferencedMeshFramesCached", WoTRetailDataSpecFlags)
+bool FWoTRetailDataUnreferencedMeshCacheSpec::RunTest(const FString&)
+{
+	if (!WoTReferenceTreeExists())
+	{
+		AddWarning(WoTReferenceMissingWarning(TEXT("original")));
+		return true;
+	}
+	FWoTRetailDataActivationScope ActivationScope;
+	FWoTRetailDataCacheRoot CacheRoot;
+	for (int32 Generation = 0; Generation < 2; ++Generation)
+	{
+		WoTDevRetailFamiliesResetForTesting();
+		WoTRetailFamiliesResetActivationForTesting();
+		WoTRetailFamiliesSetActivationInputsForTesting({}, {});
+		WoTDevRetailFamiliesSetCacheRootForTesting(CacheRoot.Path);
+		TestEqual(TEXT("testing reset clears decode count"),
+			WoTDevRetailUnreferencedMeshDecodeCountForTesting(), 0);
+		TArray<TArray<FVector>> First;
+		TArray<TArray<FVector>> Again;
+		TestTrue(TEXT("real tip frames decode"),
+			WoTDevRetailUnreferencedMeshFrames(TEXT("WoTPawns.MashTip"), First));
+		TestTrue(TEXT("case-insensitive identity reuses frames"),
+			WoTDevRetailUnreferencedMeshFrames(TEXT("wotpawns.mashtip"), Again));
+		TestTrue(TEXT("cached frames match the initial decode"), First == Again);
+		TestTrue(TEXT("tip recovery contains animated frames"), First.Num() > 1);
+		TestEqual(TEXT("one decode per identity per activation"),
+			WoTDevRetailUnreferencedMeshDecodeCountForTesting(), 1);
+		for (int32 Attempt = 0; Attempt < 2; ++Attempt)
+		{
+			TestTrue(TEXT("real body lookup succeeds with no unreferenced vertices"),
+				WoTDevRetailUnreferencedMeshFrames(TEXT("WoTPawns.MashSeg"), Again));
+			TestFalse(TEXT("missing mesh lookup fails quietly"),
+				WoTDevRetailUnreferencedMeshFrames(TEXT("WoTPawns.NoSuchMesh"), Again));
+			TestTrue(TEXT("failed lookup clears stale output"), Again.IsEmpty());
+		}
+		TestEqual(TEXT("empty recovery is cached too"),
+			WoTDevRetailUnreferencedMeshDecodeCountForTesting(), 2);
+	}
 	WoTDevRetailFamiliesResetForTesting();
 	return !HasAnyErrors();
 }
