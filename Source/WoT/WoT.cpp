@@ -18,6 +18,7 @@
 #include "WoTMacUninstall.h"
 #include "WoTMenuStyle.h"
 #include "WoTWindowActivation.h"
+#include "WoTMetalLayerRefresh.h"
 #include "WoTOnboardingSeams.h"
 #include "WoTRandom.h"
 #include "WoTRetailText.h"
@@ -123,6 +124,7 @@ public:
 		{
 			WoTInstallWindowActivationMonitor();
 		}
+		WoTInstallMetalLayerRefresh();
 		WoTRandom::InitializeFromTime();
 		WoTNetVersion::Bind();
 		// Onboarding seam: the plugin asks for retail display text by
@@ -316,6 +318,7 @@ public:
 		{
 			WoTShutdownWindowActivationMonitor();
 		}
+		WoTShutdownMetalLayerRefresh();
 	#if PLATFORM_MAC && WOT_GUARDED_BOOTSTRAP && !WITH_EDITOR && !IS_PROGRAM
 		WoTMacApplyRememberedUpdateAtQuit();
 		WoTShutdownMacUninstallMenuItem();

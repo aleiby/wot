@@ -972,6 +972,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** On macOS, if LAN search or hosting finds Local Network access denied, the game explains how to allow it and offers to open System Settings.
 - **Why:** macOS privacy settings silently block LAN discovery.
 
+### macOS window resize recovery
+- **Original:** Not applicable.
+- **Port:** On macOS, after a window resize settles (or if the frame rate collapses), the game gives its window a fresh Metal layer.
+- **Why:** Fast resizes can starve the engine's Metal presentation, dropping the game to a few frames per second until it quits.
+
 ## Tooling
 
 ### Retail data read directly
