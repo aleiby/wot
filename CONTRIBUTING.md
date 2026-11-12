@@ -193,6 +193,11 @@ maintainer verifies it against the original game's behavior.
   project license. There is no CLA.
 - One topic per pull request, with a description that says what the original
   does, what the change does, and how you verified it.
+- A new feature is one topic: one branch and one pull request. Open it early
+  (a draft is fine), push follow-up work to the same branch as new commits,
+  and keep the description current. Do not open a pull request on top of
+  another that has not merged. If a feature is too large to review at once,
+  get its first part merged, then open the next part against `main`.
 - Built on both platforms when `Source/` changes (say which you could not
   build; the maintainer covers the other).
 - Tests green. New behavior comes with a spec.
