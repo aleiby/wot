@@ -26,6 +26,8 @@
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPlayerController.h"
 
+#include "Engine/Engine.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerStart.h"
 #include "Misc/ScopeExit.h"
 
@@ -269,20 +271,44 @@ bool FWoTKillingItemDeliverySpec::RunTest(const FString&)
 		FWoTOnboardingSeams::Get().ClientKilledBy.Remove(Listener);
 	};
 
-	// Both controllers are local here and share the one seam, so a single
-	// message per kill shows it went to the victim alone.
-	AWoTCharacter* Struck = PawnOf(SpawnPlayer(FVector(0, 200, 100)));
+	// The standalone world's controllers share one seam, so a single message
+	// per kill shows it went to the victim alone.
+	AWoTPlayerController* VictimController = SpawnPlayer(FVector(0, 200, 100));
+	// A bare headless controller has no local player. Give the victim one so
+	// death presentation and cleanup run through their local-controller gate.
+	VictimController->Player = NewObject<ULocalPlayer>(GEngine);
+	TestTrue(TEXT("the victim is a local controller"), VictimController->IsLocalController());
+	AWoTCharacter* Struck = PawnOf(VictimController);
 	Struck->TakeDamage(1000.0f, Fire, KillerController, Lightning);
 	TestTrue(TEXT("the struck player died"), Struck->bDead);
+	TestEqual(TEXT("the struck player waits to respawn"),
+		VictimController->GetPlayerStateMachineState(), EWoTPlayerStateMachineState::Dying);
+	TestEqual(TEXT("while dead the player remembers the killing item"),
+		VictimController->GetKilledByItemWhileDead(), FName(TEXT("AngrealInvLightning")));
 	if (TestEqual(TEXT("one message per kill, to the victim"), Delivered.Num(), 1))
 	{
 		TestEqual(TEXT("naming the item that killed"), Delivered[0],
 			FName(TEXT("AngrealInvLightning")));
 	}
 
-	AWoTCharacter* Punched = PawnOf(SpawnPlayer(FVector(0, -200, 100)));
+	VictimController->ServerRestartPlayerWoT_Implementation();
+	TestEqual(TEXT("the respawned player is playing"),
+		VictimController->GetPlayerStateMachineState(), EWoTPlayerStateMachineState::Playing);
+	TestEqual(TEXT("respawning clears the killing item"),
+		VictimController->GetKilledByItemWhileDead(), NAME_None);
+	AWoTCharacter* Punched = PawnOf(VictimController);
+	if (!TestNotNull(TEXT("the same victim controller respawned"), Punched))
+	{
+		WoTTest::DestroySpecWorld(World);
+		return false;
+	}
 	Punched->TakeDamage(1000.0f, Fire, KillerController, Killer);
-	TestEqual(TEXT("a kill no item dealt sends nothing"), Delivered.Num(), 1);
+	TestEqual(TEXT("a kill no item dealt names nothing"), Delivered.Num(), 1);
+	TestTrue(TEXT("the respawned player died again"), Punched->bDead);
+	TestEqual(TEXT("the second death waits to respawn"),
+		VictimController->GetPlayerStateMachineState(), EWoTPlayerStateMachineState::Dying);
+	TestEqual(TEXT("an unnamed second death never reuses the first killing item"),
+		VictimController->GetKilledByItemWhileDead(), NAME_None);
 
 	// A killer-less death soon after a displacement names the displacing
 	// angreal, on the terms ScoreKill credits its caster.
@@ -313,6 +339,35 @@ bool FWoTKillingItemDeliverySpec::RunTest(const FString&)
 	{
 		TestEqual(TEXT("naming the trap's item over the displacement"),
 			Delivered[2], FName(TEXT("SpearInventory")));
+	}
+
+	// A client can miss the brief Playing state between two quick deaths, so
+	// its cleanup on leaving Dying never runs. A controller with no local
+	// player skips that cleanup the same way, which leaves the second death's
+	// own message as the only thing that can replace the first death's item.
+	AWoTPlayerController* MissedRespawn = SpawnPlayer(FVector(200, -200, 100));
+	TestFalse(TEXT("this victim runs no local cleanup"), MissedRespawn->IsLocalController());
+	AWoTCharacter* FirstBody = PawnOf(MissedRespawn);
+	if (TestNotNull(TEXT("this victim spawned"), FirstBody))
+	{
+		FirstBody->TakeDamage(1000.0f, Fire, KillerController, Lightning);
+		TestEqual(TEXT("this victim remembers the killing item"),
+			MissedRespawn->GetKilledByItemWhileDead(), FName(TEXT("AngrealInvLightning")));
+		MissedRespawn->Possess(World->SpawnActor<AWoTCharacter>(
+			FVector(200, -400, 100), FRotator::ZeroRotator));
+		AWoTCharacter* SecondBody = PawnOf(MissedRespawn);
+		if (TestNotNull(TEXT("this victim has a new body"), SecondBody))
+		{
+			TestEqual(TEXT("this victim plays again"),
+				MissedRespawn->GetPlayerStateMachineState(),
+				EWoTPlayerStateMachineState::Playing);
+			SecondBody->TakeDamage(1000.0f, Fire, KillerController, Killer);
+			TestEqual(TEXT("the quick second death waits to respawn"),
+				MissedRespawn->GetPlayerStateMachineState(),
+				EWoTPlayerStateMachineState::Dying);
+			TestEqual(TEXT("the unnamed death's message replaces the first item"),
+				MissedRespawn->GetKilledByItemWhileDead(), NAME_None);
+		}
 	}
 
 	WoTTest::DestroySpecWorld(World);

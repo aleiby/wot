@@ -762,19 +762,27 @@ bool FWoTOnboardingBrowserOpeningRowSpec::RunTest(const FString&)
 	const FName Warden(TEXT("CinderWarden"));
 	const FName Unknown(TEXT("NotARow"));
 	TestEqual(TEXT("no card and no hand item opens the first entry"),
-		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, NAME_None), Jet);
+		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, NAME_None, NAME_None), Jet);
 	TestEqual(TEXT("the card's item wins"),
-		SWoTGuideBrowser::OpeningRow(*Guide, Veil, Warden), Veil);
+		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, Veil, Warden), Veil);
 	TestEqual(TEXT("without a card, the selected hand item"),
-		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, Warden), Warden);
+		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, NAME_None, Warden), Warden);
 	TestEqual(TEXT("a card item the guide lacks falls through to the hand"),
-		SWoTGuideBrowser::OpeningRow(*Guide, Unknown, Warden), Warden);
+		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, Unknown, Warden), Warden);
 	TestEqual(TEXT("a hand item the guide lacks opens the first entry"),
-		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, Unknown), Jet);
+		SWoTGuideBrowser::OpeningRow(*Guide, NAME_None, NAME_None, Unknown), Jet);
+	// Warden is neither the card, the hand nor the first entry, so only the
+	// killing item's priority can choose it.
+	TestEqual(TEXT("the killing item wins over the card and hand"),
+		SWoTGuideBrowser::OpeningRow(*Guide, Warden, Veil, Jet), Warden);
+	TestEqual(TEXT("a killing item the guide lacks falls through to the card"),
+		SWoTGuideBrowser::OpeningRow(*Guide, Unknown, Veil, Warden), Veil);
+	TestEqual(TEXT("a killing item the guide lacks with no card falls through to the hand"),
+		SWoTGuideBrowser::OpeningRow(*Guide, Unknown, NAME_None, Warden), Warden);
 	const UWoTAngrealGuide* Empty =
 		NewObject<UWoTAngrealGuide>(GetTransientPackage());
 	TestTrue(TEXT("an empty guide has no opening row"),
-		SWoTGuideBrowser::OpeningRow(*Empty, Jet, Warden).IsNone());
+		SWoTGuideBrowser::OpeningRow(*Empty, Veil, Jet, Warden).IsNone());
 
 	TestEqual(TEXT("the browser opens at its initial row"),
 		WoTOnboardingBrowserMake(Guide, true, Warden)->SelectedRowForTesting(), Warden);

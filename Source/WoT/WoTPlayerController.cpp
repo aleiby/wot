@@ -594,14 +594,21 @@ void AWoTPlayerController::BeginPlay()
 				return Controller && (Controller->IsItemInfoOpen()
 					|| Controller->IsHelpOpen() || Controller->InGameMenu.IsOpen());
 			};
-		// The selected hand's item (the one the item-info key describes), so
-		// an improvement module's guide can open at it. Cleared on EndPlay.
+		// The selected hand's item (the one the item-info key describes) and
+		// the killing item while dead, so an improvement module's guide can
+		// open at either. Both queries are cleared on EndPlay.
 		Seams.SelectedItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
 			this)]()
 			{
 				const AWoTPlayerController* Controller = WeakThis.Get();
 				return Controller ? UWoTInventoryComponent::GetHandSetItemName(
 					Controller->GetSelectedItemForInfo()) : FName();
+			};
+		Seams.KilledByItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? Controller->GetKilledByItemWhileDead() : FName();
 			};
 	}
 	ClearProgressMessages();
@@ -1921,6 +1928,7 @@ void AWoTPlayerController::ExitPlayerState(EWoTPlayerStateMachineState OldState)
 	{
 		return;
 	}
+	KilledByItemClass = NAME_None;
 	GetWorldTimerManager().ClearTimer(DeathScoreboardAutoShowTimer);
 	bDeathScoreboardAutoShowActive = false;
 	bShowScores = false;
@@ -4385,7 +4393,8 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
 		// Gameplay teardown: no window stays (an improvement module's window
 		// closes with the match, as the retail windows below do). The input
-		// seam goes last so that close can still restore game input.
+		// seam goes last so that close can still restore game input. The window
+		// and guide-item queries end with this controller too.
 		Seams.CloseClientWindows.Broadcast(NAME_None);
 		if (OnboardingCloseWindowsHandle.IsValid())
 		{
@@ -4395,6 +4404,7 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 		Seams.SetOverlayInput = nullptr;
 		Seams.IsClientWindowOpen = nullptr;
 		Seams.SelectedItemClass = nullptr;
+		Seams.KilledByItemClass = nullptr;
 	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.
@@ -4879,6 +4889,8 @@ void AWoTPlayerController::ClientTypedMessage_Implementation(const FString& S, F
 
 void AWoTPlayerController::ClientKilledBy_Implementation(FName ItemClassName)
 {
+	// Every death replaces the last one's item, an unnamed death included.
+	KilledByItemClass = ItemClassName;
 	if (!ItemClassName.IsNone())
 	{
 		FWoTOnboardingSeams::Get().ClientKilledBy.Broadcast(ItemClassName);

@@ -141,4 +141,11 @@ struct WOT_API FWoTOnboardingSeams
 	    gameplay controller while it lives; unbound reads as nothing
 	    selected. */
 	TFunction<FName()> SelectedItemClass;
+
+	/** The shipped class name of the item that killed the local player, while
+	    the player waits to respawn (the controller's Dying state), or
+	    NAME_None: alive, respawned, or killed by nothing the server could
+	    name. Installed by the local gameplay controller while it lives;
+	    unbound reads as none. */
+	TFunction<FName()> KilledByItemClass;
 };

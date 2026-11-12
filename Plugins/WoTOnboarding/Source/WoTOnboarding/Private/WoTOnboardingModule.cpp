@@ -541,11 +541,12 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 		// does nothing (the loader already logged it once).
 		return;
 	}
-	// The card's suggestion followed: the guide opens at the card's item, or
-	// else at the item in the player's selected hand. Captured first, because
-	// the close broadcast below removes the card.
+	// While the player is dead, the guide opens at the item that killed
+	// them; else at the card's item or the item in the player's selected hand.
+	// Captured first, because the close broadcast below removes the card.
 	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
-	const FName InitialRow = SWoTGuideBrowser::OpeningRow(*Guide, PickupCardClass,
+	const FName InitialRow = SWoTGuideBrowser::OpeningRow(*Guide,
+		Seams.KilledByItemClass ? Seams.KilledByItemClass() : NAME_None, PickupCardClass,
 		Seams.SelectedItemClass ? Seams.SelectedItemClass() : NAME_None);
 	// One client window at a time, as the original kept it: the retail
 	// windows close before the guide takes the screen.

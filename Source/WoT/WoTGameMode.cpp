@@ -849,14 +849,12 @@ void AWoTGameMode::PlayerKilled(AController* Killer, AWoTCharacter* Victim, FNam
 	{
 		return;
 	}
-	// The optional death recap's one fact: the item that killed this player, sent to the
-	// victim alone and whatever this server's own settings. A client without the
-	// onboarding aids receives it and does nothing.
-	const FName KillingItem = KillingItemFor(Killer, *Victim);
-	if (!KillingItem.IsNone())
-	{
-		PlayerController->ClientKilledBy(KillingItem);
-	}
+	// The onboarding aids' one fact about this death, sent to the victim alone and
+	// whatever this server's own settings: the item that killed this player, or none
+	// when no item did. Every death sends it: a client can miss the brief Playing state
+	// between two quick deaths, and then only this message replaces the first death's
+	// item. A client without the aids receives it and does nothing with it.
+	PlayerController->ClientKilledBy(KillingItemFor(Killer, *Victim));
 	PlayerController->UnPossess();
 	PlayerController->ArmRespawnFire(Victim, RespawnDelay);
 }

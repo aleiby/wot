@@ -47,6 +47,7 @@ bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 		static_cast<bool>(Seams.IsClientWindowOpen));
 	TestFalse(TEXT("no selected-item query"),
 		static_cast<bool>(Seams.SelectedItemClass));
+	TestFalse(TEXT("no killed-by-item query"), static_cast<bool>(Seams.KilledByItemClass));
 	TestFalse(TEXT("no retail texture resolver"),
 		static_cast<bool>(Seams.ResolveRetailTexture));
 	TestFalse(TEXT("no item icon resolver"),

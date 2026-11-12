@@ -140,10 +140,10 @@ FName WoTGuideBrowserTag(const TCHAR* Prefix, FName ClassName)
 }
 } // namespace
 
-FName SWoTGuideBrowser::OpeningRow(const UWoTAngrealGuide& InGuide, FName CardRow,
-	FName HandItem)
+FName SWoTGuideBrowser::OpeningRow(const UWoTAngrealGuide& InGuide, FName KilledBy,
+	FName CardRow, FName HandItem)
 {
-	for (const FName Candidate : {CardRow, HandItem})
+	for (const FName Candidate : {KilledBy, CardRow, HandItem})
 	{
 		if (!Candidate.IsNone() && InGuide.FindByClassName(Candidate))
 		{
@@ -209,7 +209,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 				FMath::Min(WoTGuideBrowserColumns, Group.Rows.Num() - Start));
 		}
 	}
-	SelectedClassName = OpeningRow(*Guide, InArgs._InitialRow, NAME_None);
+	SelectedClassName = OpeningRow(*Guide, NAME_None, InArgs._InitialRow, NAME_None);
 
 	const TSharedRef<FWoTOnboardingFaces> FacesRef = Faces.ToSharedRef();
 	const TSharedRef<FWoTOnboardingWindowScale> ScaleRef = Scale.ToSharedRef();

@@ -55,12 +55,13 @@ public:
 
 	void Construct(const FArguments& InArgs);
 
-	/** The row to open at: CardRow while a card is up and the guide carries
-	    it, else HandItem (the selected hand's item) when the guide carries
-	    it, else the first entry of the first group. None for an empty
-	    guide. */
-	static FName OpeningRow(const UWoTAngrealGuide& InGuide, FName CardRow,
-		FName HandItem);
+	/** The row to open at: KilledBy (the item that killed the player, while
+	    they wait to respawn) when the guide carries it, else CardRow while a
+	    card is up and the guide carries it, else HandItem (the selected
+	    hand's item) when the guide carries it, else the first entry of the
+	    first group. None for an empty guide. */
+	static FName OpeningRow(const UWoTAngrealGuide& InGuide, FName KilledBy,
+		FName CardRow, FName HandItem);
 
 	/** Shows ClassName's row in the detail pane (the deep link the counter
 	    icons use). Unknown names leave the selection unchanged. */

@@ -259,9 +259,9 @@ CONTRIBUTING delta.
   causer: an item, a projectile's source angreal, the item that places a
   trap, the Guardian for the Mashadar, and Balefire by its damage type. A
   killer-less death soon after a Whirlwind or Swap Places names that
-  angreal. The game mode sends the name to the victim alone
-  (`ClientKilledBy`, reliable), whatever the server's own settings; a client
-  without the aids drops it. The plugin shows a card in the pickup card's
+  angreal. The game mode sends the name, or none, to the victim alone on
+  every death (`ClientKilledBy`, reliable), whatever the server's own
+  settings; a client without the aids drops it. The plugin shows a card in the pickup card's
   slot: "Killed by ⟨title⟩", the row's hint line, and "Press ⟨guide key⟩ for
   the field guide". No row, or a row with no hint line, shows nothing.
 - **Honesty gate** (spec): every facts row's `CppClass` resolves to a ported
@@ -337,9 +337,10 @@ files, at the whole-number scale the game's windows use:
   Arrow keys, the d-pad and the left stick move the selection through the
   grid; a click selects. Escape, the controller's B and View buttons and the
   guide key close it.
-- **Opening selection.** The card's row while a card is up, else the item in
-  the local player's selected hand when the guide carries it, else the first
-  entry of the first group.
+- **Opening selection.** While the local player is dead (until they respawn),
+  the item that killed them when the guide carries it; else the card's row
+  while a card is up; else the item in the local player's selected hand when
+  the guide carries it; else the first entry of the first group.
 - **Card** (430 wide, left edge, mid-height): a dark band between two
   dividers, the item's icon, its title, the first sentence of its
   description, and the guide key as "F3  Field Guide".
@@ -542,3 +543,14 @@ each green on both platforms, `PORT_NOTES.md` arriving with Task 7.
       project descriptor but the neutral shells'. The exact path is allowed
       at most once and never required, so a build with the plugin off still
       passes.
+- 2026-11-11: the guide opens at the killing item while the player is dead.
+  Decisions:
+  - From death until respawn (the controller's Dying state), every way of
+    opening the guide starts at the item that killed the player, when the
+    server named one and the guide carries it. It does not depend on the
+    recap setting, and it wins over a card still on screen. After the
+    respawn the guide opens as before.
+  - The server now sends `ClientKilledBy` on every death, with none when no
+    item dealt it. The client forgets the item when it leaves Dying, but it
+    can miss the brief Playing state between two quick deaths; the second
+    death's message then replaces the first death's item.
