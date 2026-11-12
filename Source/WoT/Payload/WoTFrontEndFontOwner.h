@@ -34,10 +34,20 @@ public:
 	UFont* Font() const { return SlateFont.Get(); }
 	UFont* CanvasFontObject() const { return CanvasFont.Get(); }
 	UFontFace* SlateFaceObject() const { return SlateFace.Get(); }
-	UFont* NativeMultiplayerFont() const { return NativeSlateFont.Get(); }
-	UFontFace* NativeMultiplayerFaceObject() const { return NativeSlateFace.Get(); }
-	UFont* DoubledFont() const { return DoubledSlateFont.Get(); }
-	UFontFace* DoubledFaceObject() const { return DoubledSlateFace.Get(); }
+	UFont* IntegerScaledFont(int32 PixelScale) const
+	{
+		const auto* Strike = IntegerStrikes.Find(PixelScale);
+		return Strike ? Strike->FontObject.Get() : nullptr;
+	}
+	UFontFace* IntegerScaledFaceObject(int32 PixelScale) const
+	{
+		const auto* Strike = IntegerStrikes.Find(PixelScale);
+		return Strike ? Strike->FaceObject.Get() : nullptr;
+	}
+	UFont* NativeMultiplayerFont() const { return IntegerScaledFont(1); }
+	UFontFace* NativeMultiplayerFaceObject() const { return IntegerScaledFaceObject(1); }
+	UFont* DoubledFont() const { return IntegerScaledFont(2); }
+	UFontFace* DoubledFaceObject() const { return IntegerScaledFaceObject(2); }
 	FSlateFontInfo SlateInfo(float Size) const;
 	bool ResolveGlyphSource(uint32 Codepoint, FWoTFrontEndGlyphSource& Out) const;
 	int32 GlyphCount() const { return FontRecord.Glyphs().Num(); }
@@ -51,10 +61,12 @@ private:
 	TStrongObjectPtr<UFont> CanvasFont;
 	TStrongObjectPtr<UFontFace> SlateFace;
 	TStrongObjectPtr<UFont> SlateFont;
-	TStrongObjectPtr<UFontFace> NativeSlateFace;
-	TStrongObjectPtr<UFont> NativeSlateFont;
-	TStrongObjectPtr<UFontFace> DoubledSlateFace;
-	TStrongObjectPtr<UFont> DoubledSlateFont;
+	struct FIntegerStrike
+	{
+		TStrongObjectPtr<UFontFace> FaceObject;
+		TStrongObjectPtr<UFont> FontObject;
+	};
+	TMap<int32, FIntegerStrike> IntegerStrikes;
 
 	friend class FWoTFrontEndFontOwner;
 };
@@ -62,6 +74,8 @@ private:
 class WOT_API FWoTFrontEndFontOwner final
 {
 public:
+	static constexpr int32 MaxIntegerStrike = 8;
+
 	FWoTFrontEndFontOwner() = default;
 	~FWoTFrontEndFontOwner();
 	FWoTFrontEndFontOwner(const FWoTFrontEndFontOwner&) = delete;
@@ -86,7 +100,7 @@ public:
 		TArray<TFunction<bool()>>&& Callbacks) const;
 #endif
 	TWoTBootstrapResult<FSlateFontInfo> Resolve(FName Face) const;
-	/** Lazily materialize exact 1x/2x bitmap strikes for multiplayer text. */
+	/** Lazily materialize exact bitmap strikes from 1x to MaxIntegerStrike. */
 	TWoTBootstrapResult<FSlateFontInfo> ResolveIntegerScaled(
 		FName Face, int32 PixelScale);
 	FWoTBootstrapStatus EnsureBrowserFont(UWoTPayloadSubsystem& Payload);

@@ -41,6 +41,7 @@
 #include "Inventory/WoTInventory.h"
 #include "Inventory/WoTHandInfo.h"
 #include "Inventory/WoTHandSet.h"
+#include "Inventory/WoTInventoryComponent.h"
 #include "Inventory/WoTSeal.h"
 #include "Projectiles/WoTMashadarGuide.h"
 #include "Traps/WoTPortcullis.h"
@@ -583,6 +584,31 @@ void AWoTPlayerController::BeginPlay()
 					Controller->bShowMouseCursor = false;
 					Controller->SetInputMode(FInputModeGameOnly());
 				}
+			};
+		// The retail windows that hold the screen, for an improvement module's
+		// passive overlays to wait on. Cleared on EndPlay with the input seam.
+		Seams.IsClientWindowOpen = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller && (Controller->IsItemInfoOpen()
+					|| Controller->IsHelpOpen() || Controller->InGameMenu.IsOpen());
+			};
+		// The selected hand's item (the one the item-info key describes) and
+		// the killing item while dead, so an improvement module's guide can
+		// open at either. Both queries are cleared on EndPlay.
+		Seams.SelectedItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? UWoTInventoryComponent::GetHandSetItemName(
+					Controller->GetSelectedItemForInfo()) : FName();
+			};
+		Seams.KilledByItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? Controller->GetKilledByItemWhileDead() : FName();
 			};
 	}
 	ClearProgressMessages();
@@ -1902,6 +1928,7 @@ void AWoTPlayerController::ExitPlayerState(EWoTPlayerStateMachineState OldState)
 	{
 		return;
 	}
+	KilledByItemClass = NAME_None;
 	GetWorldTimerManager().ClearTimer(DeathScoreboardAutoShowTimer);
 	bDeathScoreboardAutoShowActive = false;
 	bShowScores = false;
@@ -4366,7 +4393,8 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
 		// Gameplay teardown: no window stays (an improvement module's window
 		// closes with the match, as the retail windows below do). The input
-		// seam goes last so that close can still restore game input.
+		// seam goes last so that close can still restore game input. The window
+		// and guide-item queries end with this controller too.
 		Seams.CloseClientWindows.Broadcast(NAME_None);
 		if (OnboardingCloseWindowsHandle.IsValid())
 		{
@@ -4374,6 +4402,9 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 			OnboardingCloseWindowsHandle.Reset();
 		}
 		Seams.SetOverlayInput = nullptr;
+		Seams.IsClientWindowOpen = nullptr;
+		Seams.SelectedItemClass = nullptr;
+		Seams.KilledByItemClass = nullptr;
 	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.
@@ -4516,7 +4547,7 @@ void AWoTPlayerController::SetupInputComponent()
 			this, &AWoTPlayerController::ShowHelp);
 		{
 			// ShowGuide (onboarding seam): a broadcast only, inert when nothing
-			// is bound — the retail help action above stays exactly as ported.
+			// is bound; the retail help action above stays exactly as ported.
 			// A weak lambda, so the controller's surface gains no handler for
 			// an improvement-only action.
 			FInputActionBinding Binding(FName(TEXT("ShowGuide")), IE_Pressed);
@@ -4856,6 +4887,16 @@ void AWoTPlayerController::ClientTypedMessage_Implementation(const FString& S, F
 	RouteTypedMessage(S, Type, GetNetMode() == NM_Standalone);
 }
 
+void AWoTPlayerController::ClientKilledBy_Implementation(FName ItemClassName)
+{
+	// Every death replaces the last one's item, an unnamed death included.
+	KilledByItemClass = ItemClassName;
+	if (!ItemClassName.IsNone())
+	{
+		FWoTOnboardingSeams::Get().ClientKilledBy.Broadcast(ItemClassName);
+	}
+}
+
 void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool bStandalone)
 {
 	// WOTPlayer.ClientMessage (WOTPlayer.uc:1862-1890): 'Pickup' and 'FailedMessage' land
@@ -4881,9 +4922,6 @@ void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool 
 			{
 				HUD->AddRightMessage(S);
 			}
-			// Onboarding seam, behavior-neutral: the death-recap aid reads
-			// the same line the right queue just received.
-			FWoTOnboardingSeams::Get().ClientDeathMessage.Broadcast(S);
 		}
 	}
 	else if (Type == FName(TEXT("DeathMessage")))

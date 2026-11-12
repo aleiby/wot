@@ -7,10 +7,11 @@
 
 #include "WoTOnboardingSeams.h"
 
+#include "GameFramework/InputSettings.h"
 #include "Modules/ModuleManager.h"
 
 // The Field Guide menu row (plan Task 5): unlike the settings rows, which are
-// the way back on and register unconditionally, the guide row is an aid — it
+// the way back on and register unconditionally, the guide row is an aid: it
 // registers while the master toggle is on and unregisters live when it turns
 // off, through the settings OnChanged delegate. The spec drives the public
 // settings API only and restores every value it changes. Helper names carry
@@ -69,12 +70,26 @@ bool FWoTOnboardingGuideMenuRowToggleSpec::RunTest(const FString&)
 	}
 	TestTrue(TEXT("the row is owner-tagged"),
 		Rows[0]->Owner == FWoTOnboardingModule::SettingsRowOwner());
-	TestTrue(TEXT("the row labels the field guide"),
-		Rows[0]->Label && Rows[0]->Label().Contains(TEXT("Field Guide")));
+	TArray<FInputActionKeyMapping> GuideMappings;
+	GetDefault<UInputSettings>()->GetActionMappingByName(TEXT("ShowGuide"), GuideMappings);
+	TestTrue(TEXT("ShowGuide keeps the environment's binding"), !GuideMappings.IsEmpty());
+	if (TestTrue(TEXT("the row carries a label"), static_cast<bool>(Rows[0]->Label)))
+	{
+		const FString GuideLabel = Rows[0]->Label();
+		TestEqual(TEXT("the guide row uses only its name"), GuideLabel,
+			FString(TEXT("Field Guide")));
+		for (const TCHAR Character : GuideLabel)
+		{
+			TestFalse(TEXT("the title-face label has no digits or brackets"),
+				FChar::IsDigit(Character) || Character == TEXT('(') || Character == TEXT(')')
+				|| Character == TEXT('[') || Character == TEXT(']')
+				|| Character == TEXT('{') || Character == TEXT('}'));
+		}
+	}
 	TestTrue(TEXT("the row carries an invoke"),
 		static_cast<bool>(Rows[0]->Invoke));
 
-	// The master toggle unregisters the row live, through OnChanged — no
+	// The master toggle unregisters the row live, through OnChanged, with no
 	// module restart involved.
 	Live.SetEnableOnboardingAids(false);
 	TestEqual(TEXT("master off unregisters the menu row"),

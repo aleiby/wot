@@ -507,6 +507,14 @@ public:
 		return PlayerStateMachineState;
 	}
 
+	/** The item that killed this player while they wait to respawn, or none
+	    outside Dying or when the server could not name the item. */
+	FName GetKilledByItemWhileDead() const
+	{
+		return PlayerStateMachineState == EWoTPlayerStateMachineState::Dying
+			? KilledByItemClass : NAME_None;
+	}
+
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRespawnPlayer();
 
@@ -611,6 +619,13 @@ public:
 	// The routing body, split out with an explicit standalone flag so the headless spec
 	// can exercise the MP-only death-message gate (a test world is always standalone).
 	void RouteTypedMessage(const FString& S, FName Type, bool bStandalone);
+
+	// The optional onboarding aids (WoTKillingItem): on every death the server names the
+	// item that killed this player, or none, to this player only. The owning client keeps
+	// it for the field guide until it leaves Dying and passes a named item to the
+	// onboarding seam, which only the optional aids bind, so a client without them drops it.
+	UFUNCTION(Client, Reliable)
+	void ClientKilledBy(FName ItemClassName);
 
 	// AngrealInventory.uc:615-616 GiveTo: the first-new-artifact owner presentation —
 	// ClientPlaySound(NotifyNewPickupSoundName) + BaseHUD.SetFlashTexture(texture, fade).
@@ -750,6 +765,8 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_PlayerStateMachineState)
 	EWoTPlayerStateMachineState PlayerStateMachineState =
 		EWoTPlayerStateMachineState::Playing;
+	// Client-local: the killing item belongs to this death only.
+	FName KilledByItemClass;
 	// Authority-only WOTPlayer.OKToFireTime and the body replaced by RestartPlayer.
 	float OKToFireTime = 0.0f;
 	TWeakObjectPtr<AWoTCharacter> RespawnCorpse;

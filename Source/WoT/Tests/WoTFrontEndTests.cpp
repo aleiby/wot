@@ -2049,6 +2049,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndRootCompositionSpec,
 
 bool FWoTFrontEndRootCompositionSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	TSharedRef<SWoTFrontEndRoot> UnavailableRoot =
 		SNew(SWoTFrontEndRoot).PlayerController(nullptr);
 	FChildren* RootChildren = UnavailableRoot->GetChildren();
@@ -2547,6 +2548,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndSlateInputSpec,
 
 bool FWoTFrontEndSlateInputSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTestsMenuRowsGuard MenuRowsGuard;
 	// Entering Play auto-fetches: pin the platform path where that search
 	// really starts (on a Mac the LAN heads-up would answer first), so Back
 	// is exercised against an in-flight search on every host.

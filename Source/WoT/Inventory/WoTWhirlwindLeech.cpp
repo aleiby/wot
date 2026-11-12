@@ -333,7 +333,7 @@ void UWoTWhirlwindLeech::TickComponent(float DeltaTime, ELevelTick TickType,
 			// each tick — if the whirlwind flings them into a hazard, the caster gets the kill.
 			if (AWoTCharacter* HostChar = Cast<AWoTCharacter>(Host))
 			{
-				HostChar->SetSuicideInstigator(LeechInstigator);
+				HostChar->SetSuicideInstigator(LeechInstigator, SourceAngreal);
 			}
 		}
 	}

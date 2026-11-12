@@ -11,7 +11,7 @@
 
 // The shared counter-hint resolver (plan Task 5; the Task 7 death recap
 // reuses it). Synthetic fixtures throughout: invented class names, titles and
-// hint wording only. Helper names carry the WoTOnboardingHint prefix — the
+// hint wording only. Helper names carry the WoTOnboardingHint prefix: the
 // plugin test files share one unity translation unit.
 
 namespace
@@ -38,43 +38,33 @@ FWoTAngrealGuideRow WoTOnboardingHintRow(const TCHAR* ClassName,
 	return Row;
 }
 
-/** The selection fixture: offenses with element flags, then counterers in a
-    deliberate registration order — shield first, then the reflect-like row,
-    then the dedicated rows — so tier preference has to beat Rows order. */
-UWoTAngrealGuide* WoTOnboardingHintMakeGuide(bool bWithReflect,
-	bool bWithDedicated, bool bWithSecondDedicated)
+/** Offenses whose templates each name one counter, and the counterers. The
+    shield registers first and counters GaleJet too, so a hint naming the
+    later HushCharm proves the named counter wins over registration order. */
+UWoTAngrealGuide* WoTOnboardingHintMakeGuide()
 {
 	UWoTAngrealGuide* Guide = NewObject<UWoTAngrealGuide>(GetTransientPackage());
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("GaleJet"), {TEXT("Air")}, {},
-		TEXT("{title} - {counter} tames it.")));
+		TEXT("{counter:HushCharm} tames it.")));
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("EmberShot"), {TEXT("Fire")}, {}));
+	// Names a real counterer that does not counter this row.
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("DualBolt"),
-		{TEXT("Air"), TEXT("Fire")}, {}));
-	// Shield-like: both countered rows share Air.
+		{TEXT("Air"), TEXT("Fire")}, {}, TEXT("{counter:MirrorBand} turns it.")));
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("StoneWard"), {},
 		{TEXT("GaleJet"), TEXT("DualBolt")}));
-	if (bWithReflect)
-	{
-		// Reflect-like: its countered rows share no element.
-		Guide->Rows.Add(WoTOnboardingHintRow(TEXT("MirrorBand"), {},
-			{TEXT("GaleJet"), TEXT("EmberShot")}));
-	}
-	if (bWithDedicated)
-	{
-		Guide->Rows.Add(WoTOnboardingHintRow(TEXT("HushCharm"), {},
-			{TEXT("GaleJet")}));
-	}
-	if (bWithSecondDedicated)
-	{
-		Guide->Rows.Add(WoTOnboardingHintRow(TEXT("QuietBead"), {},
-			{TEXT("GaleJet")}));
-	}
-	// Countered by nothing: one template that wants a counter, one that
-	// deliberately names none (the Balefire shape).
+	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("MirrorBand"), {},
+		{TEXT("GaleJet"), TEXT("EmberShot")}));
+	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("HushCharm"), {},
+		{TEXT("GaleJet")}));
+	// Countered by nothing: one template naming a counter anyway, one naming
+	// a class the guide does not carry, and one naming none (the Balefire
+	// shape, which always renders).
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("VoidLance"), {}, {},
-		TEXT("{title} - {counter} stops it.")));
+		TEXT("{counter:HushCharm} stops it.")));
+	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("GhostLance"), {}, {},
+		TEXT("{counter:NoSuchCharm} stops it.")));
 	Guide->Rows.Add(WoTOnboardingHintRow(TEXT("SunLance"), {}, {},
-		TEXT("{title} - strike first.")));
+		TEXT("Strike first.")));
 	return Guide;
 }
 
@@ -108,87 +98,79 @@ const FWoTAngrealGuideRow* WoTOnboardingHintFindRow(
 {
 	return Guide.FindByClassName(FName(ClassName));
 }
+
+FString WoTOnboardingHintLineFor(const UWoTAngrealGuide& Guide,
+	const FWoTAngrealGuideRow& Row)
+{
+	return WoTOnboardingHints::ResolveHintLine(Guide, Row,
+		[](const FWoTAngrealGuideRow& TitleRow)
+		{
+			return WoTOnboardingHintFixtureTitle(TitleRow);
+		});
+}
 } // namespace
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintSelectDedicatedSpec,
-	"WoT.Onboarding.HintSelectDedicated", WoTOnboardingHintFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintCounterNamedSpec,
+	"WoT.Onboarding.HintCounterNamed", WoTOnboardingHintFlags)
 
-bool FWoTOnboardingHintSelectDedicatedSpec::RunTest(const FString&)
+bool FWoTOnboardingHintCounterNamedSpec::RunTest(const FString&)
 {
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ true, /*dedicated*/ true, /*second*/ false);
-	const FWoTAngrealGuideRow* Target =
+	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide();
+	const FWoTAngrealGuideRow* Row =
 		WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet"));
 	const FWoTAngrealGuideRow* Counter =
-		WoTOnboardingHints::SelectCounter(*Guide, *Target);
-	if (TestNotNull(TEXT("a counter is selected"), Counter))
+		WoTOnboardingHints::HintCounter(*Guide, *Row);
+	if (TestNotNull(TEXT("the named counter resolves"), Counter))
 	{
-		// The dedicated counter wins although the shield and the reflect row
-		// both registered before it.
-		TestEqual(TEXT("dedicated counter preferred"), Counter->ClassName,
-			FName(TEXT("HushCharm")));
+		// StoneWard and MirrorBand also counter GaleJet and register first;
+		// the template's own counter is the one its sentence describes.
+		TestEqual(TEXT("the named counter, not the first counterer"),
+			Counter->ClassName, FName(TEXT("HushCharm")));
 	}
+	TestEqual(TEXT("the line names the counter's title"),
+		WoTOnboardingHintLineFor(*Guide, *Row),
+		FString(TEXT("Hush Charm Band tames it.")));
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintSelectReflectFamilySpec,
-	"WoT.Onboarding.HintSelectReflectFamily", WoTOnboardingHintFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintCounterUnbackedSpec,
+	"WoT.Onboarding.HintCounterUnbacked", WoTOnboardingHintFlags)
 
-bool FWoTOnboardingHintSelectReflectFamilySpec::RunTest(const FString&)
+bool FWoTOnboardingHintCounterUnbackedSpec::RunTest(const FString&)
 {
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ true, /*dedicated*/ false, /*second*/ false);
-	const FWoTAngrealGuideRow* Target =
-		WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet"));
-	const FWoTAngrealGuideRow* Counter =
-		WoTOnboardingHints::SelectCounter(*Guide, *Target);
-	if (TestNotNull(TEXT("a counter is selected"), Counter))
+	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide();
+	for (const TCHAR* ClassName :
+		{TEXT("DualBolt"), TEXT("VoidLance"), TEXT("GhostLance")})
 	{
-		// No dedicated counter: the reflect-family row (its countered rows
-		// share no element) beats the earlier-registered element shield.
-		TestEqual(TEXT("reflect family preferred over the shield"),
-			Counter->ClassName, FName(TEXT("MirrorBand")));
+		const FWoTAngrealGuideRow* Row =
+			WoTOnboardingHintFindRow(*Guide, ClassName);
+		TestNull(FString::Printf(TEXT("%s: an unbacked counter resolves to nothing"),
+			ClassName), WoTOnboardingHints::HintCounter(*Guide, *Row));
+		TestEqual(FString::Printf(TEXT("%s: an unbacked counter renders no line"),
+			ClassName), WoTOnboardingHintLineFor(*Guide, *Row), FString());
 	}
+	TestNull(TEXT("a counter-free template names no counter"),
+		WoTOnboardingHints::HintCounter(*Guide,
+			*WoTOnboardingHintFindRow(*Guide, TEXT("SunLance"))));
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintSelectShieldFallbackSpec,
-	"WoT.Onboarding.HintSelectShieldFallback", WoTOnboardingHintFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintBareCounterRefusedSpec,
+	"WoT.Onboarding.HintBareCounterRefused", WoTOnboardingHintFlags)
 
-bool FWoTOnboardingHintSelectShieldFallbackSpec::RunTest(const FString&)
+bool FWoTOnboardingHintBareCounterRefusedSpec::RunTest(const FString&)
 {
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ false, /*dedicated*/ false, /*second*/ false);
-	const FWoTAngrealGuideRow* Target =
-		WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet"));
-	const FWoTAngrealGuideRow* Counter =
-		WoTOnboardingHints::SelectCounter(*Guide, *Target);
-	if (TestNotNull(TEXT("a counter is selected"), Counter))
+	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide();
+	FWoTAngrealGuideRow Row =
+		*WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet"));
+	for (const TCHAR* Template : {
+		TEXT("{counter} tames it."),           // a rule would have to pick one
+		TEXT("{boom} tames it."),              // unknown placeholder
+		TEXT("{counter:HushCharm tames it.")}) // unterminated
 	{
-		TestEqual(TEXT("the element shield is the last resort"),
-			Counter->ClassName, FName(TEXT("StoneWard")));
-	}
-	TestNull(TEXT("a row countered by nothing selects nothing"),
-		WoTOnboardingHints::SelectCounter(*Guide,
-			*WoTOnboardingHintFindRow(*Guide, TEXT("VoidLance"))));
-	return !HasAnyErrors();
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintSelectTieBreakSpec,
-	"WoT.Onboarding.HintSelectTieBreak", WoTOnboardingHintFlags)
-
-bool FWoTOnboardingHintSelectTieBreakSpec::RunTest(const FString&)
-{
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ true, /*dedicated*/ true, /*second*/ true);
-	const FWoTAngrealGuideRow* Counter = WoTOnboardingHints::SelectCounter(
-		*Guide, *WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet")));
-	if (TestNotNull(TEXT("a counter is selected"), Counter))
-	{
-		// Two dedicated counters: the first in Rows order stays (the
-		// documented tie-break).
-		TestEqual(TEXT("tie-break keeps Rows order"), Counter->ClassName,
-			FName(TEXT("HushCharm")));
+		Row.HintText = Template;
+		TestEqual(FString::Printf(TEXT("'%s' renders no line"), Template),
+			WoTOnboardingHintLineFor(*Guide, Row), FString());
 	}
 	return !HasAnyErrors();
 }
@@ -198,28 +180,21 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingHintRenderOmissionSpec,
 
 bool FWoTOnboardingHintRenderOmissionSpec::RunTest(const FString&)
 {
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ true, /*dedicated*/ true, /*second*/ false);
-	const auto Resolve = [](const FWoTAngrealGuideRow& Row)
-	{
-		return WoTOnboardingHintFixtureTitle(Row);
-	};
-	TestEqual(TEXT("a {counter} template on an uncountered row renders nothing"),
-		WoTOnboardingHints::ResolveHintLine(*Guide,
-			*WoTOnboardingHintFindRow(*Guide, TEXT("VoidLance")), Resolve),
-		FString());
-	TestEqual(TEXT("a counter-free template renders without counters (Balefire)"),
-		WoTOnboardingHints::ResolveHintLine(*Guide,
-			*WoTOnboardingHintFindRow(*Guide, TEXT("SunLance")), Resolve),
-		FString(TEXT("Sun Lance Rod - strike first.")));
+	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide();
+	TestEqual(TEXT("a counter-free template renders as written (Balefire)"),
+		WoTOnboardingHintLineFor(*Guide,
+			*WoTOnboardingHintFindRow(*Guide, TEXT("SunLance"))),
+		FString(TEXT("Strike first.")));
 	TestEqual(TEXT("a row without a hint template renders nothing"),
-		WoTOnboardingHints::ResolveHintLine(*Guide,
-			*WoTOnboardingHintFindRow(*Guide, TEXT("EmberShot")), Resolve),
+		WoTOnboardingHintLineFor(*Guide,
+			*WoTOnboardingHintFindRow(*Guide, TEXT("EmberShot"))),
 		FString());
-	TestEqual(TEXT("a countered row's template resolves both placeholders"),
-		WoTOnboardingHints::ResolveHintLine(*Guide,
-			*WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet")), Resolve),
-		FString(TEXT("Gale Jet Rod - Hush Charm Band tames it.")));
+	FWoTAngrealGuideRow Titled =
+		*WoTOnboardingHintFindRow(*Guide, TEXT("SunLance"));
+	Titled.HintText = TEXT("{title} burns bright.");
+	TestEqual(TEXT("{title} still resolves to the row's own title"),
+		WoTOnboardingHintLineFor(*Guide, Titled),
+		FString(TEXT("Sun Lance Rod burns bright.")));
 	return !HasAnyErrors();
 }
 
@@ -239,15 +214,14 @@ bool FWoTOnboardingHintRenderTitleFallbackSpec::RunTest(const FString&)
 		WoTOnboardingHints::SpacedClassName(FName(TEXT("AngrealInvAMAFixture"))),
 		FString(TEXT("AMAFixture")));
 
-	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide(
-		/*reflect*/ false, /*dedicated*/ true, /*second*/ false);
-	// No titles resolve: both placeholders fall back to spaced class names,
+	UWoTAngrealGuide* Guide = WoTOnboardingHintMakeGuide();
+	// No titles resolve: the counter falls back to its spaced class name,
 	// never placeholder prose.
-	TestEqual(TEXT("unresolved titles fall back to spaced class names"),
+	TestEqual(TEXT("an unresolved counter title falls back to its class name"),
 		WoTOnboardingHints::ResolveHintLine(*Guide,
 			*WoTOnboardingHintFindRow(*Guide, TEXT("GaleJet")),
 			[](const FWoTAngrealGuideRow&) { return FString(); }),
-		FString(TEXT("Gale Jet - Hush Charm tames it.")));
+		FString(TEXT("Hush Charm tames it.")));
 	return !HasAnyErrors();
 }
 

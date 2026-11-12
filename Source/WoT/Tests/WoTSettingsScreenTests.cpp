@@ -8,6 +8,7 @@
 #include "../WoTGameInstance.h"
 #include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
+#include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
 #include "../Online/WoTInstallerSharingSubsystem.h"
@@ -38,6 +39,26 @@ namespace
 {
 constexpr EAutomationTestFlags ScreenFlags =
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter;
+
+/** Empties the live onboarding menu-row registry; restores on exit. These
+    specs open the settings pages by their retail main-menu entries, so an
+    installed module's registered rows (the onboarding plugin's Field Guide
+    entry, which sits after Multiplayer) must not shift those entries. */
+struct FWoTSettingsScreenTestsMenuRowsGuard
+{
+	TArray<FWoTOnboardingRow> Saved;
+
+	FWoTSettingsScreenTestsMenuRowsGuard()
+	{
+		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
+		FWoTOnboardingSeams::Get().MenuRows.Reset();
+	}
+
+	~FWoTSettingsScreenTestsMenuRowsGuard()
+	{
+		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+	}
+};
 
 class FSettingsFeedbackRecorder final : public IWoTFrontEndFeedbackSink
 {
@@ -215,6 +236,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsNavigationSpec,
 
 bool FWoTSettingsNavigationSpec::RunTest(const FString&)
 {
+	FWoTSettingsScreenTestsMenuRowsGuard MenuRowsGuard;
 	FActivatedPreferencesFixture Fixture;
 	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
@@ -740,6 +762,7 @@ bool FWoTSettingsGeometrySpec::RunTest(const FString&)
 {
 	// A 2x body face on a 1280x720 review window must never push Save/Back off
 	// screen: the body scrolls, the footer stays.
+	FWoTSettingsScreenTestsMenuRowsGuard MenuRowsGuard;
 	FActivatedPreferencesFixture Fixture;
 	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
@@ -870,6 +893,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTParityFix18SettingsLabelsSpec,
 
 bool FWoTParityFix18SettingsLabelsSpec::RunTest(const FString&)
 {
+	FWoTSettingsScreenTestsMenuRowsGuard MenuRowsGuard;
 	// The same fixed-list projection left Controls rows (Always MouseLook,
 	// Crosshair, Drop Item, Walk...) and Hardware's Brightness as raw keys in
 	// the neutral package. Drive the real projection into both real pages with

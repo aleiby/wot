@@ -1,4 +1,11 @@
 #include "Modules/ModuleManager.h"
+#include "Assets/WoTRuntimeAssets.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "Inventory/WoTInventory.h"
+#include "Payload/WoTFrontEndFontOwner.h"
 #include "Updater/WoTGameBootstrapWorker.h"
 #include "Updater/WoTReleaseIdentity.h"
 #if PLATFORM_MAC
@@ -45,6 +52,66 @@
 }
 #endif
 
+static_assert(FWoTOnboardingMenuChrome::MaxPixelScale
+	<= FWoTFrontEndFontOwner::MaxIntegerStrike,
+	"Onboarding bitmap strikes must be supported by the font owner");
+
+namespace
+{
+/** The HUD's own texture options, so a crisp request shares the texture the
+    HUD draws; a smooth one asks for bilinear filtering instead. */
+FWoTRuntimeTextureOptions WoTOnboardingTextureOptions(bool bSmooth)
+{
+	FWoTRuntimeTextureOptions Options;
+	if (bSmooth)
+	{
+		Options.Filter = TF_Bilinear;
+	}
+	return Options;
+}
+
+/** The original UI art the onboarding seam names. The item-info window's
+    textures live in the WOT package's UI group, which imports under
+    Textures/WOT like every WOT texture (BindStatusIcons builds the same
+    path); the gold selected-slot frame is the one the HUD draws, read from
+    the inventory default that names it. */
+UTexture2D* WoTOnboardingRetailTexture(FName Name, bool bSmooth)
+{
+	FSoftObjectPath Path;
+	if (Name == FName(TEXT("StatusIconFrame")))
+	{
+		Path = GetDefault<AWoTInventory>()->StatusIconFrame.ToSoftObjectPath();
+	}
+	else if (Name == FName(TEXT("InfoBoxC1")) || Name == FName(TEXT("InfoBoxC2"))
+		|| Name == FName(TEXT("IconMask")))
+	{
+		const FString Leaf = Name.ToString();
+		Path = FSoftObjectPath(FString::Printf(
+			TEXT("/Game/WoT/Textures/WOT/%s.%s"), *Leaf, *Leaf));
+	}
+	return Path.IsNull() ? nullptr : UWoTRuntimeAssets::ResolveTexturePath(
+		Path, WoTOnboardingTextureOptions(bSmooth));
+}
+
+UTexture2D* WoTOnboardingItemIcon(FName ClassName, bool bSmooth)
+{
+	const AWoTInventory* Default = AWoTInventory::FindDefaultByOriginalName(ClassName);
+	return Default && !Default->StatusIcon.IsNull()
+		? UWoTRuntimeAssets::ResolveTexturePath(Default->StatusIcon.ToSoftObjectPath(),
+			WoTOnboardingTextureOptions(bSmooth))
+		: nullptr;
+}
+
+/** The local player's controller: the onboarding windows draw on its
+    viewport, over the front end and over a match alike. */
+APlayerController* WoTOnboardingLocalController()
+{
+	UGameViewportClient* Viewport = GEngine ? GEngine->GameViewport.Get() : nullptr;
+	UWorld* World = Viewport ? Viewport->GetWorld() : nullptr;
+	return World ? World->GetFirstPlayerController() : nullptr;
+}
+} // namespace
+
 class FWoTGameModule final : public FDefaultGameModuleImpl
 {
 public:
@@ -66,37 +133,40 @@ public:
 					FWoTRetailText::FindSectionValue(Section, Property);
 				return Value ? *Value : FString();
 			};
-		// Onboarding seam: the retail menu chrome, resolved lazily per call so
-		// nothing here touches fonts or payloads at startup. Unset while the
-		// guarded faces are unavailable or revoked — a consumer then draws
-		// with its own fallback, exactly like the in-game menu does.
+		// Onboarding seam: the original game's faces, resolved lazily per call
+		// so nothing here touches fonts or payloads at startup. The exact
+		// bitmap strikes come from a presentation authority for the local
+		// player, as the help and in-game menu windows take theirs; the
+		// widget keeps it alive through the chrome and collapses with its
+		// revocation. Unset while the guarded faces are unavailable or
+		// revoked; a consumer then draws with its own fallback.
 		FWoTOnboardingSeams::Get().ResolveMenuChrome =
 			[]() -> TOptional<FWoTOnboardingMenuChrome>
 			{
-				const TOptional<FWoTRequiredMenuFonts> Fonts =
-					FWoTMenuStyle::Get().ResolveRequiredFonts();
-				if (!Fonts.IsSet())
+				APlayerController* Controller = WoTOnboardingLocalController();
+				const TSharedPtr<FWoTFrontEndPresentationAuthority> Authority =
+					Controller ? FWoTFrontEndPresentationAuthority::Create(Controller)
+					           : TSharedPtr<FWoTFrontEndPresentationAuthority>();
+				if (!Authority.IsValid() || !Authority->IsReady())
 				{
 					return TOptional<FWoTOnboardingMenuChrome>();
 				}
 				FWoTOnboardingMenuChrome Chrome;
-				Chrome.TitleFont = Fonts->Title;
-				Chrome.BodyFont = Fonts->List;
-				Chrome.ItalicFont = FWoTMenuStyle::Get().ItalicFont();
-				Chrome.SmallFont = FWoTMenuStyle::Get().SmallFont();
-				Chrome.Background = FWoTMenuStyle::Get().Background();
-				Chrome.Frame = FWoTMenuStyle::Get().Frame();
-				Chrome.Blackout = FWoTMenuStyle::Get().Blackout();
-				Chrome.Separator = FWoTMenuStyle::Get().Separator();
-				Chrome.Foreground = FWoTMenuStyle::MenuColor(false);
-				Chrome.Accent = FWoTMenuStyle::SelectedColor();
-				Chrome.BindWidget =
-					[Captured = Fonts.GetValue()](const TSharedRef<SWidget>& Widget)
-					{
-						Captured.BindWidget(Widget);
-					};
+				Chrome.PixelFont = [Authority](FName Face, int32 PixelScale)
+				{
+					return Authority->MultiplayerStrike(
+						Face, PixelScale, static_cast<float>(PixelScale));
+				};
+				Chrome.BindWidget = [Authority](const TSharedRef<SWidget>& Widget)
+				{
+					Authority->BindWidget(Widget);
+				};
 				return Chrome;
 			};
+		// Onboarding seams: the original UI art and the item icons, resolved
+		// the way the HUD and the item-info window resolve theirs.
+		FWoTOnboardingSeams::Get().ResolveRetailTexture = &WoTOnboardingRetailTexture;
+		FWoTOnboardingSeams::Get().ResolveItemIcon = &WoTOnboardingItemIcon;
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
 		WoTStereoNonRealtimeAudio::Register();
 #endif

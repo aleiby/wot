@@ -28,6 +28,8 @@ public:
 	// Convert the port's WoT-prefixed C++ class name back to the shipped script
 	// class name used by HandSet/HandInfo.
 	static FName GetHandSetItemName(const AWoTInventory* Item);
+	// The same name for an item class: its native leaf, WoT prefix dropped.
+	static FName GetHandSetItemClassName(const UClass* ItemClass);
 
 	// Pawn.AddInventory + WOTPlayer auto-select of the first artifact
 	bool AddInventory(AWoTInventory* NewItem);
