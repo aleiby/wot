@@ -16,6 +16,10 @@
 
 namespace
 {
+// Keep the base window readable, with room around it for desktop controls.
+const FIntPoint WoTBaseWindowSize(1280, 720);
+constexpr double WoTWindowWorkAreaFraction = 0.9;
+
 struct FBindingDefinition
 {
 	EWoTManagedBinding Id;
@@ -348,9 +352,43 @@ bool FWoTGameSettings::IsEditableKey(const FKey& Key)
 	return ::IsEditableKey(Key);
 }
 
-FWoTGameSettings FWoTGameSettings::Defaults()
+FIntPoint FWoTGameSettings::DefaultWindowSize(const FIntPoint& WorkAreaPixels,
+	float DpiScale)
+{
+	if (WorkAreaPixels.X <= 0 || WorkAreaPixels.Y <= 0
+		|| !FMath::IsFinite(DpiScale) || DpiScale <= 0.0f)
+	{
+		return WoTBaseWindowSize;
+	}
+	const FWoTEarlyUILimits Limits = FWoTEarlyUILimits::Production();
+	const double MaxScale = FMath::Min(
+		static_cast<double>(Limits.MaxWidth) / WoTBaseWindowSize.X,
+		static_cast<double>(Limits.MaxHeight) / WoTBaseWindowSize.Y);
+	double WindowScale = FMath::Clamp(static_cast<double>(DpiScale), 1.0, MaxScale);
+	FIntPoint WindowSize(
+		2 * FMath::FloorToInt(WoTBaseWindowSize.X * WindowScale / 2.0),
+		2 * FMath::FloorToInt(WoTBaseWindowSize.Y * WindowScale / 2.0));
+	const double AvailableWidth = WorkAreaPixels.X * WoTWindowWorkAreaFraction;
+	const double AvailableHeight = WorkAreaPixels.Y * WoTWindowWorkAreaFraction;
+	if (WindowSize.X > AvailableWidth || WindowSize.Y > AvailableHeight)
+	{
+		WindowScale = FMath::Clamp(FMath::Min(
+			AvailableWidth / WoTBaseWindowSize.X,
+			AvailableHeight / WoTBaseWindowSize.Y), 1.0, MaxScale);
+		WindowSize = FIntPoint(
+			2 * FMath::FloorToInt(WoTBaseWindowSize.X * WindowScale / 2.0),
+			2 * FMath::FloorToInt(WoTBaseWindowSize.Y * WindowScale / 2.0));
+	}
+	return WindowSize;
+}
+
+FWoTGameSettings FWoTGameSettings::Defaults(const FIntPoint& WorkAreaPixels,
+	float DpiScale)
 {
 	FWoTGameSettings Settings;
+	const FIntPoint WindowSize = DefaultWindowSize(WorkAreaPixels, DpiScale);
+	Settings.Width = static_cast<uint16>(WindowSize.X);
+	Settings.Height = static_cast<uint16>(WindowSize.Y);
 	for (const FBindingDefinition& Entry : BindingDefinitions)
 	{
 		Settings.Bindings.Add({Entry.Id, Entry.Primary, Entry.Secondary});
@@ -505,7 +543,7 @@ void FWoTGameSettings::ApplyToInput(UPlayerInput& Input) const
 FString FWoTGameSettingsCodec::Serialize(const FWoTGameSettings& Settings)
 {
 	FString Text = FString::Printf(
-		TEXT("GameSettingsVersion=10\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
+		TEXT("GameSettingsVersion=11\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
 		TEXT("GameWidth=%u\nGameHeight=%u\nGameWindowMode=%s\nGameVSync=%d\n")
 		TEXT("GameGraphicsQuality=%u\nGameFrameRateLimit=%u\nGameMasterVolume=%.9g\n")
 		TEXT("GameAlwaysMouseLook=%d\nGameAutoSlopeLook=%d\nGamePlayerID=%d\n")
@@ -536,7 +574,8 @@ FString FWoTGameSettingsCodec::Serialize(const FWoTGameSettings& Settings)
 }
 
 bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
-	FWoTGameSettings& Out, FString& OutError)
+	FWoTGameSettings& Out, FString& OutError, const FIntPoint& WorkAreaPixels,
+	float DpiScale)
 {
 	OutError.Reset();
 	if (Bytes.Num() > static_cast<int32>(FWoTEarlyUILimits::Production().MaxSerializedBytes))
@@ -550,7 +589,7 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 	const FString Source(Converted.Length(), Converted.Get());
 	if (!Source.IsEmpty() && !Source.EndsWith(TEXT("\n")))
 	{ OutError = TEXT("Preference record is incomplete."); return false; }
-	FWoTGameSettings Candidate = FWoTGameSettings::Defaults();
+	FWoTGameSettings Candidate = FWoTGameSettings::Defaults(WorkAreaPixels, DpiScale);
 	TSet<FString> Seen;
 	bool bHasGameRecord = false;
 	uint32 SettingsVersion = 0;
@@ -578,7 +617,8 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 					&& SettingsVersion != 3 && SettingsVersion != 4
 					&& SettingsVersion != 5 && SettingsVersion != 6
 					&& SettingsVersion != 7 && SettingsVersion != 8
-					&& SettingsVersion != 9 && SettingsVersion != 10))
+					&& SettingsVersion != 9 && SettingsVersion != 10
+					&& SettingsVersion != 11))
 			{
 				OutError = TEXT("Unsupported game settings version.");
 				return false;
@@ -678,7 +718,7 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 	}
 	if (bHasGameRecord)
 	{
-		const bool bCompleteCurrent = SettingsVersion == 10
+		const bool bCompleteCurrent = (SettingsVersion == 10 || SettingsVersion == 11)
 			&& Seen.Num() == BindingCount + 22;
 		const bool bCompleteVersion9 = SettingsVersion == 9
 			&& Seen.Num() == BindingCount + 19;
@@ -898,6 +938,16 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 		// Controllers never worked before version 10, so an old "off" was never a
 		// real choice. Turn the joystick on once; version 10 files keep theirs.
 		Candidate.bJoystickEnabled = true;
+	}
+	if (bHasGameRecord && SettingsVersion <= 10
+		&& Candidate.Width == WoTBaseWindowSize.X
+		&& Candidate.Height == WoTBaseWindowSize.Y
+		&& Candidate.WindowMode == EWoTWindowMode::Windowed)
+	{
+		// Replace the old fixed window default once; keep every other saved size.
+		const FIntPoint WindowSize = FWoTGameSettings::DefaultWindowSize(WorkAreaPixels, DpiScale);
+		Candidate.Width = static_cast<uint16>(WindowSize.X);
+		Candidate.Height = static_cast<uint16>(WindowSize.Y);
 	}
 	if (!Candidate.Validate(OutError)) { return false; }
 	Out = MoveTemp(Candidate);

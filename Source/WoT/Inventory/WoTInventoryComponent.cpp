@@ -25,7 +25,12 @@ void UWoTInventoryComponent::GetLifetimeReplicatedProps(
 
 FName UWoTInventoryComponent::GetHandSetItemName(const AWoTInventory* Item)
 {
-	if (!Item)
+	return Item ? GetHandSetItemClassName(Item->GetClass()) : NAME_None;
+}
+
+FName UWoTInventoryComponent::GetHandSetItemClassName(const UClass* ItemClass)
+{
+	if (!ItemClass)
 	{
 		return NAME_None;
 	}
@@ -33,7 +38,6 @@ FName UWoTInventoryComponent::GetHandSetItemName(const AWoTInventory* Item)
 	// table names the native AngrealInv* leaf. Peel generated classes before applying
 	// the port's WoT-prefix normalization. IsNative() rather than ClassGeneratedBy:
 	// the latter is editor-only data (absent in game targets and cooked builds).
-	const UClass* ItemClass = Item->GetClass();
 	while (ItemClass && !ItemClass->IsNative() && ItemClass->GetSuperClass())
 	{
 		ItemClass = ItemClass->GetSuperClass();

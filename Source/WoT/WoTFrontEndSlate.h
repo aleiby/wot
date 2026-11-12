@@ -8,6 +8,7 @@
 #include "Widgets/Views/SListView.h"
 #include "UI/WoTUpdateBanner.h"
 #include "WoTFrontEndViewModel.h"
+#include "WoTOnboardingSeams.h"
 
 class AWoTFrontEndPlayerController;
 class SBox;
@@ -304,6 +305,9 @@ private:
 	FReply Quit();
 	FReply ActivateMainMenuEntry(int32 EntryIndex);
 	void SelectMainMenuEntry(int32 EntryIndex);
+	/** Retail entries plus the seam extension rows captured at the last main
+	    screen build. */
+	int32 MainMenuTotalEntryCount() const;
 	FReply SavePlayerConfig();
 	FReply CancelPlayerConfig();
 	FReply BackFromPlay();
@@ -554,6 +558,10 @@ private:
 	TSharedPtr<FWoTFrontEndBackInputProcessor> BackInputProcessor;
 	TUniquePtr<FWoTFrontEndMenuSelection> MainMenuSelection;
 	TArray<TSharedPtr<SWoTMenuButton>> MainMenuButtons;
+	/** Seam menu rows as captured when the main screen was last built; the
+	    appended buttons and extension activation read these, never the live
+	    registry, and Tick rebuilds the screen when the registry drifts. */
+	TArray<FWoTOnboardingRow> MainMenuExtensionRows;
 	TArray<FMapItem> MapItems;
 	FMapItem SelectedMapItem;
 	TSharedPtr<SWoTListCombo> MapComboBox;

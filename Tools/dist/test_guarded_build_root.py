@@ -169,6 +169,36 @@ class PrepareTests(BuildRootTestCase):
             result["reset"], "no build-root state beside existing UBT outputs")
         self.assertFalse(orphan.exists())
 
+    def test_plugin_outputs_are_ubt_outputs(self):
+        plugin = self.root / "Plugins" / "P"
+        descriptor = self.write(plugin / "P.uplugin", "{}")
+        source = self.write(plugin / "Source" / "P" / "P.cpp", "int p;\n")
+        obj = self.write(plugin / "Intermediate" / "P.obj", b"o")
+        dll = self.write(plugin / "Binaries" / "Win64" / "P.dll", b"x")
+        # Plugin outputs alone, with no state file: provenance unknown.
+        result = br.prepare(self.root, "Win64", IDENTITY)
+        self.assertEqual(
+            result["reset"], "no build-root state beside existing UBT outputs")
+        self.assertFalse(obj.exists() or dll.exists())
+        self.assertTrue(descriptor.is_file() and source.is_file())
+        # An identity change wipes them like the project's own outputs.
+        dll = self.write(plugin / "Binaries" / "Win64" / "P.dll", b"x")
+        result = br.prepare(self.root, "Win64",
+                            dict(IDENTITY, commit="0" * 40))
+        self.assertIsNotNone(result["reset"])
+        self.assertFalse(dll.exists())
+        self.assertTrue(descriptor.is_file() and source.is_file())
+
+    def test_only_directories_beside_a_descriptor_are_plugin_outputs(self):
+        self.write(self.root / "Plugins" / "P" / "P.uplugin", "{}")
+        self.write(self.root / "Plugins" / "Group" / "Q" / "Q.uplugin", "{}")
+        owned = {path.relative_to(self.root).as_posix()
+                 for path in br._ubt_owned_paths(self.root)}
+        self.assertEqual(owned, {
+            "Intermediate", "Binaries",
+            "Plugins/P/Intermediate", "Plugins/P/Binaries",
+            "Plugins/Group/Q/Intermediate", "Plugins/Group/Q/Binaries"})
+
     def test_clock_behind_last_ubt_exit_resets(self):
         br.prepare(self.root, "Win64", IDENTITY)
         obj = self.write(self.root / "Intermediate" / "a.obj", b"o")
@@ -226,6 +256,36 @@ class MirrorTests(BuildRootTestCase):
         br.mirror(self.iso, self.root, clock=clock, sleep=clock.sleep)
         self.assertFalse((self.root / "Tools").exists())
         self.assertFalse((self.root / "Content").exists())
+
+    def test_plugin_ubt_outputs_are_never_mirrored_either_way(self):
+        self.seed_iso()
+        iso_plugin = self.iso / "Plugins" / "P"
+        self.write(iso_plugin / "P.uplugin", "{}")
+        self.write(iso_plugin / "Source" / "P" / "P.cpp", "int p;\n")
+        # Seeded or transferred editor modules and an ISO build's objects.
+        self.write(iso_plugin / "Binaries" / "Win64" / "UnrealEditor-P.dll",
+                   b"seeded")
+        self.write(iso_plugin / "Intermediate" / "P.obj", b"iso object")
+        clock = self.prepared()
+        br.mirror(self.iso, self.root, clock=clock, sleep=clock.sleep)
+        root_plugin = self.root / "Plugins" / "P"
+        self.assertTrue((root_plugin / "Source" / "P" / "P.cpp").is_file())
+        self.assertFalse((root_plugin / "Binaries").exists())
+        self.assertFalse((root_plugin / "Intermediate").exists())
+        # UBT's own plugin outputs in the root survive the next mirror.
+        built = self.write(
+            root_plugin / "Binaries" / "Win64" / "UnrealEditor-P.dll", b"ubt")
+        obj = self.write(root_plugin / "Intermediate" / "P.obj", b"ubt")
+        result = br.mirror(self.iso, self.root, clock=clock, sleep=clock.sleep)
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(built.read_bytes(), b"ubt")
+        self.assertEqual(obj.read_bytes(), b"ubt")
+        self.assertEqual(br.tree_digest(self.iso), br.tree_digest(self.root))
+        # A Binaries folder that is not beside a descriptor is plain input.
+        self.write(iso_plugin / "Source" / "Binaries" / "data.txt", "x")
+        br.mirror(self.iso, self.root, clock=clock, sleep=clock.sleep)
+        self.assertTrue(
+            (root_plugin / "Source" / "Binaries" / "data.txt").is_file())
 
     def test_unchanged_inputs_keep_their_timestamps(self):
         self.seed_iso()
@@ -402,6 +462,64 @@ class TransferTests(BuildRootTestCase):
         on_disk = json.loads(Path(result["path"]).read_text())
         self.assertEqual(on_disk, receipt)
 
+    def test_plugin_editor_modules_are_transferred_into_the_iso(self):
+        self.build_products()
+        for base in (self.root, self.iso):
+            self.write(base / "Plugins/P/P.uplugin", '{"Modules": []}')
+        self.write(self.root / "Plugins/P/Binaries/Win64/UnrealEditor-P.dll",
+                   fake_pe(b"plugin"))
+        self.write(self.root / "Plugins/P/Binaries/Win64/UnrealEditor.modules",
+                   '{"BuildId": "build-id-1"}')
+        self.ubt_receipt(
+            target="WoTEditor", configuration="Development",
+            products=[
+                {"Path": "$(ProjectDir)/Binaries/Win64/WoT-Win64-Test.exe",
+                 "Type": "Executable"},
+                {"Path": "$(ProjectDir)/Plugins/P/Binaries/Win64/"
+                         "UnrealEditor-P.dll", "Type": "DynamicLibrary"},
+                {"Path": "$(ProjectDir)/Plugins/P/Binaries/Win64/"
+                         "UnrealEditor.modules", "Type": "RequiredResource"},
+            ],
+            runtime=[{"Path": "$(ProjectDir)/Plugins/P/P.uplugin",
+                      "Type": "UFS"}])
+        result = self.transfer(target="WoTEditor", configuration="Development")
+        receipt = result["receipt"]
+        self.assertIn("Plugins/P/Binaries/Win64/UnrealEditor-P.dll",
+                      [row["path"] for row in receipt["products"]])
+        self.assertEqual(
+            (self.iso / "Plugins/P/Binaries/Win64/UnrealEditor-P.dll")
+            .read_bytes(), fake_pe(b"plugin"))
+        self.assertEqual(
+            [row["path"] for row in receipt["runtime_dependencies_verified"]],
+            ["Plugins/P/P.uplugin"])
+
+    def test_plugin_products_fail_closed(self):
+        self.build_products()
+        self.write(self.root / "Plugins/P/P.uplugin", "{}")
+        self.write(self.root / "Plugins/P/Binaries/Win64/UnrealEditor-P.dll",
+                   fake_pe(b"plugin"))
+        dll = {"Path": "$(ProjectDir)/Plugins/P/Binaries/Win64/"
+                       "UnrealEditor-P.dll", "Type": "DynamicLibrary"}
+        with self.subTest("no plugin descriptor in the ISO"):
+            self.ubt_receipt(products=[dll], runtime=[])
+            with self.assertRaisesRegex(br.BuildRootError, "descriptor"):
+                self.transfer()
+        self.write(self.iso / "Plugins/P/P.uplugin", "{}")
+        for label, path in (
+                ("another platform",
+                 "$(ProjectDir)/Plugins/P/Binaries/Mac/UnrealEditor-P.dylib"),
+                ("plugin content",
+                 "$(ProjectDir)/Plugins/P/Content/x.uasset"),
+                ("plugin root file", "$(ProjectDir)/Plugins/P/x.dll"),
+                ("Binaries without a file",
+                 "$(ProjectDir)/Plugins/P/Binaries/Win64")):
+            with self.subTest(label):
+                self.ubt_receipt(products=[{"Path": path, "Type": "x"}],
+                                 runtime=[])
+                with self.assertRaisesRegex(br.BuildRootError,
+                                            "outside Binaries"):
+                    self.transfer()
+
     def test_transfer_fails_closed(self):
         self.build_products()
         self.ubt_receipt(configuration="Shipping")
@@ -501,6 +619,21 @@ class InFlightTests(BuildRootTestCase):
         self.assertEqual(
             br.read_state(self.root)[br.IN_FLIGHT_KEY]["started_epoch"],
             start + 300)
+
+    def test_killed_run_loses_the_plugin_outputs_it_wrote(self):
+        self.write(self.root / "Plugins/P/P.uplugin", "{}")
+        older = self.write(self.root / "Plugins/P/Intermediate/old.obj", b"o")
+        start = self.now + 100
+        br.begin_ubt(self.root, "WoTEditor", clock=lambda: start)
+        partial_dll = self.written_at(
+            "Plugins/P/Binaries/Win64/UnrealEditor-P.dll", start + 30)
+        partial_obj = self.written_at("Plugins/P/Intermediate/new.obj",
+                                      start + 1)
+        recovered = br.begin_ubt(self.root, "WoTEditor",
+                                 clock=lambda: start + 300)
+        self.assertEqual(recovered["deleted"], 2)
+        self.assertFalse(partial_dll.exists() or partial_obj.exists())
+        self.assertTrue(older.is_file())
 
     def test_failed_exit_keeps_the_marker(self):
         br.begin_ubt(self.root, "WoT-Test", clock=lambda: self.now + 100)

@@ -97,7 +97,7 @@ TArray<uint8> WoTBuildBdf(const FWoTRuntimeFontResource& Font,
 #if WITH_AUTOMATION_TESTS
 	++GWoTBdfConstructionAttempts;
 #endif
-	if (PixelScale != 1 && PixelScale != 2) return {};
+	if (PixelScale < 1 || PixelScale > FWoTFrontEndFontOwner::MaxIntegerStrike) return {};
 	int32 MaximumWidth = 1;
 	const int64 Descent = static_cast<int64>(Font.LineHeight()) - Font.Baseline();
 	if (Font.LineHeight() == 0
@@ -281,9 +281,10 @@ void WoTFlushSlateFontPair(UFont* Font, UFontFace* Face)
 
 void WoTFlushSlateFontResource(FWoTFrontEndFontResource& Resource)
 {
-	WoTFlushSlateFontPair(Resource.NativeMultiplayerFont(),
-		Resource.NativeMultiplayerFaceObject());
-	WoTFlushSlateFontPair(Resource.DoubledFont(), Resource.DoubledFaceObject());
+	for (int32 PixelScale = 1; PixelScale <= FWoTFrontEndFontOwner::MaxIntegerStrike;
+		++PixelScale)
+		WoTFlushSlateFontPair(Resource.IntegerScaledFont(PixelScale),
+			Resource.IntegerScaledFaceObject(PixelScale));
 	WoTFlushSlateFontPair(Resource.Font(), Resource.SlateFaceObject());
 }
 
@@ -697,10 +698,10 @@ TWoTBootstrapResult<FSlateFontInfo> FWoTFrontEndFontOwner::ResolveIntegerScaled(
 	FName Face, int32 PixelScale)
 {
 	using FResult = TWoTBootstrapResult<FSlateFontInfo>;
-	if (PixelScale != 1 && PixelScale != 2)
+	if (PixelScale < 1 || PixelScale > MaxIntegerStrike)
 		return FResult::Error(MakeWoTBootstrapError(
 			EWoTBootstrapError::SizeLimit,
-			TEXT("multiplayer bitmap scale must be one or two")));
+			TEXT("multiplayer bitmap scale must be one to eight")));
 #if WITH_AUTOMATION_TESTS
 	if (GWoTForceOptionalVariantFailure)
 		return FResult::Error(MakeWoTBootstrapError(
@@ -723,10 +724,9 @@ TWoTBootstrapResult<FSlateFontInfo> FWoTFrontEndFontOwner::ResolveIntegerScaled(
 		return FResult::Error(MakeWoTBootstrapError(
 			EWoTBootstrapError::SizeLimit,
 			TEXT("multiplayer bitmap strike exceeds Slate metrics")));
-	TStrongObjectPtr<UFontFace>& VariantFace = PixelScale == 1
-		? Resource.NativeSlateFace : Resource.DoubledSlateFace;
-	TStrongObjectPtr<UFont>& VariantFont = PixelScale == 1
-		? Resource.NativeSlateFont : Resource.DoubledSlateFont;
+	auto& IntegerStrike = Resource.IntegerStrikes.FindOrAdd(PixelScale);
+	TStrongObjectPtr<UFontFace>& VariantFace = IntegerStrike.FaceObject;
+	TStrongObjectPtr<UFont>& VariantFont = IntegerStrike.FontObject;
 	if (VariantFont.Get() != nullptr)
 	{
 		FSlateFontInfo Cached(
@@ -744,7 +744,7 @@ TWoTBootstrapResult<FSlateFontInfo> FWoTFrontEndFontOwner::ResolveIntegerScaled(
 	UFontFace* FontFace = NewObject<UFontFace>(GetTransientPackage());
 	FontFace->SourceFilename = PixelScale == 1
 		? TEXT("authenticated-font-v2-native.bdf")
-		: TEXT("authenticated-font-v2-x2.bdf");
+		: FString::Printf(TEXT("authenticated-font-v2-x%d.bdf"), PixelScale);
 	FontFace->Hinting = EFontHinting::None;
 	FontFace->LoadingPolicy = EFontLoadingPolicy::Inline;
 	FontFace->FontFaceData = FFontFaceData::MakeFontFaceData(MoveTemp(Bdf));

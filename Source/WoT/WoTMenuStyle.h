@@ -129,10 +129,14 @@ public:
 	int32 GetSelectedIndex() const { return SelectedIndex; }
 	bool MoveTo(int32 NewIndex);
 	bool Activate(int32 Index, TFunctionRef<void()> Action);
+	/** The retail main menu has four entries; seam extension rows appended to
+	    the list raise the count (and an empty registry keeps it at four). A
+	    shrinking count clamps the selection back into range. */
+	void SetEntryCount(int32 NewEntryCount);
 
 private:
-	static constexpr int32 EntryCount = 4;
 	TSharedRef<IWoTFrontEndFeedbackSink> Feedback;
+	int32 EntryCount = 4;
 	int32 SelectedIndex = 0;
 };
 
@@ -218,6 +222,9 @@ public:
 	virtual bool IsReady() const override;
 	bool IsReadyForFeedback() const { return IsReady(); }
 	const FWoTRequiredMenuFonts* RequiredFonts() const;
+	/** Face as the exact PixelScale strike (1 to FWoTFrontEndFontOwner::MaxIntegerStrike),
+	 * sized to draw 1:1 where one Slate unit covers RenderScale screen pixels. */
+	FSlateFontInfo MultiplayerStrike(FName Face, int32 PixelScale, float RenderScale) const;
 	FSlateFontInfo MultiplayerFont(FName Face, float ViewportScale,
 		int32 MinimumPixelScale = 1) const;
 	FText Text(FName Id) const;

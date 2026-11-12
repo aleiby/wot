@@ -74,7 +74,9 @@ struct FWoTGameSettings
 	uint8 GoreDetailLevel = 2;
 	TArray<FWoTManagedKeyBinding> Bindings;
 
-	static FWoTGameSettings Defaults();
+	static FIntPoint DefaultWindowSize(const FIntPoint& WorkAreaPixels, float DpiScale);
+	static FWoTGameSettings Defaults(
+		const FIntPoint& WorkAreaPixels = FIntPoint::ZeroValue, float DpiScale = 1.0f);
 	bool Validate(FString& OutError) const;
 	bool operator==(const FWoTGameSettings& Other) const;
 	FWoTManagedKeyBinding* FindBinding(EWoTManagedBinding Action);
@@ -94,7 +96,8 @@ struct FWoTGameSettings
 struct FWoTGameSettingsCodec
 {
 	static bool Parse(TConstArrayView<uint8> Bytes, FWoTGameSettings& Out,
-		FString& OutError);
+		FString& OutError, const FIntPoint& WorkAreaPixels = FIntPoint::ZeroValue,
+		float DpiScale = 1.0f);
 	static FString Serialize(const FWoTGameSettings& Settings);
 };
 

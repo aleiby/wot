@@ -26,9 +26,14 @@ public:
 	UPROPERTY(Config)
 	bool bEnableOnboardingAids = bDefaultEnableOnboardingAids;
 
-	/** First-pickup info cards (handler arrives with Task 6). */
+	/** First-pickup info cards. */
 	UPROPERTY(Config)
 	bool bShowFirstPickupCards = bDefaultShowFirstPickupCards;
+
+	/** Item classes whose first-pickup card has shown: each class gets one
+	    card per profile. Not a toggle: changes persist without OnChanged. */
+	UPROPERTY(Config)
+	TArray<FName> SeenPickupCards;
 
 	/** Death-recap counter hints (handler arrives with Task 7). */
 	UPROPERTY(Config)
@@ -48,7 +53,15 @@ public:
 	void ToggleShowFirstPickupCards();
 	void ToggleShowDeathCounterHints();
 
-	/** Fires after any persisted change. The settings rows re-read live values
+	bool HasSeenPickupCard(FName ClassName) const;
+	/** Records ClassName's card as shown and persists it; false (no write)
+	    when it already was, or for NAME_None. */
+	bool MarkPickupCardSeen(FName ClassName);
+	/** Replaces the whole seen list and persists it (specs restore through
+	    this; empty brings every card back). */
+	void SetSeenPickupCards(const TArray<FName>& ClassNames);
+
+	/** Fires after any persisted toggle change. The settings rows re-read live values
 	    each draw and need no subscription; this is for the aid handlers of
 	    Tasks 5-7, which tear widgets down or up when a toggle flips. */
 	FSimpleMulticastDelegate OnChanged;

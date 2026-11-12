@@ -1752,6 +1752,35 @@ class FunnelHarnessTests(unittest.TestCase):
             ):
                 funnel._resolve_release(release)
 
+    def test_stale_source_snapshot_is_reported_before_cooked_path_rules(self):
+        release = self.make_release()
+        manifest = json.loads(release.read_text(encoding="utf-8"))
+        wrapper = manifest["cooked_container_inventory"]
+        receipt = wrapper["receipt"]
+        receipt["paths"] = sorted(
+            receipt["paths"] + ["../../../WoT/Plugins/Other/Other.uplugin"])
+        receipt["path_count"] = len(receipt["paths"])
+        receipt["containers"][0]["entry_count"] = len(receipt["paths"])
+        wrapper["path_count"] = receipt["path_count"]
+        wrapper["receipt_sha256"] = self._sha(
+            funnel._pretty_json_bytes(receipt))
+        release.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._resolve_release(release, require_current_source=False)
+
+        current = {
+            "format": funnel.SOURCE_SNAPSHOT_FORMAT,
+            "git_commit": "different",
+            "sha256": "f" * 64,
+        }
+        with mock.patch.object(
+            funnel, "_current_source_snapshot", return_value=current
+        ):
+            with self.assertRaisesRegex(
+                funnel.FunnelFailure, "build_stripped_pak.py --guarded"
+            ):
+                funnel._resolve_release(release)
+
     def test_development_source_drift_override_only_relaxes_snapshot_check(self):
         release = self.make_release()
         args = mock.Mock(
@@ -3545,6 +3574,19 @@ class LauncherUpdateHandoffTests(unittest.TestCase):
 
 
 
+class SourceSnapshotLockstepTests(unittest.TestCase):
+    """The funnel refuses a stale release by recomputing the packager's
+    source snapshot, so both must bind the same paths (code plugins too)."""
+
+    def test_funnel_and_packager_compute_the_same_snapshot(self):
+        packager = funnel.build_stripped_pak
+        current = funnel._current_source_snapshot()
+        self.assertEqual(current["paths"],
+                         list(packager.SOURCE_SNAPSHOT_PATHS))
+        self.assertIn("Plugins/WoTOnboarding", current["paths"])
+        self.assertEqual(current, packager._source_snapshot(packager.REPO))
+
+
 class ReleaseCookedPathDescriptorTests(unittest.TestCase):
     """The funnel's re-derived census applies the packager's descriptor rule."""
 
@@ -3567,6 +3609,23 @@ class ReleaseCookedPathDescriptorTests(unittest.TestCase):
         with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
             funnel._validate_release_cooked_paths(
                 self._paths("../../../WoT/Plugins/Other/Other.uplugin"))
+
+    def test_allows_the_optional_onboarding_descriptor(self):
+        baseline = funnel._validate_release_cooked_paths(self._paths())
+        self.assertEqual(funnel._validate_release_cooked_paths(self._paths(
+            "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")),
+            baseline)
+
+    def test_onboarding_descriptor_never_stands_in_for_the_shell(self):
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._validate_release_cooked_paths(self._paths(
+                "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin",
+                drop_shell=True))
+
+    def test_refuses_an_onboarding_descriptor_elsewhere(self):
+        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+            funnel._validate_release_cooked_paths(self._paths(
+                "../../../WoT/Plugins/Other/WoTOnboarding.uplugin"))
 
 if __name__ == "__main__":
     unittest.main()

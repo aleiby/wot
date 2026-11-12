@@ -4,6 +4,7 @@
 #include "Assets/WoTRetailIdentity.h"
 
 #include "WoTGameMode.h"
+#include "WoTKillingItem.h"
 #include "WoTPlayerController.h"
 #include "WoTPlayerState.h"
 #include "WoTPreferencesSubsystem.h"
@@ -1204,6 +1205,8 @@ int32 AWoTCharacter::ApplyDamageChain(int32 Damage, FName WoTDamageType,
 
 	if (Health <= 0 && !bAlreadyDead)
 	{
+		// Read-only, for the optional death recap; nothing in the simulation uses it.
+		KillingItemName = WoTKillingItem::Resolve(*this, WoTDamageType, DamageCauser);
 		Died(EventInstigator, WoTDamageType, HitLocation);
 	}
 	else if (Health > 0)
@@ -2929,13 +2932,14 @@ void AWoTCharacter::Tick(float DeltaSeconds)
 	}
 }
 
-void AWoTCharacter::SetSuicideInstigator(APawn* Other)
+void AWoTCharacter::SetSuicideInstigator(APawn* Other, const AWoTInventory* Item)
 {
 	// WOTPawn.SetSuicideInstigator: remember who displaced us and when, so ScoreKill can
 	// credit them if we die in the next few seconds. Store the controller (the stable player
 	// identity across a respawn) rather than the pawn, which the port replaces on death.
 	SuicideInstigator = Other ? Other->GetController() : nullptr;
 	SuicideInstigationTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	SuicideInstigatorItemClass = IsValid(Item) ? Item->GetClass() : nullptr;
 }
 
 void AWoTCharacter::BeginPlay()

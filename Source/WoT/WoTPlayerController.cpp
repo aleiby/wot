@@ -41,6 +41,7 @@
 #include "Inventory/WoTInventory.h"
 #include "Inventory/WoTHandInfo.h"
 #include "Inventory/WoTHandSet.h"
+#include "Inventory/WoTInventoryComponent.h"
 #include "Inventory/WoTSeal.h"
 #include "Projectiles/WoTMashadarGuide.h"
 #include "Traps/WoTPortcullis.h"
@@ -500,6 +501,24 @@ bool AWoTPlayerController::PreTeleport()
 	return true;
 }
 
+namespace
+{
+// Keeper names this controller's windows use on the CloseClientWindows
+// onboarding seam. A keeper outside this set is a foreign (improvement
+// module) window: the retail windows then close, mirroring the original's
+// one-window-at-a-time discipline; the controller's own keepers change
+// nothing, because each retail open path already closes its peers directly.
+const FName WoTWindowKeeperItemInfo(TEXT("ItemInfo"));
+const FName WoTWindowKeeperHelp(TEXT("Help"));
+const FName WoTWindowKeeperInGameMenu(TEXT("InGameMenu"));
+
+bool WoTIsOwnWindowKeeper(FName Keeper)
+{
+	return Keeper == WoTWindowKeeperItemInfo || Keeper == WoTWindowKeeperHelp
+		|| Keeper == WoTWindowKeeperInGameMenu;
+}
+} // namespace
+
 void AWoTPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -513,6 +532,84 @@ void AWoTPlayerController::BeginPlay()
 				Preferences->ApplyGameSettingsToInput(*PlayerInput);
 			}
 		}
+	}
+	if (IsLocalController())
+	{
+		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		// A foreign exclusive window is opening: close the retail windows it
+		// would stack over. Weak-bound, and removed again on EndPlay.
+		OnboardingCloseWindowsHandle = Seams.CloseClientWindows.AddWeakLambda(
+			this, [this](FName Keeper)
+			{
+				if (!WoTIsOwnWindowKeeper(Keeper))
+				{
+					RemoveItemInfoWidget();
+					RemoveHelpWidget(/*bRestoreGameInput*/ true);
+				}
+			});
+		// UI input hosting for an improvement module's window, the same steps
+		// the retail overlays run through their owning controller. Cleared on
+		// EndPlay; the seam is then unbound and the call a no-op.
+		Seams.SetOverlayInput = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)](bool bOverlayOpen, TSharedPtr<SWidget> FocusWidget)
+			{
+				AWoTPlayerController* Controller = WeakThis.Get();
+				if (!Controller || !Controller->IsLocalController())
+				{
+					return;
+				}
+				if (bOverlayOpen)
+				{
+					// The flush synthesizes release edges for held gameplay
+					// keys before focus moves to Slate (the in-game menu's
+					// stuck-weave guard).
+					Controller->FlushPressedKeys();
+					Controller->bShowMouseCursor = true;
+					FInputModeUIOnly InputMode;
+					if (FocusWidget.IsValid())
+					{
+						InputMode.SetWidgetToFocus(FocusWidget);
+					}
+					InputMode.SetLockMouseToViewportBehavior(
+						EMouseLockMode::DoNotLock);
+					Controller->SetInputMode(InputMode);
+					if (FocusWidget.IsValid() && FSlateApplication::IsInitialized())
+					{
+						FSlateApplication::Get().SetKeyboardFocus(
+							FocusWidget, EFocusCause::SetDirectly);
+					}
+				}
+				else
+				{
+					Controller->bShowMouseCursor = false;
+					Controller->SetInputMode(FInputModeGameOnly());
+				}
+			};
+		// The retail windows that hold the screen, for an improvement module's
+		// passive overlays to wait on. Cleared on EndPlay with the input seam.
+		Seams.IsClientWindowOpen = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller && (Controller->IsItemInfoOpen()
+					|| Controller->IsHelpOpen() || Controller->InGameMenu.IsOpen());
+			};
+		// The selected hand's item (the one the item-info key describes) and
+		// the killing item while dead, so an improvement module's guide can
+		// open at either. Both queries are cleared on EndPlay.
+		Seams.SelectedItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? UWoTInventoryComponent::GetHandSetItemName(
+					Controller->GetSelectedItemForInfo()) : FName();
+			};
+		Seams.KilledByItemClass = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(
+			this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				return Controller ? Controller->GetKilledByItemWhileDead() : FName();
+			};
 	}
 	ClearProgressMessages();
 	BindProgressFailureDelegates();
@@ -1831,6 +1928,7 @@ void AWoTPlayerController::ExitPlayerState(EWoTPlayerStateMachineState OldState)
 	{
 		return;
 	}
+	KilledByItemClass = NAME_None;
 	GetWorldTimerManager().ClearTimer(DeathScoreboardAutoShowTimer);
 	bDeathScoreboardAutoShowActive = false;
 	bShowScores = false;
@@ -3039,6 +3137,11 @@ void AWoTPlayerController::ToggleInGameMenu()
 
 	if (InGameMenu.Open())
 	{
+		// The menu claims the screen: a foreign exclusive window (the
+		// onboarding guide) closes, as the retail windows above already did
+		// on this path.
+		FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(
+			WoTWindowKeeperInGameMenu);
 		CreateInGameMenuWidget();
 	}
 }
@@ -3889,6 +3992,9 @@ void AWoTPlayerController::ShowHelp()
 	{
 		return;
 	}
+	// Help follows WOTPlayer.ShowHelp's RemoveWindows discipline; the seam
+	// extends it to foreign windows (the onboarding guide closes too).
+	FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(WoTWindowKeeperHelp);
 	bHelpOpen = true;
 	CreateHelpWidget(Content);
 }
@@ -4067,6 +4173,10 @@ void AWoTPlayerController::ShowInventoryInfo()
 	{
 		return;
 	}
+	// Item info is about to open and stay: any foreign exclusive window (the
+	// onboarding guide) closes. Inert when nothing foreign listens.
+	FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(
+		WoTWindowKeeperItemInfo);
 	bItemInfoOpen = true;
 	ItemInfoItem = SelectedItem;
 	CreateItemInfoWidget(SelectedItem);
@@ -4278,6 +4388,24 @@ void AWoTPlayerController::NotifyLoadedWorld(
 void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 {
 	UnbindProgressFailureDelegates();
+	if (IsLocalController())
+	{
+		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		// Gameplay teardown: no window stays (an improvement module's window
+		// closes with the match, as the retail windows below do). The input
+		// seam goes last so that close can still restore game input. The window
+		// and guide-item queries end with this controller too.
+		Seams.CloseClientWindows.Broadcast(NAME_None);
+		if (OnboardingCloseWindowsHandle.IsValid())
+		{
+			Seams.CloseClientWindows.Remove(OnboardingCloseWindowsHandle);
+			OnboardingCloseWindowsHandle.Reset();
+		}
+		Seams.SetOverlayInput = nullptr;
+		Seams.IsClientWindowOpen = nullptr;
+		Seams.SelectedItemClass = nullptr;
+		Seams.KilledByItemClass = nullptr;
+	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.
 	RemoveChatInputWidget(/*bRestoreGameInput*/ true);
@@ -4419,7 +4547,7 @@ void AWoTPlayerController::SetupInputComponent()
 			this, &AWoTPlayerController::ShowHelp);
 		{
 			// ShowGuide (onboarding seam): a broadcast only, inert when nothing
-			// is bound — the retail help action above stays exactly as ported.
+			// is bound; the retail help action above stays exactly as ported.
 			// A weak lambda, so the controller's surface gains no handler for
 			// an improvement-only action.
 			FInputActionBinding Binding(FName(TEXT("ShowGuide")), IE_Pressed);
@@ -4759,6 +4887,16 @@ void AWoTPlayerController::ClientTypedMessage_Implementation(const FString& S, F
 	RouteTypedMessage(S, Type, GetNetMode() == NM_Standalone);
 }
 
+void AWoTPlayerController::ClientKilledBy_Implementation(FName ItemClassName)
+{
+	// Every death replaces the last one's item, an unnamed death included.
+	KilledByItemClass = ItemClassName;
+	if (!ItemClassName.IsNone())
+	{
+		FWoTOnboardingSeams::Get().ClientKilledBy.Broadcast(ItemClassName);
+	}
+}
+
 void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool bStandalone)
 {
 	// WOTPlayer.ClientMessage (WOTPlayer.uc:1862-1890): 'Pickup' and 'FailedMessage' land
@@ -4784,9 +4922,6 @@ void AWoTPlayerController::RouteTypedMessage(const FString& S, FName Type, bool 
 			{
 				HUD->AddRightMessage(S);
 			}
-			// Onboarding seam, behavior-neutral: the death-recap aid reads
-			// the same line the right queue just received.
-			FWoTOnboardingSeams::Get().ClientDeathMessage.Broadcast(S);
 		}
 	}
 	else if (Type == FName(TEXT("DeathMessage")))

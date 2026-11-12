@@ -87,11 +87,11 @@ PREREQUISITES = {
 }
 # Binaries ride along: the import commandlet cannot boot the isolated
 # project without the COMPILED WoT editor modules (an -unattended editor
-# exits during early init when project modules are missing — first live
-# run). The cook step's -build recompiles the game target regardless.
+# exits during early init when project modules are missing, as seen on the
+# first live run). The cook step's -build recompiles the game target regardless.
 # Build rides along for Mac/Resources/*.entitlements: without it UBT
 # regenerates the engine-default entitlements, which enable the macOS App
-# Sandbox — a sandboxed client cannot open -WoTPayloadCache=<path> outside
+# Sandbox; a sandboxed client cannot open -WoTPayloadCache=<path> outside
 # its container and every payload preflight fails "cannot open file".
 SEED_COPY_SET = ("WoT.uproject", "Config", "Source", "Tools", "Content",
                  "Binaries", "Build")
@@ -161,6 +161,20 @@ NEUTRAL_SHELL_NAMES = tuple(
     f"WoTMapShell{slot:02d}" for slot in range(1, 20))
 NEUTRAL_SHELL_MAPS = tuple(
     f"/WoTNeutralShells/{name}" for name in NEUTRAL_SHELL_NAMES)
+# Optional code plugins the game target may link (Plugins/<Name>). WoT.uproject
+# enables them by default; a parity-pure build may disable or delete them.
+# - The seed copies each one present into the ISO: UBT refuses a project whose
+#   enabled plugin it cannot find. Its Intermediate is UBT's alone and is
+#   never seeded.
+# - UBT stages the descriptor of every plugin that contributes a module (the
+#   packaged plugin manager finds the plugin through it), so an enabled code
+#   plugin puts its .uplugin in the pak. A descriptor carries no content, and
+#   a build with the plugin disabled stages none: each path is allowed at most
+#   once and never required.
+SEED_CODE_PLUGINS = ("WoTOnboarding",)
+SEED_CODE_PLUGIN_EXCLUSIONS = frozenset({"Intermediate"})
+OPTIONAL_CODE_PLUGIN_DESCRIPTORS = tuple(
+    f"../../../WoT/Plugins/{name}/{name}.uplugin" for name in SEED_CODE_PLUGINS)
 NEUTRAL_SUPPORT_ROOT_PACKAGES = (
     "/Game/WoT/Materials/M_WoT_World",
     "/Game/WoT/Materials/M_WoT_WorldMasked",
@@ -274,7 +288,10 @@ GUARDED_GAME_PROFILE_DEFINITIONS = {
     "USE_CRASH_REPORTER_MONITOR": "0",
 }
 GUARDED_RECEIPT_TARGETS = ("WoT",)
-SOURCE_SNAPSHOT_PATHS = ("Source", "Tools")
+# The seeded code plugins are source too: a dirty plugin edit must not reuse
+# an ISO seeded from the old bytes.
+SOURCE_SNAPSHOT_PATHS = (
+    "Source", "Tools", *(f"Plugins/{name}" for name in SEED_CODE_PLUGINS))
 SOURCE_SNAPSHOT_FORMAT = "wot-source-snapshot-v1"
 TOOLS_SEED_EXACT_EXCLUSIONS = frozenset({
     "Tools/local.json",
@@ -409,11 +426,39 @@ def _validate_iso(iso: Path) -> Path:
     # Every seeded DIRECTORY is forbidden: _copy_tree would discover the iso
     # beneath its own source and copy recursively ("Build" was once
     # missed when it joined the copy set).
-    if relative.parts[0] in {name for name in GUARDED_SEED_COPY_SET
-                             if name != "WoT.uproject"}:
+    if relative.parts[0] in _seeded_top_directories():
         raise BuildFailure(
             "--iso may not be nested under a seeded source directory")
     return iso
+
+
+def _seeded_top_directories() -> frozenset:
+    """Top-level repo directories the seed copies from (code plugins live
+    under Plugins/)."""
+    return frozenset(
+        {name for name in GUARDED_SEED_COPY_SET if name != "WoT.uproject"}
+        | {"Plugins"})
+
+
+def _seed_link_target(link: Path, tree: Path) -> str:
+    """The target of a symlink the seed may recreate in the ISO.
+
+    The seed copies links as links, so the ISO copy points wherever the source
+    link points from its own place in the tree. Only a relative link that
+    resolves inside ``tree`` keeps the ISO self-contained; any other link lets
+    ISO cleanup and generator writes reach the files it names. (A
+    Content/WoT/Maps link into another checkout once let the seed delete that
+    checkout's bootstrap map.)
+    """
+    target = os.readlink(link)
+    resolved = Path(os.path.realpath(link))
+    root = Path(os.path.realpath(tree))
+    if os.path.isabs(target) or (
+            resolved != root and root not in resolved.parents):
+        raise BuildFailure(
+            f"seed refuses a symlink that leaves {tree.name}: {link} -> "
+            f"{target} (replace it with a real copy)")
+    return target
 
 
 def _copy_tree(source: Path, target: Path, *, hardlink_files: bool) -> dict:
@@ -428,14 +473,15 @@ def _copy_tree(source: Path, target: Path, *, hardlink_files: bool) -> dict:
             item = root_path / name
             if item.is_symlink():
                 destination = destination_root / name
-                destination.symlink_to(os.readlink(item), target_is_directory=True)
+                destination.symlink_to(_seed_link_target(item, source),
+                                       target_is_directory=True)
                 directories.remove(name)
                 counts["symlinks"] += 1
         for name in files:
             item = root_path / name
             destination = destination_root / name
             if item.is_symlink():
-                destination.symlink_to(os.readlink(item))
+                destination.symlink_to(_seed_link_target(item, source))
                 counts["symlinks"] += 1
                 continue
             if hardlink_files:
@@ -496,8 +542,9 @@ def _copy_tools_seed(source_root: Path, target_root: Path) -> dict:
         destination.parent.mkdir(parents=True, exist_ok=True)
         created_directories.update(missing)
         if source.is_symlink():
-            destination.symlink_to(os.readlink(source),
-                                   target_is_directory=source.is_dir())
+            destination.symlink_to(
+                _seed_link_target(source, source_root / "Tools"),
+                target_is_directory=source.is_dir())
             counts["symlinks"] += 1
         else:
             shutil.copy2(source, destination)
@@ -511,16 +558,67 @@ def _merge_counts(destination: dict, source: dict) -> None:
         destination[key] = destination.get(key, 0) + value
 
 
+def _seed_code_plugins(root: Path) -> list[str]:
+    """The SEED_CODE_PLUGINS this tree carries (a descriptor on disk)."""
+    return [name for name in SEED_CODE_PLUGINS
+            if (root / "Plugins" / name / f"{name}.uplugin").is_file()]
+
+
+def _copy_code_plugins_seed(source_root: Path, target_root: Path) -> dict:
+    """Replace the ISO's copy of every seeded code plugin.
+
+    The descriptor, Source and the editor binaries the import commandlet
+    loads ride along, like the project's own Binaries; Intermediate never
+    does. The old ISO copy goes first, its Intermediate included, so the next
+    build compiles the plugin from the seeded Source.
+    """
+    counts = {"directories": 0, "hardlinks": 0, "copies": 0, "symlinks": 0}
+    plugins = target_root / "Plugins"
+    for name in SEED_CODE_PLUGINS:
+        target = plugins / name
+        for path in (plugins, target):
+            if path.is_symlink():
+                raise BuildFailure(
+                    f"seeded plugin path crosses a symlink: {path}")
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
+    for name in _seed_code_plugins(source_root):
+        source = source_root / "Plugins" / name
+        target = plugins / name
+        target.mkdir(parents=True)
+        counts["directories"] += 1
+        for item in sorted(source.iterdir()):
+            if item.name in SEED_CODE_PLUGIN_EXCLUSIONS:
+                continue
+            destination = target / item.name
+            if item.is_symlink():
+                destination.symlink_to(_seed_link_target(item, source),
+                                       target_is_directory=item.is_dir())
+                counts["symlinks"] += 1
+            elif item.is_dir():
+                _merge_counts(counts, _copy_tree(
+                    item, destination, hardlink_files=False))
+            else:
+                shutil.copy2(item, destination)
+                counts["copies"] += 1
+    return counts
+
+
 def _editor_module_mtime(root: Path) -> float:
-    # The compiled editor module is the seed's one time-sensitive product: a
+    # The compiled editor modules are the seed's one time-sensitive product: a
     # rebuild on the source tree must invalidate a copied ISO (a stale module
     # makes the -unattended editor drop the pythonscript commandlet silently).
-    dylib = root / "Binaries" / "Mac" / "libUnrealEditor-WoT.dylib"
-    dll = root / "Binaries" / "Win64" / "UnrealEditor-WoT.dll"
-    for product in (dylib, dll):
-        if product.exists():
-            return product.stat().st_mtime
-    return 0.0
+    # A seeded code plugin's editor module counts like the game module.
+    products = [root / "Binaries" / "Mac" / "libUnrealEditor-WoT.dylib",
+                root / "Binaries" / "Win64" / "UnrealEditor-WoT.dll"]
+    for name in SEED_CODE_PLUGINS:
+        binaries = root / "Plugins" / name / "Binaries"
+        products += [binaries / "Mac" / f"libUnrealEditor-{name}.dylib",
+                     binaries / "Win64" / f"UnrealEditor-{name}.dll"]
+    return max((product.stat().st_mtime for product in products
+                if product.exists()), default=0.0)
 
 
 def _entitlements_digests(root: Path) -> dict:
@@ -802,6 +900,8 @@ def _seed_inputs_valid(iso: Path, stamp: dict | None,
              or stamp.get("import_generated_outputs") == [
                  path.as_posix() for path in IMPORT_GENERATED_OUTPUTS])
         and all((iso / name).exists() for name in copy_set)
+        and stamp.get("code_plugins") == _seed_code_plugins(REPO)
+        and stamp.get("code_plugins") == _seed_code_plugins(iso)
         and stamp.get("release_sequence") == release_sequence
         and stamp.get("human_version", "") == human_version
         and version_matches
@@ -1040,6 +1140,8 @@ def stage_seed(iso: Path, *, guarded: bool = False,
             for stale in binaries.glob(pattern):
                 if stale.is_file():
                     stale.unlink()
+    code_plugins = _seed_code_plugins(REPO)
+    _merge_counts(counts, _copy_code_plugins_seed(REPO, iso))
     # Content dominates the workspace. Prefer cp -al semantics per file and
     # fall back to copy2 on filesystems that reject hardlinks.
     _merge_counts(counts, _copy_tree(
@@ -1065,8 +1167,8 @@ def stage_seed(iso: Path, *, guarded: bool = False,
     # inode intact and makes generation ownership unambiguous.
     if guarded:
         (iso / IMPORT_GENERATED_OUTPUTS[0]).unlink(missing_ok=True)
-    # The stripped SOUND pass creates UWoTPayloadSoundWave assets — a
-    # DIFFERENT class from the canonical USoundWave at the same paths — and
+    # The stripped SOUND pass creates UWoTPayloadSoundWave assets (a
+    # DIFFERENT class from the canonical USoundWave at the same paths), and
     # its batch prevalidation rightly fails closed on a class swap (first
     # composed run). The seed therefore leaves the sound tree empty for the
     # stripped importer to rebuild; every other branch overwrites same-class
@@ -1075,6 +1177,7 @@ def stage_seed(iso: Path, *, guarded: bool = False,
     details = {
         "source": str(REPO.resolve()),
         "copy_set": list(copy_set),
+        "code_plugins": code_plugins,
         "excluded": [
             "Saved", "Intermediate", "DerivedDataCache",
             "Tools/local.json", "Tools/test/net/nodes.json",
@@ -1289,9 +1392,7 @@ def _validate_build_root(root: Path, iso: Path) -> None:
         relative = root.relative_to(REPO.resolve())
     except ValueError:
         return
-    if not relative.parts or relative.parts[0] in {
-            name for name in GUARDED_SEED_COPY_SET
-            if name != "WoT.uproject"}:
+    if not relative.parts or relative.parts[0] in _seeded_top_directories():
         raise BuildFailure(
             f"guarded build root {root} may not be a seeded source directory")
 
@@ -1629,7 +1730,7 @@ def _import_command(args, iso: Path, editor: Path) -> list[str]:
             if policy is not None else ()
         ),
     ))
-    # The project rides as the FIRST POSITIONAL argument — the proven
+    # The project rides as the FIRST POSITIONAL argument, the proven
     # commandlet invocation shape everywhere in this repo (-project= is UAT
     # syntax and pythonscript never saw the script when it was used here).
     return [
@@ -2286,12 +2387,13 @@ def _neutral_shell_stamp_valid(iso: Path, stamp: dict) -> bool:
         return False
 
 
-def _neutral_shell_real_path(iso: Path, relative: Path) -> Path:
+def _iso_cleanup_path(iso: Path, relative: Path) -> Path:
     """Reject a symlink anywhere between the iso root and a cleanup target.
 
     Checking only the leaf is not enough: a symlinked ancestor (iso/Plugins ->
-    /external) leaves the leaf looking like an ordinary directory, and the
-    rmtree below would then delete the external tree instead of iso content.
+    /external) leaves the leaf looking like an ordinary file or directory, and
+    the unlink or rmtree would then delete external content instead of iso
+    content.
     """
     path = iso / relative
     current = iso
@@ -2299,7 +2401,7 @@ def _neutral_shell_real_path(iso: Path, relative: Path) -> Path:
         current = current / part
         if current.is_symlink():
             raise BuildFailure(
-                f"neutral-shell cleanup path crosses a symlink: {current}")
+                f"ISO cleanup path crosses a symlink: {current}")
     return path
 
 
@@ -2311,7 +2413,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
             # staging shell or a non-empty staging root, so a process killed
             # mid-generation would otherwise make EVERY retry fail forever.
             NEUTRAL_SHELL_STAGING_ROOT):
-        path = _neutral_shell_real_path(iso, relative)
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             shutil.rmtree(path)
         else:
@@ -2319,7 +2421,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
     for relative in (
             NEUTRAL_SHELL_DENIED_READ_RECEIPT,
             NEUTRAL_SHELL_OUTPUT_IDENTITY_RECEIPT):
-        path = _neutral_shell_real_path(iso, relative)
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             raise BuildFailure(
                 f"neutral-shell receipt slot is unexpectedly a directory: {path}")
@@ -2329,7 +2431,7 @@ def _prepare_neutral_shell_outputs(iso: Path) -> None:
 def _prepare_import_generated_outputs(iso: Path) -> None:
     """Restore import_all's exact no-replace output slots after a failed run."""
     for relative in IMPORT_GENERATED_OUTPUTS:
-        path = iso / relative
+        path = _iso_cleanup_path(iso, relative)
         if path.is_dir():
             raise BuildFailure(
                 f"generated import output slot is unexpectedly a directory: {path}")
@@ -2452,12 +2554,14 @@ def _validate_guarded_cooked_paths(paths: Sequence[str]) -> dict:
     # Mac UAT also stages every enabled engine plugin's descriptor (187 of
     # them, already present in the 356ec0cf Mac release before this rule);
     # Win64 stages none. Engine plugin metadata carries no project or retail
-    # content, so it is allowed. Every other descriptor must be the
-    # neutral-shell one, exactly once.
+    # content, so it is allowed, as is an enabled optional code plugin's
+    # descriptor (OPTIONAL_CODE_PLUGIN_DESCRIPTORS, exact path). Every other
+    # descriptor must be the neutral-shell one, exactly once.
     engine_descriptors = [
         path for path in descriptor_paths if _is_engine_plugin_descriptor(path)]
     project_descriptors = [
-        path for path in descriptor_paths if path not in engine_descriptors]
+        path for path in descriptor_paths if path not in engine_descriptors
+        and path not in OPTIONAL_CODE_PLUGIN_DESCRIPTORS]
     if project_descriptors != [plugin_descriptor]:
         raise BuildFailure(
             "guarded cooked inventory must stage exactly the neutral-shell "
@@ -5880,6 +5984,8 @@ def write_summary(args, iso: Path, statuses: dict[str, str]) -> Path:
         "steps": {name: statuses.get(name, "not-selected") for name in STEPS},
         "seed_copy_set": list(
             GUARDED_SEED_COPY_SET if guarded else SEED_COPY_SET),
+        "seed_code_plugins": [
+            f"Plugins/{name}" for name in _seed_code_plugins(REPO)],
         "seed_excluded": ["Saved", "Intermediate", "DerivedDataCache"],
         "staged": containers,
         "canonical_baseline": {
@@ -5977,6 +6083,8 @@ def _dry_run(args, iso: Path, selected: set[str]) -> None:
     print(f"  cache:     {args.cache.resolve()}")
     copy_set = GUARDED_SEED_COPY_SET if _mode_is_guarded(args) else SEED_COPY_SET
     print(f"  seed copy: {', '.join(copy_set)}")
+    plugins = [f"Plugins/{name}" for name in _seed_code_plugins(REPO)]
+    print(f"  plugins:   {', '.join(plugins) or '(none)'}")
     print("  excluded:  Saved, Intermediate, DerivedDataCache")
     build_root = _build_root(args) if _compile_cache_enabled(args) else None
     if _mode_is_guarded(args):

@@ -324,7 +324,7 @@ void AWoTSwapPlacesProjectile::PerformSwap(APawn* Source, AActor* Dest)
 	// is a hazard, credit the caster with the kill if the target dies soon.
 	if (AWoTCharacter* DestChar = Cast<AWoTCharacter>(Dest))
 	{
-		DestChar->SetSuicideInstigator(Source);
+		DestChar->SetSuicideInstigator(Source, SourceAngreal);
 	}
 
 	// SwapPlacesEffect.uc:408-434: an AppearEffect on EACH swapped pawn, colored

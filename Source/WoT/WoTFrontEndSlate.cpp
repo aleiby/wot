@@ -44,6 +44,30 @@
 #include "UI/WoTMenuNavigation.h"
 #include "UI/WoTTextEntry.h"
 
+namespace
+{
+struct FWoTFrontEndSlateMainEntry
+{
+	int32 RetailIndex = INDEX_NONE;
+	int32 ExtensionIndex = INDEX_NONE;
+	bool IsValid() const { return RetailIndex != INDEX_NONE || ExtensionIndex != INDEX_NONE; }
+};
+
+// Multiplayer, the registered rows in order, then the remaining retail rows.
+FWoTFrontEndSlateMainEntry WoTFrontEndSlate_MapMainEntry(int32 DisplayIndex,
+	int32 ExtensionCount)
+{
+	if (DisplayIndex < 0
+		|| DisplayIndex >= SWoTFrontEndRoot::RetailMainEntries().Num() + ExtensionCount)
+	{
+		return {};
+	}
+	if (DisplayIndex == 0) return {0, INDEX_NONE};
+	if (DisplayIndex <= ExtensionCount) return {INDEX_NONE, DisplayIndex - 1};
+	return {DisplayIndex - ExtensionCount, INDEX_NONE};
+}
+} // namespace
+
 // Escape's per-window back path. B and View go through the back stack
 // (FWoTBackStack) since controller sub-project 3; Escape keeps this path,
 // except that with the keyboard panel open it cancels the panel first, and
@@ -702,15 +726,48 @@ void SWoTFrontEndRoot::Tick(
 	{
 		FWoTMenuStyle::SizeCheckBoxImages(PlayCheckBoxStyle, PlayCheckGlyphSize);
 	}
+	// A seam menu-row registration or removal while the main screen shows
+	// (the onboarding guide row follows its live master toggle) rebuilds the
+	// screen from the current registry; an unchanged registry rebuilds
+	// nothing. Owner-and-count identity is enough: rows register and remove
+	// as owner-tagged units.
+	if (ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
+	{
+		const TArray<FWoTOnboardingRow>& LiveRows =
+			FWoTOnboardingSeams::Get().MenuRows;
+		bool bRowsMatch = LiveRows.Num() == MainMenuExtensionRows.Num();
+		for (int32 RowIndex = 0;
+			bRowsMatch && RowIndex < LiveRows.Num(); ++RowIndex)
+		{
+			bRowsMatch = LiveRows[RowIndex].Owner
+				== MainMenuExtensionRows[RowIndex].Owner;
+		}
+		if (!bRowsMatch)
+		{
+			RebuildScreen();
+		}
+	}
 	TArray<FVector2D, TInlineAllocator<4>> Measurements;
 	bool bHasMeasuredFace = true;
-	for (const FWoTFrontEndMainMenuEntry& Entry : RetailMainEntries())
+	for (int32 DisplayIndex = 0; DisplayIndex < MainMenuTotalEntryCount(); ++DisplayIndex)
 	{
-		const FVector2D Measurement = FWoTMenuLayout::MeasureText(
-			RetailText(Entry.LocalizationId), MenuFonts().Title);
-		bHasMeasuredFace = bHasMeasuredFace
-			&& Measurement.X > 0.0f && Measurement.Y > 0.0f;
-		Measurements.Add(Measurement);
+		const FWoTFrontEndSlateMainEntry MappedEntry =
+			WoTFrontEndSlate_MapMainEntry(DisplayIndex, MainMenuExtensionRows.Num());
+		if (MappedEntry.ExtensionIndex != INDEX_NONE)
+		{
+			// Extension labels take part in layout but cannot veto the retail face gate.
+			const FWoTOnboardingRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
+			Measurements.Add(FWoTMenuLayout::MeasureText(
+				FText::FromString(Row.Label ? Row.Label() : FString()), MenuFonts().Title));
+		}
+		else
+		{
+			const FVector2D Measurement = FWoTMenuLayout::MeasureText(
+				RetailText(RetailMainEntries()[MappedEntry.RetailIndex].LocalizationId), MenuFonts().Title);
+			bHasMeasuredFace = bHasMeasuredFace
+				&& Measurement.X > 0.0f && Measurement.Y > 0.0f;
+			Measurements.Add(Measurement);
+		}
 	}
 	if (!bHasMeasuredFace)
 	{
@@ -929,12 +986,60 @@ void SWoTFrontEndRoot::RebuildScreen()
 TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 {
 	TSharedRef<SVerticalBox> Entries = SNew(SVerticalBox);
-	MainMenuButtons.Reserve(RetailMainEntries().Num());
-	for (int32 EntryIndex = 0;
-		EntryIndex < RetailMainEntries().Num(); ++EntryIndex)
+	// Capture the rows the buttons invoke; Tick rebuilds when the registry changes.
+	// Restore the retail entry or the row's ordinal within its registered owner.
+	const FWoTFrontEndSlateMainEntry PreviousEntry = WoTFrontEndSlate_MapMainEntry(
+		MainMenuSelection.IsValid() ? MainMenuSelection->GetSelectedIndex() : 0,
+		MainMenuExtensionRows.Num());
+	const FName PreviousOwner = PreviousEntry.ExtensionIndex != INDEX_NONE
+		? MainMenuExtensionRows[PreviousEntry.ExtensionIndex].Owner : NAME_None;
+	int32 PreviousOwnerOrdinal = 0;
+	for (int32 RowIndex = 0; RowIndex < PreviousEntry.ExtensionIndex; ++RowIndex)
 	{
-		const FWoTFrontEndMainMenuEntry Entry = RetailMainEntries()[EntryIndex];
-		const FText Label = RetailText(Entry.LocalizationId);
+		if (MainMenuExtensionRows[RowIndex].Owner == PreviousOwner) ++PreviousOwnerOrdinal;
+	}
+	MainMenuExtensionRows = FWoTOnboardingSeams::Get().MenuRows;
+	if (MainMenuSelection.IsValid())
+	{
+		MainMenuSelection->SetEntryCount(MainMenuTotalEntryCount());
+		int32 RestoredIndex = 0;
+		for (int32 DisplayIndex = 0; DisplayIndex < MainMenuTotalEntryCount(); ++DisplayIndex)
+		{
+			const FWoTFrontEndSlateMainEntry MappedEntry =
+				WoTFrontEndSlate_MapMainEntry(DisplayIndex, MainMenuExtensionRows.Num());
+			if (PreviousEntry.RetailIndex != INDEX_NONE
+				&& MappedEntry.RetailIndex == PreviousEntry.RetailIndex)
+			{
+				RestoredIndex = DisplayIndex;
+				break;
+			}
+			if (PreviousEntry.ExtensionIndex != INDEX_NONE
+				&& MappedEntry.ExtensionIndex != INDEX_NONE
+				&& MainMenuExtensionRows[MappedEntry.ExtensionIndex].Owner == PreviousOwner)
+			{
+				if (PreviousOwnerOrdinal == 0)
+				{
+					RestoredIndex = DisplayIndex;
+					break;
+				}
+				--PreviousOwnerOrdinal;
+			}
+		}
+		MainMenuSelection->MoveTo(RestoredIndex);
+	}
+	MainMenuButtons.Reserve(MainMenuTotalEntryCount());
+	for (int32 EntryIndex = 0;
+		EntryIndex < MainMenuTotalEntryCount(); ++EntryIndex)
+	{
+		const FWoTFrontEndSlateMainEntry MappedEntry =
+			WoTFrontEndSlate_MapMainEntry(EntryIndex, MainMenuExtensionRows.Num());
+		const FText Label = MappedEntry.ExtensionIndex != INDEX_NONE
+			? FText::FromString([this, MappedEntry]()
+				{
+					const FWoTOnboardingRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
+					return Row.Label ? Row.Label() : FString();
+				}())
+			: RetailText(RetailMainEntries()[MappedEntry.RetailIndex].LocalizationId);
 		TSharedPtr<SWoTMenuButton> Button;
 		Entries->AddSlot()
 		.AutoHeight()
@@ -2880,22 +2985,46 @@ FReply SWoTFrontEndRoot::Quit()
 
 void SWoTFrontEndRoot::SelectMainMenuEntry(int32 EntryIndex)
 {
-	if (IsPresentationReady() && MainMenuSelection.IsValid())
+	if (IsPresentationReady() && MainMenuSelection.IsValid()
+		&& WoTFrontEndSlate_MapMainEntry(EntryIndex, MainMenuExtensionRows.Num()).IsValid())
 	{
 		MainMenuSelection->MoveTo(EntryIndex);
 	}
 }
 
+int32 SWoTFrontEndRoot::MainMenuTotalEntryCount() const
+{
+	return RetailMainEntries().Num() + MainMenuExtensionRows.Num();
+}
+
 FReply SWoTFrontEndRoot::ActivateMainMenuEntry(int32 EntryIndex)
 {
+	const FWoTFrontEndSlateMainEntry MappedEntry =
+		WoTFrontEndSlate_MapMainEntry(EntryIndex, MainMenuExtensionRows.Num());
 	if (bShowReleaseNotesNotice || bShowUpdateFailedNotice
 		|| !IsPresentationReady() || !MainMenuSelection.IsValid()
-		|| !RetailMainEntries().IsValidIndex(EntryIndex))
+		|| !MappedEntry.IsValid())
 	{
 		return FReply::Unhandled();
 	}
+	if (MappedEntry.ExtensionIndex != INDEX_NONE)
+	{
+		// A seam extension row: run the invoke captured with the rendered
+		// button, through the same selection/feedback path as retail entries.
+		const FWoTOnboardingRow Row =
+			MainMenuExtensionRows[MappedEntry.ExtensionIndex];
+		const bool bExtensionActivated = MainMenuSelection->Activate(
+			EntryIndex, [this, &Row]()
+			{
+				if (IsPresentationReady() && Row.Invoke)
+				{
+					Row.Invoke();
+				}
+			});
+		return bExtensionActivated ? FReply::Handled() : FReply::Unhandled();
+	}
 	const EWoTFrontEndMainMenuAction Action =
-		RetailMainEntries()[EntryIndex].Action;
+		RetailMainEntries()[MappedEntry.RetailIndex].Action;
 	const bool bActivated = MainMenuSelection->Activate(
 		EntryIndex, [this, Action]()
 		{
@@ -4620,12 +4749,16 @@ ECheckBoxState SWoTFrontEndRoot::LANState() const
 
 FMargin SWoTFrontEndRoot::MainMenuEntryPadding(int32 EntryIndex) const
 {
+	if (!WoTFrontEndSlate_MapMainEntry(EntryIndex, MainMenuExtensionRows.Num()).IsValid())
+	{
+		return FMargin(0.0f);
+	}
 	const float HalfSpacing = MainMenuSpacing * 0.5f;
 	return FMargin(
 		0.0f,
 		EntryIndex == 0 ? 0.0f : HalfSpacing,
 		0.0f,
-		EntryIndex == 3 ? 0.0f : HalfSpacing);
+		EntryIndex == MainMenuTotalEntryCount() - 1 ? 0.0f : HalfSpacing);
 }
 
 void SWoTFrontEndRoot::HandleHostComplete(bool bSucceeded)

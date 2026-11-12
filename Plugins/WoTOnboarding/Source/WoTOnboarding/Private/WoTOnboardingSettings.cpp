@@ -45,3 +45,29 @@ void UWoTOnboardingSettings::ToggleShowDeathCounterHints()
 {
 	SetShowDeathCounterHints(!bShowDeathCounterHints);
 }
+
+bool UWoTOnboardingSettings::HasSeenPickupCard(FName ClassName) const
+{
+	return SeenPickupCards.Contains(ClassName);
+}
+
+bool UWoTOnboardingSettings::MarkPickupCardSeen(FName ClassName)
+{
+	if (ClassName.IsNone() || SeenPickupCards.Contains(ClassName))
+	{
+		return false;
+	}
+	SeenPickupCards.Add(ClassName);
+	SaveConfig();
+	return true;
+}
+
+void UWoTOnboardingSettings::SetSeenPickupCards(const TArray<FName>& ClassNames)
+{
+	if (SeenPickupCards == ClassNames)
+	{
+		return;
+	}
+	SeenPickupCards = ClassNames;
+	SaveConfig();
+}
