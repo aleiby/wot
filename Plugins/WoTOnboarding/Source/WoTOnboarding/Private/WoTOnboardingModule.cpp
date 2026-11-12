@@ -574,10 +574,31 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 	}
 	else if (FSlateApplication::IsInitialized())
 	{
-		// Front end (or any UI-input context): focus is enough.
+		// Front end (or any UI-input context): focus is enough. The menu row
+		// that had focus gets it back when the guide closes.
+		FocusBeforeGuide = FSlateApplication::Get().GetKeyboardFocusedWidget();
 		FSlateApplication::Get().SetKeyboardFocus(
 			GuideBrowser, EFocusCause::SetDirectly);
 	}
+}
+
+void FWoTOnboardingModule::RestoreFocusAfterGuide(const TWeakPtr<SWidget>& FocusBeforeGuide)
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return;
+	}
+	FSlateApplication& SlateApp = FSlateApplication::Get();
+	const TSharedPtr<SWidget> Before = FocusBeforeGuide.Pin();
+	if (Before.IsValid() && Before->GetVisibility().IsVisible() && Before->IsEnabled()
+		&& SlateApp.FindWidgetWindow(Before.ToSharedRef()).IsValid())
+	{
+		// Every user: the controller that pressed B navigates from the row it
+		// left, and the viewport's own navigation cannot reach the menu.
+		SlateApp.SetAllUserFocus(Before, EFocusCause::SetDirectly);
+		return;
+	}
+	SlateApp.SetAllUserFocusToGameViewport();
 }
 
 void FWoTOnboardingModule::CloseGuideBrowser()
@@ -597,12 +618,12 @@ void FWoTOnboardingModule::CloseGuideBrowser()
 	{
 		Seams.SetOverlayInput(false, nullptr);
 	}
-	else if (FSlateApplication::IsInitialized())
+	else
 	{
-		// Front end: hand focus back to the viewport so its UI keeps keyboard
-		// navigation.
-		FSlateApplication::Get().SetAllUserFocusToGameViewport();
+		// Front end: focus returns to the menu row the guide opened from.
+		RestoreFocusAfterGuide(FocusBeforeGuide);
 	}
+	FocusBeforeGuide.Reset();
 }
 
 IMPLEMENT_MODULE(FWoTOnboardingModule, WoTOnboarding)
