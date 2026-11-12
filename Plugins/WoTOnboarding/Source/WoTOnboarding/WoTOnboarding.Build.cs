@@ -15,7 +15,12 @@ public class WoTOnboarding : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
-			"Engine"
+			"Engine",
+			// The guide browser is a Slate overlay; InputCore carries the FKey
+			// close-key plumbing it shares with the retail help window.
+			"InputCore",
+			"Slate",
+			"SlateCore"
 		});
 
 		// The editor-only import/export seam speaks JSON so the content
