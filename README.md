@@ -103,8 +103,14 @@ it up and adds it to your Steam library; you do this once, in Desktop Mode.
    **Downloads** folder.
 3. Download
    [Install-WoT-Reborn.desktop](https://github.com/aleiby/wot/releases/latest/download/Install-WoT-Reborn.desktop)
-   into **Downloads**. If you have the original game's offline installer
-   (see above), put it in **Downloads** too.
+   into **Downloads**. You also need the original game's offline installer
+   (see above):
+   - If a Windows PC or Mac on your network already runs WoT Reborn and
+     still has the installer, skip it. The Deck copies it from that
+     computer; see
+     [Installer from another computer](#deck-installer-from-another-computer)
+     below.
+   - Otherwise, download it and put it in **Downloads** too.
 4. In the **Dolphin** file manager, open **Downloads** and double-click
    `Install-WoT-Reborn.desktop`. SteamOS asks twice before it runs a downloaded
    file: choose **Launch**, then **Continue**.
@@ -117,7 +123,9 @@ it up and adds it to your Steam library; you do this once, in Desktop Mode.
 
 Running `Install-WoT-Reborn.desktop` again repairs or updates the install.
 
-**No installer file on the Deck?** If a Windows PC or Mac on the same local
+<a id="deck-installer-from-another-computer"></a>
+
+**Installer from another computer.** If a Windows PC or Mac on the same local
 network is running WoT Reborn and has the original installer, the Deck copies
 it from that computer automatically on its first launch. On the computer that
 shares it, leave **Share the original installer on this network** turned on
