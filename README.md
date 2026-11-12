@@ -69,6 +69,8 @@ converted data from it, and the game asks for it again if it can't find it.
 - Mac: download
   [WoT-Reborn-Mac.dmg](https://github.com/aleiby/wot/releases/latest/download/WoT-Reborn-Mac.dmg),
   open it, drag `WoT.app` to Applications, then open it from Applications.
+- Steam Deck: see [Steam Deck](#steam-deck) below. A small installer
+  downloads the Windows version and adds it to your Steam library.
 
 Both links always fetch the current version; every version is also listed on
 the [Releases page](https://github.com/aleiby/wot/releases).
@@ -89,6 +91,46 @@ Multiplayer works over LAN and over the internet. Internet play uses Epic
 Online Services for session discovery and relay with an anonymous device
 identity; no account is needed.
 
+### Steam Deck
+
+The Steam Deck runs the Windows version through Proton. A small installer sets
+it up and adds it to your Steam library; you do this once, in Desktop Mode.
+
+1. Press the Steam button and choose **Power ▸ Switch to Desktop**.
+2. SteamOS has no web browser out of the box. Install one from the
+   **Discover** app (the desktop's **Install Firefox** icon opens it there), or
+   download the files below on another computer and copy them to the Deck's
+   **Downloads** folder.
+3. Download
+   [Install-WoT-Reborn.desktop](https://github.com/aleiby/wot/releases/latest/download/Install-WoT-Reborn.desktop)
+   into **Downloads**. You also need the original game's offline installer
+   (see above):
+   - If a Windows PC or Mac on your network already runs WoT Reborn and
+     still has the installer, the Deck copies it from that computer; see
+     [Installer from another computer](#deck-installer-from-another-computer)
+     below.
+   - Otherwise, download it and put it in **Downloads** too.
+4. In the **Dolphin** file manager, open **Downloads** and double-click
+   `Install-WoT-Reborn.desktop`. SteamOS asks twice before it runs a downloaded
+   file: choose **Launch**, then **Continue**.
+5. The installer downloads the current Windows release, installs it in
+   `~/Games/WoT Reborn`, puts the original game's installer next to it if it
+   finds one, and adds the game to Steam with its library artwork. It needs
+   about 5 GB of free space. Steam may list the game as **WoT Reborn.exe**.
+6. Use **Return to Gaming Mode** on the desktop and start the game from your
+   library. The first launch builds the game's data, which takes a few minutes.
+
+Running `Install-WoT-Reborn.desktop` again repairs or updates the install.
+
+<a id="deck-installer-from-another-computer"></a>
+
+**Installer from another computer.** If a Windows PC or Mac on the same local
+network is running WoT Reborn and has the original installer, the Deck copies
+it from that computer automatically on its first launch. On the computer that
+shares it, leave **Share the original installer on this network** turned on
+(**Hardware** menu; it is on by default), and on a Mac allow Local Network
+access when asked.
+
 ## Uninstalling
 
 - Windows: delete the `WoT Reborn` folder you extracted. Saves, preferences,
@@ -100,6 +142,9 @@ identity; no account is needed.
   Applications to the Trash. In Finder, choose **Go ▸ Go to Folder…**, enter
   `~/Library/Application Support/WoT Reborn`, and delete that folder. You may
   also delete `~/Library/Caches/com.aleiby.wot`.
+- Steam Deck: in Desktop Mode, delete the `~/Games/WoT Reborn` folder in
+  Dolphin. Then, in your Steam library, open the game's **Manage** menu and
+  remove the non-Steam shortcut.
 
 ## How the game gets its data
 
