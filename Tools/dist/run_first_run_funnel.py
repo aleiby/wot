@@ -803,7 +803,7 @@ def _git_bytes(arguments: list[str], what: str) -> bytes:
 
 def _current_source_snapshot() -> dict:
     """Reproduce the pipeline's Source/Tools snapshot identity."""
-    paths = ("Source", "Tools")
+    paths = build_stripped_pak.SOURCE_SNAPSHOT_PATHS
     commit = _git_bytes(["rev-parse", "--short=9", "HEAD"], "HEAD").decode(
         "ascii"
     ).strip()
@@ -1216,9 +1216,11 @@ def _validate_release_cooked_paths(value: object) -> dict:
     normalized = [path.replace("\\", "/") for path in value]
     # The same descriptor rule as build_stripped_pak._validate_guarded_cooked_paths:
     # exactly one canonical neutral-shell descriptor; mount-rooted engine plugin
-    # descriptors (Mac UAT stages them, Win64 none) are engine metadata.
+    # descriptors (Mac UAT stages them, Win64 none) are engine metadata, and an
+    # enabled optional code plugin may add its own descriptor (exact path).
     plugin_descriptor = (
         "../../../WoT/Plugins/WoTNeutralShells/WoTNeutralShells.uplugin")
+    optional_descriptors = build_stripped_pak.OPTIONAL_CODE_PLUGIN_DESCRIPTORS
     descriptor_paths = [
         path for path in normalized if path.casefold().endswith(".uplugin")]
     if len(descriptor_paths) != len(set(descriptor_paths)):
@@ -1228,7 +1230,8 @@ def _validate_release_cooked_paths(value: object) -> dict:
         path for path in descriptor_paths
         if _release_engine_plugin_descriptor(path)]
     if [path for path in descriptor_paths
-            if path not in engine_descriptors] != [plugin_descriptor]:
+            if path not in engine_descriptors
+            and path not in optional_descriptors] != [plugin_descriptor]:
         raise FunnelFailure(
             "release cooked path census must stage exactly the neutral-shell "
             "plugin descriptor")
@@ -1433,6 +1436,16 @@ def _resolve_release(
     ):
         raise FunnelFailure("release source-snapshot receipt is malformed")
     _validate_digest(source.get("sha256"), "source-snapshot digest")
+    # Checked before the receipts below, whose rules may have changed since
+    # the release was built: a stale release needs a rebuild, not a diagnosis.
+    if require_current_source:
+        current = _current_source_snapshot()
+        if source != current:
+            raise FunnelFailure(
+                "release Source/Tools snapshot differs from the current tree; "
+                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
+                f"(release {source.get('sha256')}, current {current['sha256']})"
+            )
     neutral_support = _validate_neutral_support_proof(
         manifest.get("neutral_support_authority"))
     products = manifest.get("products")
@@ -1563,14 +1576,6 @@ def _resolve_release(
     _validate_zen_lifetime_proof(
         manifest.get("zen_lifetime"), manifest["platform"])
 
-    if require_current_source:
-        current = _current_source_snapshot()
-        if source != current:
-            raise FunnelFailure(
-                "release Source/Tools snapshot differs from the current tree; "
-                "rebuild with Tools/dist/build_stripped_pak.py --guarded "
-                f"(release {source.get('sha256')}, current {current['sha256']})"
-            )
     authority_path = REPO / neutral_support["authority_relative_path"]
     if (not authority_path.is_file()
             or _sha256_file(authority_path)

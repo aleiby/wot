@@ -1,15 +1,14 @@
 #include "WoTAngrealGuide.h"
 
-#include "Misc/PackageName.h"
-
-#if WITH_EDITOR
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Policies/CondensedJsonPrintPolicy.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#endif
+#include "UObject/Package.h"
+
+#include "Generated/WoTAngrealGuideRows.inl"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWoTOnboarding, Log, All);
 
@@ -24,32 +23,6 @@ const FWoTAngrealGuideRow* UWoTAngrealGuide::FindByClassName(
 	{
 		return Row.ClassName == ClassName;
 	});
-}
-
-const FWoTAngrealGuideRow* UWoTAngrealGuide::FindByTitleIn(
-	const FString& Text,
-	TFunctionRef<FString(const FWoTAngrealGuideRow&)> ResolveTitle) const
-{
-	// Longest contained resolved title wins: a recap line naming one item may
-	// contain another row's shorter title as a substring, and the longer
-	// match is the one the line actually names. Ties keep the earliest row,
-	// so the result is deterministic in Rows order.
-	const FWoTAngrealGuideRow* Best = nullptr;
-	int32 BestLength = 0;
-	for (const FWoTAngrealGuideRow& Row : Rows)
-	{
-		const FString Title = ResolveTitle(Row);
-		// An empty title (unresolved retail text) would "match" any text;
-		// such a row is simply unresolvable.
-		if (Title.Len() <= BestLength || Title.Len() > Text.Len()
-			|| !Text.Contains(Title, ESearchCase::IgnoreCase))
-		{
-			continue;
-		}
-		Best = &Row;
-		BestLength = Title.Len();
-	}
-	return Best;
 }
 
 TArray<const FWoTAngrealGuideRow*> UWoTAngrealGuide::CounteredBy(
@@ -72,28 +45,35 @@ TArray<const FWoTAngrealGuideRow*> UWoTAngrealGuide::CounteredBy(
 
 UWoTAngrealGuide* UWoTAngrealGuide::Load()
 {
-	// A tree whose import pipeline has not run carries no package at all;
-	// answer null quietly then (LoadObject would log load errors) so callers
-	// can treat "no guide" as the ordinary degraded state.
-	const FString PackageName =
-		FPackageName::ObjectPathToPackageName(FString(AssetPath()));
-	if (!FPackageName::DoesPackageExist(PackageName))
+	UWoTAngrealGuide* Guide = NewObject<UWoTAngrealGuide>(GetTransientPackage());
+	const FString Error = Guide->ImportRowsFromJson(CompiledRowsJson());
+	if (!Error.IsEmpty())
 	{
-		UE_LOG(LogWoTOnboarding, Log,
-			TEXT("Angreal guide package %s is not present; the onboarding "
-			     "aids run without a guide until the importer publishes it."),
-			*PackageName);
+		// The generator and its check refuse malformed rows before a build,
+		// so this means a hand-edited include; run without a guide.
+		UE_LOG(LogWoTOnboarding, Error,
+			TEXT("The compiled angreal guide rows do not parse (%s); the "
+			     "onboarding aids run without a guide."), *Error);
 		return nullptr;
 	}
-	return LoadObject<UWoTAngrealGuide>(nullptr, AssetPath());
+	return Guide;
 }
 
-const TCHAR* UWoTAngrealGuide::AssetPath()
+FString UWoTAngrealGuide::CompiledRowsJson()
 {
-	return TEXT("/Game/WoT/UI/Guide/DA_WoTAngrealGuide.DA_WoTAngrealGuide");
+	FString Json = TEXT("{\"rows\":[");
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(WoTAngrealGuideGenerated::RowsJson);
+		++Index)
+	{
+		if (Index > 0)
+		{
+			Json += TEXT(",");
+		}
+		Json += WoTAngrealGuideGenerated::RowsJson[Index];
+	}
+	Json += TEXT("]}");
+	return Json;
 }
-
-#if WITH_EDITOR
 
 namespace
 {
@@ -173,6 +153,8 @@ bool WoTGuideRowFromJson(const FJsonObject& Object,
 		|| !WoTGuideReadCount(Object, TEXT("max_initial_charges"),
 			OutRow.MaxInitialCharges, OutError)
 		|| !WoTGuideReadCount(Object, TEXT("max_charges"), OutRow.MaxCharges,
+			OutError)
+		|| !WoTGuideReadCount(Object, TEXT("charge_cost"), OutRow.ChargeCost,
 			OutError))
 	{
 		return false;
@@ -261,6 +243,7 @@ FString UWoTAngrealGuide::ExportRowsAsJson() const
 		Object->SetNumberField(TEXT("max_initial_charges"),
 			Row.MaxInitialCharges);
 		Object->SetNumberField(TEXT("max_charges"), Row.MaxCharges);
+		Object->SetNumberField(TEXT("charge_cost"), Row.ChargeCost);
 		TArray<TSharedPtr<FJsonValue>> Counters;
 		for (const FName& Counter : Row.Counters)
 		{
@@ -279,5 +262,3 @@ FString UWoTAngrealGuide::ExportRowsAsJson() const
 	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
 	return Out;
 }
-
-#endif // WITH_EDITOR

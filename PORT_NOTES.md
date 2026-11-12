@@ -890,6 +890,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** That refusal is shown in the center of the screen. Player chat keeps the flood throttle, but server-composed kill announcements skip it.
 - **Why:** Players can see the message, and kill announcements are server announcements, not chat.
 
+### Optional onboarding aids
+- **Original:** Items were taught by the single-player campaign: mission and tutorial maps mark chosen pickups to flash a notice and play a sound the first time they are picked up. No multiplayer map marks any, and the game's built-in pickup hint is switched on but no shipped item asks for it. In multiplayer, players opened the item info window or help themselves. The death message names the killer, never the item that did it.
+- **Port:** An optional plugin, on by default, adds a field guide to every multiplayer item and trap and what counters each (F3, or a menu row); opened while you are dead, it starts at the item that killed you. The plugin also adds a short card the first time each item is picked up, and, after a death, a card naming the item that killed you and its counter. For that card the server tells each victim, and only the victim, which item killed them; it does so whatever its own settings, and a client with the aids off or without the plugin ignores it. The main-menu guide row sits between Multiplayer and Controls. The guide fills 95% of the largest 960x540 window that fits the screen and closes on any mouse button press outside its window. Pickup cards keep their whole-step scale. Its switches are on the Controls screen, after player ID and before the key bindings. With its master switch off, or with the plugin disabled or absent, the game behaves as the original.
+- **Why:** The port ships multiplayer only, so the campaign that taught items is not there.
+
 ## Audio
 
 ### Default sound radius

@@ -414,6 +414,22 @@ struct FWoTUITest_SettingsRowsGuard
 	}
 };
 
+/** Empties the onboarding menu rows for a spec that opens the main menu's
+    retail entries by position; restores them on exit. */
+struct FWoTUITest_MenuRowsGuard
+{
+	TArray<FWoTOnboardingRow> Saved;
+	FWoTUITest_MenuRowsGuard()
+	{
+		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
+		FWoTOnboardingSeams::Get().MenuRows.Reset();
+	}
+	~FWoTUITest_MenuRowsGuard()
+	{
+		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+	}
+};
+
 TSharedRef<FWoTRequiredMenuFonts> WoTUITest_Fonts()
 {
 	// The fonts hold their generation weakly; keep one alive for the specs.
@@ -1033,6 +1049,7 @@ bool FWoTUIBackStackFrontEndSpec::RunTest(const FString&)
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(), WoTUITest_MakeRoot(WoTUITest_Authority()),
 		FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
@@ -1566,6 +1583,7 @@ bool FWoTUIFrontEndGraphsSpec::RunTest(const FString&)
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	FSlateApplication& Slate = FSlateApplication::Get();
 	FWoTUITest_FrontEnd FrontEnd(WoTUITest_Authority(),
 		WoTUITest_MakeRoot(WoTUITest_Authority()), FVector2D(1280.0f, 720.0f));
@@ -1662,6 +1680,7 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 		return false;
 	}
 	FWoTUITest_SettingsRowsGuard RowsGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	FWoTOnboardingSeams::Get().SettingsRows.Add({
 		[]() { return FString(TEXT("Walk Aid Alpha")); }, []() {}});
 	FWoTOnboardingSeams::Get().SettingsRows.Add({
@@ -1716,10 +1735,18 @@ bool FWoTUISettingsWalkSpec::RunTest(const FString&)
 		}
 		return Label;
 	};
-	TestEqual(TEXT("the onboarding rows close the body"),
-		LabelOf(Rows[Rows.Num() - 2][0]), FString(TEXT("Walk Aid Beta")));
-	TestEqual(TEXT("the first onboarding row is part of the graph"),
-		LabelOf(Rows[Rows.Num() - 3][0]), FString(TEXT("Walk Aid Alpha")));
+	// The onboarding rows precede player controls: the binding rows, then
+	// Reset, then the footer.
+	const int32 AlphaRow = Rows.IndexOfByPredicate([&LabelOf](const FWoTNavRow& Row)
+	{
+		return !Row.IsEmpty() && LabelOf(Row[0]) == TEXT("Walk Aid Alpha");
+	});
+	TestTrue(TEXT("the first onboarding row is part of the graph"), AlphaRow != INDEX_NONE);
+	TestTrue(TEXT("the second onboarding row follows it"), AlphaRow != INDEX_NONE
+		&& Rows.IsValidIndex(AlphaRow + 1) && !Rows[AlphaRow + 1].IsEmpty()
+		&& LabelOf(Rows[AlphaRow + 1][0]) == TEXT("Walk Aid Beta"));
+	TestEqual(TEXT("the binding rows and Reset come between them and the footer"),
+		AlphaRow + 2 + FWoTGameSettings::ManagedActions().Num() + 1, Rows.Num() - 1);
 
 	// First to last by the D-pad at 1280x720, each row scrolled into view.
 	Slate.SetKeyboardFocus(Controls->InitialControllerFocusWidget(), EFocusCause::SetDirectly);
@@ -2295,12 +2322,13 @@ bool FWoTUIWidgetsSettingsDropdownSpec::RunTest(const FString&)
 		[&Applied](float Brightness) { Applied.Add(Brightness); });
 	ON_SCOPE_EXIT { FWoTGameSettingsAdapter::SetBrightnessProjectionForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 	FWoTUITest_FrontEnd FrontEnd(Authority,
 		WoTUITest_MakeRoot(Authority, nullptr, false, Fixture.Owner), FVector2D(1280.0f, 720.0f));
 	const TSharedRef<SWoTFrontEndRoot>& Root = FrontEnd.Root;
 	FSlateApplication& Slate = FSlateApplication::Get();
-	auto OpenHardware = [&Root, &FrontEnd]() -> TSharedPtr<SWoTSettingsScreen>
+	auto OpenHardware =[&Root, &FrontEnd]() -> TSharedPtr<SWoTSettingsScreen>
 	{
 		Root->ActivateMainMenuEntryForTesting(2);
 		FrontEnd.Settle();
@@ -2624,6 +2652,7 @@ bool FWoTUIWidgetsPromptWindowsSpec::RunTest(const FString&)
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = WoTUITest_Authority();
 	FWoTUITest_FrontEnd FrontEnd(Authority,
 		WoTUITest_MakeRoot(Authority, nullptr, /*bShowDisclosure*/ true),
@@ -4767,6 +4796,9 @@ bool FWoTInGameMenuTauntsSpec::RunTest(const FString&)
 	}
 
 	// A on an entry: the menu closes and PlayTaunt gets that entry's argument.
+	// This fixture has no input preprocessor, so restore Controller mode after
+	// the pointer-mode Escape check before sending synthetic D-pad presses.
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
 	Overlay->OpenTauntsForTesting();
 	Shown.Settle();
 	WoTWidgetTest_Press(Shown, EKeys::Gamepad_DPad_Down);
@@ -5418,6 +5450,7 @@ bool FWoTDeckSettingsSaveChangesSpec::RunTest(const FString&)
 	ON_SCOPE_EXIT { WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting({}); };
 	FWoTUITest_ModeGuard ModeGuard;
 	FWoTUITest_SettingsRowsGuard RowsGuard;
+	FWoTUITest_MenuRowsGuard MenuRowsGuard;
 	FWoTUITest_Preferences Fixture;
 	if (!TestTrue(TEXT("a test preferences owner"), Fixture.bReady))
 	{
@@ -5618,7 +5651,9 @@ bool FWoTDeckInGameMenuFitsSpec::RunTest(const FString&)
 				.RequiredFontsForTesting(WoTUITest_Fonts());
 			FWoTDeckTest_Screen Screen(Overlay, Resolution);
 			const int32 Count = Overlay->RenderedMainMenuEntryCountForTesting();
-			TestEqual(Label + TEXT(": every entry"), Count, bBattle ? 11 : 10);
+			// Rows the onboarding plugin registered sit above Quit and must fit too.
+			TestEqual(Label + TEXT(": every entry"), Count,
+				(bBattle ? 11 : 10) + FWoTOnboardingSeams::Get().MenuRows.Num());
 			TestEqual(Label + TEXT(": Quit is last"),
 				Overlay->MainMenuIndexForTesting(EWoTInGameMenuEntry::Quit), Count - 1);
 			const FSlateRect Background = FWoTDeckTest_Screen::Rect(Overlay->MenuBackgroundForTesting());

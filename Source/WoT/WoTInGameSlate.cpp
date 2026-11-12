@@ -59,6 +59,12 @@ namespace
 	// The heading's gap above the entries.
 	constexpr float WoTInGameMenu_HeadingGap = 24.0f;
 
+	// Seam extension rows (FWoTOnboardingSeams::MenuRows) sit after the other
+	// entries, just above Quit; their ids carry the row index offset past the
+	// retail enum, so the Tick snapshot/live comparison treats them like any
+	// other entry and rebuilds when the registry changes under the open menu.
+	constexpr uint8 WoTInGameSlate_ExtensionIdBase = 0x80;
+
 	struct FWoTInGameMenuEntry
 	{
 		EWoTInGameMenuEntry Id;
@@ -187,9 +193,26 @@ namespace
 		Entries.Append({
 			{EWoTInGameMenuEntry::PlayerConfig, TEXT("Player Config")},
 			{EWoTInGameMenuEntry::Controls, TEXT("Controls")},
-			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")},
-			{EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")}
+			{EWoTInGameMenuEntry::Hardware, TEXT("Hardware")}
 		});
+		// Seam extension rows, just above Quit, which stays last [I9]; an
+		// empty registry adds nothing, so a build without the onboarding
+		// plugin renders exactly the retail list. Labels resolve here
+		// (snapshot time) so Tick's live/snapshot comparison follows label
+		// changes too.
+		const TArray<FWoTOnboardingRow>& ExtensionRows =
+			FWoTOnboardingSeams::Get().MenuRows;
+		const int32 ExtensionCapacity = 0xFF - WoTInGameSlate_ExtensionIdBase;
+		for (int32 RowIndex = 0;
+			RowIndex < ExtensionRows.Num() && RowIndex < ExtensionCapacity;
+			++RowIndex)
+		{
+			const FWoTOnboardingRow& Row = ExtensionRows[RowIndex];
+			Entries.Add({static_cast<EWoTInGameMenuEntry>(
+					WoTInGameSlate_ExtensionIdBase + RowIndex),
+				Row.Label ? Row.Label() : FString()});
+		}
+		Entries.Add({EWoTInGameMenuEntry::Quit, TEXT("Quit to Main Menu")});
 		return Entries;
 	}
 }
@@ -702,6 +725,10 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildMainMenu()
 	MainMenuButtons.Reset();
 	MainMenuEntryIds.Reset();
 	MainMenuLabels.Reset();
+	// Captured with the labels: extension activation must run the invoke that
+	// belongs to the rendered row even if the registry changes before Tick's
+	// snapshot comparison rebuilds the list.
+	ExtensionMenuRows = FWoTOnboardingSeams::Get().MenuRows;
 	const TArray<FWoTInGameMenuEntry> MenuEntries = WoTInGameSlate_MenuEntries(
 		PlayerController.Get(), Preferences.Get()
 #if WITH_AUTOMATION_TESTS
@@ -1502,8 +1529,35 @@ FReply SWoTInGameMenuOverlay::ActivateCitadel()
 	return FReply::Handled();
 }
 
+FReply SWoTInGameMenuOverlay::ActivateExtensionEntry(int32 RowIndex)
+{
+	if (!ExtensionMenuRows.IsValidIndex(RowIndex))
+	{
+		return FReply::Handled();
+	}
+	// Copy before Resume: leaving the menu releases the controller's reference
+	// to this overlay, so members are not touched after it. Activation mirrors
+	// ActivateHelp: leave the menu first, then run the row's action.
+	const FWoTOnboardingRow Row = ExtensionMenuRows[RowIndex];
+	if (AWoTPlayerController* Controller = PlayerController.Get())
+	{
+		Controller->ResumeFromInGameMenu();
+	}
+	if (Row.Invoke)
+	{
+		Row.Invoke();
+	}
+	return FReply::Handled();
+}
+
 FReply SWoTInGameMenuOverlay::ActivateMainMenuEntryById(uint8 EntryId)
 {
+	// Extension ids sit past the retail enum; they must never reach the switch
+	// below, whose default is the Quit entry.
+	if (EntryId >= WoTInGameSlate_ExtensionIdBase)
+	{
+		return ActivateExtensionEntry(EntryId - WoTInGameSlate_ExtensionIdBase);
+	}
 	switch (static_cast<EWoTInGameMenuEntry>(EntryId))
 	{
 	case EWoTInGameMenuEntry::Resume: return Resume();

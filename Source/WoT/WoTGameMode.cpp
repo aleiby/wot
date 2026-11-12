@@ -849,8 +849,45 @@ void AWoTGameMode::PlayerKilled(AController* Killer, AWoTCharacter* Victim, FNam
 	{
 		return;
 	}
+	// The onboarding aids' one fact about this death, sent to the victim alone and
+	// whatever this server's own settings: the item that killed this player, or none
+	// when no item did. Every death sends it: a client can miss the brief Playing state
+	// between two quick deaths, and then only this message replaces the first death's
+	// item. A client without the aids receives it and does nothing with it.
+	PlayerController->ClientKilledBy(KillingItemFor(Killer, *Victim));
 	PlayerController->UnPossess();
 	PlayerController->ArmRespawnFire(Victim, RespawnDelay);
+}
+
+AController* AWoTGameMode::ActiveSuicideInstigator(const AWoTCharacter& VictimPawn) const
+{
+	// SuicideInstigator holds the instigator's controller (the persistent identity),
+	// so it survives the caster's own pawn being replaced on respawn within the window.
+	AController* InstigatorController = VictimPawn.SuicideInstigator.Get();
+	if (InstigatorController
+		&& VictimPawn.SuicideInstigationTime + SuicideInstigationRelevance
+			> GetWorld()->GetTimeSeconds())
+	{
+		return InstigatorController;
+	}
+	return nullptr;
+}
+
+FName AWoTGameMode::KillingItemFor(const AController* Killer,
+	const AWoTCharacter& Victim) const
+{
+	if (!Victim.KillingItemName.IsNone())
+	{
+		return Victim.KillingItemName;
+	}
+	// A fall or a hazard soon after a Whirlwind or a Swap Places names the displacing
+	// angreal, on the same terms ScoreKill credits its caster with the kill.
+	if (!Killer && ActiveSuicideInstigator(Victim))
+	{
+		return UWoTInventoryComponent::GetHandSetItemClassName(
+			Victim.SuicideInstigatorItemClass);
+	}
+	return NAME_None;
 }
 
 void AWoTGameMode::ScoreKill(AController* Killer, AWoTCharacter* Victim)
@@ -878,12 +915,7 @@ void AWoTGameMode::ScoreKillIdentity(AController* Killer,
 	// credits the caster who put the victim there, instead of scoring a plain suicide.
 	if (Killer == nullptr && VictimPawn)
 	{
-		// SuicideInstigator holds the instigator's controller (the persistent identity),
-		// so it survives the caster's own pawn being replaced on respawn within the window.
-		AController* InstigatorController = VictimPawn->SuicideInstigator.Get();
-		if (InstigatorController
-			&& VictimPawn->SuicideInstigationTime + SuicideInstigationRelevance
-				> GetWorld()->GetTimeSeconds())
+		if (AController* InstigatorController = ActiveSuicideInstigator(*VictimPawn))
 		{
 			Killer = InstigatorController;
 		}

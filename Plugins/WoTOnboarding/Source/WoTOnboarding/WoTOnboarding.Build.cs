@@ -15,11 +15,16 @@ public class WoTOnboarding : ModuleRules
 		{
 			"Core",
 			"CoreUObject",
-			"Engine"
+			"Engine",
+			// The guide browser is a Slate overlay; InputCore carries the FKey
+			// close-key plumbing it shares with the retail help window.
+			"InputCore",
+			"Slate",
+			"SlateCore"
 		});
 
-		// The editor-only import/export seam speaks JSON so the content
-		// importer can drive it through reflection alone. "WoT" is the seam
+		// The compiled guide rows are JSON (Private/Generated/
+		// WoTAngrealGuideRows.inl, parsed at runtime). "WoT" is the seam
 		// header's home and the one game-module dependency.
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{

@@ -93,7 +93,9 @@ STATE_NAME = ".wot-build-root.json"
 SYNC_ENTRIES = ("WoT.uproject", "Config", "Source", "Plugins", "Build",
                 "ThirdParty")
 # Owned by UBT alone. Wiped when the engine identity changes or the root's
-# provenance is unknown.
+# provenance is unknown. UBT writes the same two directories beside every
+# plugin descriptor under Plugins/; those are UBT-owned too (_ubt_owned_paths)
+# and never mirrored in either direction.
 UBT_OWNED = ("Intermediate", "Binaries")
 # UBT's per-target command-line history (Actions/ActionHistory.cs
 # GetProjectLocation/GetEngineLocation), kept through interrupted-run
@@ -238,9 +240,26 @@ def _write_state(root: Path, state: dict) -> None:
                                    "updated_utc": _utc_now()})
 
 
+def _is_plugin_directory(files: Sequence[str]) -> bool:
+    return any(name.casefold().endswith(".uplugin") for name in files)
+
+
+def _ubt_owned_paths(root: Path) -> list[Path]:
+    """The project's UBT output directories, then each plugin's."""
+    paths = [root / name for name in UBT_OWNED]
+    plugins = root / "Plugins"
+    if plugins.is_dir() and not plugins.is_symlink():
+        for current, directories, files in os.walk(plugins, followlinks=False):
+            if _is_plugin_directory(files):
+                paths.extend(Path(current) / name for name in UBT_OWNED)
+                # UE stops its plugin search at a descriptor; so does this.
+                directories[:] = []
+    return paths
+
+
 def _wipe_ubt_outputs(root: Path) -> None:
-    for name in UBT_OWNED:
-        _remove(root / name)
+    for path in _ubt_owned_paths(root):
+        _remove(path)
 
 
 def prepare(root: Path, platform_name: str, identity: dict, *,
@@ -253,7 +272,7 @@ def prepare(root: Path, platform_name: str, identity: dict, *,
     """
     root.mkdir(parents=True, exist_ok=True)
     state = read_state(root)
-    has_outputs = any((root / name).exists() for name in UBT_OWNED)
+    has_outputs = any(path.exists() for path in _ubt_owned_paths(root))
     reason = None
     if state is None:
         if has_outputs:
@@ -308,8 +327,7 @@ def _recover_interrupted_ubt(root: Path, marker: dict) -> dict:
         return {"label": marker.get("label"), "wiped": True, "deleted": 0}
     threshold = started - RECOVERY_SLOP_SECONDS
     deleted = 0
-    for name in UBT_OWNED:
-        base = root / name
+    for base in _ubt_owned_paths(root):
         if not base.is_dir():
             continue
         for directory, _dirs, files in os.walk(base):
@@ -502,6 +520,11 @@ def _inventory(base: Path, entries: Sequence[str]) -> dict[str, tuple]:
         rows[entry] = ("dir",)
         for current, directories, files in os.walk(top, followlinks=False):
             current_path = Path(current)
+            if entry == "Plugins" and _is_plugin_directory(files):
+                # A plugin's UBT outputs are not build inputs: never planted
+                # into the root, never deleted from it (_ubt_owned_paths).
+                directories[:] = [
+                    name for name in directories if name not in UBT_OWNED]
             for name in list(directories):
                 path = current_path / name
                 relative = path.relative_to(base).as_posix()
@@ -699,10 +722,25 @@ def _project_relative(path: str, platform_name: str, *,
     if not path.startswith("$(ProjectDir)/"):
         raise BuildRootError(f"receipt path has no known root: {path!r}")
     relative = _safe_relative(path[len("$(ProjectDir)/"):])
-    if binaries_only and relative.parts[:2] != ("Binaries", platform_name):
+    if (binaries_only and relative.parts[:2] != ("Binaries", platform_name)
+            and _plugin_of_product(relative, platform_name) is None):
         raise BuildRootError(
             f"build product outside Binaries/{platform_name}: {path!r}")
     return relative
+
+
+def _plugin_of_product(relative: PurePosixPath,
+                       platform_name: str) -> PurePosixPath | None:
+    """Plugins/<plugin>/Binaries/<platform>/... -> Plugins/<plugin>."""
+    parts = relative.parts
+    if len(parts) < 5 or parts[0] != "Plugins":
+        return None
+    for index in range(2, len(parts) - 2):
+        if parts[index] == "Binaries":
+            if parts[index + 1] != platform_name:
+                return None
+            return PurePosixPath(*parts[:index])
+    return None
 
 
 def transfer_products(root: Path, iso: Path, *, platform_name: str,
@@ -713,7 +751,8 @@ def transfer_products(root: Path, iso: Path, *, platform_name: str,
 
     The UBT target receipt the build just wrote is the authority for what the
     product set is; every $(ProjectDir) build product is copied (engine-owned
-    products of shared editor targets stay where UBT built them), the receipt
+    products of shared editor targets stay where UBT built them; a project
+    plugin's editor modules land in Plugins/<plugin>/Binaries), the receipt
     itself follows so UAT stages from it unchanged, and each project runtime
     dependency that is not a product (WoT.uproject, plugin descriptors) must
     already be byte-identical in the ISO -- it is a mirrored input.
@@ -745,6 +784,12 @@ def transfer_products(root: Path, iso: Path, *, platform_name: str,
         if relative is None:
             engine_owned += 1
             continue
+        plugin = _plugin_of_product(relative, platform_name)
+        if plugin is not None and not any(
+                (iso / Path(*plugin.parts)).glob("*.uplugin")):
+            raise BuildRootError(
+                "plugin build product has no plugin descriptor in the ISO: "
+                f"{relative.as_posix()}")
         source = root / Path(*relative.parts)
         if not source.is_file():
             raise BuildRootError(f"UBT build product is missing: {source}")

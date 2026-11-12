@@ -53,6 +53,23 @@ Every change is one of two kinds, and issues are labelled to match:
   that leave play unchanged are not enhancements in this sense; send them as
   normal pull requests.
 
+### Optional improvements
+
+A player-facing feature the original never had, even one that leaves play
+unchanged (the onboarding aids that teach items and counters, say), ships as
+an optional plugin rather than as a change to the port:
+
+- The plugin lives under `Plugins/` and reaches the game only through a small
+  seam header in the game module (`Source/WoT/WoTOnboardingSeams.h`). A seam
+  does nothing when nothing listens, so the game builds and plays the same
+  with the plugin disabled or absent.
+- A master setting turns the plugin off while the game runs. Switched off, it
+  holds no seam binding and draws nothing; a spec proves it.
+- Parity checks, captures and comparisons run with the plugin off.
+- Its `PORT_NOTES.md` entry says what it adds and how to turn it off.
+
+`Plugins/WoTOnboarding` is the worked example.
+
 ## Porting conventions
 
 | UnrealScript | UE5 C++ |

@@ -206,6 +206,12 @@ bool FWoTFrontEndFeedbackContract::ShouldPlay(
 		&& AppVolumeMultiplier > 0.0f;
 }
 
+void FWoTFrontEndMenuSelection::SetEntryCount(int32 NewEntryCount)
+{
+	EntryCount = FMath::Max(NewEntryCount, 1);
+	SelectedIndex = FMath::Clamp(SelectedIndex, 0, EntryCount - 1);
+}
+
 bool FWoTFrontEndMenuSelection::MoveTo(int32 NewIndex)
 {
 	if (NewIndex < 0 || NewIndex >= EntryCount || NewIndex == SelectedIndex)
@@ -511,6 +517,15 @@ FSlateFontInfo FWoTFrontEndPresentationAuthority::MultiplayerFont(FName Face, fl
 		return FSlateFontInfo();
 	const int32 PixelScale = FMath::Clamp(
 		FMath::Max(FMath::RoundToInt(ViewportScale), MinimumPixelScale), 1, 2);
+	return MultiplayerStrike(Face, PixelScale, ViewportScale);
+}
+
+FSlateFontInfo FWoTFrontEndPresentationAuthority::MultiplayerStrike(
+	FName Face, int32 PixelScale, float RenderScale) const
+{
+	if (!IsReady() || !FMath::IsFinite(RenderScale) || RenderScale <= 0.0f
+		|| PixelScale < 1 || PixelScale > FWoTFrontEndFontOwner::MaxIntegerStrike)
+		return FSlateFontInfo();
 	FSlateFontInfo Font;
 #if WITH_AUTOMATION_TESTS
 	if (bTestingAuthority || bIntegrityRecovery)
@@ -538,7 +553,7 @@ FSlateFontInfo FWoTFrontEndPresentationAuthority::MultiplayerFont(FName Face, fl
 		// A failed optional larger strike must not select Slate's engine-font
 		// fallback; retain the authenticated native face at its original size.
 		if (Resolved.IsError() && PixelScale > 1) Resolved = Owner->ResolveIntegerScaled(Face, 1);
-		// Even if both optional pixel-perfect variants are rejected, keep the
+		// Even if both optional integer strikes are rejected, keep the
 		// already validated original face; empty font info selects Slate fallback.
 		if (Resolved.IsError()) Resolved = Owner->Resolve(Face);
 		if (Resolved.IsError() || !IsReady()) return FSlateFontInfo();
@@ -547,7 +562,7 @@ FSlateFontInfo FWoTFrontEndPresentationAuthority::MultiplayerFont(FName Face, fl
 	}
 	// Owner sizes are bitmap pixels, not points. Integer strikes are expanded
 	// before entering Slate, so its alpha atlas is sampled at 1:1 on screen.
-	Font.Size *= 72.0f / (FontConstants::RenderDPI * ViewportScale);
+	Font.Size *= 72.0f / (FontConstants::RenderDPI * RenderScale);
 	return Font;
 }
 
