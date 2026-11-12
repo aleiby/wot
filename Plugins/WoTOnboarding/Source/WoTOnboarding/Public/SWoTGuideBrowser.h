@@ -5,8 +5,10 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 
+class FWoTBackStackEntryHandle;
 class FWoTOnboardingFaces;
 class FWoTRetailArt;
+class STextBlock;
 class SBox;
 class SScrollBox;
 class SVerticalBox;
@@ -82,6 +84,12 @@ public:
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry,
 		const FPointerEvent& MouseEvent) override;
+	/** A touch outside the window closes it, as a click there does. */
+	virtual FReply OnTouchStarted(const FGeometry& MyGeometry,
+		const FPointerEvent& InTouchEvent) override;
+	/** The corner close label as shown now ("B  Close" while a controller
+	    drives the UI, "Esc  Close" otherwise). */
+	FString CloseLabelForTesting() const;
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry,
 		const FKeyEvent& InKeyEvent) override;
 	virtual FReply OnPreviewKeyDown(const FGeometry& MyGeometry,
@@ -137,6 +145,13 @@ private:
 	TSharedPtr<SScrollBox> GridScroll;
 	TSharedPtr<SScrollBox> DetailScroll;
 	TSharedPtr<SBox> WindowBox;
+	TSharedPtr<STextBlock> CloseLabel;
+	/** The controller back keys (B, View) reach the back stack's input
+	    preprocessor before any widget, and the screen behind the guide has its
+	    own entry there; this one sits above it so B closes the guide. Released
+	    with the widget; the stack skips it once the guide is off screen. */
+	TSharedPtr<FWoTBackStackEntryHandle> BackEntry;
+	bool IsOutsideWindow(const FGeometry& MyGeometry, const FVector2D& ScreenPosition) const;
 	TSharedPtr<SBox> DetailHost;
 	FName SelectedClassName;
 	double LastScaleChangeTime = 0.0;

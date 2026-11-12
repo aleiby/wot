@@ -19,6 +19,13 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Framework/Application/SlateApplication.h"
+#include "UI/WoTBackStack.h"
+#include "UI/WoTControllerUIInput.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SWindow.h"
+#include "Widgets/SBoxPanel.h"
+#include "WoTOnboardingModule.h"
 
 // The guide browser (plan Tasks 5 and 8). Synthetic fixtures with invented
 // names and invented prose; compiled-row specs assert layout, construction
@@ -1051,5 +1058,184 @@ bool FWoTOnboardingBrowserCompiledRowsSpec::RunTest(const FString&)
 	}
 	return !HasAnyErrors();
 }
+
+// The Steam Deck owner could not close the guide from the main menu: B and
+// View reach FWoTBackStack's input preprocessor before any widget, and the
+// main menu's own entry took them. The guide registers its own entry on top.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserControllerBackSpec,
+	"WoT.Onboarding.BrowserControllerBack", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserControllerBackSpec::RunTest(const FString&)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	int32 ScreenBacks = 0;
+	int32 Closes = 0;
+	// The screen behind the guide registers first, as SWoTFrontEndRoot does.
+	const TSharedRef<SButton> Screen = SNew(SButton);
+	const TSharedRef<FWoTBackStackEntryHandle> ScreenEntry = FWoTBackStack::Get().Register(
+		Screen, nullptr, [&ScreenBacks]() { ++ScreenBacks; return true; });
+	TSharedPtr<SOverlay> Layers;
+	const TSharedRef<SWindow> Window = SNew(SWindow)
+		.ClientSize(FVector2D(1280.0f, 800.0f))
+		.SupportsMaximize(false)
+		.SupportsMinimize(false)
+		.CreateTitleBar(false)
+		[
+			SAssignNew(Layers, SOverlay)
+			+ SOverlay::Slot()[Screen]
+		];
+	Slate.AddWindow(Window, true);
+	ON_SCOPE_EXIT
+	{
+		Window->RequestDestroyWindow();
+		FSlateApplication::Get().Tick();
+	};
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(WoTOnboardingBrowserMakeGuide())
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0))
+		.OnClose(FSimpleDelegate::CreateLambda([&Closes]() { ++Closes; }));
+	// Hosted above the screen, as the module adds it over the viewport.
+	Layers->AddSlot()[Browser];
+	Slate.Tick();
+	Slate.SetKeyboardFocus(Browser, EFocusCause::SetDirectly);
+	const auto Press = [&Slate](const FKey& Key)
+	{
+		return Slate.ProcessKeyDownEvent(
+			FKeyEvent(Key, FModifierKeysState(), 0, false, 0, 0));
+	};
+	TestTrue(TEXT("B is handled"), Press(EKeys::Gamepad_FaceButton_Right));
+	TestEqual(TEXT("B closes the guide"), Closes, 1);
+	TestEqual(TEXT("B never reaches the screen behind the guide"), ScreenBacks, 0);
+	Press(EKeys::Gamepad_Special_Left);
+	TestEqual(TEXT("View closes the guide too"), Closes, 2);
+	TestEqual(TEXT("View never reaches the screen either"), ScreenBacks, 0);
+	// Once the host takes the guide off screen and hands focus back as it
+	// does in the front end, B belongs to the screen again.
+	Layers->RemoveSlot(Browser);
+	Slate.Tick();
+	FWoTOnboardingModule::RestoreFocusAfterGuide(Screen);
+	TestTrue(TEXT("focus is back on the screen the guide opened over"),
+		Slate.GetUserFocusedWidget(0) == StaticCastSharedRef<SWidget>(Screen));
+	Press(EKeys::Gamepad_FaceButton_Right);
+	TestEqual(TEXT("B backs the screen once the guide is gone"), ScreenBacks, 1);
+	TestEqual(TEXT("and no longer closes the removed guide"), Closes, 2);
+	return !HasAnyErrors();
+}
+
+// The review of the back-key fix: closing the guide over the front end gave
+// focus to the bare game viewport, whose navigation cannot reach the menu, so
+// a controller was stuck again. Focus returns to the row the guide opened from.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingGuideCloseRestoresFocusSpec,
+	"WoT.Onboarding.GuideCloseRestoresFocus", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingGuideCloseRestoresFocusSpec::RunTest(const FString&)
+{
+	FSlateApplication& Slate = FSlateApplication::Get();
+	TSharedPtr<SButton> MenuRow;
+	TSharedPtr<SButton> OtherRow;
+	TSharedPtr<SOverlay> Layers;
+	const TSharedRef<SWindow> Window = SNew(SWindow)
+		.ClientSize(FVector2D(1280.0f, 800.0f))
+		.SupportsMaximize(false)
+		.SupportsMinimize(false)
+		.CreateTitleBar(false)
+		[
+			SAssignNew(Layers, SOverlay)
+			+ SOverlay::Slot()
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[SAssignNew(OtherRow, SButton)]
+				+ SVerticalBox::Slot().AutoHeight()[SAssignNew(MenuRow, SButton)]
+			]
+		];
+	Slate.AddWindow(Window, true);
+	ON_SCOPE_EXIT
+	{
+		Window->RequestDestroyWindow();
+		FSlateApplication::Get().Tick();
+	};
+	Slate.Tick();
+	Slate.SetKeyboardFocus(MenuRow, EFocusCause::SetDirectly);
+	const TWeakPtr<SWidget> Before = Slate.GetKeyboardFocusedWidget();
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(WoTOnboardingBrowserMakeGuide())
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0));
+	Layers->AddSlot()[Browser];
+	Slate.Tick();
+	Slate.SetKeyboardFocus(Browser, EFocusCause::SetDirectly);
+	TestTrue(TEXT("the guide takes focus while open"),
+		Slate.GetKeyboardFocusedWidget() == StaticCastSharedRef<SWidget>(Browser));
+	Layers->RemoveSlot(Browser);
+	Slate.Tick();
+	FWoTOnboardingModule::RestoreFocusAfterGuide(Before);
+	TestTrue(TEXT("the menu row has focus again"),
+		Slate.GetUserFocusedWidget(0) == StaticCastSharedPtr<SWidget>(MenuRow));
+	// A row that went away while the guide was up is not focused.
+	Slate.SetKeyboardFocus(Browser, EFocusCause::SetDirectly);
+	OtherRow->SetVisibility(EVisibility::Collapsed);
+	FWoTOnboardingModule::RestoreFocusAfterGuide(OtherRow);
+	TestFalse(TEXT("a hidden row is never given focus"),
+		Slate.GetUserFocusedWidget(0) == StaticCastSharedPtr<SWidget>(OtherRow));
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserOutsideTouchSpec,
+	"WoT.Onboarding.BrowserOutsideTouch", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserOutsideTouchSpec::RunTest(const FString&)
+{
+	int32 Closes = 0;
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(WoTOnboardingBrowserMakeGuide())
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0))
+		.OnClose(FSimpleDelegate::CreateLambda([&Closes]() { ++Closes; }));
+	const FGeometry RootGeometry = FGeometry::MakeRoot(
+		FVector2D(1280.0, 800.0), FSlateLayoutTransform());
+	Browser->SlatePrepass(1.0f);
+	TArray<FArrangedWidget> ArrangedWidgets;
+	WoTOnboardingBrowserArrangeTree(Browser, RootGeometry, ArrangedWidgets);
+	const FArrangedWidget* WindowBox = ArrangedWidgets.FindByPredicate(
+		[](const FArrangedWidget& Candidate)
+		{
+			return Candidate.Widget->GetType() == FName(TEXT("SBox"))
+				&& FVector2D(Candidate.Widget->GetDesiredSize()).Equals(FVector2D(960.0, 540.0), 0.01);
+		});
+	if (!TestNotNull(TEXT("the window box is arranged"), WindowBox)) return false;
+	const FVector2D WindowCenter = WindowBox->Geometry.LocalToAbsolute(
+		WindowBox->Geometry.GetLocalSize() * 0.5f);
+	const auto Touch = [&Browser, &RootGeometry](const FVector2D& Position)
+	{
+		// The touch overload: user 0, pointer 1, full force, no mouse button.
+		return Browser->OnTouchStarted(RootGeometry,
+			FPointerEvent(0, 1, Position, Position, 1.0f, false));
+	};
+	TestTrue(TEXT("an outside touch is handled"), Touch(FVector2D(20.0, 20.0)).IsEventHandled());
+	TestEqual(TEXT("an outside touch closes, as a click there does"), Closes, 1);
+	Touch(WindowCenter);
+	TestEqual(TEXT("a touch inside the window does not close"), Closes, 1);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserCloseLabelSpec,
+	"WoT.Onboarding.BrowserCloseLabel", WoTOnboardingBrowserFlags)
+
+bool FWoTOnboardingBrowserCloseLabelSpec::RunTest(const FString&)
+{
+	FWoTControllerUIInput::ResetForTesting();
+	ON_SCOPE_EXIT { FWoTControllerUIInput::ResetForTesting(); };
+	const TSharedRef<SWoTGuideBrowser> Browser = SNew(SWoTGuideBrowser)
+		.Guide(WoTOnboardingBrowserMakeGuide())
+		.InitialPhysicalSize(FVector2D(1280.0, 800.0));
+	TestEqual(TEXT("keyboard and mouse see Esc"), Browser->CloseLabelForTesting(),
+		FString(TEXT("Esc  Close")));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Controller);
+	TestEqual(TEXT("a controller sees B"), Browser->CloseLabelForTesting(),
+		FString(TEXT("B  Close")));
+	FWoTControllerUIInput::SetLastInputForTesting(EWoTLastInput::Pointer);
+	TestEqual(TEXT("and Esc again after the mouse moves"), Browser->CloseLabelForTesting(),
+		FString(TEXT("Esc  Close")));
+	return !HasAnyErrors();
+}
+
 
 #endif // WITH_AUTOMATION_TESTS

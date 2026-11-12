@@ -7,6 +7,7 @@
 #include "UObject/WeakObjectPtrTemplates.h"
 #include "WoTAngrealGuide.h"
 
+class SWidget;
 class SWoTGuideBrowser;
 class SWoTPickupCard;
 class UGameViewportClient;
@@ -52,6 +53,12 @@ public:
 	/** Death recaps the handler decided to show since startup, hosted or not. */
 	int32 GetDeathRecapsShownForTesting() const { return DeathRecapsShown; }
 
+	/** After the guide closes over a UI-input screen (the front end): focus
+	    goes back to the widget that had it when the guide opened (the menu
+	    row), for every user, so a controller can keep navigating; with that
+	    widget gone or hidden, to the game viewport as before. */
+	static void RestoreFocusAfterGuide(const TWeakPtr<SWidget>& FocusBeforeGuide);
+
 private:
 	void RefreshMenuRowRegistration();
 	/** Binds the seam handlers while the master switch is on and unbinds them
@@ -89,6 +96,8 @@ private:
 	FDelegateHandle KilledByHandle;
 	TSharedPtr<SWoTGuideBrowser> GuideBrowser;
 	TWeakObjectPtr<UGameViewportClient> GuideViewport;
+	/** The front end's focused widget when the guide opened over it. */
+	TWeakPtr<SWidget> FocusBeforeGuide;
 
 	TStrongObjectPtr<UWoTAngrealGuide> CachedGuide;
 	bool bGuideAbsent = false;

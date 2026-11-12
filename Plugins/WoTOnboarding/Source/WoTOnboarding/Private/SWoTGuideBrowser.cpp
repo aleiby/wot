@@ -5,6 +5,8 @@
 #include "WoTOnboardingChrome.h"
 #include "WoTOnboardingHints.h"
 #include "WoTOnboardingSeams.h"
+#include "UI/WoTBackStack.h"
+#include "UI/WoTControllerUIInput.h"
 
 #include "Input/Events.h"
 #include "InputCoreTypes.h"
@@ -273,8 +275,9 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 									.IsFocusable(false)
 									.OnClicked(this, &SWoTGuideBrowser::Close)
 									[
-										WoTOnboardingChrome::MakeText(FacesRef, TEXT("Esc  Close"),
-											EFace::Body, WoTOnboardingChrome::LabelColor(EFace::Body))
+										(CloseLabel = WoTOnboardingChrome::MakeText(FacesRef,
+											TEXT("Esc  Close"), EFace::Body,
+											WoTOnboardingChrome::LabelColor(EFace::Body))).ToSharedRef()
 									]
 								]
 							]
@@ -329,6 +332,31 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 	{
 		Faces->GetChrome().BindWidget(AsShared());
 	}
+	// The label names the key that closes the guide for the device in use.
+	CloseLabel->SetText(TAttribute<FText>::CreateLambda([]()
+	{
+		return FText::FromString(FWoTControllerUIInput::IsControllerMode()
+			? TEXT("B  Close") : TEXT("Esc  Close"));
+	}));
+	// B and View go to the back stack before any widget sees them, and the
+	// screen behind the guide (the main menu, or a match's overlays) has its
+	// own entry. Registered after it, this entry is on top while the guide is
+	// shown, so B closes the guide instead of being taken by that screen.
+	const TWeakPtr<SWoTGuideBrowser> WeakThis = SharedThis(this);
+	BackEntry = FWoTBackStack::Get().Register(SharedThis(this), nullptr,
+		[WeakThis]()
+		{
+			if (const TSharedPtr<SWoTGuideBrowser> Pinned = WeakThis.Pin())
+			{
+				Pinned->Close();
+			}
+			return true;
+		});
+}
+
+FString SWoTGuideBrowser::CloseLabelForTesting() const
+{
+	return CloseLabel.IsValid() ? CloseLabel->GetText().ToString() : FString();
 }
 
 TArray<FName> SWoTGuideBrowser::GridOrder() const
@@ -914,26 +942,45 @@ FReply SWoTGuideBrowser::Close()
 	return FReply::Handled();
 }
 
+bool SWoTGuideBrowser::IsOutsideWindow(const FGeometry& MyGeometry,
+	const FVector2D& ScreenPosition) const
+{
+	if (!WindowBox.IsValid())
+	{
+		return false;
+	}
+	TSet<TSharedRef<SWidget>> WindowToFind;
+	WindowToFind.Add(WindowBox.ToSharedRef());
+	TMap<TSharedRef<SWidget>, FArrangedWidget> FoundWindow;
+	FindChildGeometries(MyGeometry, WindowToFind, FoundWindow);
+	const FArrangedWidget* ArrangedWindow = FoundWindow.Find(WindowBox.ToSharedRef());
+	return ArrangedWindow != nullptr
+		&& !ArrangedWindow->Geometry.IsUnderLocation(ScreenPosition);
+}
+
 FReply SWoTGuideBrowser::OnMouseButtonDown(const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
 	// A press that reaches the browser outside its window (on the dimmed
 	// backdrop) closes the guide, as the Close button and Esc do. Presses
 	// inside the window keep their own handling.
-	if (WindowBox.IsValid())
+	if (IsOutsideWindow(MyGeometry, MouseEvent.GetScreenSpacePosition()))
 	{
-		TSet<TSharedRef<SWidget>> WindowToFind;
-		WindowToFind.Add(WindowBox.ToSharedRef());
-		TMap<TSharedRef<SWidget>, FArrangedWidget> FoundWindow;
-		FindChildGeometries(MyGeometry, WindowToFind, FoundWindow);
-		const FArrangedWidget* ArrangedWindow = FoundWindow.Find(WindowBox.ToSharedRef());
-		if (ArrangedWindow != nullptr
-			&& !ArrangedWindow->Geometry.IsUnderLocation(MouseEvent.GetScreenSpacePosition()))
-		{
-			return Close();
-		}
+		return Close();
 	}
 	return SCompoundWidget::OnMouseButtonDown(MyGeometry, MouseEvent);
+}
+
+FReply SWoTGuideBrowser::OnTouchStarted(const FGeometry& MyGeometry,
+	const FPointerEvent& InTouchEvent)
+{
+	// Slate routes a touch as a touch, not a mouse press, so the Steam Deck's
+	// screen needs its own outside-the-window close.
+	if (IsOutsideWindow(MyGeometry, InTouchEvent.GetScreenSpacePosition()))
+	{
+		return Close();
+	}
+	return SCompoundWidget::OnTouchStarted(MyGeometry, InTouchEvent);
 }
 
 bool SWoTGuideBrowser::IsCloseKey(const FKey& Key) const
