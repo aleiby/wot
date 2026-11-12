@@ -106,8 +106,7 @@ it up and adds it to your Steam library; you do this once, in Desktop Mode.
    into **Downloads**. You also need the original game's offline installer
    (see above):
    - If a Windows PC or Mac on your network already runs WoT Reborn and
-     still has the installer, skip it. The Deck copies it from that
-     computer; see
+     still has the installer, the Deck copies it from that computer; see
      [Installer from another computer](#deck-installer-from-another-computer)
      below.
    - Otherwise, download it and put it in **Downloads** too.
