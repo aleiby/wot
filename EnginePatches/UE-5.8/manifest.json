@@ -1,0 +1,87 @@
+{
+  "files": [
+    {
+      "created": false,
+      "patched_sha256": "97000c1385a6eba68ff260dc6a260708ae91b0f0854d91aef5bfbffb18532ff4",
+      "path": "Engine/Source/Runtime/Core/Private/Misc/ConfigCacheIni.cpp",
+      "pristine_sha256": "905d5f4b568a7fe1007eb81932fd98bb14247190aa32bf0d8a51a3b02d26bc13"
+    },
+    {
+      "created": false,
+      "patched_sha256": "0626450c051920c6fd38784cdba5fad87902d97e60befbf24564db133a621e38",
+      "path": "Engine/Source/Runtime/Core/Private/Misc/Paths.cpp",
+      "pristine_sha256": "395dbb886fa19cd01d05c10b79ab66887106eda1485a2d2c8009d4bcd8404db9"
+    },
+    {
+      "created": true,
+      "patched_sha256": "431f44f7f683b88e230aa7a11f54ac40a224bd1a2affef7fb227fdf3c64530ae",
+      "path": "Engine/Source/Runtime/Core/Private/WoTUserDataRoot.cpp"
+    },
+    {
+      "created": true,
+      "patched_sha256": "3c2aa96c86bca3cc249d59d8ee8610eed4f13738a86a0e6acfb7acb352de6c69",
+      "path": "Engine/Source/Runtime/Core/Public/WoTUserDataRoot.h"
+    },
+    {
+      "created": false,
+      "patched_sha256": "b342ff8db6a039d421bb50f414d991c5a7b02415c983d0a8595067a19ff243c7",
+      "path": "Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp",
+      "pristine_sha256": "fbc122433b3fdfe47b1f4dd0f246eebf0e14b7a957676b5a11e02b031c654109"
+    },
+    {
+      "created": false,
+      "patched_sha256": "1fee494abf9b9e4f37f4edcf6bfd832ebac74d0a1f5f08f726ccf64d7d416aa1",
+      "path": "Engine/Source/Runtime/Engine/Private/World.cpp",
+      "pristine_sha256": "a4a884840eb5f0354b5df7937eef3b03be8c09818a32e2b803f9c20f38e06f7f"
+    },
+    {
+      "created": false,
+      "patched_sha256": "7128c3314dc2e15c99d14d8ae45eb883183e6052bc83ec56418b1fe547d4de03",
+      "path": "Engine/Source/Runtime/Engine/Private/GameUserSettings.cpp",
+      "pristine_sha256": "c4520a0ade3969ead90ae900957d5830b06a2aedbbcedd464908c85f387e801f"
+    },
+    {
+      "created": false,
+      "patched_sha256": "d53399823be432c61e9578b3f9e0fece5b15f3e021dd18eef220921427b39597",
+      "path": "Engine/Source/Runtime/Engine/Private/GameEngine.cpp",
+      "pristine_sha256": "d5f49bb4ff5fbe4d94c6b4c568a314ea5eb922b85cab94491150f930fa6720a9"
+    },
+    {
+      "created": true,
+      "patched_sha256": "da5615ca4fe1d01516ef9689816d061e5e896431e99c14ca60d78499a47e3c11",
+      "path": "Engine/Source/Runtime/Engine/Public/WoTWorldMaterialization.h"
+    },
+    {
+      "created": false,
+      "patched_sha256": "9e7eaf22bd76dec92a2a0ba55789c3221feebd37b9d5f7cf5430254acdcf1794",
+      "path": "Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp",
+      "pristine_sha256": "f23b201a530fb87af894aac9f76ce090fab42fe4dccc92267e044f5b6d6cae1d"
+    },
+    {
+      "created": false,
+      "patched_sha256": "8dbecc08f98b72adc8f6eb80ad43af4a2b32cf49e07021f7a52890ae78727677",
+      "path": "Engine/Source/Runtime/Launch/Private/Mac/LaunchMac.cpp",
+      "pristine_sha256": "f0717168fefa83c6ced0548a6bb38c29760cce59a3f08bef1084fb26ad580de4"
+    },
+    {
+      "created": false,
+      "patched_sha256": "cb015ac4e112086871ee3ced73c7df5be1669fa970f8d00dbe1808afe61e9a06",
+      "path": "Engine/Source/Runtime/Launch/Private/Windows/LaunchWindows.cpp",
+      "pristine_sha256": "1dab45b057510c3660a0439e464dada9dfcc544317cbbb5a10039590571e15a8"
+    },
+    {
+      "patched_sha256": "a41fa271574b2448cb9ada4b17a4af659427323dbf33279c3fe284f16f27abb9",
+      "path": "Engine/Plugins/Online/OnlineBase/Source/Private/Online/LANBeacon.cpp",
+      "pristine_sha256": "5d0806e52018f3e3b30e0a61cd62200ec2cedb0763ea30d5df35039680633bb9"
+    },
+    {
+      "patched_sha256": "ed88ce8fb60552e191b74e1f46aad4f185ae48a45e2895b4662c8c0cb177e87b",
+      "path": "Engine/Plugins/Online/OnlineSubsystemEOS/Source/OnlineSubsystemEOS/Private/UserManagerEOS.cpp",
+      "pristine_sha256": "44e165f403aade610979d855feb6f6acab86777c783d3ebfb858e2dd51bdcf37"
+    }
+  ],
+  "format": "wot-ue58-engine-patch-v1",
+  "patch_sha256": "e5249458cfa040e191daf9d2da8674adfda286c92e805f72fce596c896094504",
+  "record_command": "python3 Tools/dist/apply_engine_patch.py --engine <pristine-ue> --manifest EnginePatches/UE-5.8/manifest.json --patch EnginePatches/UE-5.8/guarded-bootstrap.patch --record",
+  "source_manifest": "source-toolchain.json"
+}

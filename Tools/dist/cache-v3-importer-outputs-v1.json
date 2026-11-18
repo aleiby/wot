@@ -1,0 +1,101 @@
+{
+    "format": "cache-v3-importer-outputs-v1",
+    "importers": [
+        {
+            "audit_rule": "audit.texture-payload-v1",
+            "domain": "texture",
+            "importer": "texture-v2",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-texture-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.sound-payload-v1",
+            "domain": "sound",
+            "importer": "sound-v1",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-sound-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.mesh-payload-v1",
+            "domain": "mesh",
+            "importer": "mesh-v1",
+            "max_decoded_size": 536870912,
+            "output_schema": "wot-mesh-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.animation-payload-v1",
+            "domain": "animation",
+            "importer": "animation-v1",
+            "max_decoded_size": 536870912,
+            "output_schema": "wot-animation-v3",
+            "runtime_consumer": "UWoTVertexAnimComponent"
+        },
+        {
+            "audit_rule": "audit.bsp-payload-v1",
+            "domain": "bsp",
+            "importer": "bsp-v1",
+            "max_decoded_size": 1073741824,
+            "output_schema": "wot-bsp-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.world-payload-v1",
+            "domain": "world",
+            "importer": "world-v1",
+            "max_decoded_size": 1073741824,
+            "output_schema": "wot-world-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.front-end-world-payload-v1",
+            "domain": "front_end_world",
+            "importer": "front-end-world-v1",
+            "max_decoded_size": 4194304,
+            "output_schema": "wot-front-end-world-v3",
+            "runtime_consumer": "FWoTCacheGenerationLease"
+        },
+        {
+            "audit_rule": "audit.font-payload-v2",
+            "domain": "font",
+            "importer": "font-v2",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-font-v3",
+            "runtime_consumer": "FWoTFrontEndFontOwner"
+        },
+        {
+            "audit_rule": "audit.procedural-payload-v1",
+            "domain": "procedural",
+            "importer": "procedural-v1",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-procedural-v3",
+            "runtime_consumer": "UWoTFractalSubsystem"
+        },
+        {
+            "audit_rule": "audit.registry-payload-v1",
+            "domain": "registry",
+            "importer": "registry-v1",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-registry-v3",
+            "runtime_consumer": "UWoTPayloadSubsystem"
+        },
+        {
+            "audit_rule": "audit.localization-payload-v1",
+            "domain": "localization",
+            "importer": "localization-v1",
+            "max_decoded_size": 67108864,
+            "output_schema": "wot-localization-v3",
+            "runtime_consumer": "FWoTLocalizationRegistry"
+        },
+        {
+            "audit_rule": "audit.class-default-payload-v1",
+            "domain": "class_default",
+            "importer": "class-default-v2",
+            "max_decoded_size": 268435456,
+            "output_schema": "wot-class-default-v3",
+            "runtime_consumer": "FWoTWorldMaterializer"
+        }
+    ]
+}

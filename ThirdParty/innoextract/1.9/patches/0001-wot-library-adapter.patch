@@ -1,0 +1,1606 @@
+diff --git a/src/util/load.hpp b/src/util/load.hpp
+--- a/src/util/load.hpp
++++ b/src/util/load.hpp
+@@ -40,6 +40,30 @@
+ 
+ namespace util {
+ 
++/* WoT parser-local string allocation controls. Adapter calls are serialized,
++ * but these remain thread-local so non-adapter use cannot share a budget. */
++class string_load_scope {
++public:
++	string_load_scope(boost::uint64_t total_bytes, bool discard_strings);
++	~string_load_scope();
++
++private:
++	boost::uint64_t previous_remaining;
++	boost::uint32_t previous_item_limit;
++	bool previous_discard;
++};
++
++class string_item_limit_scope {
++public:
++	explicit string_item_limit_scope(boost::uint32_t maximum_bytes);
++	~string_item_limit_scope();
++
++private:
++	boost::uint32_t previous_item_limit;
++};
++
++bool strings_are_discarded();
++
+ /*!
+  * Wrapper to load a length-prefixed string from an input stream into a std::string.
+  * The string length is stored as 32-bit integer.
+diff --git a/src/util/load.cpp b/src/util/load.cpp
+--- a/src/util/load.cpp
++++ b/src/util/load.cpp
+@@ -21,11 +21,58 @@
+ #include "util/load.hpp"
+ 
+ #include <algorithm>
++#include <ios>
++#include <limits>
++#include <stdexcept>
+ 
+ #include <boost/lexical_cast.hpp>
+ 
+ namespace util {
+ 
++namespace {
++
++thread_local boost::uint64_t string_bytes_remaining =
++	std::numeric_limits<boost::uint64_t>::max();
++thread_local boost::uint32_t string_item_limit =
++	std::numeric_limits<boost::uint32_t>::max();
++thread_local bool discard_loaded_strings = false;
++
++void consume_string_length(boost::uint32_t length) {
++	if(length > string_item_limit || boost::uint64_t(length) > string_bytes_remaining) {
++		throw std::length_error("stored strings exceed WoT adapter budget");
++	}
++	string_bytes_remaining -= length;
++}
++
++} // anonymous namespace
++
++string_load_scope::string_load_scope(boost::uint64_t total_bytes, bool discard_strings)
++	: previous_remaining(string_bytes_remaining), previous_item_limit(string_item_limit),
++	  previous_discard(discard_loaded_strings) {
++	string_bytes_remaining = total_bytes;
++	string_item_limit = std::numeric_limits<boost::uint32_t>::max();
++	discard_loaded_strings = discard_strings;
++}
++
++string_load_scope::~string_load_scope() {
++	string_bytes_remaining = previous_remaining;
++	string_item_limit = previous_item_limit;
++	discard_loaded_strings = previous_discard;
++}
++
++string_item_limit_scope::string_item_limit_scope(boost::uint32_t maximum_bytes)
++	: previous_item_limit(string_item_limit) {
++	string_item_limit = std::min(string_item_limit, maximum_bytes);
++}
++
++string_item_limit_scope::~string_item_limit_scope() {
++	string_item_limit = previous_item_limit;
++}
++
++bool strings_are_discarded() {
++	return discard_loaded_strings;
++}
++
+ void binary_string::load(std::istream & is, std::string & target) {
+ 	
+ 	boost::uint32_t length = util::load<boost::uint32_t>(is);
+@@ -33,14 +80,24 @@
+ 		return;
+ 	}
+ 	
++	consume_string_length(length);
++	
+ 	target.clear();
++	if(discard_loaded_strings) {
++		discard(is, length);
++		return;
++	}
+ 	
+ 	while(length) {
+ 		char buffer[10 * 1024];
+ 		boost::uint32_t buf_size = std::min(length, boost::uint32_t(sizeof(buffer)));
+ 		is.read(buffer, std::streamsize(buf_size));
+-		target.append(buffer, buf_size);
+-		length -= buf_size;
++		std::streamsize read = is.gcount();
++		if(read != std::streamsize(buf_size)) {
++			throw std::ios_base::failure("unexpected end of stored string");
++		}
++		target.append(buffer, size_t(read));
++		length -= boost::uint32_t(read);
+ 	}
+ }
+ 
+@@ -50,6 +107,7 @@
+ 	if(is.fail()) {
+ 		return;
+ 	}
++	consume_string_length(length);
+ 	
+ 	discard(is, length);
+ }
+@@ -57,7 +115,9 @@
+ void encoded_string::load(std::istream & is, std::string & target, codepage_id codepage,
+                           const std::bitset<256> * lead_bytes) {
+ 	binary_string::load(is, target);
+-	to_utf8(target, codepage, lead_bytes);
++	if(!strings_are_discarded()) {
++		to_utf8(target, codepage, lead_bytes);
++	}
+ }
+ 
+ unsigned to_unsigned(const char * chars, size_t count) {
+diff --git a/src/setup/file.cpp b/src/setup/file.cpp
+--- a/src/setup/file.cpp
++++ b/src/setup/file.cpp
+@@ -82,7 +82,13 @@
+ 	}
+ 	
+-	is >> util::encoded_string(source, i.codepage, i.header.lead_bytes);
+-	is >> util::encoded_string(destination, i.codepage, i.header.lead_bytes);
++	{
++		// Reject hostile path lengths before encoded_string copies bytes into the
++		// persistent std::strings used by setup::file_entry.
++		util::string_item_limit_scope path_limit(4096);
++		is >> util::encoded_string(source, i.codepage, i.header.lead_bytes);
++		is >> util::encoded_string(destination, i.codepage, i.header.lead_bytes);
++	}
+ 	is >> util::encoded_string(install_font_name, i.codepage, i.header.lead_bytes);
+ 	if(i.version >= INNO_VERSION(5, 2, 5)) {
+ 		is >> util::encoded_string(strong_assembly_name, i.codepage, i.header.lead_bytes);
+diff --git a/src/setup/info.cpp b/src/setup/info.cpp
+--- a/src/setup/info.cpp
++++ b/src/setup/info.cpp
+@@ -23,6 +23,7 @@
+ #include <cassert>
+ #include <istream>
+ #include <sstream>
++#include <stdexcept>
+ 
+ #include <boost/foreach.hpp>
+ 
+@@ -69,6 +70,27 @@
+ 
+ namespace {
+ 
++void require_reasonable_entry_counts(const setup::header & header) {
++	// WoT hardening: setup::info normally trusts these counts and resizes each
++	// vector immediately. The library adapter treats every installer as hostile.
++	static const size_t MaxEntries = 65536;
++	const size_t counts[] = {
++		header.language_count, header.message_count, header.permission_count,
++		header.type_count, header.component_count, header.task_count,
++		header.directory_count, header.file_count, header.data_entry_count,
++		header.icon_count, header.ini_entry_count, header.registry_entry_count,
++		header.delete_entry_count, header.uninstall_delete_entry_count,
++		header.run_entry_count, header.uninstall_run_entry_count
++	};
++	size_t total = 0;
++	for(size_t i = 0; i < sizeof(counts) / sizeof(counts[0]); i++) {
++		if(counts[i] > MaxEntries || total > MaxEntries - counts[i]) {
++			throw std::length_error("setup entry count exceeds WoT adapter limit");
++		}
++		total += counts[i];
++	}
++}
++
+ void load_wizard_images(std::istream & is, const setup::version & version,
+                         std::vector<std::string> & images, info::entry_types entries) {
+ 	
+@@ -148,6 +170,26 @@
+ 		entries |= Languages;
+ 	}
+ 	
++	static const boost::uint64_t MaxHeaderStringBytes =
++		boost::uint64_t(16) * 1024 * 1024;
++	const std::streampos main_block_start = is.tellg();
++	{
++		// Counts follow the main-header strings on disk. Preflight with copying
++		// disabled so the aggregate count is refused before any real header string
++		// is loaded into setup::header.
++		util::string_load_scope preflight_budget(MaxHeaderStringBytes, true);
++		stream::block_reader::pointer preflight = stream::block_reader::get(is, version);
++		setup::header preflight_header;
++		preflight_header.load(*preflight, version);
++		require_reasonable_entry_counts(preflight_header);
++	}
++	is.clear();
++	is.seekg(main_block_start);
++	if(is.fail()) {
++		throw std::ios_base::failure("could not rewind preflighted setup header");
++	}
++
++	util::string_load_scope header_budget(MaxHeaderStringBytes, false);
+ 	stream::block_reader::pointer reader = stream::block_reader::get(is, version);
+ 	
+ 	debug("loading main header");
+@@ -258,58 +300,25 @@
+ 		entries |= NoSkip;
+ 	}
+ 	
+-	bool parsed_without_errors = false;
+ 	std::streampos start = is.tellg();
+ 	for(;;) {
+-		
+-		warning_suppressor warnings;
+-		
+ 		try {
+-			
+-			// Try to parse headers for this version
++			// The library path never constructs warning_suppressor: it replaces
++			// std::cerr.rdbuf process-globally. Adapter callers accept the first
++			// version candidate that parses without an exception.
+ 			try_load(is, entries, force_codepage);
+-			
+-			if(warnings) {
+-				// Parsed without errors but with warnings - try other versions first
+-				if(!parsed_without_errors) {
+-					listed_version = version.value;
+-					parsed_without_errors = true;
+-				}
+-				throw std::exception();
+-			}
+-			
+-			warnings.flush();
+ 			return;
+-			
+ 		} catch(...) {
+-			
+ 			is.clear();
+ 			is.seekg(start);
+-			
+ 			version_constant next_version = version.next();
+-			
+ 			if(!ambiguous || !next_version) {
+-				if(version.value != listed_version) {
+-					// Rewind to a previous version that had better results and report those
+-					version.value = listed_version;
+-					warnings.restore();
+-					try_load(is, entries, force_codepage);
+-				} else {
+-					// Otherwise. report results for the current version
+-					warnings.flush();
+-					if(!parsed_without_errors) {
+-						throw;
+-					}
+-				}
+-				return;
++				version.value = listed_version;
++				throw;
+ 			}
+-			
+-			// Retry with the next version
+ 			version.value = next_version;
+ 			ambiguous = version.is_ambiguous();
+-			
+ 		}
+-		
+ 	}
+ 	
+ }
+diff --git a/src/stream/lzma.cpp b/src/stream/lzma.cpp
+--- a/src/stream/lzma.cpp
++++ b/src/stream/lzma.cpp
+@@ -29,6 +29,8 @@
+ 
+ namespace stream {
+ 
++static const boost::uint32_t MaxWoTDictionarySize = 64u * 1024u * 1024u;
++
+ static lzma_stream * init_raw_lzma_stream(lzma_vli filter, lzma_options_lzma & options) {
+ 	
+ 	options.preset_dict = NULL;
+@@ -109,6 +111,10 @@
+ 		options.lc = boost::uint32_t(properties % 9);
+ 		
+ 		options.dict_size = util::little_endian::load<boost::uint32_t>(header + 1);
++		if(options.dict_size > MaxWoTDictionarySize) {
++			throw lzma_error("inno lzma1 dictionary exceeds WoT adapter limit",
++			                 LZMA_MEMLIMIT_ERROR);
++		}
+ 		
+ 		stream = init_raw_lzma_stream(LZMA_FILTER_LZMA1, options);
+ 	}
+@@ -138,6 +144,10 @@
+ 		} else {
+ 			options.dict_size = ((boost::uint32_t(2) | boost::uint32_t((prop) & 1)) << ((prop) / 2 + 11));
+ 		}
++		if(options.dict_size > MaxWoTDictionarySize) {
++			throw lzma_error("inno lzma2 dictionary exceeds WoT adapter limit",
++			                 LZMA_MEMLIMIT_ERROR);
++		}
+ 		
+ 		stream = init_raw_lzma_stream(LZMA_FILTER_LZMA2, options);
+ 	}
+diff --git a/src/util/encoding.cpp b/src/util/encoding.cpp
+--- a/src/util/encoding.cpp
++++ b/src/util/encoding.cpp
+@@ -596,19 +596,9 @@
+ 
+ #if INNOEXTRACT_HAVE_ICONV
+ 
+-typedef boost::unordered_map<codepage_id, iconv_t> converter_map;
+-converter_map converters;
+-
+ iconv_t get_converter(codepage_id codepage, bool reverse) {
+-	
+-	boost::uint32_t key = codepage | (reverse ? 0x80000000 : 0);
+-	
+-	// Try to reuse an existing converter if possible
+-	converter_map::const_iterator i = converters.find(key);
+-	if(i != converters.end()) {
+-		return i->second;
+-	}
+-	
++	// iconv_t carries mutable conversion state. A fresh handle per conversion
++	// avoids both the upstream process-global map race and state sharing.
+ 	iconv_t handle = iconv_t(-1);
+ 	
+ 	const char * encoding = get_encoding_name(codepage);
+@@ -633,15 +623,22 @@
+ 		log_warning << "Could not get codepage " << codepage << " -> UTF-8 converter.";
+ 	}
+ 	
+-	return converters[key] = handle;
++	return handle;
+ }
+ 
++struct scoped_iconv {
++	iconv_t handle;
++	explicit scoped_iconv(iconv_t value) : handle(value) { }
++	~scoped_iconv() { if(handle != iconv_t(-1)) { iconv_close(handle); } }
++};
++
+ bool utf8_iconv(const std::string & from, std::string & to, codepage_id codepage, bool reverse) {
+ 	
+ 	iconv_t converter = get_converter(codepage, reverse);
+ 	if(converter == iconv_t(-1)) {
+ 		return false;
+ 	}
++	scoped_iconv close_converter(converter);
+ 	
+ 	/*
+ 	 * Some iconv implementations declare the second parameter of iconv() as
+diff --git a/src/stream/callback.hpp b/src/stream/callback.hpp
+new file mode 100644
+--- /dev/null
++++ b/src/stream/callback.hpp
+@@ -0,0 +1,55 @@
++/* WoT callback-backed, seekable input stream. No path or FILE* exists here. */
++#ifndef INNOEXTRACT_STREAM_CALLBACK_HPP
++#define INNOEXTRACT_STREAM_CALLBACK_HPP
++
++#include <istream>
++#include <streambuf>
++
++#include <boost/cstdint.hpp>
++
++#include "wot/innoextract_adapter.h"
++
++namespace stream {
++
++class callback_streambuf : public std::streambuf {
++public:
++	callback_streambuf(wot_innoextract_read_at_fn read_at, void * context,
++	                   boost::uint64_t size);
++
++	bool callback_failed() const { return callback_failed_; }
++
++protected:
++	int_type underflow();
++	pos_type seekoff(off_type offset, std::ios_base::seekdir direction,
++	                 std::ios_base::openmode mode);
++	pos_type seekpos(pos_type position, std::ios_base::openmode mode);
++
++private:
++	pos_type seek_absolute(boost::uint64_t position);
++	boost::uint64_t logical_position() const;
++
++	wot_innoextract_read_at_fn read_at_;
++	void * context_;
++	boost::uint64_t size_;
++	boost::uint64_t next_offset_;
++	bool callback_failed_;
++	char buffer_[64 * 1024];
++};
++
++class callback_istream : public std::istream {
++public:
++	callback_istream(wot_innoextract_read_at_fn read_at, void * context,
++	                 boost::uint64_t size)
++		: std::istream(NULL), buffer_(read_at, context, size) {
++		rdbuf(&buffer_);
++	}
++
++	bool callback_failed() const { return buffer_.callback_failed(); }
++
++private:
++	callback_streambuf buffer_;
++};
++
++} // namespace stream
++
++#endif // INNOEXTRACT_STREAM_CALLBACK_HPP
+diff --git a/src/stream/callback.cpp b/src/stream/callback.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/stream/callback.cpp
+@@ -0,0 +1,98 @@
++#include "stream/callback.hpp"
++
++#include <algorithm>
++#include <cstring>
++#include <limits>
++
++namespace stream {
++
++callback_streambuf::callback_streambuf(wot_innoextract_read_at_fn read_at,
++                                       void * context, boost::uint64_t size)
++	: read_at_(read_at), context_(context), size_(size), next_offset_(0),
++	  callback_failed_(false) {
++	setg(buffer_, buffer_, buffer_);
++}
++
++boost::uint64_t callback_streambuf::logical_position() const {
++	boost::uint64_t unread = boost::uint64_t(egptr() - gptr());
++	return unread <= next_offset_ ? next_offset_ - unread : 0;
++}
++
++callback_streambuf::int_type callback_streambuf::underflow() {
++	if(gptr() < egptr()) {
++		return traits_type::to_int_type(*gptr());
++	}
++	if(next_offset_ >= size_ || callback_failed_ || read_at_ == NULL) {
++		return traits_type::eof();
++	}
++	boost::uint64_t requested = std::min<boost::uint64_t>(sizeof(buffer_),
++	                                                    size_ - next_offset_);
++	boost::int64_t read = read_at_(context_, next_offset_, buffer_, requested);
++	if(read < 0 || boost::uint64_t(read) > requested) {
++		callback_failed_ = true;
++		return traits_type::eof();
++	}
++	if(read == 0) {
++		// The caller declared an explicit size. EOF before that size is I/O failure.
++		callback_failed_ = true;
++		return traits_type::eof();
++	}
++	next_offset_ += boost::uint64_t(read);
++	setg(buffer_, buffer_, buffer_ + read);
++	return traits_type::to_int_type(*gptr());
++}
++
++callback_streambuf::pos_type callback_streambuf::seek_absolute(
++    boost::uint64_t position) {
++	if(position > size_ || position > boost::uint64_t(
++			std::numeric_limits<off_type>::max())) {
++		return pos_type(off_type(-1));
++	}
++	next_offset_ = position;
++	setg(buffer_, buffer_, buffer_);
++	return pos_type(off_type(position));
++}
++
++callback_streambuf::pos_type callback_streambuf::seekpos(
++    pos_type position, std::ios_base::openmode mode) {
++	if(!(mode & std::ios_base::in)) {
++		return pos_type(off_type(-1));
++	}
++	off_type signed_position = off_type(position);
++	if(signed_position < 0) {
++		return pos_type(off_type(-1));
++	}
++	return seek_absolute(boost::uint64_t(signed_position));
++}
++
++callback_streambuf::pos_type callback_streambuf::seekoff(
++    off_type offset, std::ios_base::seekdir direction,
++    std::ios_base::openmode mode) {
++	if(!(mode & std::ios_base::in)) {
++		return pos_type(off_type(-1));
++	}
++	boost::uint64_t base;
++	if(direction == std::ios_base::beg) {
++		base = 0;
++	} else if(direction == std::ios_base::cur) {
++		base = logical_position();
++	} else if(direction == std::ios_base::end) {
++		base = size_;
++	} else {
++		return pos_type(off_type(-1));
++	}
++	if(offset < 0) {
++		boost::uint64_t magnitude = boost::uint64_t(-(offset + 1)) + 1;
++		if(magnitude > base) {
++			return pos_type(off_type(-1));
++		}
++		return seek_absolute(base - magnitude);
++	}
++	boost::uint64_t positive = boost::uint64_t(offset);
++	if(positive > size_ - std::min(base, size_)) {
++		return pos_type(off_type(-1));
++	}
++	return seek_absolute(base + positive);
++}
++
++} // namespace stream
+diff --git a/src/stream/slice.hpp b/src/stream/slice.hpp
+--- a/src/stream/slice.hpp
++++ b/src/stream/slice.hpp
+@@ -16,141 +16,43 @@
+  * 2. Altered source versions must be plainly marked as such, and must not be
+  *    misrepresented as being the original software.
+  * 3. This notice may not be removed or altered from any source distribution.
+- */
+-
+-/*!
+- * \file
+  *
+- * Abstraction for reading the embedded or external raw setup data.
++ * Altered for WoT callback-only input; external slice filenames were removed.
+  */
+ #ifndef INNOEXTRACT_STREAM_SLICE_HPP
+ #define INNOEXTRACT_STREAM_SLICE_HPP
+ 
+ #include <ios>
++#include <istream>
+ #include <string>
+ 
++#include <boost/cstdint.hpp>
+ #include <boost/iostreams/concepts.hpp>
+-#include <boost/filesystem/path.hpp>
+-
+-#include "util/fstream.hpp"
+ 
+ namespace stream {
+ 
+-//! Error thrown by \ref slice_reader if there was a problem.
+ struct slice_error : public std::ios_base::failure {
+-	
+ 	explicit slice_error(const std::string & msg) : std::ios_base::failure(msg) { }
+-	
+ };
+ 
+-/*!
+- * Abstraction for reading either data embedded inside the setup executable or from
+- * multiple external slices.
+- *
+- * Setup data contained in the executable is located by a non-zeore
+- * \ref loader::offsets::data_offset.
+- *
+- * The contained data is made up of one or more \ref chunk "chunks"
+- * (read by \ref chunk_reader), which in turn contain one or more  \ref file "files"
+- * (read by \ref file_reader).
++/*
++ * WoT accepts embedded setup data from one caller-supplied seekable callback
++ * stream. External slice filenames and all filesystem fallback were removed.
+  */
+ class slice_reader : public boost::iostreams::source {
+-	
+-	typedef boost::filesystem::path path_type;
+-	
+-	// Information for reading embedded setup data
+ 	const boost::uint32_t data_offset;
+-	
+-	// Information for eading external setup data
+-	path_type    dir;             //!< Slice directory specified at construction.
+-	std::string  base_file;       //!< Base file name for slices.
+-	std::string  base_file2;      //!< Fallback base filename for slices.
+-	const size_t slices_per_disk; //!< Number of slices grouped into each disk (for names).
+-	
+-	// Information about the current slice
+-	size_t          current_slice; //!< Number of the currently opened slice.
+-	boost::uint32_t slice_size;    //!< Size in bytes of the currently opened slice.
+-	
+-	// Streams
+-	util::ifstream ifs; //!< File input stream used when reading from external slices.
+-	std::istream * is;  //!< Input stream to read from.
+-	
+-	void seek(size_t slice);
+-	bool open_file(const path_type & file);
+-	bool open_file_case_insensitive(const path_type & dirname, const path_type & filename);
+-	void open(size_t slice);
+-	
++	size_t current_slice;
++	boost::uint32_t stream_size;
++	std::istream * is;
++
+ public:
+-	
+-	static std::string slice_filename(const std::string & basename, size_t slice,
+-	                                  size_t slices_per_disk = 1);
+-	
+-	/*!
+-	 * Construct a \ref slice_reader to read from data inside the setup file.
+-	 * Seeking to anything except the zeroeth slice is not allowed.
+-	 *
+-	 * \param istream A seekable input stream for the setup executable.
+-	 *                The initial read position of the stream is ignored.
+-	 * \param offset  The offset within the given stream where the setup data starts.
+-	 *                This offset is given by \ref loader::offsets::data_offset.
+-	 *
+-	 * The constructed reader will allow reading the byte range [data_offset, file end)
+-	 * from the setup executable and provide this as the range [0, file end - data_offset).
+-	 */
+ 	slice_reader(std::istream * istream, boost::uint32_t offset);
+-	
+-	/*!
+-	 * Construct a \ref slice_reader to read from external data slices (aka disks).
+-	 *
+-	 * Slice files must be located at \c $dir/$base_file-$disk.bin
+-	 * or \c $dir/$base_file-$disk$sliceletter.bin if \c slices_per_disk is greater
+-	 * than \c 1.
+-	 *
+-	 * The disk number is given by \code slice / slices_per_disk + 1 \endcode while
+-	 * the sliceletter is the ASCII char \code 'a' + (slice % slices_per_disk) \endcode.
+-	 *
+-	 * \param dirname          The directory containing the slice files.
+-	 * \param basename         The base name for slice files.
+-	 * \param basename2        Alternative base name for slice files.
+-	 * \param disk_slice_count How many slices are grouped into one disk. Must not be \c 0.
+-	 */
+-	slice_reader(const path_type & dirname, const std::string & basename, const std::string & basename2,
+-	             size_t disk_slice_count);
+-	
+-	/*!
+-	 * Attempt to seek to an offset within a slice.
+-	 *
+-	 * \param slice  The slice to seek to.
+-	 * \param offset The byte offset to seek to within the given slice.
+-	 *
+-	 * \return \c false if the requested slice could not be opened, or if the requested
+-	 *         offset is not a valid position in that slice - \c true otherwise.
+-	 */
++
+ 	bool seek(size_t slice, boost::uint32_t offset);
+-	
+-	/*!
+-	 * Read a number of bytes starting at the current slice and offset within that slice.
+-	 *
+-	 * \param buffer Buffer to receive the bytes read.
+-	 * \param bytes  Number of bytes to read.
+-	 *
+-	 * The current offset will be advanced by the number of bytes read. It is not an error
+-	 * to read past the end of the current slice (unless it is the last slice). Doing so
+-	 * will automatically seek to the start of the next slice and continue reading from
+-	 * there.
+-	 *
+-	 * \return The number of bytes read or \c -1 if there was an error. Unless we are at the
+-	 *         end of the last slice, this function blocks until the number of requested
+-	 *         bytes have been read.
+-	 */
+ 	std::streamsize read(char * buffer, std::streamsize bytes);
+-	
+-	//! \return the number currently opened slice.
+-	size_t slice() { return current_slice; }
+-	
+-	//! \return true a slice is currently open.
+-	bool is_open() { return (is != &ifs || ifs.is_open()); }
+-	
++
++	size_t slice() const { return current_slice; }
++	bool is_open() const { return is != NULL; }
+ };
+ 
+ } // namespace stream
+diff --git a/src/stream/slice.cpp b/src/stream/slice.cpp
+--- a/src/stream/slice.cpp
++++ b/src/stream/slice.cpp
+@@ -16,242 +16,60 @@
+  * 2. Altered source versions must be plainly marked as such, and must not be
+  *    misrepresented as being the original software.
+  * 3. This notice may not be removed or altered from any source distribution.
++ *
++ * Altered for WoT callback-only embedded setup data.
+  */
+-
+ #include "stream/slice.hpp"
+ 
+-#include <sstream>
+-#include <cstring>
++#include <algorithm>
+ #include <limits>
+-
+-#include <boost/cstdint.hpp>
+-#include <boost/algorithm/string/predicate.hpp>
+-#include <boost/filesystem/operations.hpp>
+-#include <boost/range/size.hpp>
+-
+-#include "util/console.hpp"
+-#include "util/load.hpp"
+-#include "util/log.hpp"
+ 
+ namespace stream {
+ 
+-namespace {
+-
+-const char slice_ids[][8] = {
+-	{ 'i', 'd', 's', 'k', 'a', '1', '6', 0x1a },
+-	{ 'i', 'd', 's', 'k', 'a', '3', '2', 0x1a },
+-};
+-
+-} // anonymous namespace
+-
+ slice_reader::slice_reader(std::istream * istream, boost::uint32_t offset)
+-	: data_offset(offset),
+-	  slices_per_disk(1), current_slice(0), slice_size(0),
+-	  is(istream) {
+-	
+-	std::streampos max_size = std::streampos(std::numeric_limits<boost::int32_t>::max());
+-	
++	: data_offset(offset), current_slice(0), stream_size(0), is(istream) {
++	if(is == NULL) {
++		throw slice_error("callback stream is null");
++	}
++	std::streampos max_size = std::streampos(
++		std::numeric_limits<boost::int32_t>::max());
+ 	std::streampos file_size = is->seekg(0, std::ios_base::end).tellg();
+-	
+-	slice_size = boost::uint32_t(std::min(file_size, max_size));
+-	if(is->seekg(data_offset).fail()) {
+-		throw slice_error("could not seek to data");
++	if(file_size < 0 || file_size > max_size) {
++		throw slice_error("callback stream size is invalid");
++	}
++	stream_size = boost::uint32_t(file_size);
++	if(data_offset > stream_size || is->seekg(data_offset).fail()) {
++		throw slice_error("could not seek to embedded setup data");
+ 	}
+ }
+ 
+-slice_reader::slice_reader(const path_type & dirname, const std::string & basename,
+-                           const std::string & basename2, size_t disk_slice_count)
+-	: data_offset(0),
+-	  dir(dirname), base_file(basename), base_file2(basename2),
+-	  slices_per_disk(disk_slice_count), current_slice(0), slice_size(0),
+-	  is(&ifs) { }
+-
+-void slice_reader::seek(size_t slice) {
+-	
+-	if(slice == current_slice && is_open()) {
+-		return;
+-	}
+-	
+-	if(data_offset != 0) {
+-		throw slice_error("cannot change slices in single-file setup");
+-	}
+-	
+-	open(slice);
+-}
+-
+-bool slice_reader::open_file(const path_type & file) {
+-	
+-	if(!boost::filesystem::exists(file)) {
++bool slice_reader::seek(size_t slice, boost::uint32_t offset) {
++	if(slice != 0 || data_offset > stream_size
++	   || offset > stream_size - data_offset) {
+ 		return false;
+ 	}
+-	
+-	log_info << "Opening \"" << color::cyan << file.string() << color::reset << '"';
+-	
+-	ifs.close();
+-	ifs.clear();
+-	
+-	ifs.open(file, std::ios_base::in | std::ios_base::binary | std::ios_base::ate);
+-	if(ifs.fail()) {
+-		return false;
+-	}
+-	
+-	std::streampos file_size = ifs.tellg();
+-	ifs.seekg(0);
+-	
+-	char magic[8];
+-	if(ifs.read(magic, 8).fail()) {
+-		ifs.close();
+-		throw slice_error("could not read slice magic number in \"" + file.string() + "\"");
+-	}
+-	bool found = false;
+-	for(size_t i = 0; boost::size(slice_ids); i++) {
+-		if(!std::memcmp(magic, slice_ids[i], 8)) {
+-			found = true;
+-			break;
+-		}
+-	}
+-	if(!found) {
+-		ifs.close();
+-		throw slice_error("bad slice magic number in \"" + file.string() + "\"");
+-	}
+-	
+-	slice_size = util::load<boost::uint32_t>(ifs);
+-	if(ifs.fail()) {
+-		ifs.close();
+-		throw slice_error("could not read slice size in \"" + file.string() + "\"");
+-	} else if(std::streampos(slice_size) > file_size) {
+-		ifs.close();
+-		std::ostringstream oss;
+-		oss << "bad slice size in " << file << ": " << slice_size << " > " << file_size;
+-		throw slice_error(oss.str());
+-	} else if(std::streampos(slice_size) < ifs.tellg()) {
+-		ifs.close();
+-		std::ostringstream oss;
+-		oss << "bad slice size in " << file << ": " << slice_size << " < " << ifs.tellg();
+-		throw slice_error(oss.str());
+-	}
+-	
+-	return true;
+-}
+-
+-std::string slice_reader::slice_filename(const std::string & basename, size_t slice,
+-                                         size_t slices_per_disk) {
+-	
+-	std::ostringstream oss;
+-	oss << basename << '-';
+-	
+-	if(slices_per_disk == 0) {
+-		throw slice_error("slices per disk must not be zero");
+-	}
+-	
+-	if(slices_per_disk == 1) {
+-		oss << (slice + 1);
+-	} else {
+-		size_t major = (slice / slices_per_disk) + 1;
+-		size_t minor = slice % slices_per_disk;
+-		oss << major << char(boost::uint8_t('a') + minor);
+-	}
+-	
+-	oss << ".bin";
+-	
+-	return oss.str();
+-}
+-
+-bool slice_reader::open_file_case_insensitive(const path_type & dirname, const path_type & filename) {
+-	
+-	boost::filesystem::directory_iterator end;
+-	for(boost::filesystem::directory_iterator i(dirname); i != end; ++i) {
+-		path_type actual_filename = i->path().filename();
+-		if(boost::iequals(actual_filename.string(), filename.string()) && open_file(dirname / actual_filename)) {
+-			return true;
+-		}
+-	}
+-	
+-	return false;
+-}
+-
+-void slice_reader::open(size_t slice) {
+-	
+-	current_slice = slice;
+-	is = &ifs;
+-	ifs.close();
+-	
+-	path_type slice_file = slice_filename(base_file, slice, slices_per_disk);
+-	if(open_file(dir / slice_file)) {
+-		return;
+-	}
+-	
+-	path_type slice_file2 = slice_filename(base_file2, slice, slices_per_disk);
+-	if(!base_file2.empty() && slice_file2 != slice_file && open_file(dir / slice_file2)) {
+-		return;
+-	}
+-	
+-	if(open_file_case_insensitive(dir, slice_file)) {
+-		return;
+-	}
+-	
+-	if(!base_file2.empty() && slice_file2 != slice_file && open_file_case_insensitive(dir, slice_file2)) {
+-		return;
+-	}
+-	
+-	std::ostringstream oss;
+-	oss << "could not open slice " << slice << ": " << slice_file;
+-	if(!base_file2.empty() && slice_file2 != slice_file) {
+-		oss << " or " << slice_file2;
+-	}
+-	throw slice_error(oss.str());
+-}
+-
+-bool slice_reader::seek(size_t slice, boost::uint32_t offset) {
+-	
+-	seek(slice);
+-	
+-	offset += data_offset;
+-	
+-	if(offset > slice_size) {
+-		return false;
+-	}
+-	
+-	if(is->seekg(offset).fail()) {
+-		return false;
+-	}
+-	
+-	return true;
++	current_slice = 0;
++	is->clear();
++	return !is->seekg(data_offset + offset).fail();
+ }
+ 
+ std::streamsize slice_reader::read(char * buffer, std::streamsize bytes) {
+-	
+-	seek(current_slice);
+-	
+-	std::streamsize nread = 0;
+-	
+-	while(bytes > 0) {
+-		
+-		boost::uint32_t read_pos = boost::uint32_t(is->tellg());
+-		if(read_pos > slice_size) {
+-			break;
+-		}
+-		boost::uint32_t remaining = slice_size - read_pos;
+-		if(!remaining) {
+-			seek(current_slice + 1);
+-			read_pos = boost::uint32_t(is->tellg());
+-			if(read_pos > slice_size) {
+-				break;
+-			}
+-			remaining = slice_size - read_pos;
+-		}
+-		
+-		boost::uint64_t toread = std::min(boost::uint64_t(remaining), boost::uint64_t(bytes));
+-		toread = std::min(toread, boost::uint64_t(std::numeric_limits<std::streamsize>::max()));
+-		if(is->read(buffer, std::streamsize(toread)).fail()) {
+-			break;
+-		}
+-		
+-		std::streamsize read = is->gcount();
+-		nread += read, buffer += read, bytes -= read;
++	if(is == NULL || buffer == NULL || bytes < 0 || current_slice != 0) {
++		return -1;
+ 	}
+-	
+-	return (nread != 0 || bytes == 0) ? nread : -1;
++	std::streampos position = is->tellg();
++	if(position < 0 || position > std::streampos(stream_size)) {
++		return -1;
++	}
++	boost::uint64_t remaining = stream_size - boost::uint32_t(position);
++	std::streamsize requested = std::streamsize(std::min<boost::uint64_t>(
++		remaining, boost::uint64_t(bytes)));
++	if(requested == 0) {
++		return bytes == 0 ? 0 : -1;
++	}
++	is->read(buffer, requested);
++	std::streamsize count = is->gcount();
++	return count > 0 ? count : -1;
+ }
+ 
+ } // namespace stream
+diff --git a/src/wot/adapter.cpp b/src/wot/adapter.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/wot/adapter.cpp
+@@ -0,0 +1,545 @@
++/* WoT's exception-contained C ABI over innoextract's parser/extraction core. */
++#include "wot/innoextract_adapter.h"
++
++#include <algorithm>
++#include <cstdio>
++#include <exception>
++#include <ios>
++#include <limits>
++#include <memory>
++#include <mutex>
++#include <new>
++#include <sstream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include <boost/cstdint.hpp>
++
++#include "cli/goggalaxy.hpp"
++#include "crypto/checksum.hpp"
++#include "crypto/hasher.hpp"
++#include "loader/offsets.hpp"
++#include "setup/data.hpp"
++#include "setup/file.hpp"
++#include "setup/info.hpp"
++#include "stream/callback.hpp"
++#include "stream/chunk.hpp"
++#include "stream/file.hpp"
++#include "stream/slice.hpp"
++#include "util/load.hpp"
++
++namespace {
++
++const boost::uint64_t MaxDecodedBytes = boost::uint64_t(8) * 1024 * 1024 * 1024;
++const boost::uint64_t MaxFileOffset = boost::uint64_t(8) * 1024 * 1024 * 1024;
++thread_local std::string last_error;
++std::mutex library_mutex;
++
++void set_error(const char * message) {
++	try {
++		last_error = message ? message : "unknown innoextract adapter error";
++	} catch(...) {
++		// The accessor must remain callable even under allocation failure.
++	}
++}
++
++void set_error(const std::exception & error) {
++	set_error(error.what());
++}
++
++wot_innoextract_checksum_type checksum_type(crypto::checksum_type type) {
++	switch(type) {
++		case crypto::None: return WOT_INNOEXTRACT_CHECKSUM_NONE;
++		case crypto::Adler32: return WOT_INNOEXTRACT_CHECKSUM_ADLER32;
++		case crypto::CRC32: return WOT_INNOEXTRACT_CHECKSUM_CRC32;
++		case crypto::MD5: return WOT_INNOEXTRACT_CHECKSUM_MD5;
++		case crypto::SHA1: return WOT_INNOEXTRACT_CHECKSUM_SHA1;
++	}
++	return WOT_INNOEXTRACT_CHECKSUM_NONE;
++}
++
++wot_innoextract_compression compression_type(stream::compression_method type) {
++	switch(type) {
++		case stream::Stored: return WOT_INNOEXTRACT_COMPRESSION_STORED;
++		case stream::Zlib: return WOT_INNOEXTRACT_COMPRESSION_ZLIB;
++		case stream::BZip2: return WOT_INNOEXTRACT_COMPRESSION_BZIP2;
++		case stream::LZMA1: return WOT_INNOEXTRACT_COMPRESSION_LZMA1;
++		case stream::LZMA2: return WOT_INNOEXTRACT_COMPRESSION_LZMA2;
++		default: return WOT_INNOEXTRACT_COMPRESSION_UNKNOWN;
++	}
++}
++
++std::string hex_checksum(const crypto::checksum & value) {
++	char byte[3];
++	std::string result;
++	switch(value.type) {
++		case crypto::None: return result;
++		case crypto::Adler32:
++		case crypto::CRC32: {
++			boost::uint32_t number = value.type == crypto::Adler32
++			                       ? value.adler32 : value.crc32;
++			char buffer[9];
++			std::snprintf(buffer, sizeof(buffer), "%08x", unsigned(number));
++			return buffer;
++		}
++		case crypto::MD5:
++			result.reserve(32);
++			for(size_t i = 0; i < sizeof(value.md5); i++) {
++				std::snprintf(byte, sizeof(byte), "%02x",
++				              unsigned(static_cast<unsigned char>(value.md5[i])));
++				result += byte;
++			}
++			return result;
++		case crypto::SHA1:
++			result.reserve(40);
++			for(size_t i = 0; i < sizeof(value.sha1); i++) {
++				std::snprintf(byte, sizeof(byte), "%02x",
++				              unsigned(static_cast<unsigned char>(value.sha1[i])));
++				result += byte;
++			}
++			return result;
++	}
++	return result;
++}
++
++bool strip_app_destination(const std::string & stored, std::string & relative) {
++	static const char AppRoot[] = "{app}\\";
++	static const size_t AppRootLength = sizeof(AppRoot) - 1;
++	if(stored.size() <= AppRootLength
++	   || stored.compare(0, AppRootLength, AppRoot) != 0) {
++		return false;
++	}
++	const std::string::const_iterator begin = stored.begin() + AppRootLength;
++	if(std::find(begin, stored.end(), '{') != stored.end()
++	   || std::find(begin, stored.end(), '}') != stored.end()) {
++		return false;
++	}
++	relative.assign(begin, stored.end());
++	return !relative.empty() && relative.size() <= 4096;
++}
++
++bool targets_app_destination(const std::string & stored) {
++	static const char AppRoot[] = "{app}\\";
++	static const size_t AppRootLength = sizeof(AppRoot) - 1;
++	return stored == "{app}"
++	    || (stored.size() >= AppRootLength
++	        && stored.compare(0, AppRootLength, AppRoot) == 0);
++}
++
++bool strip_recovered_gog_destination(
++    const std::string & stored, std::string & relative) {
++	if(stored.empty() || stored.size() > 4096 || stored[0] == '\\'
++	   || stored[0] == '/' || stored.find(':') != std::string::npos
++	   || stored.find('{') != std::string::npos
++	   || stored.find('}') != std::string::npos) {
++		return false;
++	}
++	relative = stored;
++	return true;
++}
++
++struct adapter_entry {
++	std::string name;
++	std::string checksum;
++	size_t file_index;
++	std::vector<size_t> data_indices;
++	crypto::checksum whole_checksum;
++	wot_innoextract_entry public_entry;
++
++	adapter_entry() : file_index(0) {
++		public_entry.name_utf8 = NULL;
++		public_entry.uncompressed_size = 0;
++		public_entry.checksum_type = WOT_INNOEXTRACT_CHECKSUM_NONE;
++		public_entry.checksum_hex = NULL;
++		public_entry.compression = WOT_INNOEXTRACT_COMPRESSION_UNKNOWN;
++	}
++
++	void bind_pointers() {
++		public_entry.name_utf8 = name.c_str();
++		public_entry.checksum_hex = checksum.c_str();
++	}
++};
++
++} // anonymous namespace
++
++struct wot_innoextract_extraction_cursor {
++	std::unique_ptr<stream::callback_istream> input;
++	std::unique_ptr<stream::slice_reader> slices;
++	stream::chunk_reader::pointer chunk;
++	stream::chunk chunk_info;
++	boost::uint64_t position;
++	bool active;
++
++	wot_innoextract_extraction_cursor() : position(0), active(false) { }
++
++	void invalidate() {
++		active = false;
++	}
++
++	void reset() {
++		chunk.reset();
++		slices.reset();
++		input.reset();
++		position = 0;
++		active = false;
++	}
++};
++
++struct wot_innoextract_package {
++	wot_innoextract_read_at_fn read_at;
++	void * read_context;
++	boost::uint64_t input_size;
++	loader::offsets offsets;
++	setup::info info;
++	std::vector<adapter_entry> entries;
++	std::string description;
++	mutable wot_innoextract_extraction_cursor cursor;
++
++	wot_innoextract_package(wot_innoextract_read_at_fn callback, void * context,
++	                       boost::uint64_t size)
++		: read_at(callback), read_context(context), input_size(size) { }
++};
++
++namespace {
++
++void prepare_cursor(const wot_innoextract_package * package,
++                    const setup::data_entry & data) {
++	wot_innoextract_extraction_cursor & cursor = package->cursor;
++	if(!cursor.active || !(cursor.chunk_info == data.chunk)
++	   || cursor.position > data.file.offset) {
++		cursor.reset();
++		cursor.input.reset(new stream::callback_istream(
++			package->read_at, package->read_context, package->input_size));
++		cursor.slices.reset(new stream::slice_reader(
++			cursor.input.get(), package->offsets.data_offset));
++		cursor.chunk = stream::chunk_reader::get(
++			*cursor.slices, data.chunk, std::string());
++		cursor.chunk_info = data.chunk;
++		cursor.position = 0;
++		cursor.active = true;
++	}
++	if(cursor.position < data.file.offset) {
++		util::discard(*cursor.chunk, data.file.offset - cursor.position);
++		cursor.position = data.file.offset;
++	}
++}
++
++int32_t open_impl(wot_innoextract_read_at_fn read_at, void * read_context,
++                  boost::uint64_t input_size,
++                  wot_innoextract_package ** output_package) {
++	if(read_at == NULL || output_package == NULL || input_size == 0
++	   || input_size > boost::uint64_t(std::numeric_limits<std::streamoff>::max())) {
++		set_error("invalid read callback, output pointer, or input size");
++		return WOT_INNOEXTRACT_INVALID_ARGUMENT;
++	}
++	*output_package = NULL;
++	std::unique_ptr<wot_innoextract_package> package(
++		new wot_innoextract_package(read_at, read_context, input_size));
++
++	stream::callback_istream input(read_at, read_context, input_size);
++	package->offsets.load(input);
++	if(input.callback_failed()) {
++		set_error("read callback failed while locating setup headers");
++		return WOT_INNOEXTRACT_IO_ERROR;
++	}
++	if(!package->offsets.found_magic || package->offsets.header_offset >= input_size
++	   || package->offsets.data_offset == 0
++	   || package->offsets.data_offset >= input_size) {
++		set_error("installer has no valid embedded setup headers and data");
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	}
++
++	input.clear();
++	input.seekg(package->offsets.header_offset);
++	package->info.load(input, setup::info::Files | setup::info::DataEntries
++	                              | setup::info::NoUnknownVersion);
++	if(input.callback_failed()) {
++		set_error("read callback failed while parsing setup headers");
++		return WOT_INNOEXTRACT_IO_ERROR;
++	}
++	if(input.fail()) {
++		set_error("setup header stream ended unexpectedly");
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	}
++
++	std::vector<std::string> stored_destinations;
++	stored_destinations.reserve(package->info.files.size());
++	for(size_t i = 0; i < package->info.files.size(); i++) {
++		stored_destinations.push_back(package->info.files[i].destination);
++	}
++	gog::parse_galaxy_files(package->info, false);
++
++	boost::uint64_t total = 0;
++	for(size_t file_index = 0; file_index < package->info.files.size(); file_index++) {
++		const setup::file_entry & file = package->info.files[file_index];
++		const bool exact_app = targets_app_destination(
++			stored_destinations[file_index]);
++		const bool recovered_gog =
++			file.destination != stored_destinations[file_index];
++		if(!exact_app && !recovered_gog) {
++			// GOG installers bundle redistributables and per-user setup files.
++			// They are never game payload and are omitted from the adapter's
++			// closed extraction surface.
++			continue;
++		}
++		if(file.destination.empty()
++		   || file.location >= package->info.data_entries.size()) {
++			continue; // external copy commands have no bytes in the held installer
++		}
++
++		adapter_entry entry;
++		if(exact_app) {
++			if(!strip_app_destination(file.destination, entry.name)) {
++				set_error("entry destination is not exactly below the {app} root");
++				return WOT_INNOEXTRACT_FORMAT_ERROR;
++			}
++		} else if(!strip_recovered_gog_destination(file.destination, entry.name)) {
++			set_error("entry destination is not exactly below the {app} root");
++			return WOT_INNOEXTRACT_FORMAT_ERROR;
++		}
++		entry.file_index = file_index;
++		entry.data_indices.push_back(file.location);
++		entry.data_indices.insert(entry.data_indices.end(),
++			file.additional_locations.begin(), file.additional_locations.end());
++		entry.whole_checksum = recovered_gog
++			? file.checksum
++			: package->info.data_entries[file.location].file.checksum;
++		for(size_t part = 0; part < entry.data_indices.size(); part++) {
++			const size_t data_index = entry.data_indices[part];
++			if(data_index >= package->info.data_entries.size()) {
++				set_error("GOG file part references an absent data entry");
++				return WOT_INNOEXTRACT_FORMAT_ERROR;
++			}
++			const setup::data_entry & data = package->info.data_entries[data_index];
++			if(data.chunk.encryption != stream::Plaintext) {
++				set_error("encrypted Inno entries are unsupported by the WoT adapter");
++				return WOT_INNOEXTRACT_FORMAT_ERROR;
++			}
++			if(data.uncompressed_size > MaxDecodedBytes
++			   || data.file.offset > MaxFileOffset
++			   || data.file.size > MaxDecodedBytes
++			   || data.file.size > MaxFileOffset - data.file.offset
++			   || (!recovered_gog
++			       && data.file.size != data.uncompressed_size)) {
++				set_error("entry size or offset exceeds the WoT adapter limit");
++				return WOT_INNOEXTRACT_LIMIT_ERROR;
++			}
++			boost::uint64_t available = input_size - package->offsets.data_offset;
++			if(available < 4 || data.chunk.offset > available - 4
++			   || data.chunk.size > available - 4 - data.chunk.offset) {
++				set_error("compressed chunk lies outside the held installer");
++				return WOT_INNOEXTRACT_FORMAT_ERROR;
++			}
++			if(total > MaxDecodedBytes - data.uncompressed_size
++			   || entry.public_entry.uncompressed_size
++			      > MaxDecodedBytes - data.uncompressed_size) {
++				set_error("total decoded size exceeds the WoT adapter limit");
++				return WOT_INNOEXTRACT_LIMIT_ERROR;
++			}
++			total += data.uncompressed_size;
++			entry.public_entry.uncompressed_size += data.uncompressed_size;
++		}
++		const setup::data_entry & first_data =
++			package->info.data_entries[entry.data_indices.front()];
++		entry.checksum = hex_checksum(entry.whole_checksum);
++		entry.public_entry.checksum_type =
++			checksum_type(entry.whole_checksum.type);
++		entry.public_entry.compression =
++			compression_type(first_data.chunk.compression);
++		package->entries.push_back(entry);
++	}
++	if(package->entries.empty()) {
++		set_error("installer contains no embedded file entries");
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	}
++	for(size_t i = 0; i < package->entries.size(); i++) {
++		package->entries[i].bind_pointers();
++	}
++	std::ostringstream description;
++	description << "innoextract-1.9;setup=" << package->info.version
++	            << ";entries=" << package->entries.size() << ";io=callback";
++	package->description = description.str();
++	*output_package = package.release();
++	last_error.clear();
++	return WOT_INNOEXTRACT_OK;
++}
++
++int32_t extract_impl(const wot_innoextract_package * package, boost::uint64_t index,
++                     wot_innoextract_write_fn write, void * write_context) {
++	if(package == NULL || write == NULL || index >= package->entries.size()) {
++		set_error("invalid package, entry index, or write callback");
++		return WOT_INNOEXTRACT_INVALID_ARGUMENT;
++	}
++	const adapter_entry & entry = package->entries[size_t(index)];
++	std::unique_ptr<crypto::hasher> whole_hasher;
++	if(entry.whole_checksum.type != crypto::None) {
++		whole_hasher.reset(new crypto::hasher(entry.whole_checksum.type));
++	}
++	boost::uint64_t written = 0;
++	for(size_t part = 0; part < entry.data_indices.size(); part++) {
++		const setup::data_entry & data =
++			package->info.data_entries[entry.data_indices[part]];
++		prepare_cursor(package, data);
++		crypto::checksum actual;
++		stream::file_reader::pointer file =
++			stream::file_reader::get(*package->cursor.chunk, data.file, &actual);
++		boost::uint64_t part_written = 0;
++		while(!file->eof()) {
++			char buffer[64 * 1024];
++			std::streamsize count = file->read(buffer, sizeof(buffer)).gcount();
++			if(count < 0) {
++				package->cursor.invalidate();
++				set_error("negative decoded read size");
++				return WOT_INNOEXTRACT_FORMAT_ERROR;
++			}
++			if(count == 0) {
++				continue;
++			}
++			if(boost::uint64_t(count) > data.uncompressed_size -
++			   std::min(part_written, data.uncompressed_size)) {
++				package->cursor.invalidate();
++				set_error("decoded entry exceeds its declared size");
++				return WOT_INNOEXTRACT_LIMIT_ERROR;
++			}
++			if(whole_hasher.get() != NULL) {
++				whole_hasher->update(buffer, size_t(count));
++			}
++			if(write(write_context, buffer, boost::uint64_t(count)) != 0) {
++				package->cursor.invalidate();
++				set_error("caller write callback rejected decoded bytes");
++				return WOT_INNOEXTRACT_WRITE_ERROR;
++			}
++			part_written += boost::uint64_t(count);
++			written += boost::uint64_t(count);
++		}
++		if(package->cursor.input->callback_failed()) {
++			package->cursor.invalidate();
++			set_error("read callback failed during extraction");
++			return WOT_INNOEXTRACT_IO_ERROR;
++		}
++		if(part_written != data.uncompressed_size) {
++			package->cursor.invalidate();
++			set_error("decoded entry ended before its declared size");
++			return WOT_INNOEXTRACT_FORMAT_ERROR;
++		}
++		if(actual != data.file.checksum) {
++			package->cursor.invalidate();
++			set_error("decoded entry checksum mismatch");
++			return WOT_INNOEXTRACT_FORMAT_ERROR;
++		}
++		package->cursor.position = data.file.offset + data.file.size;
++	}
++	if(written != entry.public_entry.uncompressed_size) {
++		package->cursor.invalidate();
++		set_error("decoded multi-part entry ended before its declared size");
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	}
++	if(whole_hasher.get() != NULL
++	   && whole_hasher->finalize() != entry.whole_checksum) {
++		package->cursor.invalidate();
++		set_error("decoded whole-entry checksum mismatch");
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	}
++	last_error.clear();
++	return WOT_INNOEXTRACT_OK;
++}
++
++} // anonymous namespace
++
++extern "C" int32_t wot_innoextract_open(
++    wot_innoextract_read_at_fn read_at, void * read_context,
++    uint64_t input_size, wot_innoextract_package ** output_package) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		return open_impl(read_at, read_context, input_size, output_package);
++	} catch(const std::bad_alloc &) {
++		set_error("allocation failed while opening installer");
++		return WOT_INNOEXTRACT_LIMIT_ERROR;
++	} catch(const std::ios_base::failure & error) {
++		set_error(error);
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	} catch(const std::exception & error) {
++		set_error(error);
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	} catch(...) {
++		set_error("unknown exception while opening installer");
++		return WOT_INNOEXTRACT_INTERNAL_ERROR;
++	}
++}
++
++extern "C" uint64_t wot_innoextract_entry_count(
++    const wot_innoextract_package * package) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		if(package == NULL) {
++			set_error("package is null");
++			return 0;
++		}
++		return package->entries.size();
++	} catch(...) {
++		set_error("unknown exception while counting entries");
++		return 0;
++	}
++}
++
++extern "C" int32_t wot_innoextract_entry_at(
++    const wot_innoextract_package * package, uint64_t index,
++    wot_innoextract_entry * output_entry) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		if(package == NULL || output_entry == NULL || index >= package->entries.size()) {
++			set_error("invalid package, entry index, or output pointer");
++			return WOT_INNOEXTRACT_INVALID_ARGUMENT;
++		}
++		*output_entry = package->entries[size_t(index)].public_entry;
++		last_error.clear();
++		return WOT_INNOEXTRACT_OK;
++	} catch(const std::exception & error) {
++		set_error(error);
++		return WOT_INNOEXTRACT_INTERNAL_ERROR;
++	} catch(...) {
++		set_error("unknown exception while reading entry metadata");
++		return WOT_INNOEXTRACT_INTERNAL_ERROR;
++	}
++}
++
++extern "C" int32_t wot_innoextract_extract_entry(
++    const wot_innoextract_package * package, uint64_t index,
++    wot_innoextract_write_fn write, void * write_context) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		return extract_impl(package, index, write, write_context);
++	} catch(const std::bad_alloc &) {
++		if(package != NULL) package->cursor.invalidate();
++		set_error("allocation failed during extraction");
++		return WOT_INNOEXTRACT_LIMIT_ERROR;
++	} catch(const std::ios_base::failure & error) {
++		if(package != NULL) package->cursor.invalidate();
++		set_error(error);
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	} catch(const std::exception & error) {
++		if(package != NULL) package->cursor.invalidate();
++		set_error(error);
++		return WOT_INNOEXTRACT_FORMAT_ERROR;
++	} catch(...) {
++		if(package != NULL) package->cursor.invalidate();
++		set_error("unknown exception during extraction");
++		return WOT_INNOEXTRACT_INTERNAL_ERROR;
++	}
++}
++
++extern "C" const char * wot_innoextract_description(
++    const wot_innoextract_package * package) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		if(package == NULL) {
++			set_error("package is null");
++			return "";
++		}
++		return package->description.c_str();
++	} catch(...) {
++		set_error("unknown exception while reading package description");
++		return "";
++	}
++}
++
++extern "C" void wot_innoextract_close(wot_innoextract_package * package) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		delete package;
++	} catch(...) {
++		set_error("unknown exception while closing package");
++	}
++}
++
++extern "C" const char * wot_innoextract_last_error(void) {
++	std::lock_guard<std::mutex> lock(library_mutex);
++	try {
++		return last_error.c_str();
++	} catch(...) {
++		return "unknown innoextract adapter error";
++	}
++}
+diff --git a/src/wot/release.cpp b/src/wot/release.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/wot/release.cpp
+@@ -0,0 +1,13 @@
++/* Fixed release strings for the library-only WoT build. */
++#include "release.hpp"
++
++const char innoextract_name[] = "innoextract";
++const char innoextract_version[] = "innoextract 1.9 (WoT callback adapter)";
++const char innosetup_versions[] = "Inno Setup 1.2.10 to 6.0.5";
++const char innoextract_bugs[] = "https://innoextract.constexpr.org/issues";
++const char innoextract_copyright[] =
++	"Copyright (C) 2011-2020 Daniel Scharrer <daniel@constexpr.org>";
++const char innoextract_license[] =
++	"This software is provided 'as-is', without any express or implied warranty. "
++	"Permission is granted to anyone to use this software for any purpose, subject "
++	"to the restrictions in the upstream LICENSE file.";
+diff --git a/src/util/windows.cpp b/src/util/windows.cpp
+--- a/src/util/windows.cpp
++++ b/src/util/windows.cpp
+@@ -495,39 +495,3 @@
+ }
+ 
+ } // namespace util
+-
+-// We really want main here, not utf8_main.
+-#undef main
+-int main() {
+-	
+-	// We use UTF-8 for everything internally, as almost all modern operating systems
+-	// have standardized on that. However, as usual, Windows has to do its own thing
+-	// and only supports Unicode input/output via UCS-2^H^H^H^H^HUTF-16.
+-	
+-	std::setlocale(LC_ALL, "");
+-	
+-	// Emulate wmain() as it's nonstandard and not supported by MinGW
+-	// Convert the UTF-16 command-line parameters to UTF-8
+-	int argc = 0;
+-	char ** argv = NULL;
+-	std::vector<std::string> args;
+-	{
+-		wchar_t ** wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+-		args.resize(size_t(argc));
+-		argv = new char *[argc + 1];
+-		argv[argc] = NULL;
+-		for(size_t i = 0; i < args.size(); i++) {
+-			util::utf16le_to_wtf8(std::string(reinterpret_cast<char *>(wargv[i]), wcslen(wargv[i]) * 2), args[i]);
+-			argv[i] = &args[i][0];
+-		}
+-		LocalFree(wargv);
+-	}
+-	
+-	// Tell boost::filesystem to interpret our path strings as UTF-8
+-	boost::filesystem::path::imbue(std::locale(std::locale(), new utf8_codecvt()));
+-	
+-	// Enable UTF-8 output and ANSI escape sequences
+-	util::console_wrapper wrapped;
+-	
+-	return utf8_main(argc, argv);
+-}

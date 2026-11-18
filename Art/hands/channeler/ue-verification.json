@@ -1,0 +1,611 @@
+{
+ "importer": "UE 5.8 Interchange glTF, default settings (headless)",
+ "bones": 28,
+ "names_match_contract": true,
+ "parents_match_contract": true,
+ "worst_position_error_cm": 0.0007,
+ "worst_axis_error_deg": 0.182,
+ "wrist_at_origin": true,
+ "wrist_to_middle_tip_cm": 18.5,
+ "triangles": 5012,
+ "max_influences": 4,
+ "unweighted_bones": [
+  "grip_r",
+  "index_tip_r",
+  "little_tip_r",
+  "middle_tip_r",
+  "palm_r",
+  "ring_tip_r",
+  "thumb_tip_r"
+ ],
+ "bones_detail": [
+  {
+   "bone": "forearm_r",
+   "parent": "None",
+   "location_cm": [
+    -14.38889,
+    -1.18635,
+    -0.47411
+   ],
+   "axis_x": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "axis_z": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "wrist_r",
+   "parent": "forearm_r",
+   "location_cm": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "axis_x": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "axis_z": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "pos_err_cm": 0.0,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "palm_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    4.25126,
+    -0.97987,
+    -0.38516
+   ],
+   "axis_x": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "axis_z": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "pos_err_cm": 0.0003,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "grip_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    4.25126,
+    -0.97987,
+    -6.85252
+   ],
+   "axis_x": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "axis_z": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "thumb_metacarpal_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    1.81078,
+    -2.87736,
+    -0.54421
+   ],
+   "axis_x": [
+    0.85533,
+    -0.50426,
+    -0.1189
+   ],
+   "axis_z": [
+    -0.24224,
+    -0.59211,
+    0.76859
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "thumb_proximal_r",
+   "parent": "thumb_metacarpal_r",
+   "location_cm": [
+    5.72565,
+    -5.18539,
+    -1.08842
+   ],
+   "axis_x": [
+    0.8601,
+    -0.50708,
+    -0.05559
+   ],
+   "axis_z": [
+    -0.28975,
+    -0.57533,
+    0.76488
+   ],
+   "pos_err_cm": 0.0007,
+   "axis_err_deg": 0.159
+  },
+  {
+   "bone": "thumb_distal_r",
+   "parent": "thumb_proximal_r",
+   "location_cm": [
+    8.39488,
+    -6.75905,
+    -1.26094
+   ],
+   "axis_x": [
+    0.86128,
+    -0.50777,
+    0.01909
+   ],
+   "axis_z": [
+    -0.34576,
+    -0.55811,
+    0.75429
+   ],
+   "pos_err_cm": 0.0001,
+   "axis_err_deg": 0.18
+  },
+  {
+   "bone": "thumb_tip_r",
+   "parent": "thumb_distal_r",
+   "location_cm": [
+    10.70821,
+    -8.12289,
+    -1.20966
+   ],
+   "axis_x": [
+    0.86128,
+    -0.50777,
+    0.01909
+   ],
+   "axis_z": [
+    -0.34576,
+    -0.55811,
+    0.75429
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.18
+  },
+  {
+   "bone": "index_metacarpal_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    1.12361,
+    -1.76638,
+    -0.30415
+   ],
+   "axis_x": [
+    0.97414,
+    -0.22111,
+    -0.04653
+   ],
+   "axis_z": [
+    0.04538,
+    -0.0103,
+    0.99892
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "index_proximal_r",
+   "parent": "index_metacarpal_r",
+   "location_cm": [
+    7.49073,
+    -3.2116,
+    -0.6083
+   ],
+   "axis_x": [
+    0.99561,
+    0.06137,
+    0.07073
+   ],
+   "axis_z": [
+    -0.0706,
+    -0.00435,
+    0.9975
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "index_intermediate_r",
+   "parent": "index_proximal_r",
+   "location_cm": [
+    12.18284,
+    -2.92238,
+    -0.27494
+   ],
+   "axis_x": [
+    0.99639,
+    0.06142,
+    0.05854
+   ],
+   "axis_z": [
+    -0.05843,
+    -0.0036,
+    0.99828
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.182
+  },
+  {
+   "bone": "index_distal_r",
+   "parent": "index_intermediate_r",
+   "location_cm": [
+    15.10238,
+    -2.74243,
+    -0.10341
+   ],
+   "axis_x": [
+    0.99811,
+    0.06152,
+    -0.00038
+   ],
+   "axis_z": [
+    0.00038,
+    2e-05,
+    1.0
+   ],
+   "pos_err_cm": 0.0007,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "index_tip_r",
+   "parent": "index_distal_r",
+   "location_cm": [
+    17.91764,
+    -2.5689,
+    -0.10448
+   ],
+   "axis_x": [
+    0.99811,
+    0.06152,
+    -0.00038
+   ],
+   "axis_z": [
+    0.00038,
+    2e-05,
+    1.0
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "middle_metacarpal_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    1.10903,
+    -0.69539,
+    -0.16496
+   ],
+   "axis_x": [
+    0.99559,
+    -0.09013,
+    -0.02613
+   ],
+   "axis_z": [
+    0.02603,
+    -0.00236,
+    0.99966
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "middle_proximal_r",
+   "parent": "middle_metacarpal_r",
+   "location_cm": [
+    7.3935,
+    -1.26435,
+    -0.32993
+   ],
+   "axis_x": [
+    0.98642,
+    0.1632,
+    -0.01854
+   ],
+   "axis_z": [
+    0.01829,
+    0.00303,
+    0.99983
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "middle_intermediate_r",
+   "parent": "middle_proximal_r",
+   "location_cm": [
+    12.37695,
+    -0.43986,
+    -0.4236
+   ],
+   "axis_x": [
+    0.98375,
+    0.16276,
+    -0.07578
+   ],
+   "axis_z": [
+    0.07477,
+    0.01237,
+    0.99712
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.164
+  },
+  {
+   "bone": "middle_distal_r",
+   "parent": "middle_intermediate_r",
+   "location_cm": [
+    15.47776,
+    0.07316,
+    -0.66247
+   ],
+   "axis_x": [
+    0.98333,
+    0.16269,
+    -0.08116
+   ],
+   "axis_z": [
+    0.08007,
+    0.01325,
+    0.9967
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.153
+  },
+  {
+   "bone": "middle_tip_r",
+   "parent": "middle_distal_r",
+   "location_cm": [
+    18.46783,
+    0.56785,
+    -0.90925
+   ],
+   "axis_x": [
+    0.98333,
+    0.16269,
+    -0.08116
+   ],
+   "axis_z": [
+    0.08007,
+    0.01325,
+    0.9967
+   ],
+   "pos_err_cm": 0.0003,
+   "axis_err_deg": 0.153
+  },
+  {
+   "bone": "ring_metacarpal_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    0.9969,
+    0.30469,
+    -0.22843
+   ],
+   "axis_x": [
+    0.99821,
+    0.04405,
+    -0.04036
+   ],
+   "axis_z": [
+    0.04033,
+    0.00178,
+    0.99919
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.157
+  },
+  {
+   "bone": "ring_proximal_r",
+   "parent": "ring_metacarpal_r",
+   "location_cm": [
+    6.64598,
+    0.55398,
+    -0.45687
+   ],
+   "axis_x": [
+    0.97143,
+    0.23674,
+    -0.01671
+   ],
+   "axis_z": [
+    0.01624,
+    0.00396,
+    0.99986
+   ],
+   "pos_err_cm": 0.0001,
+   "axis_err_deg": 0.043
+  },
+  {
+   "bone": "ring_intermediate_r",
+   "parent": "ring_proximal_r",
+   "location_cm": [
+    11.16675,
+    1.65568,
+    -0.53464
+   ],
+   "axis_x": [
+    0.96093,
+    0.23418,
+    -0.14755
+   ],
+   "axis_z": [
+    0.14336,
+    0.03494,
+    0.98905
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.154
+  },
+  {
+   "bone": "ring_distal_r",
+   "parent": "ring_intermediate_r",
+   "location_cm": [
+    13.97968,
+    2.34119,
+    -0.96656
+   ],
+   "axis_x": [
+    0.97026,
+    0.23645,
+    -0.05184
+   ],
+   "axis_z": [
+    0.05036,
+    0.01227,
+    0.99866
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "ring_tip_r",
+   "parent": "ring_distal_r",
+   "location_cm": [
+    16.69215,
+    3.00221,
+    -1.11148
+   ],
+   "axis_x": [
+    0.97026,
+    0.23645,
+    -0.05184
+   ],
+   "axis_z": [
+    0.05036,
+    0.01227,
+    0.99866
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "little_metacarpal_r",
+   "parent": "wrist_r",
+   "location_cm": [
+    0.83795,
+    1.19384,
+    -0.29299
+   ],
+   "axis_x": [
+    0.97771,
+    0.20112,
+    -0.06033
+   ],
+   "axis_z": [
+    0.05909,
+    0.01216,
+    0.99818
+   ],
+   "pos_err_cm": 0.0002,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "little_proximal_r",
+   "parent": "little_metacarpal_r",
+   "location_cm": [
+    5.58635,
+    2.17061,
+    -0.58598
+   ],
+   "axis_x": [
+    0.91459,
+    0.39954,
+    0.06245
+   ],
+   "axis_z": [
+    -0.05722,
+    -0.025,
+    0.99805
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.0
+  },
+  {
+   "bone": "little_intermediate_r",
+   "parent": "little_proximal_r",
+   "location_cm": [
+    9.11049,
+    3.71013,
+    -0.34535
+   ],
+   "axis_x": [
+    0.89869,
+    0.39259,
+    -0.1955
+   ],
+   "axis_z": [
+    0.17915,
+    0.07826,
+    0.9807
+   ],
+   "pos_err_cm": 0.0006,
+   "axis_err_deg": 0.173
+  },
+  {
+   "bone": "little_distal_r",
+   "parent": "little_intermediate_r",
+   "location_cm": [
+    11.30329,
+    4.66805,
+    -0.82236
+   ],
+   "axis_x": [
+    0.89544,
+    0.39117,
+    -0.21252
+   ],
+   "axis_z": [
+    0.19474,
+    0.08507,
+    0.97716
+   ],
+   "pos_err_cm": 0.0005,
+   "axis_err_deg": 0.167
+  },
+  {
+   "bone": "little_tip_r",
+   "parent": "little_distal_r",
+   "location_cm": [
+    13.41777,
+    5.59177,
+    -1.32419
+   ],
+   "axis_x": [
+    0.89544,
+    0.39117,
+    -0.21252
+   ],
+   "axis_z": [
+    0.19474,
+    0.08507,
+    0.97716
+   ],
+   "pos_err_cm": 0.0004,
+   "axis_err_deg": 0.167
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+{"asset":"WoT-Mac-stripped-abc123456.zip","audit":{"cache_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","container_count":4,"verdict":"pass"},"format":"wot-stripped-release-v1","generated_utc":"2026-07-24T00:00:00+00:00","git_commit":"abc123456","platform":"Mac","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":123}

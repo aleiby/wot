@@ -1,0 +1,21 @@
+# gitleaks configuration for the public guard (.github/workflows/public-guard.yml).
+# Default rules plus allowlisted synthetic test values, none of them a credential:
+# - the placeholder token that the release and funnel test fixtures use for
+#   health and recovery tokens;
+# - the join-password tokens in the game-password specs (WoTFrontEndTests,
+#   WoTParityFix6Tests, WoTParityFix7Tests): SHA-256 test vectors of the specs'
+#   own made-up passwords, derived the way WoTPasswordToken derives them.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test values (fixture token, spec password tokens), not credentials"
+regexes = [
+  '''01234567-89ab-cdef-0123-456789abcdef''',
+  '''36947e6df297c2bbdebf1a9779d3e701fce4e2dc63e57ed4f42643ee3cb2fbe4''',
+  '''36061083b1809afb45a933837b1aa8af620859b48e15a716df2eede9f23d7702''',
+  '''63cc3e764149aecf431941146613bef1f866fceba0824e30199b022e808f50cb''',
+  '''3c102d489000460464d5c773b83c9d3db9b54689a44926ced5a2b5a45c802c71''',
+  '''87e900ca7da6b140155d69757948093ef80615c0f980879d8c6ccd52dbc0d9ba''',
+]

@@ -1,0 +1,11 @@
+{
+ "_doc": "Per-class build config for build_hands.py. tint: which texture regions take the team colour (k-means cluster ids on the 512 base texture, k=6, seed 7; or a geometric sleeve mask). covering: regions that cover the forearm, used to find the wrist. expect_means: the cluster mean colours the ids refer to; the build fails if clustering changes.",
+ "channeler": {"tint": {"clusters": [1, 3]}, "covering": [1, 3, 4],
+               "expect_means": ["#b58c5a", "#8d4448", "#e1a5a2", "#854346", "#43241e", "#e09d9b"]},
+ "darklord": {"tint": {"geometry_sleeve": {"trim_cluster": 4}, "clusters": [100]}, "covering": [100, 4],
+              "expect_means": ["#15131d", "#201e29", "#2a2834", "#1b1925", "#c8bfba", "#4b474e"]},
+ "hound": {"tint": {"clusters": [3, 4]}, "covering": [1, 3, 4],
+           "expect_means": ["#b1584a", "#896344", "#c36355", "#2c0c0b", "#4a1010", "#a55e4f"]},
+ "zealot": {"tint": {"clusters": [4]}, "covering": [1, 3, 4, 5],
+            "expect_means": ["#dd7959", "#511c12", "#d5836a", "#b88258", "#656469", "#e8d8d1"]}
+}

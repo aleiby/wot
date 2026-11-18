@@ -1,0 +1,61 @@
+// One in-process extract/build/verify cache publication operation.
+#pragma once
+
+#include "CoreMinimal.h"
+#include "../Payload/WoTCacheStore.h"
+#include "WoTInstallerAcquisition.h"
+#include "WoTRetailReader/Contract.h"
+
+class FWoTRetailPackage;
+
+/** Proof returned only after publication and a final held-installer reverify. */
+struct FWoTPublishedCacheReceipt
+{
+	FWoTSha256 InstallerSha256;
+	FWoTSha256 ContractSha256;
+	/** The cache content label the build recorded; the name matches the
+	 * manifest key kept for format compatibility. */
+	FWoTSha256 ProductionDescriptorSha256;
+	FWoTSha256 ManifestSha256;
+	uint64 CompletedProgressUnits = 0;
+	uint64 TotalProgressUnits = 0;
+};
+
+class WOT_API FWoTCacheBootstrapOperation final
+{
+public:
+	FWoTCacheBootstrapOperation() = default;
+
+#if WITH_AUTOMATION_TESTS
+	using FBuildForTesting = TFunction<TWoTBootstrapResult<FWoTCacheBuildResult>(
+		FWoTRetailPackage&, const FWoTRetailContract&, IWoTObjectWriter&,
+		IWoTProgressSink&)>;
+	explicit FWoTCacheBootstrapOperation(FBuildForTesting InBuildForTesting)
+		: BuildForTesting(MoveTemp(InBuildForTesting))
+	{
+	}
+#endif
+
+	TWoTBootstrapResult<FWoTPublishedCacheReceipt> BuildAndPublish(
+		FWoTVerifiedInstaller&& Installer, FWoTCacheStore& Store,
+		IWoTProgressSink& Progress);
+	TWoTBootstrapResult<FWoTPublishedCacheReceipt> BuildAndPublish(
+		FWoTRetailPackage&& Package, FWoTCacheStore& Store,
+		IWoTProgressSink& Progress);
+
+	/** True when the last BuildAndPublish failed because of the original game's
+	 * installer rather than the cache: it failed its held-identity check, the
+	 * reader reported it corrupt, or it no longer verifies after the failure.
+	 * Cache-store errors (CorruptInstallation included) and profile-session
+	 * errors never count, so the player is not sent to the wrong folder. */
+	bool LastFailureCameFromInstaller() const
+	{
+		return bLastFailureCameFromInstaller;
+	}
+
+private:
+#if WITH_AUTOMATION_TESTS
+	FBuildForTesting BuildForTesting;
+#endif
+	bool bLastFailureCameFromInstaller = false;
+};

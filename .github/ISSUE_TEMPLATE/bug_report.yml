@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from the original game, crashes, or fails to install.
+labels: ["bug", "parity"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do not attach or paste anything from the original game:
+        no maps, packages, installer, script text or data. File names, class names and
+        line references are fine.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The first line of the release notes you installed from (for example `WoT 0.1.0 (release sequence 0, commit …)`), or the commit if you built it.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Both / cross-platform session
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - First launch / installer / data build
+        - Menus and settings
+        - LAN play
+        - Internet play
+        - Gameplay parity (differs from the original)
+        - Rendering or audio
+        - Crash
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected (what the original game does, if you know), and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Host an Arena match on Arena_03
+        2. Pick up …
+        3. …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant log lines. Screenshots of the game are fine; screenshots of the original game's files or script are not.

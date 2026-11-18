@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "WoT Onboarding Aids",
+	"Description": "Optional onboarding aids: the angreal field guide, first-pickup info cards and death-recap counter hints. Disable this plugin (or ship without it) for a parity-pure build; the game module's seams are inert when nothing binds them.",
+	"Category": "WoT",
+	"CreatedBy": "WoT Reborn contributors",
+	"CreatedByURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "WoTOnboarding",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

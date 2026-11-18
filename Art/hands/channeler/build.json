@@ -1,0 +1,45 @@
+{
+ "class": "channeler",
+ "source_glb_sha256": "4135a0fb3aa3a493596e82bb0487c4cfd828387d4b6ff931081c5d75980ddff0",
+ "colours_sha256": "8a466aa97545037608d83cbf4d203ff9b1da9b9ae98efadad28ae570c0c64fc2",
+ "outputs_sha256": {
+  "channeler.glb": "522581f921ae5b2f72334d6b7c14f7e4ac075cb50fc97d963e3ad1d07082b489",
+  "channeler_base.png": "00c90439bb0f1bebec6ff69c8ba0eb977ae17c8e48c433f0ae9970478f949836",
+  "channeler_black.png": "e0a24bb476df410ea5879b4f3bdde7a4c978874a283b2550e9ad3ca4dc6a5af8",
+  "channeler_blue.png": "f2adf6c00709f57015a7882c4b54f191915ec7064dc8d38ef5a88bd11c8e9f5d",
+  "channeler_green.png": "990246b414e919334c0e556408b1827a71afb86892b5951c104b752898920c95",
+  "channeler_mask.png": "ac8aeb1af15edf15bfac7464310be88ba3f9bdc1b1341216eca97b4fddaa98d9",
+  "channeler_red.png": "6772d11a439727b5081183b21093606d39a7789279aa791142ec629ffdbd7537"
+ },
+ "triangles": 5012,
+ "bones": 28,
+ "max_influences": 4,
+ "wrist_to_middle_tip_cm": 18.5,
+ "subdivision": "SUBDIVIDED faces 3124 -> 5012",
+ "tools": {
+  "python": "3.12.3",
+  "numpy": "2.4.4",
+  "Pillow": "12.3.0",
+  "opencv": "4.13.0",
+  "blender": "Blender 4.0.2",
+  "scripts_sha256": {
+   "build_hands.py": "4df38519a4896a5e40686272bc2e1bd4eab4580eb0f0c24e8534417fc3d82786",
+   "densify.py": "eb099253dafb7b07364e4ae0981757a50f49c199fdd62be4a90bf30a6c9b85f7",
+   "dump_faces.py": "3540ff0e210b18101d07b6cbd5bd08d08e614bf3f4fdcd6615127f604ee67beb",
+   "geometry_sleeve.py": "535b5a4247db9ae9f202593a97d69100ba19864fe3ba0d47c035ddad35b2c202",
+   "gltf_skin.py": "6125429e83da1709f40442e93b1701433a3d564ac5952d6f1fd2ce1312758d38",
+   "hand_rig.py": "13365ecc48a82292c310db3e553aae2c7cb4dd6e3f09cabac3f5d3148a8d5352",
+   "inspect_glb.py": "9c6bfa659e062504536c22533d6e079df4706a2467a9f89302ae4347d3b4943b",
+   "meshy_i23d.py": "ba51230a194facd14e6e3dd0c09f3d3d5c66cdde1c579444b5c4ac30d7b82c68",
+   "pose_test.py": "d52f05aa6c8788d5bcf694e3f16ae7039c22aedc0cc102d930de65456e068442",
+   "rebake_512.py": "afbea67a95839c749d711eb7498b0fe9aedb8fce874fbc1eb88b0685bc8e3efd",
+   "render_bones.py": "d95133c6020380637c6ecaad484c75e7aa83c26024dfa8eadaba286f034e5023",
+   "render_variants.py": "af19217a33a84456e0434c5571445a669ea1a2d08515074949f9c293b499d651",
+   "subdivide_hand.py": "cf0eb349f7556049a4b02ab852de042b4c296022322eadae193b2b72267e5e0c",
+   "tint_regions.py": "0ddf4ba0df26a09fce38880ad41d9f9f93fc85622c8b854eb4339c6aa939139d",
+   "ue_import_dump.py": "3ccd27c48b0fc4ce27151d7a4320973385f6eb840a9fc3a576dfb6bed922f318",
+   "verify_ue.py": "1c3d2d1f437d9f9fe0df6894fa4641b646974264d213b616d7e7640d4bfb6dcd",
+   "hands.json": "f2c8811140205ea126872d12379353cb4ed43f211b039b0a2621b89d462de268"
+  }
+ }
+}

@@ -1,0 +1,18 @@
+{
+ "red": {
+  "hex": "#a64c4b",
+  "value_scale": 1.258
+ },
+ "blue": {
+  "hex": "#665557",
+  "value_scale": 0.773
+ },
+ "green": {
+  "hex": "#685a3a",
+  "value_scale": 0.788
+ },
+ "black": {
+  "hex": "#44423d",
+  "value_scale": 0.515
+ }
+}

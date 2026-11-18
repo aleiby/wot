@@ -1,0 +1,55 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/recovery-domain-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The accepted outcome of the only operation that changes a client's announcement domain. It exists to rescue a machine whose announcement key was compromised: an attacker who forged the old domain's high-water to the maximum would otherwise make every future release look stale forever. On transition the announcement-ONLY high-waters are quarantined to zero, while the floors describing what actually ran and passed health are preserved \u2014 those were never the attacker's to set. Requires exactly one declared next domain plus its replacement key, and binds the CURRENT healthy tree, so a recovery package cannot move a machine that is not in the state it was built for.",
+  "properties": {
+    "current_domain": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "installed_tree_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "next_announcement_public_key": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "next_domain": {
+      "description": "must differ from current_domain",
+      "minLength": 1,
+      "type": "string"
+    },
+    "package_sequence": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "release_domain": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "release_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "release_sequence": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "current_domain",
+    "installed_tree_sha256",
+    "next_announcement_public_key",
+    "next_domain",
+    "package_sequence",
+    "release_domain",
+    "release_manifest_sha256",
+    "release_sequence"
+  ],
+  "title": "WoT recovery domain transition v1",
+  "type": "object"
+}

@@ -1,0 +1,52 @@
+{
+ "class": "channeler",
+ "archetype": "noble sorceress-scholar",
+ "concept_sheet": {
+  "tool": "OpenAI gpt-image-2 (Codex CLI 0.164.0 image tool)",
+  "date": "2026-11-16",
+  "prompt": "Concept art sheet for a video game first-person view model: one RIGHT hand and forearm, cut off just below the elbow, no body. Style: a late-1990s 3D PC fantasy game, hand-painted texture look on a chunky, low-poly-friendly silhouette with readable forms. Not modern photoreal, no glossy rendering. Plain neutral mid-grey background. Lay out four views in a 2x2 grid: top-left \"relaxed\" (back of the hand, fingers slightly curled); top-right \"open\" (palm up, fingers open); bottom-left \"grip\" (holding a smooth fist-sized carved stone orb as a held magic item); bottom-right \"cast\" (seen from the wearer's own eyes in first person, hand raised, index and middle fingers extended forward). Small plain labels under each view with exactly those words. Consistent design across all four views. 1536x1024 landscape. Character: a noble sorceress-scholar. Slender, graceful pale hand with a rosy undertone, short neat nails, a slim gold ring shaped like a serpent eating its own tail on the index finger. Fitted sleeve of soft dusty-rose leather gathered at the wrist by a dark brown band. Colour palette sampled from the original character texture: pale skin #f2e7ea, rose skin #d5aaaf, skin shadow #dc8078 and #9f7878, sleeve mid #79453a, sleeve shadow #52302d and #391f1e, darkest #1b0b0a.",
+  "note": "palette hex values were sampled locally from the original character skin; no original art was sent to any service"
+ },
+ "meshy_input_image": {
+  "tool": "OpenAI gpt-image-2 (Codex CLI 0.164.0 image tool)",
+  "date": "2026-11-16",
+  "prompt": "3D modelling reference image of a single RIGHT hand and forearm, cut cleanly just below the elbow, nothing else in the image. Neutral rigging rest pose: palm facing down, wrist straight, all four fingers straight and slightly spread with a clear gap between every finger, thumb relaxed out to the side at about 45 degrees. Viewed from above at a three-quarter angle so all five fingers and the thumb are fully visible and separated. Centred, filling most of the frame. Plain pure white background, soft even studio lighting, no cast shadow, no text, no labels. Style: hand-painted texture look of a late-1990s 3D fantasy game on simple, smooth, low-poly-friendly forms. Character: a noble sorceress-scholar with a slender, graceful pale hand with a rosy undertone, short neat nails, a slim gold ring shaped like a serpent eating its own tail on the index finger, and a fitted sleeve of soft dusty-rose leather gathered at the wrist by a dark brown band. Colours: pale skin #f2e7ea, rose skin #d5aaaf, skin shadow #dc8078 and #9f7878, sleeve #79453a with shadow #52302d, dark band #391f1e. Square 1024x1024."
+ },
+ "meshy": {
+  "tool": "meshy image-to-3d",
+  "endpoint": "https://api.meshy.ai/openapi/v1/image-to-3d",
+  "task_id": "01a1e78e-c875-725c-9ba7-eac5fd39fd17",
+  "status": "SUCCEEDED",
+  "params": {
+   "ai_model": "latest",
+   "should_texture": true,
+   "enable_pbr": false,
+   "texture_resolution": "2k",
+   "remove_lighting": true,
+   "should_remesh": true,
+   "topology": "triangle",
+   "target_polycount": 3000,
+   "save_pre_remeshed_model": true,
+   "target_formats": [
+    "glb"
+   ],
+   "multi_view_thumbnails": true
+  },
+  "input_image": "meshy-input-channeler-20261116-193025.png",
+  "consumed_credits": 30,
+  "created_at": 1794886257769,
+  "finished_at": 1794886303461,
+  "task_error": null
+ },
+ "texture_bake": {
+  "script": "tools/rebake_512.py",
+  "tool": "Blender 4.0.2 (Cycles, CPU)",
+  "detail": "Meshy's 2k base colour baked to 512x512 on Meshy's own UVs (margin 6 px); the result is source/channeler-meshy-512.glb"
+ },
+ "team_colours": {
+  "file": "source/colours.json",
+  "detail": "median clothing/armour colour of the original game's red, blue, green and black skins for this class, with the value relative to the class's base skin"
+ },
+ "build": "build.json (tool versions, script hashes, output hashes)",
+ "verification": "ue-verification.json (UE 5.8 Interchange glTF import, default settings)"
+}

@@ -1,0 +1,29 @@
+{
+  "dependencies": {
+    "Engine/Build/Commit.gitdeps.xml": "2909ef4d614a563522ed8f0e0ed01baadedd7767bba1dd3a052075e6248a7669"
+  },
+  "engine": {
+    "commit": "7deeb413d3dc1fc034f48d1aacc0861301829d32",
+    "repository": "git@github.com:EpicGames/UnrealEngine.git",
+    "tag": "5.8.0-release"
+  },
+  "format": "wot-ue58-source-toolchain-v1",
+  "pristine_sources": {
+    "Engine/Source/Runtime/Engine/Private/UnrealEngine.cpp": "fbc122433b3fdfe47b1f4dd0f246eebf0e14b7a957676b5a11e02b031c654109",
+    "Engine/Source/Runtime/Engine/Private/World.cpp": "a4a884840eb5f0354b5df7937eef3b03be8c09818a32e2b803f9c20f38e06f7f",
+    "Engine/Source/Runtime/Launch/Private/Mac/LaunchMac.cpp": "f0717168fefa83c6ced0548a6bb38c29760cce59a3f08bef1084fb26ad580de4",
+    "Engine/Source/Runtime/Launch/Private/Windows/LaunchWindows.cpp": "1dab45b057510c3660a0439e464dada9dfcc544317cbbb5a10039590571e15a8"
+  },
+  "toolchains": {
+    "Mac": {
+      "apple_clang": "Apple clang version 17.0.0 (clang-1700.6.4.2)",
+      "macos_sdk": "26.2"
+    },
+    "Win64": {
+      "msvc_cl": "19.44.35228",
+      "msvc_toolset": "14.44.35207",
+      "visual_studio": "17.14.37516.0",
+      "windows_sdk": "10.0.22621.0"
+    }
+  }
+}

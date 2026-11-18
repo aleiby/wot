@@ -1,0 +1,19 @@
+WoT Reborn — scope of the license
+
+The MIT License in this repository covers only the original source code,
+build tooling and documentation written for this project.
+
+It grants no rights whatsoever to The Wheel of Time (1999) computer game: its
+executables, UnrealScript, maps, textures, meshes, sounds, music, localization
+text or any other data; to the trademarks associated with the game or with
+Legend Entertainment and its publishers; or to the Wheel of Time literary
+property. Those remain the property of their respective owners. This project is
+an unofficial fan effort and is not affiliated with or endorsed by any of them.
+
+The game data is never part of this repository or of its releases. To play, each
+person supplies their own legitimately purchased copy of the original game, from
+which the data is rebuilt locally.
+
+Building this project requires Unreal Engine, which is licensed separately by
+Epic Games under the Unreal Engine End User License Agreement. Nothing in this
+repository relicenses any part of Unreal Engine.

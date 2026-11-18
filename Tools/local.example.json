@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy this file to Tools/local.json and replace every placeholder needed by the tools you run. WOT_<UPPERCASE_KEY> environment variables override individual values.",
+  "source_engine_root_mac": "/path/to/UnrealEngine-source",
+  "source_engine_root_win64": "D:\\path\\to\\UnrealEngine-source",
+  "installed_engine_root_mac": "/path/to/UnrealEngine-installed",
+  "installed_engine_root_win64": "D:\\path\\to\\UnrealEngine-installed",
+  "visual_studio_root_win64": "D:\\path\\to\\Microsoft Visual Studio\\2022\\Edition",
+  "scratch_root": "/path/to/wot-scratch",
+  "conversion_root": "/path/to/wot-conversion",
+  "eof_probe_root": "/path/to/eof-probe",
+  "mac_signing_identity": "Developer ID Application: Example Name (TEAMID1234)",
+  "mac_notary_profile": "example-notary-profile",
+  "mac_notary_key_path": "/path/to/AuthKey_KEYID.p8",
+  "mac_notary_key_id": "KEYID",
+  "mac_notary_issuer": "00000000-0000-0000-0000-000000000000"
+}

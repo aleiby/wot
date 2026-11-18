@@ -1,0 +1,67 @@
+# Public tree guards
+
+This repository is the canonical source tree; every change lands through a
+pull request. The `public-guard` workflow gates each one:
+
+- `leak_guard.py` fails on retail files and extensions, private reference
+  roots, LFS pointers, machine paths, private addresses, email addresses, key
+  material and unreviewed binaries;
+- gitleaks scans for secrets;
+- every pure-Python tool test runs on Python 3.9 and 3.12.
+
+Run the guard locally before opening a pull request:
+
+```sh
+python3 Tools/public/leak_guard.py --tree . --verbose
+```
+
+## Generated identity registries
+
+The production cache contract and these generated registries carry identities,
+types, sizes and counts only, never game data. They are published:
+
+- `Build/WoTRelease/cache-contract-v3-production.json`
+- `Source/WoTRetailReader/Public/WoTRetailReader/Generated/CacheContractProduction.generated.h`
+- `Source/WoTRetailReader/Public/WoTRetailReader/Generated/CacheContractV3.generated.h`
+- `Source/WoTRetailReader/Public/WoTRetailReader/Generated/RequiredWorlds.generated.h`
+- `Source/WoTRetailReader/Public/WoTRetailReader/Generated/WorldProperties.generated.h`
+- `Source/WoTRetailReader/Public/WoTRetailReader/Generated/WorldTextures.generated.h`
+
+## Tables built from the player's data
+
+These files keep native behavior and generic resolvers. Their rows are built
+during payload activation from the class defaults in the player's own content
+cache; no compiled table or fallback remains:
+
+- `Source/WoT/WoTAnimTable.cpp`
+- `Source/WoT/WoTSoundTable.cpp`
+- `Source/WoT/WoTCreatureChunk.cpp`
+- `Source/WoT/WoTWeaveFX.cpp`
+- `Source/WoT/WoTFootsteps.h`
+- `Source/WoT/WoTFootsteps.cpp`
+- `Source/WoT/AI/WoTNPCWeaponData.cpp`
+- `Source/WoT/AI/WoTCreatureData.cpp`
+- `Source/WoT/WoTBloodFX.cpp`
+- `Source/WoT/WoTDecal.cpp`
+- `Source/WoT/Traps/WoTFireWall.cpp`
+- `Source/WoT/WoTUE1LightRegistry.cpp`
+- `Source/WoT/WoTMeshFX.cpp`
+
+The same kinds of fact (names, scalars, counts, sizes, hashes) also appear in:
+
+- `Tools/import/import_pickups.py`, `Tools/import/import_seal_skins.py`
+  (pickup mesh names, DrawScale, palette RGB)
+- `Source/WoT/Tests/WoTRuntimeMapProjectionTests.cpp`,
+  `Source/WoTRetailReader/Private/Tests/FrontEndWorldTests.cpp` (census literals)
+
+## Third-party files
+
+`ThirdParty/vcpkg/vcpkg.json` and the vcpkg overlay triplets are published. For
+innoextract, the upstream source archive, patches, recipe and README are
+published; the prebuilt libraries are not, and a checkout fetches or builds them
+(see [docs/BUILD-PATHS.md](../../docs/BUILD-PATHS.md)).
+
+`binary-allowlist.sha256` is a separate reviewed list for non-text content. Each
+entry is an exact SHA-256 and path; changing any listed file's bytes requires an
+explicit hash review.
+

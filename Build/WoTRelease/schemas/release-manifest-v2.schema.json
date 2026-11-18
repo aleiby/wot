@@ -1,0 +1,230 @@
+{
+  "$id": "https://github.com/aleiby/wot/schemas/release-manifest-v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The inner, release-key-signed manifest. Only this authorizes installing code; the announcement never does. v1 exists solely as a frozen developer oracle and is neither emitted nor accepted by production.",
+  "properties": {
+    "announcement_domain": {
+      "description": "must equal the announcement and the compiled domain",
+      "minLength": 1,
+      "type": "string"
+    },
+    "archive": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "a bare file name; a signed manifest is not permission to write outside the staging root",
+          "minLength": 1,
+          "pattern": "^[^/\\\\:]+$",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "lower-case hex; upper case is not canonical",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "canonical JSON carries integers only up to int64",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "url": {
+          "description": "HTTPS only; a signed artifact never points at plaintext",
+          "pattern": "^https://",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "size",
+        "url"
+      ],
+      "type": "object"
+    },
+    "archive_root_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "build_commit": {
+      "description": "provenance only; newness is NEVER inferred from a commit",
+      "minLength": 1,
+      "type": "string"
+    },
+    "cache_contract_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "cache_contract_version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "format": {
+      "const": "wot-release-manifest-v2"
+    },
+    "generated_utc": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "human_version": {
+      "description": "display only; never used for ordering",
+      "minLength": 1,
+      "type": "string"
+    },
+    "installed_tree_root": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "description": "lower-case hex; upper case is not canonical",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "canonical JSON carries integers only up to int64",
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "size"
+      ],
+      "type": "object"
+    },
+    "installed_tree_version": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "key_id": {
+      "description": "must equal the announcement's key_id",
+      "minLength": 1,
+      "type": "string"
+    },
+    "main_executable": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "description": "lower-case hex; upper case is not canonical",
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "size": {
+          "description": "canonical JSON carries integers only up to int64",
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "sha256",
+        "size"
+      ],
+      "type": "object"
+    },
+    "manifest_version": {
+      "const": 2
+    },
+    "minimum_commit_service_protocol": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "minimum_gate_protocol": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "minimum_updater_protocol": {
+      "maximum": 4294967295,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "platform": {
+      "enum": [
+        "Win64",
+        "Mac"
+      ]
+    },
+    "release_sequence": {
+      "description": "must equal the announcement's sequence",
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stripped_audit_verdict": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "target_attestation": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration": {
+          "const": "Shipping"
+        },
+        "dedicated_server_startup_available": {
+          "const": false
+        },
+        "launch_module": {
+          "const": "WoTLaunch"
+        },
+        "listen_server_present": {
+          "const": true
+        },
+        "release_gate_enabled": {
+          "type": "boolean"
+        },
+        "target_type": {
+          "const": "Game"
+        }
+      },
+      "required": [
+        "configuration",
+        "dedicated_server_startup_available",
+        "launch_module",
+        "listen_server_present",
+        "release_gate_enabled",
+        "target_type"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "announcement_domain",
+    "archive",
+    "archive_root_id",
+    "build_commit",
+    "cache_contract_id",
+    "cache_contract_version",
+    "format",
+    "generated_utc",
+    "human_version",
+    "installed_tree_root",
+    "installed_tree_version",
+    "key_id",
+    "main_executable",
+    "manifest_version",
+    "minimum_commit_service_protocol",
+    "minimum_gate_protocol",
+    "minimum_updater_protocol",
+    "platform",
+    "release_sequence",
+    "stripped_audit_verdict",
+    "target_attestation"
+  ],
+  "title": "WoT release manifest v2",
+  "type": "object"
+}

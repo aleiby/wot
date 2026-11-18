@@ -1,0 +1,149 @@
+{
+  "consumers": [
+    {
+      "domain": "texture",
+      "function": "UWoTPayloadSubsystem::LoadTexturePayload",
+      "id": "payload-texture-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size texture blob byte flip after activation and before LoadTexturePayload",
+      "status": "blocked",
+      "blocker": "the import code now authors exact cache/texture logical ids, but the stripped texture assets and descriptor must be regenerated before this consumer can be declared active",
+      "parser": "WoTPayload_ReadU16",
+      "schema": "wot-texture-v3",
+      "source": "WoTPayloadSubsystem.cpp"
+    },
+    {
+      "domain": "sound",
+      "function": "UWoTPayloadSubsystem::LoadSoundPayload",
+      "id": "payload-sound-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size PCM blob byte flip after activation and before LoadSoundPayload",
+      "status": "blocked",
+      "blocker": "the import code now authors exact cache/sound logical ids, but the stripped payload-wave assets and descriptor must be regenerated before this consumer can be declared active",
+      "parser": "WoTPayload_ReadU16",
+      "schema": "wot-sound-v3",
+      "source": "WoTPayloadSubsystem.cpp"
+    },
+    {
+      "domain": "music",
+      "function": "FWoTRuntimeRegistry::Read",
+      "id": "payload-music-first-use",
+      "maximum_decoded_bytes": 1073741824,
+      "mutation_vector": "same-size music blob byte flip before its semantic registry read",
+      "status": "blocked",
+      "blocker": "the production importer registry declares no music output and no semantic music parser or load site exists",
+      "parser": "ReadVerifiedCacheBlob",
+      "schema": "wot-music-v3",
+      "source": "Payload/WoTRuntimeRegistry.cpp"
+    },
+    {
+      "domain": "mesh",
+      "function": "FWoTRuntimeVertexMesh::Decode",
+      "id": "payload-mesh-first-use",
+      "maximum_decoded_bytes": 536870912,
+      "mutation_vector": "same-size vertex mesh byte flip before LoadMeshPayload",
+      "status": "active",
+      "blocker": "",
+      "parser": "RequireExactMembers",
+      "schema": "wot-mesh-v3",
+      "source": "Mesh/WoTRuntimeVertexMesh.cpp"
+    },
+    {
+      "domain": "animation",
+      "function": "FWoTRuntimeVertexMesh::Decode",
+      "id": "payload-animation-first-use",
+      "maximum_decoded_bytes": 536870912,
+      "mutation_vector": "same-size animation blob byte flip before vertex animation first use",
+      "status": "active",
+      "blocker": "",
+      "parser": "RequireExactMembers",
+      "schema": "wot-animation-v3",
+      "source": "Mesh/WoTRuntimeVertexMesh.cpp"
+    },
+    {
+      "domain": "bsp",
+      "function": "WoTWorldDecodeBSPPart",
+      "id": "payload-bsp-first-use",
+      "maximum_decoded_bytes": 1073741824,
+      "mutation_vector": "same-size BSP byte flip before LoadBSPPayload",
+      "status": "active",
+      "blocker": "",
+      "parser": "UWoTBSPPayloadLibrary::DecodePayload",
+      "schema": "wot-bsp-v3",
+      "source": "World/WoTWorldMaterializer.cpp"
+    },
+    {
+      "domain": "world",
+      "function": "FWoTRuntimeWorldResource::LoadFirstUse",
+      "id": "payload-world-first-use",
+      "maximum_decoded_bytes": 1073741824,
+      "mutation_vector": "same-size world-record byte flip before world materialization read",
+      "status": "active",
+      "blocker": "",
+      "parser": "RequireExactMembers",
+      "schema": "wot-world-v3",
+      "source": "Payload/WoTRuntimeWorldResource.cpp"
+    },
+    {
+      "domain": "font",
+      "function": "FWoTRuntimeFontResource::LoadFirstUse",
+      "id": "payload-font-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size font atlas/glyph/page/kerning byte flip before font first use",
+      "status": "active",
+      "blocker": "",
+      "parser": "RequireExactMembers",
+      "schema": "wot-font-v3",
+      "source": "Payload/WoTRuntimeFontResource.cpp"
+    },
+    {
+      "domain": "procedural",
+      "function": "FWoTRuntimeProceduralResource::LoadFirstUse",
+      "id": "payload-procedural-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size procedural seed byte flip before fractal first use",
+      "status": "blocked",
+      "blocker": "the procedural object parser is wired, but its v1 schema preserves only typed palette references and cannot materialize the PaletteRGBA bytes required by the live simulator",
+      "parser": "RequireExactMembers",
+      "schema": "wot-procedural-v3",
+      "source": "Payload/WoTRuntimeProceduralResource.cpp"
+    },
+    {
+      "domain": "registry",
+      "function": "FWoTRuntimePackageRegistry::LoadFirstUse",
+      "id": "payload-registry-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size registry byte flip before semantic lookup",
+      "status": "blocked",
+      "blocker": "world-v3 currently carries already-resolved semantic identities, and materialization does not consult package-registry exports while applying a property or reference",
+      "parser": "RequireExactMembers",
+      "schema": "wot-registry-v3",
+      "source": "Payload/WoTRuntimePackageRegistry.cpp"
+    },
+    {
+      "domain": "localization",
+      "function": "FWoTRuntimeLocalizationDefaults::LoadLocalizationFirstUse",
+      "id": "payload-localization-first-use",
+      "maximum_decoded_bytes": 67108864,
+      "mutation_vector": "same-size localization byte flip before fallback lookup",
+      "status": "blocked",
+      "blocker": "no landed materialized actor/object host consumes localization fallback bytes during pass-two property application",
+      "parser": "RequireExactMembers",
+      "schema": "wot-localization-v3",
+      "source": "Payload/WoTRuntimeLocalizationDefaults.cpp"
+    },
+    {
+      "domain": "class_default",
+      "function": "FWoTRuntimeLocalizationDefaults::LoadClassDefaultsFirstUse",
+      "id": "payload-class-default-first-use",
+      "maximum_decoded_bytes": 268435456,
+      "mutation_vector": "same-size class-default byte flip before materialization lookup",
+      "status": "blocked",
+      "blocker": "class-default bytes are parsed but no landed pass-two merger applies them to a materialized semantic host",
+      "parser": "RequireExactMembers",
+      "schema": "wot-class-default-v3",
+      "source": "Payload/WoTRuntimeLocalizationDefaults.cpp"
+    }
+  ],
+  "format": "lazy-payload-consumers-v1"
+}

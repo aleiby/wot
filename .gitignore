@@ -1,0 +1,62 @@
+# Public repository ignore rules.
+
+# Private reference data never enters the public tree. Point WOT_REFERENCE_ROOT
+# at a directory outside the checkout (docs/LOCAL-CONFIGURATION.md); these
+# rules are the belt to that suspenders.
+original/
+exports/
+*.u
+*.utx
+*.uax
+*.umx
+*.unr
+*.uc
+*.t3d
+*.wot
+*.int
+
+# The engine patch itself is distributed only through an EpicGames-org
+# licensee fork. The public tree carries only its non-patch hash/toolchain pins.
+EnginePatches/*
+!EnginePatches/UE-5.8/
+EnginePatches/UE-5.8/*
+!EnginePatches/UE-5.8/manifest.json
+!EnginePatches/UE-5.8/source-toolchain.json
+
+# Release trust material that never enters the repository.
+Build/WoTRelease/KEY-CUSTODY.md
+Build/WoTRelease/test-keys/
+Build/WoTRelease/*private*
+Build/WoTRelease/eos-credentials*
+
+# Generated content and engine build products.
+Content/
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+.idea/
+.worktrees/
+*.sln
+.stripped-pak/
+.stripped-pak-*/
+.guarded-build/
+Build/TestFixtures/
+Build/ThirdPartyBuild/
+# The Mac build writes a version counter named after the checkout folder.
+Build/Mac/*.PackageVersionCounter
+Build/ThirdPartyStage/
+/ThirdParty/innoextract/1.9/lib/
+
+# Machine-local configuration (copy the committed examples).
+Tools/local.json
+Tools/test/net/nodes.json
+Tools/test/net/logs/
+CLAUDE.local.md
+
+# OS and interpreter noise.
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc

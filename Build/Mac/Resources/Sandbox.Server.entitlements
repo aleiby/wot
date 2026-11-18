@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- App Sandbox intentionally disabled: the payload-injection client must
+	     read a user-supplied -WoTPayloadCache=<abs path> outside any container,
+	     and distribution is direct download, not App Store. A sandboxed client
+	     fails the cache preflight with "cannot open file" (2026-07-18). -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,20 @@
+HintKey,Template
+AirBurst,A close-range gust; {counter:AngrealInvAirShield} turns air weaves aside.
+Balefire,No shield stops it and walls do not block it; spread out and strike first.
+Dart,{counter:AngrealInvAirShield} stops the dart stream.
+Decay,{counter:AngrealInvSpiritShield} wards off its draining seeker.
+EarthTremor,{counter:AngrealInvEarthShield} holds firm against the tremor.
+Fireball,{counter:AngrealInvFireShield} absorbs fire weaves.
+Lightning,{counter:AngrealInvAirShield} turns the bolt aside.
+Seeker,{counter:AngrealInvReflect} sends it hunting its own caster.
+SoulBarb,{counter:AngrealInvSpiritShield} wards spirit weaves.
+Taint,{counter:AngrealInvRemoveCurse} lifts the curse from your angreal.
+Target,{counter:AngrealInvAirShield} breaks the caster's mark on you.
+Whirlwind,{counter:AngrealInvAirShield} keeps the winds off you.
+Alarm,Touching or striking it raises an alarm that alerts nearby defenders.
+FireWall,A line of burning logs that blocks the way and burns anyone who touches it.
+Pit,{counter:AngrealInvTrapDetect} reveals the drop before you step in.
+Portcullis,{counter:AngrealInvTrapDetect} reveals the gate before it falls.
+Spear,{counter:AngrealInvTrapDetect} reveals it before it springs.
+Staircase,{counter:AngrealInvTrapDetect} reveals conjured stonework ahead.
+Wall,{counter:AngrealInvTrapDetect} reveals conjured walls ahead.
