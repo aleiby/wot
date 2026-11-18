@@ -4,13 +4,19 @@
 #include "Engine/LocalPlayer.h"
 #include "WoTLocalPlayer.generated.h"
 
-/** Supplies the authenticated optional player-name preference to UE travel. */
+/** Supplies the authenticated optional player-name preference to UE travel, and
+ * passes the final view and projection through the local-player hooks. */
 UCLASS()
 class UWoTLocalPlayer : public ULocalPlayer
 {
 	GENERATED_BODY()
 
 public:
+	virtual void GetViewPoint(FMinimalViewInfo& OutViewInfo) const override;
+	virtual bool GetProjectionData(FViewport* Viewport, FSceneViewProjectionData& ProjectionData,
+		int32 StereoViewIndex = INDEX_NONE) const override;
+	virtual void PlayerRemoved() override;
+	virtual void BeginDestroy() override;
 	virtual FString GetNickname() const override;
 
 	/** Pure seam for the preferred-name/fallback choice. */

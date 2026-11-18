@@ -58,6 +58,17 @@
 		{
 			"Name": "WoTOnboarding",
 			"Enabled": true
+		},
+		{
+			"Name": "WoTVR",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Game",
+				"Editor"
+			]
 		}
 	]
 }

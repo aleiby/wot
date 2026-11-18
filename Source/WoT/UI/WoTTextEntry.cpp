@@ -10,6 +10,7 @@
 #include "Widgets/SWidget.h"
 #include "Widgets/SWindow.h"
 #include "WoTBootstrapCore/NativeHandles.h"
+#include "WoTLocalPlayerHooks.h"
 #include "WoTPreferencesSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWoTTextEntry, Log, All);
@@ -671,7 +672,10 @@ bool FWoTTextEntry::SetSteamKeyboardEnabled(bool bEnabled)
 
 EWoTTextEntryRoute FWoTTextEntry::ChooseRoute()
 {
-	return IsSteamKeyboardAvailable() && IsSteamKeyboardEnabled()
+	// A UI host without text entry of its own (H6) keeps every entry on the
+	// panel: Steam's keyboard opens on the desktop, not on the host's surface.
+	return !FWoTLocalPlayerHooks::UsesPanelTextEntry()
+		&& IsSteamKeyboardAvailable() && IsSteamKeyboardEnabled()
 		? EWoTTextEntryRoute::SteamKeyboard : EWoTTextEntryRoute::Panel;
 }
 

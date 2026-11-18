@@ -202,6 +202,8 @@ bool FWoTFrontEndSceneRuntimeColorSpec::RunTest(const FString&)
 			Camera->PostProcessSettings.bOverride_ExpandGamut);
 		TestEqual(TEXT("front-end camera disables gamut expansion"),
 			Camera->PostProcessSettings.ExpandGamut, 0.0f);
+		TestFalse(TEXT("front-end camera keeps its authored eye under a headset (no HMD lock)"),
+			static_cast<bool>(Camera->bLockToHmd));
 		const TArray<FWeightedBlendable>& Blendables =
 			Camera->PostProcessSettings.WeightedBlendables.Array;
 		TestEqual(TEXT("front-end camera has only the neutral gamma boundary"),

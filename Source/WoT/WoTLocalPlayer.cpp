@@ -2,9 +2,44 @@
 
 #include "Engine/GameInstance.h"
 #include "HAL/PlatformProcess.h"
+#include "SceneView.h"
 #include "WoTFrontEnd.h"
+#include "WoTLocalPlayerHooks.h"
 #include "WoTMacComputerName.h"
 #include "WoTPreferencesSubsystem.h"
+
+void UWoTLocalPlayer::GetViewPoint(FMinimalViewInfo& OutViewInfo) const
+{
+	Super::GetViewPoint(OutViewInfo);
+	// A local view owner composes the final pose after the camera and modifiers.
+	FWoTLocalPlayerHooks::ComposeView(*this, OutViewInfo);
+}
+
+bool UWoTLocalPlayer::GetProjectionData(FViewport* Viewport,
+	FSceneViewProjectionData& ProjectionData, int32 StereoViewIndex) const
+{
+	if (!Super::GetProjectionData(Viewport, ProjectionData, StereoViewIndex))
+	{
+		return false;
+	}
+	// A stereo device supplies its own projection after the ordinary near-plane
+	// calculation, so an owned near plane is applied last, keeping each eye's
+	// asymmetric frustum.
+	FWoTLocalPlayerHooks::ApplyNearClip(*this, ProjectionData.ProjectionMatrix);
+	return true;
+}
+
+void UWoTLocalPlayer::PlayerRemoved()
+{
+	FWoTLocalPlayerHooks::DetachAll(*this);
+	Super::PlayerRemoved();
+}
+
+void UWoTLocalPlayer::BeginDestroy()
+{
+	FWoTLocalPlayerHooks::PlayerDestroyed(*this);
+	Super::BeginDestroy();
+}
 
 FString UWoTLocalPlayer::GetNickname() const
 {

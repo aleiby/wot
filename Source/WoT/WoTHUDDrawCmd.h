@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 
+class UFont;
 class UTexture2D;
 
 enum class EWoTHUDStyle : uint8
@@ -40,4 +41,10 @@ struct FWoTHUDDrawCmd
 	EWoTTextAlignment TextAlignment = EWoTTextAlignment::Left;
 	// Retained for existing HUD layouts. New layouts should use TextAlignment.
 	bool bCenterX = false;
+	/** A face chosen at run time (a positioned message's own font): it wins
+	 * over FontId when set. A weak reference, rebuilt with every frame's
+	 * commands at the cost of a pointer: the message that chose the face
+	 * keeps it alive, nothing needs its asset path, and a face that is gone
+	 * leaves FontId to resolve. */
+	TWeakObjectPtr<UFont> Font;
 };

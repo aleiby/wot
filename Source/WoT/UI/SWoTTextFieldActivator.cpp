@@ -3,6 +3,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Input/Events.h"
 #include "UI/SWoTOnScreenKeyboard.h"
+#include "WoTLocalPlayerHooks.h"
 
 void SWoTTextFieldActivator::Construct(const FArguments& InArgs)
 {
@@ -110,11 +111,14 @@ FReply SWoTTextFieldActivator::OnPreviewKeyDown(const FGeometry& MyGeometry,
 FReply SWoTTextFieldActivator::OnPreviewMouseButtonDown(const FGeometry& MyGeometry,
 	const FPointerEvent& MouseEvent)
 {
-	// On the Deck a tap on a field starts entry [I8]; elsewhere a click keeps
-	// placing the caret as it always has.
+	// On the Deck a tap on a field starts entry [I8], and so does a UI host's
+	// pointer (a controller's laser, FWoTLocalPlayerHooks::RoutePointer);
+	// elsewhere a click keeps placing the caret as it always has.
 	const bool bPrimary = MouseEvent.IsTouchEvent()
 		|| MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton;
-	if (bPrimary && FWoTTextEntry::IsSteamDeck()
+	const bool bEntersEntry = FWoTTextEntry::IsSteamDeck()
+		|| FWoTLocalPlayerHooks::IsRoutingUIPointer(MouseEvent.GetUserIndex());
+	if (bPrimary && bEntersEntry
 		&& !FWoTTextEntry::IsActiveForField(Field.Pin())
 		&& BeginEntry(MouseEvent.GetUserIndex()))
 	{

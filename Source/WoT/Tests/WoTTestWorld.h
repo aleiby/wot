@@ -32,12 +32,14 @@ namespace WoTTest
 		bool bActivatePayload = true;
 	};
 
-	UWorld* CreateSpecWorld(const FSpecWorldOptions& Options = FSpecWorldOptions());
-	UWorld* CreateSpecWorld(TSubclassOf<AGameModeBase> GameModeClass);
-	void DestroySpecWorld(UWorld* World);
+	// Exported for the optional plugins' specs (the WoTVR plugin's WoT.VR.*),
+	// which run in the same real spec worlds.
+	WOT_API UWorld* CreateSpecWorld(const FSpecWorldOptions& Options = FSpecWorldOptions());
+	WOT_API UWorld* CreateSpecWorld(TSubclassOf<AGameModeBase> GameModeClass);
+	WOT_API void DestroySpecWorld(UWorld* World);
 
-	void TickWorld(UWorld* World, float Duration, float Step = 1.0f / 60.0f);
-	void TickWorld(UWorld* World, int32 NumTicks, float Step = 1.0f / 60.0f);
+	WOT_API void TickWorld(UWorld* World, float Duration, float Step = 1.0f / 60.0f);
+	WOT_API void TickWorld(UWorld* World, int32 NumTicks, float Step = 1.0f / 60.0f);
 
 	// Teleport Actor without generating engine begin-overlaps on the way, so a
 	// spec that invokes an overlap handler directly delivers exactly one touch

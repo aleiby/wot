@@ -4,6 +4,7 @@
 #include "GameFramework/HUD.h"
 #include "WoTCitadelTeamOverview.h"
 #include "WoTHUDDrawCmd.h"
+#include "WoTHUDSnapshot.h"
 #include "WoTScoreboard.h"
 #include "WoTHUD.generated.h"
 
@@ -478,6 +479,21 @@ public:
 	// Turn a read-out into the display lines DrawHUD paints (one string per row).
 	static TArray<FString> FormatLines(const FWoTHUDReadout& Readout);
 
+	/** H5: what the HUD shows after its last update (FWoTHUDSnapshot). The
+	 * HUD updates once per local-player frame while it draws, whether the
+	 * flat HUD or a destination presents it. */
+	const FWoTHUDSnapshot& GetSnapshot() const { return HUDSnapshot; }
+	/** H5: draws sections on a canvas the caller owns, resolving fonts and
+	 * textures as this HUD does: the flat HUD's own draw, and any
+	 * destination's (FWoTHUDLayout::Draw). */
+	void DrawSections(UCanvas& CanvasObject, TConstArrayView<FWoTHUDSection> Sections) const;
+	/** The face a text command draws with on a canvas ViewportWidth wide. */
+	UFont* ResolveCommandFont(const FWoTHUDDrawCmd& Command, int32 ViewportWidth) const;
+	/** The texture an icon command of Section draws (the scoreboards' icons
+	 * resolve by id). */
+	UTexture2D* ResolveCommandTexture(EWoTHUDSection Section,
+		const FWoTHUDDrawCmd& Command) const;
+
 	virtual void DrawHUD() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -496,23 +512,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "WoT|HUD|Citadel Editor")
 	TSoftObjectPtr<USoundBase> EndEditorSound;
 
-	void DrawHealth(UCanvas* CanvasObject);
-	void DrawStatusIcons(UCanvas* CanvasObject);
-	void DrawCrosshair(UCanvas* CanvasObject);
-	void DrawEditorCursor(UCanvas* CanvasObject);
-	void DrawHands(UCanvas* CanvasObject);
-	void DrawCurrentHand(UCanvas* CanvasObject);
-	void DrawAddedItems(UCanvas* CanvasObject);
-	void DrawProgressMessages(UCanvas* CanvasObject);
-	void DrawMessages(UCanvas* CanvasObject, float DeltaTime);
-	void DrawTeamSelect(UCanvas* CanvasObject);
+	/** H5 update: true once per local-player frame (the first DrawHUD of it). */
+	bool BeginPresentationFrame();
+	/** H5 update: advances the presentation state the flat HUD advanced while
+	 * drawing (message time and aging, the turtle, the player ID, the flash
+	 * timer, expired added-item notices) under the same visibility rules. */
+	void UpdatePresentation();
+	/** H5 snapshot: what shows now, laid out on the flat HUD's logical canvas
+	 * (CanvasObject measures text; nothing is drawn). */
+	void BuildSnapshot(UCanvas& CanvasObject, int32 HUDUpscale);
+	void LayoutMessages(UCanvas& CanvasObject, FWoTHUDSnapshot& Built) const;
+	bool MakePlayerIDCommand(const UCanvas& CanvasObject, FWoTHUDDrawCmd& OutCommand) const;
 	void UpdateTurtle(float DeltaTime);
-	void DrawFlashTexture(UCanvas* CanvasObject, float DeltaTime);
-	void DrawWarning(UCanvas* CanvasObject);
-	void DrawArenaScoreboard(UCanvas* CanvasObject);
-	void DrawCitadelTeamOverview(UCanvas* CanvasObject);
-	void ExecuteHandCommands(UCanvas* CanvasObject,
-		const TArray<FWoTHUDDrawCmd>& Commands);
 	void DrawDebugReadout(UCanvas* CanvasObject);
 	const TArray<FString>& GetCachedDebugReadoutLines();
 	bool ShouldDrawWoTHUD() const;
@@ -535,6 +546,15 @@ protected:
 	bool bDebugReadoutCacheValid = false;
 	FWoTHUDReadout CachedDebugReadout;
 	TArray<FString> CachedDebugReadoutLines;
+	/** H5: the last update, and what it captured for this frame's snapshot. */
+	FWoTHUDSnapshot HUDSnapshot;
+	uint64 PresentationSerial = 0;
+	uint64 PresentationFrame = 0;
+	bool bPresentationFrameStarted = false;
+	bool bPlayerIDUpdated = false;
+	bool bFlashShown = false;
+	FName FlashShownId;
+	float FlashShownFade = 0.0f;
 	TWeakObjectPtr<AWoTPlayerController> BoundEditorModeController;
 	FDelegateHandle EditorModeDelegateHandle;
 };

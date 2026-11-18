@@ -1843,6 +1843,13 @@ FWoTBootstrapStatus FWoTFrontEndSceneMaterializer::CommitStaged(
 	Camera->SetRelativeRotation(Plan->Descriptor.CameraRotation);
 	Camera->SetFieldOfView(Plan->Descriptor.HorizontalFov);
 	Camera->SetConstraintAspectRatio(false);
+	// A fixed scene camera: it keeps its authored eye under a headset too. With
+	// the engine default, head tracking would replace its relative transform
+	// with the tracked head pose each frame (UCameraComponent::HandleXRCamera),
+	// and nothing would put the authored eye back afterwards; a local view
+	// owner composes the head itself (WoTLocalPlayerHooks.h). Without head
+	// tracking the flag is never read.
+	Camera->bLockToHmd = false;
 	Camera->bOverrideAspectRatioAxisConstraint = true;
 	Camera->SetAspectRatioAxisConstraint(
 		EAspectRatioAxisConstraint::AspectRatio_MaintainXFOV);

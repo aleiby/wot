@@ -79,6 +79,8 @@ public:
 	FSlateFontInfo LineFontForTesting() const { return LineFont(); }
 	/** The dark strip behind the line. */
 	TSharedPtr<SWidget> LineStripForTesting() const { return LineStrip; }
+	/** The UI DPI scale the line lays out at. */
+	float DpiScaleForTesting() const { return DpiScale; }
 #endif
 
 private:

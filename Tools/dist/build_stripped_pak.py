@@ -171,7 +171,7 @@ NEUTRAL_SHELL_MAPS = tuple(
 #   plugin puts its .uplugin in the pak. A descriptor carries no content, and
 #   a build with the plugin disabled stages none: each path is allowed at most
 #   once and never required.
-SEED_CODE_PLUGINS = ("WoTOnboarding",)
+SEED_CODE_PLUGINS = ("WoTOnboarding", "WoTVR")
 SEED_CODE_PLUGIN_EXCLUSIONS = frozenset({"Intermediate"})
 OPTIONAL_CODE_PLUGIN_DESCRIPTORS = tuple(
     f"../../../WoT/Plugins/{name}/{name}.uplugin" for name in SEED_CODE_PLUGINS)

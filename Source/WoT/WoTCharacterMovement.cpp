@@ -2,6 +2,7 @@
 
 #include "AI/WoTNPCCharacter.h"
 #include "WoTCharacter.h"
+#include "WoTLocalPlayerHooks.h"
 #include "WoTMapLightTable.h"
 #include "WoTMeshLight.h"
 #include "WoTMover.h"
@@ -10,6 +11,52 @@
 #include "Components/PrimitiveComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementReplication.h"
+
+FVector UWoTCharacterMovement::ConsumeInputVector()
+{
+	if (PawnOwner)
+	{
+		// A local extra movement source joins the stick at the input boundary, so
+		// the acceleration clamp, saved moves, server transport and collision
+		// treat the sum like any other input. It is scaled like a full forward
+		// stick in this movement state (in water the strokes stay below the
+		// clamp), and the sum never exceeds the larger of the stick's own input
+		// and that full stick, so it gives no more acceleration or speed than
+		// the stick can.
+		const FVector ExtraInput = FWoTLocalPlayerHooks::ExtraMovement(*PawnOwner);
+		if (!ExtraInput.IsNearlyZero())
+		{
+			const AWoTCharacter* OwnerCharacter = Cast<AWoTCharacter>(PawnOwner);
+			const double FullStick = OwnerCharacter
+				? OwnerCharacter->GetFullStickInputScale() : 1.0;
+			const FVector StickInput = PawnOwner->GetPendingMovementInputVector();
+			const FVector Combined = (StickInput + ExtraInput.GetClampedToMaxSize(1.0) * FullStick)
+				.GetClampedToMaxSize(FMath::Max(StickInput.Size(), FullStick));
+			AddInputVector(Combined - StickInput);
+		}
+	}
+	return Super::ConsumeInputVector();
+}
+
+void UWoTCharacterMovement::OnClientCorrectionReceived(
+	FNetworkPredictionData_Client_Character& ClientData, float TimeStamp,
+	FVector NewLocation, FVector NewVelocity,
+	FMovementBaseInterfaceData* NewMovementBaseInterfaceData, FName NewBaseBoneName,
+	bool bHasBase, bool bBaseRelativePosition, uint8 ServerMovementMode,
+	FVector ServerGravityDirection)
+{
+	Super::OnClientCorrectionReceived(ClientData, TimeStamp, NewLocation, NewVelocity,
+		NewMovementBaseInterfaceData, NewBaseBoneName, bHasBase, bBaseRelativePosition,
+		ServerMovementMode, ServerGravityDirection);
+	// A server-side relocation reaches an owning client only as a correction: the
+	// local-player hooks measure its jump against their teleport distance (inert
+	// without them).
+	if (CharacterOwner && ClientData.LastAckedMove.IsValid())
+	{
+		FWoTLocalPlayerHooks::PawnCorrected(*CharacterOwner,
+			ClientData.LastAckedMove->SavedLocation, NewLocation);
+	}
+}
 
 namespace
 {
