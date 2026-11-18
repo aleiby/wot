@@ -122,6 +122,14 @@ FReply SWoTTextFieldActivator::OnPreviewMouseButtonDown(const FGeometry& MyGeome
 		&& !FWoTTextEntry::IsActiveForField(Field.Pin())
 		&& BeginEntry(MouseEvent.GetUserIndex()))
 	{
+		// The reply names the opened panel as the focus recipient. Opening it
+		// already focused it, but when no native window is active (on the Mac),
+		// FSlateApplication::RoutePointerDownEvent gives a click's focus to the
+		// focusable widget under the pointer, the field, unless the reply names one.
+		if (const TSharedPtr<SWoTOnScreenKeyboard> Panel = FWoTTextEntry::GetPanel())
+		{
+			return FReply::Handled().SetUserFocus(Panel.ToSharedRef(), EFocusCause::SetDirectly);
+		}
 		return FReply::Handled();
 	}
 	return SCompoundWidget::OnPreviewMouseButtonDown(MyGeometry, MouseEvent);
