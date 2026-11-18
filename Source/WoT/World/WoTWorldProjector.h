@@ -120,6 +120,11 @@ WOT_API bool WoTBuildMoverMeshForTesting(AWoTMover& Mover,
 	const FWoTRuntimeMoverModel& Model, FString& OutError);
 #endif
 
+/** The native item class the world projection binds for a retail item class
+    identity (for example "Angreal.AngrealInvHeal"), or null when the port has
+    none. The same resolver places map pickups; read-only. */
+WOT_API UClass* WoTResolveNativePickupClass(FStringView RetailClassIdentity);
+
 /** Universal case-insensitive retail-class projection table. */
 class WOT_API FWoTWorldProjector final
 {

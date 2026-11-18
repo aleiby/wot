@@ -512,6 +512,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTInternetSettingsQuerySpec,
 
 bool FWoTInternetSettingsQuerySpec::RunTest(const FString&)
 {
+	TArray<FWoTHostOptionRow> SavedRows = FWoTFrontEndModel::HostOptions();
+	for (const FWoTHostOptionRow& Row : SavedRows)
+	{
+		FWoTFrontEndModel::UnregisterHostOptions(Row.Owner);
+	}
+	ON_SCOPE_EXIT
+	{
+		for (FWoTHostOptionRow& Row : SavedRows)
+		{
+			FWoTFrontEndModel::RegisterHostOption(MoveTemp(Row));
+		}
+	};
 	UWorld* World = WoTInternetSpecs_CreateWorld();
 	if (!TestNotNull(TEXT("spec world"), World))
 	{

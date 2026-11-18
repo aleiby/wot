@@ -4,6 +4,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ## Gameplay
 
+### Bots fill Arena matches
+- **Original:** The game shipped bot classes but never added bots to any multiplayer mode or menu.
+- **Port:** a host can set "Fill with bots to N players". Bots play by player rules (player body and health, the starting kit, artifacts from pickups), using each faction's artifact preferences from the shipped bot classes, and leave as humans join. The feature is the optional `WoTBots` plugin; without it, play is unchanged.
+- **Why:** With a small community, an empty server is the onboarding problem (#11).
+
 ### Tossed weapons have a terminal speed while bouncing
 - **Original:** `WotWeapon.uc:129-135` creates a bounceable decoration, and `BounceableDecoration.uc:33-34,130` enables bouncing. The original engine caps non-bouncing falling actors at the zone terminal speed (2500 units per second by default), but skips that cap while bouncing remains enabled.
 - **Port:** Tossed weapons use the same 2500-unit total-speed bound while bouncing as well.

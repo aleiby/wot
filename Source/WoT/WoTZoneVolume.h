@@ -126,7 +126,7 @@ struct FWoTZoneMovement
 // box with the faithful per-zone convex geometry reconstructed from the compiled
 // .wot BSP (Nodes[].iZone + Zones[].ZoneActor), placed by import_map.py.
 UCLASS()
-class AWoTZoneVolume : public AActor
+class WOT_API AWoTZoneVolume : public AActor
 {
 	GENERATED_BODY()
 

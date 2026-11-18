@@ -5,6 +5,7 @@
 #include "WoTSeal.h"
 #include "WoTInventory.h"
 #include "../WoTCharacter.h"
+#include "../WoTMatchParticipant.h"
 #include "../WoTOnboardingSeams.h"
 
 #include "GameFramework/Pawn.h"
@@ -142,6 +143,11 @@ bool UWoTInventoryComponent::DeleteInventory(AWoTInventory* Item)
 			CeaseUsingAngreal();
 		}
 		Angreal->Reset();
+		const APawn* Holder = Cast<APawn>(GetOwner());
+		if (Holder && IsWoTBotParticipant(Holder->GetController()))
+		{
+			Angreal->ClearBotAIState();
+		}
 	}
 	const bool bSelectionChanged = Item == SelectedItem;
 	if (bSelectionChanged)

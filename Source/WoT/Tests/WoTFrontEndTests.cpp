@@ -69,6 +69,27 @@
 
 namespace
 {
+	struct FWoTFrontEndTests_WithoutHostExtensions
+	{
+		TArray<FWoTHostOptionRow> SavedRows = FWoTFrontEndModel::HostOptions();
+
+		FWoTFrontEndTests_WithoutHostExtensions()
+		{
+			for (const FWoTHostOptionRow& Row : SavedRows)
+			{
+				FWoTFrontEndModel::UnregisterHostOptions(Row.Owner);
+			}
+		}
+
+		~FWoTFrontEndTests_WithoutHostExtensions()
+		{
+			for (FWoTHostOptionRow& Row : SavedRows)
+			{
+				FWoTFrontEndModel::RegisterHostOption(MoveTemp(Row));
+			}
+		}
+	};
+
 	UWorld* WoTFrontEndTests_CreateWorld()
 	{
 		ResetWoTPayloadActivationForTesting();
@@ -423,6 +444,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndTravelURLSpec,
 
 bool FWoTFrontEndTravelURLSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTests_WithoutHostExtensions HostExtensions;
 	TestTrue(TEXT("Arena package is playable"),
 		FWoTFrontEndModel::IsArenaMap(TEXT("/Game/WoT/Maps/Arena_01")));
 	TestTrue(TEXT("Battle package is playable"),
@@ -2794,6 +2816,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndSessionSpec,
 
 bool FWoTFrontEndSessionSpec::RunTest(const FString&)
 {
+	FWoTFrontEndTests_WithoutHostExtensions HostExtensions;
 	TSharedRef<FWoTFrontEndTests_SessionState> State =
 		MakeShared<FWoTFrontEndTests_SessionState>();
 	State->World = WoTFrontEndTests_CreateWorld();
@@ -3755,6 +3778,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndMultiplayerGeometrySpec,
 
 bool FWoTFrontEndMultiplayerGeometrySpec::RunTest(const FString&)
 {
+	FWoTFrontEndTests_WithoutHostExtensions HostExtensions;
 	// Layout only: entering Play auto-fetches LAN, and on a Mac its Local
 	// Network heads-up would replace the disclosure this spec measures.
 	WoTLocalNetworkAccess::SetOSAsksForAccessOverrideForTesting(false);
@@ -4402,4 +4426,77 @@ bool FWoTFrontEndSwitchDuringSearchSpec::RunTest(const FString&)
 		Root->IsSearchRestartPendingForTesting());
 	return !HasAnyErrors();
 }
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTFrontEndBotHostOptionLifetimeSpec,
+	"WoT.FrontEnd.BotHostOptionLifetime",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWoTFrontEndBotHostOptionLifetimeSpec::RunTest(const FString&)
+{
+	const FName Owner(TEXT("BotHostLifetimeSpec"));
+	ON_SCOPE_EXIT { FWoTFrontEndModel::UnregisterHostOptions(Owner); };
+	int32 LabelCalls = 0;
+	int32 MaxCalls = 0;
+	TWeakPtr<int32> CallbackState;
+	{
+		TSharedPtr<int32> Lifetime = MakeShared<int32>(0);
+		CallbackState = Lifetime;
+		FWoTHostOptionRow Row;
+		Row.Owner = Owner;
+		Row.URLKey = TEXT("OptionalFill");
+		Row.Label = [Lifetime, &LabelCalls]()
+		{
+			++LabelCalls;
+			return FText::FromString(TEXT("Optional fill"));
+		};
+		Row.Max = [Lifetime, &MaxCalls](const FWoTHostRequest& Request)
+		{
+			++MaxCalls;
+			return Request.MaxPlayers;
+		};
+		TestTrue(TEXT("register optional row"), FWoTFrontEndModel::RegisterHostOption(MoveTemp(Row)));
+	}
+	const auto Feedback = MakeShared<FWoTFrontEndPresentationFeedbackRecorder>();
+	const TSharedRef<SWoTFrontEndRoot> Root = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr)
+		.PresentationAuthorityForTesting(MakeInjectedPresentationAuthority(Feedback));
+	Root->OpenPlayForTesting();
+	if (!TestTrue(TEXT("host panel is built"), Root->HostScrollBoxForTesting().IsValid())) return false;
+	TArray<TSharedRef<SWidget>> WrapRows;
+	CollectWidgetsOfType(Root->HostScrollBoxForTesting().ToSharedRef(), TEXT("SWrapBox"), WrapRows);
+	TSharedPtr<STextBlock> Label;
+	TSharedPtr<SWoTRetailSlider> Slider;
+	for (const TSharedRef<SWidget>& WrapRow : WrapRows)
+	{
+		TArray<TSharedRef<SWidget>> Texts;
+		CollectWidgetsOfType(WrapRow, TEXT("STextBlock"), Texts);
+		for (const TSharedRef<SWidget>& Text : Texts)
+		{
+			const auto Block = StaticCastSharedRef<STextBlock>(Text);
+			if (Block->GetText().ToString() == TEXT("Optional fill")) Label = Block;
+		}
+		if (Label.IsValid())
+		{
+			TArray<TSharedRef<SWidget>> Sliders;
+			CollectWidgetsOfType(WrapRow, TEXT("SWoTRetailSlider"), Sliders);
+			if (Sliders.Num() == 1) Slider = StaticCastSharedRef<SWoTRetailSlider>(Sliders[0]);
+			break;
+		}
+	}
+	if (!TestTrue(TEXT("registered label and slider exist"), Label.IsValid() && Slider.IsValid())) return false;
+	Slider->KnobStopForTesting();
+	TestTrue(TEXT("registered callbacks execute"), LabelCalls > 0 && MaxCalls > 0);
+	FWoTFrontEndModel::UnregisterHostOptions(Owner);
+	TestFalse(TEXT("unregister releases callback-owned state before panel rebuild"), CallbackState.IsValid());
+	const int32 LabelsBefore = LabelCalls;
+	const int32 MaxBefore = MaxCalls;
+	TestTrue(TEXT("retained label is inert before next Tick"), Label->GetText().IsEmpty());
+	TestEqual(TEXT("retained slider has inert value"), Slider->KnobStopForTesting(), 1);
+	Slider->OnKeyDown(FGeometry(), MakeFrontEndKeyEvent(EKeys::End));
+	TestEqual(TEXT("removed label callback is never called"), LabelCalls, LabelsBefore);
+	TestEqual(TEXT("removed max callback is never called"), MaxCalls, MaxBefore);
+	TestFalse(TEXT("stale input does not mutate host values"),
+		Root->ViewModelForTesting().GetHostRequest().ExtraValues.Contains(TEXT("OptionalFill")));
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS

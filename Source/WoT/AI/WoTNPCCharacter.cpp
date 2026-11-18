@@ -2,6 +2,7 @@
 #include "../WoTRandom.h"
 
 #include "WoTBrainComponent.h"
+#include "WoTAIUtil.h"
 #include "WoTCasterComponent.h"
 #include "WoTNPCController.h"
 #include "WoTCreatureBehaviors.h"
@@ -432,37 +433,7 @@ void AWoTNPCCharacter::TakeFallingDamage(const float VelocityZ)
 
 uint8 AWoTNPCCharacter::TeamOf(const APawn* Other)
 {
-	if (const AWoTNPCCharacter* NPC = Cast<AWoTNPCCharacter>(Other))
-	{
-		return NPC->AssignedTeam;
-	}
-	// Players present their (possibly disguised) APPARENT team — WOTPawn.IsFriendly
-	// reads GetApparentTeam (WOTPlayer.uc:1912/747/777). A held, active Disguise
-	// substitutes the mimicked pawn's team (AngrealInvDisguise.CopyDisguisePawnProperties:
-	// 364/373); otherwise the real PlayerState team.
-	if (const AWoTCharacter* Player = Cast<AWoTCharacter>(Other))
-	{
-		if (const UWoTInventoryComponent* Inv = Player->InventoryComponent)
-		{
-			for (const TObjectPtr<AWoTInventory>& Item : Inv->Items)
-			{
-				if (const AWoTAngrealInvDisguise* Disguise = Cast<AWoTAngrealInvDisguise>(Item))
-				{
-					const int32 Apparent = Disguise->GetApparentTeam();
-					if (Apparent != -1)   // GetApparentTeam's "not disguised" sentinel
-					{
-						return static_cast<uint8>(Apparent);
-					}
-					break;   // at most one Disguise per inventory
-				}
-			}
-		}
-	}
-	if (const AWoTPlayerState* PS = Other ? Other->GetPlayerState<AWoTPlayerState>() : nullptr)
-	{
-		return PS->Team;
-	}
-	return WoTTeam::None;
+	return WoTAIUtil::ApparentTeamOf(Other);
 }
 
 bool AWoTNPCCharacter::IsFriendly(const AActor* Other) const

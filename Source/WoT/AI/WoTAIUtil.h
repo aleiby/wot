@@ -4,6 +4,7 @@
 #include "WoTBrainComponent.h"   // EWoTGoalIndex
 
 class AActor;
+class APawn;
 class AWoTNPCCharacter;
 class AWoTNPCController;
 
@@ -19,6 +20,8 @@ class AWoTNPCController;
 // GetClosestGoal / GetNextAvailableWotPawn (WOTUtil.uc:424-425,:247-248).
 namespace WoTAIUtil
 {
+	WOT_API uint8 ApparentTeamOf(const APawn* Other);
+
 	// WOTUtil.uc:335 GetActorTeam — the polymorphic team read. Pawns present
 	// their team byte (AWoTNPCCharacter::TeamOf), seals present Seal.Team; other
 	// actors return the teamless sentinel (255) rather than asserting.
