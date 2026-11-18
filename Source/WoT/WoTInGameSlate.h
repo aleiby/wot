@@ -5,7 +5,7 @@
 #include "UI/SWoTButtonPrompts.h"
 #include "UI/WoTTextEntry.h"
 #include "WoTFrontEnd.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "Styling/SlateBrush.h"
 #include "Types/SlateStructs.h"
 #include "Widgets/SCompoundWidget.h"
@@ -263,7 +263,7 @@ private:
 	/** The seam menu rows as captured when the list was last built; extension
 	    activation reads these, never the live registry (which may have changed
 	    under the open menu — Tick's snapshot comparison rebuilds on drift). */
-	TArray<FWoTOnboardingRow> ExtensionMenuRows;
+	TArray<FWoTExtensionRow> ExtensionMenuRows;
 	TSharedPtr<SBox> ContentHost;
 	TSharedPtr<SWoTSettingsScreen> ActiveSettingsScreen;
 	TSharedPtr<SEditableText> PlayerNameInput;

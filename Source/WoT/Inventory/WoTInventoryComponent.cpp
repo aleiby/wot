@@ -5,7 +5,7 @@
 #include "WoTSeal.h"
 #include "WoTInventory.h"
 #include "../WoTCharacter.h"
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 
 #include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
@@ -77,7 +77,7 @@ void UWoTInventoryComponent::BroadcastOnboardingItemsAdded()
 			continue;
 		}
 		OnboardingAnnouncedClasses.Add(ClassName);
-		FWoTOnboardingSeams::Get().ClientItemAdded.Broadcast(ClassName);
+		FWoTExtensionSeams::Get().ClientItemAdded.Broadcast(ClassName);
 	}
 }
 

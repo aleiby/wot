@@ -153,6 +153,11 @@ public:
 	// bParticles renderer used these CURRENT vertices. bRandomFrame is deliberately
 	// absent: MashadarSegment/MashadarTip never author it.
 	bool GetCurrentPoseVertexPositions(TArray<FVector>& OutPositions) const;
+	// Component-space box of the vertices the current pose draws, for callers that
+	// size the visual. CalcBounds is a culling volume: a runtime mesh answers it
+	// with every frame and every source vertex, an imported asset with its
+	// physics body, so the two disagree about the same model.
+	bool GetCurrentPoseDrawnBox(FBox& OutBox) const;
 	// Runtime source poses include even vertices not referenced by triangles.
 	bool HasCompleteSourceVertexPose() const { return RuntimeVertexMesh.IsValid(); }
 	// Opt in before mesh assignment when a caller will sample every tick. A
@@ -311,6 +316,8 @@ private:
 			TSharedPtr<const FWoTRuntimeVertexMeshData, ESPMode::ThreadSafe> Data) const;
 	void ClearRuntimeVertexMesh();
 	void PublishRuntimePose();
+	/** wot.DebugMeshNormals: draws the published render normals (no-op without debug drawing). */
+	void DrawDebugNormals() const;
 	FVector FatnessLocalScale() const;
 	void BuildRuntimeMaterials();
 	void RefreshRuntimeMaterials();

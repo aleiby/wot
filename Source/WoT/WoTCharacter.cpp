@@ -1,4 +1,5 @@
 #include "WoTCharacter.h"
+#include "WoTExtensionSeams.h"
 #include "WoTRandom.h"
 #include "Assets/WoTRuntimeAssets.h"
 #include "Assets/WoTRetailIdentity.h"
@@ -4601,11 +4602,25 @@ void AWoTCharacter::UseAngreal()
 	// along SourcePawn->GetViewRotation() on the authority, but a Character replicates
 	// control yaw (bUseControllerRotationYaw) and not pitch — so without this the server
 	// fire is flat and an up/down aim misses over the wire.
+	const APlayerController* LocalController = Cast<APlayerController>(GetController());
+	if (IsLocallyControlled() && LocalController && LocalController->IsLocalController()
+		&& LocalController->GetPawn() == this)
+	{
+		const UWoTHandInfo* SelectedHand = CurrentHandSet ? CurrentHandSet->GetSelectedHand() : nullptr;
+		FWoTExtensionSeams::Get().LocalFirePressed.Broadcast(
+			UWoTInventoryComponent::GetHandSetItemName(SelectedHand ? SelectedHand->GetSelectedItem() : nullptr));
+	}
 	ServerUseAngreal(GetControlRotation());
 }
 
 void AWoTCharacter::CeaseUsingAngreal()
 {
+	const APlayerController* LocalController = Cast<APlayerController>(GetController());
+	if (IsLocallyControlled() && LocalController && LocalController->IsLocalController()
+		&& LocalController->GetPawn() == this)
+	{
+		FWoTExtensionSeams::Get().LocalFireReleased.Broadcast();
+	}
 	// Swallow ONLY the release of a press the editor consumed (bCitadelEditorFireHeld). A
 	// release whose press was a normal angreal use — even if editing began while it was held —
 	// must still cease the angreal: WOTPlayer's CitadelEditor state ignores Fire/UseAngreal

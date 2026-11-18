@@ -15,7 +15,7 @@
 #include "Engine/GameInstance.h"
 #include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../UI/SWoTFocusOutline.h"
 #include "../UI/SWoTListCombo.h"
@@ -917,20 +917,19 @@ void SWoTSettingsScreen::BuildControlsBody()
 	];
 	NavigationRows.Add({GoreSlider});
 	AddFlag(TEXT("menuOptions.MenuList[11]"), &FWoTGameSettings::bPlayerIDEnabled);
-	// Extension rows from the onboarding seam registry (the optional plugin's
-	// settings toggles). The group precedes player controls; an empty registry
-	// adds nothing. Labels follow their live settings, and callbacks are
-	// copied at build time so the screen never reads a registry that changed
-	// under it.
-	const TArray<FWoTOnboardingRow>& ExtensionRows =
-		FWoTOnboardingSeams::Get().SettingsRows;
-	if (!ExtensionRows.IsEmpty())
+	// Copy registrations before building: open screens retain their callbacks.
+	TArray<FWoTExtensionSettingsSection> Sections =
+		FWoTExtensionSeams::Get().SettingsSections;
+	Sections.StableSort([](const FWoTExtensionSettingsSection& A,
+		const FWoTExtensionSettingsSection& B) { return A.Order < B.Order; });
+	for (const FWoTExtensionSettingsSection& Section : Sections)
 	{
+		if (Section.Rows.IsEmpty()) continue;
 		Rows->AddSlot().Padding(0.0f, 22.0f, 0.0f, 8.0f)
 		[
-			BuildLabel(Literal(TEXT("ONBOARDING")))
+			BuildLabel(Section.Header ? FText::FromString(Section.Header()) : FText::GetEmpty())
 		];
-		for (const FWoTOnboardingRow& Row : ExtensionRows)
+		for (const FWoTExtensionRow& Row : Section.Rows)
 		{
 			TSharedPtr<SWidget> ExtensionButton;
 			Rows->AddSlot().Padding(0.0f, 3.0f).HAlign(HAlign_Left)

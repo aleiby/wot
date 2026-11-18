@@ -5,7 +5,7 @@
 #include "WoTOnboardingModule.h"
 #include "WoTOnboardingSettings.h"
 
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 #include "GameFramework/InputSettings.h"
 #include "Modules/ModuleManager.h"
@@ -39,10 +39,10 @@ struct FWoTOnboardingMenuRowMasterSnapshot
 };
 
 /** This module's rows in the live menu-row registry, in registration order. */
-TArray<const FWoTOnboardingRow*> WoTOnboardingMenuRowCollect()
+TArray<const FWoTExtensionRow*> WoTOnboardingMenuRowCollect()
 {
-	TArray<const FWoTOnboardingRow*> Rows;
-	for (const FWoTOnboardingRow& Row : FWoTOnboardingSeams::Get().MenuRows)
+	TArray<const FWoTExtensionRow*> Rows;
+	for (const FWoTExtensionRow& Row : FWoTExtensionSeams::Get().MenuRows)
 	{
 		if (Row.Owner == FWoTOnboardingModule::SettingsRowOwner())
 		{
@@ -62,7 +62,7 @@ bool FWoTOnboardingGuideMenuRowToggleSpec::RunTest(const FString&)
 	UWoTOnboardingSettings& Live = UWoTOnboardingSettings::Get();
 
 	Live.SetEnableOnboardingAids(true);
-	TArray<const FWoTOnboardingRow*> Rows = WoTOnboardingMenuRowCollect();
+	TArray<const FWoTExtensionRow*> Rows = WoTOnboardingMenuRowCollect();
 	if (!TestEqual(TEXT("master on registers exactly one menu row"),
 		Rows.Num(), 1))
 	{
@@ -95,11 +95,11 @@ bool FWoTOnboardingGuideMenuRowToggleSpec::RunTest(const FString&)
 	TestEqual(TEXT("master off unregisters the menu row"),
 		WoTOnboardingMenuRowCollect().Num(), 0);
 	TestEqual(TEXT("the settings rows stay (they are the way back on)"),
-		FWoTOnboardingSeams::Get().SettingsRows.FilterByPredicate(
-			[](const FWoTOnboardingRow& Row)
+		FWoTExtensionSeams::Get().SettingsSections.FilterByPredicate(
+			[](const FWoTExtensionSettingsSection& Section)
 			{
-				return Row.Owner == FWoTOnboardingModule::SettingsRowOwner();
-			}).Num(), 3);
+				return Section.Owner == FWoTOnboardingModule::SettingsRowOwner();
+			}).Num(), 1);
 
 	Live.SetEnableOnboardingAids(true);
 	TestEqual(TEXT("master on re-registers the menu row"),

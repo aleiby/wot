@@ -1411,6 +1411,112 @@ bool FWoTRuntimeVertexMeshComponentSpec::RunTest(const FString&)
 	return bSuccess;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRuntimeVertexMeshDrawnBoxSpec,
+	"WoT.RuntimeVertexMesh.DrawnBoxIsWhatThePoseDraws",
+	WoTRuntimeVertexMeshFlags)
+
+bool FWoTRuntimeVertexMeshDrawnBoxSpec::RunTest(const FString&)
+{
+	// One drawn triangle, and a source vertex that no face uses.
+	const TArray<FIntVector> SourcePositions = {
+		FIntVector(0, 0, 0), FIntVector(10, 0, 0), FIntVector(0, 20, 0),
+		FIntVector(100, 200, 50)};
+	const TArray<FIntVector> SourceTriangles = {FIntVector(0, 1, 2)};
+	const TArray<uint32> RenderSourceVertices = {0, 1, 2};
+	const FWoTRuntimeVertexMeshDataPtr Flat =
+		FWoTRuntimeVertexMesh::MakeSyntheticForTesting(
+			SourcePositions, SourceTriangles, RenderSourceVertices);
+	UWoTVertexAnimComponent* FlatComponent =
+		NewObject<UWoTVertexAnimComponent>(GetTransientPackage());
+	if (!TestTrue(TEXT("flat triangle binds"), Flat.IsValid()
+		&& FlatComponent->BindRuntimeVertexMeshForTesting(Flat))) return false;
+	FBox Drawn(ForceInit);
+	if (!TestTrue(TEXT("flat triangle has a drawn box"),
+		FlatComponent->GetCurrentPoseDrawnBox(Drawn))) return false;
+	TestTrue(TEXT("drawn box is the triangle"),
+		Drawn.Min.Equals(FVector(0.0, 0.0, 0.0), 1.e-4)
+		&& Drawn.Max.Equals(FVector(10.0, 20.0, 0.0), 1.e-4));
+	TestTrue(TEXT("culling bounds still reach the unused vertex"),
+		FlatComponent->CalcBounds(FTransform::Identity).GetBox().Max.Equals(
+			FVector(100.0, 200.0, 50.0), 1.e-4));
+	// Fatness 144 moves every drawn vertex one unit along its normal, and a
+	// flat triangle's normals all point the same way.
+	FlatComponent->SetFatness(144);
+	if (!TestTrue(TEXT("fattened triangle has a drawn box"),
+		FlatComponent->GetCurrentPoseDrawnBox(Drawn))) return false;
+	TestTrue(TEXT("fatness moves the drawn box off the plane"),
+		FMath::IsNearlyEqual(FMath::Abs(Drawn.GetCenter().Z), 1.0, 1.e-4)
+		&& FMath::IsNearlyZero(Drawn.GetExtent().Z, 1.e-4));
+	TestTrue(TEXT("fatness leaves the triangle's outline alone"),
+		FMath::IsNearlyEqual(Drawn.Min.X, 0.0, 1.e-4)
+		&& FMath::IsNearlyEqual(Drawn.Max.X, 10.0, 1.e-4)
+		&& FMath::IsNearlyEqual(Drawn.Min.Y, 0.0, 1.e-4)
+		&& FMath::IsNearlyEqual(Drawn.Max.Y, 20.0, 1.e-4));
+
+	// The plain fixture's three frames sit at X 0, -2 and -4. Its culling bounds
+	// span all of them; the drawn box is the one pose that shows.
+	const FWoTRuntimeVertexMeshDataPtr Plain = LoadPlainRuntimeVertexMesh(*this);
+	UWoTVertexAnimComponent* PlainComponent =
+		NewObject<UWoTVertexAnimComponent>(GetTransientPackage());
+	if (!TestTrue(TEXT("plain fixture binds"), Plain.IsValid()
+		&& PlainComponent->BindRuntimeVertexMeshForTesting(Plain))) return false;
+	if (!TestTrue(TEXT("plain fixture has a drawn box"),
+		PlainComponent->GetCurrentPoseDrawnBox(Drawn))) return false;
+	TestTrue(TEXT("idle drawn box is frame zero alone"),
+		Drawn.Min.Equals(FVector(0.0, -1.0, -0.5), 1.e-4)
+		&& Drawn.Max.Equals(FVector(0.0, 4.0, 4.5), 1.e-4));
+	TestTrue(TEXT("culling bounds span every frame"), FMath::IsNearlyEqual(
+		PlainComponent->CalcBounds(FTransform::Identity).BoxExtent.X, 2.0, 1.e-4));
+	PlainComponent->SetFrameAndStop(TEXT("Move"), 0.0f);
+	TestTrue(TEXT("drawn box follows the pose"),
+		PlainComponent->GetCurrentPoseDrawnBox(Drawn)
+		&& Drawn.Min.Equals(FVector(-2.0, -1.0, -0.5), 1.e-4)
+		&& Drawn.Max.Equals(FVector(-2.0, 4.0, 4.5), 1.e-4));
+	PlainComponent->SetFrameAndStop(TEXT("Move"), 0.25f);
+	TestTrue(TEXT("drawn box follows a blended pose"),
+		PlainComponent->GetCurrentPoseDrawnBox(Drawn)
+		&& FMath::IsNearlyEqual(Drawn.Min.X, -3.0, 1.e-4)
+		&& FMath::IsNearlyEqual(Drawn.Max.X, -3.0, 1.e-4));
+
+	// The attachment fixture publishes a render vertex at X 4 that no slot draws.
+	TArray<uint8> LodMesh;
+	TArray<uint8> LodAnimation;
+	if (!TestTrue(TEXT("attachment fixture loads"),
+		LoadRuntimeVertexMeshFixture(TEXT("cache-v3-mesh-lod.bin"), LodMesh)
+		&& LoadRuntimeVertexMeshFixture(
+			TEXT("cache-v3-animation-lod.bin"), LodAnimation))) return false;
+	auto LodDecoded = FWoTRuntimeVertexMesh::DecodeObjectBytesForTesting(
+		MoveTemp(LodMesh), MoveTemp(LodAnimation),
+		TEXT("cache/mesh/mesh__LodHero"),
+		TEXT("cache/animation/mesh__LodHero"));
+	if (LodDecoded.IsError())
+	{
+		AddError(LodDecoded.GetError().ToString());
+		return false;
+	}
+	UWoTVertexAnimComponent* LodComponent =
+		NewObject<UWoTVertexAnimComponent>(GetTransientPackage());
+	if (!TestTrue(TEXT("attachment fixture binds"),
+		LodComponent->BindRuntimeVertexMeshForTesting(LodDecoded.GetValue()))
+		|| !TestTrue(TEXT("attachment fixture has a drawn box"),
+			LodComponent->GetCurrentPoseDrawnBox(Drawn))) return false;
+	FBox Published(ForceInit);
+	if (const FWoTRuntimeVertexMeshPose* LodPose =
+		LodComponent->GetRuntimePoseForTesting())
+	{
+		for (const FVector3f& RenderPosition : LodPose->RenderPositions)
+		{
+			Published += FVector(RenderPosition);
+		}
+	}
+	TestTrue(TEXT("the published pose reaches the attachment vertex"),
+		FMath::IsNearlyEqual(Published.Max.X, 4.0, 1.e-4));
+	TestTrue(TEXT("the drawn box leaves the attachment face out"),
+		FMath::IsNearlyEqual(Drawn.Min.X, 0.0, 1.e-4)
+		&& FMath::IsNearlyEqual(Drawn.Max.X, 2.0, 1.e-4));
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRuntimeVertexMeshRealRetailCensusSpec,
 	"WoT.RuntimeVertexMesh.RealRetailCensus",
 	WoTRuntimeVertexMeshFlags)

@@ -4,7 +4,7 @@
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingChrome.h"
 #include "WoTOnboardingHints.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "UI/WoTBackStack.h"
 #include "UI/WoTControllerUIInput.h"
 
@@ -173,7 +173,7 @@ void SWoTGuideBrowser::Construct(const FArguments& InArgs)
 		{
 			// The resolver derives the owning file from the section, so the
 			// file argument carries no address here.
-			return FWoTOnboardingSeams::Get().ResolveText(
+			return FWoTExtensionSeams::Get().ResolveText(
 				FString(), Section, Property);
 		};
 	}

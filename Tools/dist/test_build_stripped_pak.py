@@ -498,12 +498,12 @@ class SeedReleaseCommitTests(unittest.TestCase):
         self.assertEqual(
             bs.stage_seed(self.iso, human_version="0.1.2"), "cached")
 
-    def write_repo_plugin(self) -> Path:
-        plugin = self.repo / "Plugins" / "WoTOnboarding"
+    def write_repo_plugin(self, name="WoTOnboarding") -> Path:
+        plugin = self.repo / "Plugins" / name
         files = {
-            "WoTOnboarding.uplugin": b'{"FileVersion": 3}',
-            "Source/WoTOnboarding/Private/A.cpp": b"int a;\n",
-            "Binaries/Mac/libUnrealEditor-WoTOnboarding.dylib": b"dylib",
+            f"{name}.uplugin": b'{"FileVersion": 3}',
+            f"Source/{name}/Private/A.cpp": b"int a;\n",
+            f"Binaries/Mac/libUnrealEditor-{name}.dylib": b"dylib",
             "Binaries/Mac/UnrealEditor.modules": b'{"BuildId": "x"}',
             "Intermediate/Build/Mac/A.o": b"stale object",
         }
@@ -512,6 +512,26 @@ class SeedReleaseCommitTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
         return plugin
+
+    def test_seed_preserves_first_person_enabled_and_disabled_project_settings(self):
+        self.write_repo_plugin()
+        self.write_repo_plugin("WoTFirstPerson")
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                plugins = [{"Name": "WoTOnboarding", "Enabled": True},
+                           {"Name": "WoTFirstPerson", "Enabled": enabled}]
+                (self.repo / "WoT.uproject").write_text(json.dumps({"Plugins": plugins}))
+                self.assertEqual(bs.stage_seed(self.iso, release_sequence=1 if enabled else 2),
+                                 "ran")
+                self.assertEqual(json.loads((self.iso / "WoT.uproject").read_text())[
+                    "Plugins"], plugins)
+                seeded = self.iso / "Plugins" / "WoTFirstPerson"
+                self.assertTrue((seeded / "WoTFirstPerson.uplugin").is_file())
+                self.assertEqual((seeded / "Source/WoTFirstPerson/Private/A.cpp").read_bytes(),
+                                 b"int a;\n")
+                self.assertFalse((seeded / "Intermediate").exists())
+                self.assertEqual(bs._read_stamp(self.iso, "seed")["code_plugins"],
+                                 ["WoTOnboarding", "WoTFirstPerson"])
 
     def test_seed_copies_the_code_plugin_without_its_intermediate(self):
         self.write_repo_plugin()
@@ -2617,6 +2637,18 @@ class GuardedModeTests(unittest.TestCase):
         paths = self.guarded_cooked_paths() + [
             "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"]
         self.assertEqual(bs._validate_guarded_cooked_paths(paths), baseline)
+
+    def test_guarded_inventory_accepts_both_optional_plugin_switches(self):
+        baseline = bs._validate_guarded_cooked_paths(self.guarded_cooked_paths())
+        for onboarding in (False, True):
+            for first_person in (False, True):
+                with self.subTest(onboarding=onboarding, first_person=first_person):
+                    paths = self.guarded_cooked_paths()
+                    if onboarding:
+                        paths.append("../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")
+                    if first_person:
+                        paths.append("../../../WoT/Plugins/WoTFirstPerson/WoTFirstPerson.uplugin")
+                    self.assertEqual(bs._validate_guarded_cooked_paths(paths), baseline)
 
     def test_guarded_inventory_rejects_a_duplicate_onboarding_descriptor(self):
         descriptor = "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin"

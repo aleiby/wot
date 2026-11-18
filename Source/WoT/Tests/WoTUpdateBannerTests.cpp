@@ -422,17 +422,17 @@ bool FWoTUpdateBannerVersionLabelSpec::RunTest(const FString&)
     neighbor under test. */
 struct FWoTUpdateBannerMenuRowsGuard
 {
-	TArray<FWoTOnboardingRow> Saved;
+	TArray<FWoTExtensionRow> Saved;
 
 	FWoTUpdateBannerMenuRowsGuard()
 	{
-		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
-		FWoTOnboardingSeams::Get().MenuRows.Reset();
+		Saved = MoveTemp(FWoTExtensionSeams::Get().MenuRows);
+		FWoTExtensionSeams::Get().MenuRows.Reset();
 	}
 
 	~FWoTUpdateBannerMenuRowsGuard()
 	{
-		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+		FWoTExtensionSeams::Get().MenuRows = MoveTemp(Saved);
 	}
 };
 

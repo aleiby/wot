@@ -5,10 +5,11 @@
 
 class SWidget;
 class UTexture2D;
+class AActor;
+class APawn;
+class UWorld;
 
-// The onboarding extension seam (docs/plans/2026-11-06-onboarding-aids.md,
-// Architecture §2): the one surface the game module exposes to the optional
-// WoTOnboarding plugin, and the seed of a general improvement-module surface.
+// The extension surface the game module exposes to optional plugins.
 // Plain types only, so a consumer binds these without linking any game class,
 // and every seam is inert when unbound: the game module broadcasts and
 // registers through them whether or not anything listens, and a build without
@@ -23,6 +24,10 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FWoTClientItemAdded, FName /*ClassName*/);
     (WoTKillingItem): the shipped script class name, the same key as above.
     The server sends it whether or not anything on the client listens. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FWoTClientKilledBy, FName /*ClassName*/);
+
+/** Cosmetic input attempts from the local player pawn only. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FWoTLocalFirePressed, FName /*ClassName*/);
+DECLARE_MULTICAST_DELEGATE(FWoTLocalFireReleased);
 
 /** The player asked to open the field guide (input wiring lands in Task 4). */
 DECLARE_MULTICAST_DELEGATE(FWoTShowGuideRequested);
@@ -60,7 +65,7 @@ struct FWoTOnboardingMenuChrome
 /** One registered extra row for the menus or the settings screen. Both
     callbacks are invoked lazily: the label at draw time (display text may
     resolve late), the action on activation. */
-struct FWoTOnboardingRow
+struct FWoTExtensionRow
 {
 	TFunction<FString()> Label;
 	TFunction<void()> Invoke;
@@ -69,21 +74,84 @@ struct FWoTOnboardingRow
 	FName Owner;
 };
 
-struct WOT_API FWoTOnboardingSeams
+/** A plugin-owned group of settings, retained while its feature is off. */
+struct FWoTExtensionSettingsSection
+{
+	FName Owner;
+	TFunction<FString()> Header;
+	int32 Order = 0;
+	TArray<FWoTExtensionRow> Rows;
+};
+
+struct WOT_API FWoTExtensionSeams
 {
 	/** The process-wide seam registry. */
-	static FWoTOnboardingSeams& Get();
+	static FWoTExtensionSeams& Get();
 
-	FWoTClientItemAdded ClientItemAdded;
-	FWoTClientKilledBy ClientKilledBy;
+	// Client windows and menus.
 	FWoTShowGuideRequested ShowGuideRequested;
 	FWoTCloseClientWindows CloseClientWindows;
+	TArray<FWoTExtensionRow> MenuRows;
 
-	/** Extra rows added to the front-end and in-game menus, and to the
-	    settings screen (consumed by Tasks 4-5; empty lists cost nothing). */
-	TArray<FWoTOnboardingRow> MenuRows;
-	TArray<FWoTOnboardingRow> SettingsRows;
+	/** In-match UI input hosting for an improvement module's window: true
+	    enters UI-only input with the cursor shown and focus on the given
+	    widget; false restores game input (what the retail overlays do through
+	    their owning controller). Installed by the local gameplay controller
+	    while it lives; unbound it is a no-op, since the front end already
+	    runs UI input and a window there manages focus itself. */
+	TFunction<void(bool /*bOverlayOpen*/, TSharedPtr<SWidget> /*FocusWidget*/)>
+		SetOverlayInput;
 
+	/** Whether a retail window that wants the screen to itself is open (item
+	    info, help, the in-game menu). A passive overlay, such as the
+	    first-pickup card, stays off the screen while one is. Installed by the
+	    local gameplay controller while it lives; unbound reads as nothing
+	    open. */
+	TFunction<bool()> IsClientWindowOpen;
+
+	// Settings.
+	TArray<FWoTExtensionSettingsSection> SettingsSections;
+
+	// Client presentation.
+	FWoTClientItemAdded ClientItemAdded;
+	FWoTClientKilledBy ClientKilledBy;
+	FWoTLocalFirePressed LocalFirePressed;
+	FWoTLocalFireReleased LocalFireReleased;
+
+	/** True only for the living local player's normal first-person view.
+	    Installed by the local controller; unbound means inactive. */
+	TFunction<bool()> IsFirstPersonViewActive;
+
+	/** A caller-owned local pickup visual, or null if unavailable.
+	    Installed at game startup; callers guard an unbound factory. */
+	TFunction<AActor*(UWorld*, FName /*ClassName*/, const FTransform&)> SpawnItemPresentation;
+
+	/** The first-person hand style for a pawn: its class key (channeler,
+	    darklord, hound or zealot) and its player colour (0 base, 1 black,
+	    2 blue, 3 red, 4 green). False when the pawn has no hand style.
+	    Installed at game startup; unbound means no hands. */
+	TFunction<bool(const APawn*, FName& /*OutHandClass*/, int32& /*OutColor*/)> HandStyleForPawn;
+
+	/** A caller-owned local hand-and-forearm visual for a hand class and
+	    colour, or null when its art is unavailable (callers then show the
+	    held item alone). The actor's poseable mesh carries the hand skeleton
+	    (grip_r is the held-item socket). Installed at game startup. */
+	TFunction<AActor*(UWorld*, FName /*HandClass*/, int32 /*Color*/, const FTransform&)> SpawnHandPresentation;
+
+	/** The shipped class name of the item in the local player's selected
+	    hand (the HandSet item name), or NAME_None. Installed by the local
+	    gameplay controller while it lives; unbound reads as nothing
+	    selected. */
+	TFunction<FName()> SelectedItemClass;
+
+	/** The shipped class name of the item that killed the local player, while
+	    the player waits to respawn (the controller's Dying state), or
+	    NAME_None: alive, respawned, or killed by nothing the server could
+	    name. Installed by the local gameplay controller while it lives;
+	    unbound reads as none. */
+	TFunction<FName()> KilledByItemClass;
+
+	// Display text, fonts and art.
 	/** Retail display text by (file, section, property), the UE1 localization
 	    address. The game module installs this at startup wrapping its runtime
 	    retail-text mechanism; that mechanism resolves the owning file from the
@@ -102,22 +170,6 @@ struct WOT_API FWoTOnboardingSeams
 	    means the caller draws with its own fallback. */
 	TFunction<TOptional<FWoTOnboardingMenuChrome>()> ResolveMenuChrome;
 
-	/** In-match UI input hosting for an improvement module's window: true
-	    enters UI-only input with the cursor shown and focus on the given
-	    widget; false restores game input (what the retail overlays do through
-	    their owning controller). Installed by the local gameplay controller
-	    while it lives; unbound it is a no-op, since the front end already
-	    runs UI input and a window there manages focus itself. */
-	TFunction<void(bool /*bOverlayOpen*/, TSharedPtr<SWidget> /*FocusWidget*/)>
-		SetOverlayInput;
-
-	/** Whether a retail window that wants the screen to itself is open (item
-	    info, help, the in-game menu). A passive overlay, such as the
-	    first-pickup card, stays off the screen while one is. Installed by the
-	    local gameplay controller while it lives; unbound reads as nothing
-	    open. */
-	TFunction<bool()> IsClientWindowOpen;
-
 	/** The original UI art by name: InfoBoxC1, InfoBoxC2 and IconMask (the
 	    item-info window's frame, gem bar, dividers and icon bevel) and
 	    StatusIconFrame (the HUD's gold selected-slot frame). Installed by the
@@ -135,17 +187,4 @@ struct WOT_API FWoTOnboardingSeams
 	    describes. Installed by the game module at startup. Unbound or
 	    unresolved -> null. */
 	TFunction<UTexture2D*(FName /*ClassName*/, bool /*bSmooth*/)> ResolveItemIcon;
-
-	/** The shipped class name of the item in the local player's selected
-	    hand (the HandSet item name), or NAME_None. Installed by the local
-	    gameplay controller while it lives; unbound reads as nothing
-	    selected. */
-	TFunction<FName()> SelectedItemClass;
-
-	/** The shipped class name of the item that killed the local player, while
-	    the player waits to respawn (the controller's Dying state), or
-	    NAME_None: alive, respawned, or killed by nothing the server could
-	    name. Installed by the local gameplay controller while it lives;
-	    unbound reads as none. */
-	TFunction<FName()> KilledByItemClass;
 };

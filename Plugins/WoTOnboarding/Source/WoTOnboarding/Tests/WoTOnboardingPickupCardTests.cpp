@@ -6,7 +6,7 @@
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingModule.h"
 #include "WoTOnboardingPickupCards.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTOnboardingSettings.h"
 
 #include "Misc/ScopeExit.h"
@@ -207,7 +207,7 @@ bool FWoTOnboardingPickupCardOncePerClassSpec::RunTest(const FString&)
 	Live.SetShowFirstPickupCards(true);
 	Live.SetSeenPickupCards({});
 
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TStrongObjectPtr<UWoTAngrealGuide> Guide(WoTOnboardingPickupMakeGuide());
 	// No retail window open, whatever an earlier spec's world left installed.
 	TFunction<bool()> SavedWindowQuery = MoveTemp(Seams.IsClientWindowOpen);
@@ -218,7 +218,7 @@ bool FWoTOnboardingPickupCardOncePerClassSpec::RunTest(const FString&)
 	ON_SCOPE_EXIT
 	{
 		Module.SetPickupCardGuideForTesting(nullptr);
-		FWoTOnboardingSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
+		FWoTExtensionSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
 	};
 
 	const int32 Before = Module.GetPickupCardsShownForTesting();

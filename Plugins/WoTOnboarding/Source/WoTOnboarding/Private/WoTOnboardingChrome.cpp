@@ -120,7 +120,7 @@ float WoTOnboardingFit(const FVector2D& PhysicalSize)
 
 FWoTOnboardingMenuChrome WoTOnboardingChrome::Resolve()
 {
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TOptional<FWoTOnboardingMenuChrome> Resolved = Seams.ResolveMenuChrome
 		? Seams.ResolveMenuChrome() : TOptional<FWoTOnboardingMenuChrome>();
 	return Resolved.IsSet() ? Resolved.GetValue() : FWoTOnboardingMenuChrome();

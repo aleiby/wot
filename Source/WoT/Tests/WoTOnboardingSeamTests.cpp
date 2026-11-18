@@ -2,7 +2,7 @@
 
 #if WITH_AUTOMATION_TESTS
 
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 #include "Engine/Texture2D.h"
 
 // The onboarding seams' contract is that they are inert when unbound: the
@@ -37,7 +37,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingSeamUnboundBroadcastSpec,
 
 bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams Seams;
+	FWoTExtensionSeams Seams;
 	TestFalse(TEXT("no item listener"), Seams.ClientItemAdded.IsBound());
 	TestFalse(TEXT("no killed-by listener"), Seams.ClientKilledBy.IsBound());
 	TestFalse(TEXT("no guide listener"), Seams.ShowGuideRequested.IsBound());
@@ -58,7 +58,7 @@ bool FWoTOnboardingSeamUnboundBroadcastSpec::RunTest(const FString&)
 	Seams.ClientKilledBy.Broadcast(FName(TEXT("EmberLob")));
 	Seams.ShowGuideRequested.Broadcast();
 	TestTrue(TEXT("the seam registry is one process-wide instance"),
-		&FWoTOnboardingSeams::Get() == &FWoTOnboardingSeams::Get());
+		&FWoTExtensionSeams::Get() == &FWoTExtensionSeams::Get());
 	return true;
 }
 
@@ -67,10 +67,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingSeamRegistriesEmptySpec,
 
 bool FWoTOnboardingSeamRegistriesEmptySpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams Seams;
+	FWoTExtensionSeams Seams;
 	TestEqual(TEXT("menu registry starts empty"), Seams.MenuRows.Num(), 0);
 	TestEqual(TEXT("settings registry starts empty"),
-		Seams.SettingsRows.Num(), 0);
+		Seams.SettingsSections.Num(), 0);
 	// A registered row round-trips both callbacks (consumed by Tasks 4-5).
 	int32 Invocations = 0;
 	Seams.MenuRows.Add({
@@ -88,7 +88,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingSeamResolverRoundTripSpec,
 
 bool FWoTOnboardingSeamResolverRoundTripSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams Seams;
+	FWoTExtensionSeams Seams;
 	TestEqual(TEXT("unbound resolver answers empty"),
 		Seams.ResolveText(TEXT("f"), TEXT("s"), TEXT("p")), FString());
 	Seams.ResolveRetailText = [](const FString& File, const FString& Section,
@@ -106,9 +106,9 @@ bool FWoTOnboardingSeamResolverRoundTripSpec::RunTest(const FString&)
 	// whole stack, with or without retail data present, so no retail prose is
 	// pinned here.
 	TestTrue(TEXT("game module installed the retail resolver"),
-		static_cast<bool>(FWoTOnboardingSeams::Get().ResolveRetailText));
+		static_cast<bool>(FWoTExtensionSeams::Get().ResolveRetailText));
 	TestEqual(TEXT("unknown retail section resolves empty"),
-		FWoTOnboardingSeams::Get().ResolveText(TEXT("WoT"),
+		FWoTExtensionSeams::Get().ResolveText(TEXT("WoT"),
 			TEXT("WoTOnboardingNoSuchSection"), TEXT("Title")),
 		FString());
 	return true;
@@ -122,7 +122,7 @@ bool FWoTOnboardingSeamArtResolversSpec::RunTest(const FString&)
 	// The game module installs both art resolvers at startup. The plugin cuts
 	// the frame, gem bar and dividers out of these textures by the original
 	// window's regions, so their sizes are part of the contract.
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	if (!TestTrue(TEXT("retail texture resolver installed"),
 			static_cast<bool>(Seams.ResolveRetailTexture))
 		|| !TestTrue(TEXT("item icon resolver installed"),

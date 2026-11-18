@@ -23,7 +23,7 @@
 #include "../WoTGameMode.h"
 #include "../WoTKillingItem.h"
 #include "../WoTMover.h"
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 #include "../WoTPlayerController.h"
 
 #include "Engine/Engine.h"
@@ -264,11 +264,11 @@ bool FWoTKillingItemDeliverySpec::RunTest(const FString&)
 	TestTrue(TEXT("a kill with nothing listening still lands"), Unheard->bDead);
 
 	TArray<FName> Delivered;
-	const FDelegateHandle Listener = FWoTOnboardingSeams::Get().ClientKilledBy.AddLambda(
+	const FDelegateHandle Listener = FWoTExtensionSeams::Get().ClientKilledBy.AddLambda(
 		[&Delivered](FName ClassName) { Delivered.Add(ClassName); });
 	ON_SCOPE_EXIT
 	{
-		FWoTOnboardingSeams::Get().ClientKilledBy.Remove(Listener);
+		FWoTExtensionSeams::Get().ClientKilledBy.Remove(Listener);
 	};
 
 	// The standalone world's controllers share one seam, so a single message

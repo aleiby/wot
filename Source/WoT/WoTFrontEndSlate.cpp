@@ -733,8 +733,8 @@ void SWoTFrontEndRoot::Tick(
 	// as owner-tagged units.
 	if (ViewModel.GetScreen() == EWoTFrontEndScreen::Main)
 	{
-		const TArray<FWoTOnboardingRow>& LiveRows =
-			FWoTOnboardingSeams::Get().MenuRows;
+		const TArray<FWoTExtensionRow>& LiveRows =
+			FWoTExtensionSeams::Get().MenuRows;
 		bool bRowsMatch = LiveRows.Num() == MainMenuExtensionRows.Num();
 		for (int32 RowIndex = 0;
 			bRowsMatch && RowIndex < LiveRows.Num(); ++RowIndex)
@@ -756,7 +756,7 @@ void SWoTFrontEndRoot::Tick(
 		if (MappedEntry.ExtensionIndex != INDEX_NONE)
 		{
 			// Extension labels take part in layout but cannot veto the retail face gate.
-			const FWoTOnboardingRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
+			const FWoTExtensionRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
 			Measurements.Add(FWoTMenuLayout::MeasureText(
 				FText::FromString(Row.Label ? Row.Label() : FString()), MenuFonts().Title));
 		}
@@ -998,7 +998,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 	{
 		if (MainMenuExtensionRows[RowIndex].Owner == PreviousOwner) ++PreviousOwnerOrdinal;
 	}
-	MainMenuExtensionRows = FWoTOnboardingSeams::Get().MenuRows;
+	MainMenuExtensionRows = FWoTExtensionSeams::Get().MenuRows;
 	if (MainMenuSelection.IsValid())
 	{
 		MainMenuSelection->SetEntryCount(MainMenuTotalEntryCount());
@@ -1036,7 +1036,7 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildMainScreen()
 		const FText Label = MappedEntry.ExtensionIndex != INDEX_NONE
 			? FText::FromString([this, MappedEntry]()
 				{
-					const FWoTOnboardingRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
+					const FWoTExtensionRow& Row = MainMenuExtensionRows[MappedEntry.ExtensionIndex];
 					return Row.Label ? Row.Label() : FString();
 				}())
 			: RetailText(RetailMainEntries()[MappedEntry.RetailIndex].LocalizationId);
@@ -3011,7 +3011,7 @@ FReply SWoTFrontEndRoot::ActivateMainMenuEntry(int32 EntryIndex)
 	{
 		// A seam extension row: run the invoke captured with the rendered
 		// button, through the same selection/feedback path as retail entries.
-		const FWoTOnboardingRow Row =
+		const FWoTExtensionRow Row =
 			MainMenuExtensionRows[MappedEntry.ExtensionIndex];
 		const bool bExtensionActivated = MainMenuSelection->Activate(
 			EntryIndex, [this, &Row]()

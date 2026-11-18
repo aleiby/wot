@@ -5,7 +5,7 @@
 #include "SWoTGuideBrowser.h"
 #include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTOnboardingChrome.h"
 
 #include "Input/Events.h"
@@ -396,7 +396,7 @@ bool FWoTOnboardingBrowserFactsOnlySpec::RunTest(const FString&)
 
 	// The published charge face maps ':' to its infinity mark, as the
 	// original window draws it.
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -426,7 +426,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserChargeFacesSpec,
 
 bool FWoTOnboardingBrowserChargeFacesSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -475,7 +475,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserHeaderOffsetsSpec,
 
 bool FWoTOnboardingBrowserHeaderOffsetsSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const auto SavedResolver = Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
 	Seams.ResolveMenuChrome = []() -> TOptional<FWoTOnboardingMenuChrome>
@@ -569,7 +569,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserAndCardDefaultSizeSpec,
 
 bool FWoTOnboardingBrowserAndCardDefaultSizeSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -888,7 +888,7 @@ bool FWoTOnboardingBrowserGridFitsSpec::RunTest(const FString&)
 	TestEqual(TEXT("the roster has forty-four rows"), Guide->Rows.Num(), 44);
 	if (HasAnyErrors()) return false;
 
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };

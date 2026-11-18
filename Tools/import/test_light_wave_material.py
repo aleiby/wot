@@ -126,7 +126,7 @@ class LightWaveMaterialContractTests(unittest.TestCase):
 
     def test_wave5_mesh_and_mover_graphs_use_static_selectors_and_one_mpc(self):
         self.assertEqual(
-            LIGHT_GRAPH_VERSION, "wave-groups-dynamic-g45-v2")
+            LIGHT_GRAPH_VERSION, "wave-groups-dynamic-g45-v3")
         for index in range(6):
             self.assertIn(f"G{index}", _ML_HLSL)
         for name in ("Wave0", "Wave1", "Wave2", "Wave3",

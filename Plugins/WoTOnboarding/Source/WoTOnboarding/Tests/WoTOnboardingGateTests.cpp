@@ -4,7 +4,7 @@
 
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingModule.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTOnboardingSettings.h"
 
 #include "Dom/JsonObject.h"
@@ -62,9 +62,9 @@ struct FWoTOnboardingGateSettingsSnapshot
 	}
 };
 
-int32 WoTOnboardingGateOwnedRows(const TArray<FWoTOnboardingRow>& Rows)
+int32 WoTOnboardingGateOwnedRows(const TArray<FWoTExtensionRow>& Rows)
 {
-	return Rows.FilterByPredicate([](const FWoTOnboardingRow& Row)
+	return Rows.FilterByPredicate([](const FWoTExtensionRow& Row)
 	{
 		return Row.Owner == FWoTOnboardingModule::SettingsRowOwner();
 	}).Num();
@@ -84,7 +84,7 @@ UWoTAngrealGuide* WoTOnboardingGateMakeGuide()
 void WoTOnboardingGateExpectBindings(FAutomationTestBase& Test,
 	const FWoTOnboardingModule& Module, bool bExpected, const TCHAR* When)
 {
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const struct
 	{
 		const TCHAR* Seam;
@@ -506,7 +506,7 @@ bool FWoTOnboardingParityOffGateSpec::RunTest(const FString&)
 		FModuleManager::GetModuleChecked<FWoTOnboardingModule>(TEXT("WoTOnboarding"));
 	FWoTOnboardingGateSettingsSnapshot Snapshot;
 	UWoTOnboardingSettings& Live = UWoTOnboardingSettings::Get();
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 
 	// The positive control: master on, the module listens, so the checks
 	// below cannot pass vacuously.
@@ -522,7 +522,8 @@ bool FWoTOnboardingParityOffGateSpec::RunTest(const FString&)
 	TestEqual(TEXT("master off: no menu row"),
 		WoTOnboardingGateOwnedRows(Seams.MenuRows), 0);
 	TestEqual(TEXT("master off: the three settings rows stay (the way back on)"),
-		WoTOnboardingGateOwnedRows(Seams.SettingsRows), 3);
+		Seams.SettingsSections.FilterByPredicate([](const FWoTExtensionSettingsSection& Section)
+		{ return Section.Owner == FWoTOnboardingModule::SettingsRowOwner(); }).Num(), 1);
 
 	// Traffic while off changes nothing, even with a spec guide that would let
 	// the item handler decide.
@@ -536,7 +537,7 @@ bool FWoTOnboardingParityOffGateSpec::RunTest(const FString&)
 	ON_SCOPE_EXIT
 	{
 		Module.SetPickupCardGuideForTesting(nullptr);
-		FWoTOnboardingSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
+		FWoTExtensionSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
 	};
 	Live.SetShowFirstPickupCards(true);
 	Live.SetSeenPickupCards({});

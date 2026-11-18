@@ -1525,6 +1525,91 @@ bool FWoTPayloadMeshMorphSeamSpec::RunTest(const FString&)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTPayloadMeshPoseCacheFrameZeroSpec,
+	"WoT.Payload.Mesh.PoseCacheFrameZeroAndDrawnBox",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FWoTPayloadMeshPoseCacheFrameZeroSpec::RunTest(const FString&)
+{
+	// A payload pose cache stores every frame, frame zero included, as a delta
+	// from a placeholder lattice. Here frame zero shows a triangle at (0,0,0),
+	// (10,0,0) and (0,10,0), and frame one lifts its third corner by ten.
+	const TArray<FVector3f> Lattice = {
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(1.0f, 0.0f, 0.0f),
+		FVector3f(2.0f, 0.0f, 0.0f)};
+	TMap<int32, TArray<FVector3f>> Deltas;
+	Deltas.Add(0, {
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(9.0f, 0.0f, 0.0f),
+		FVector3f(-2.0f, 10.0f, 0.0f)});
+	Deltas.Add(1, {
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(9.0f, 0.0f, 0.0f),
+		FVector3f(-2.0f, 10.0f, 10.0f)});
+	UWoTVertexAnimComponent* Component =
+		NewObject<UWoTVertexAnimComponent>(GetTransientPackage());
+	Component->SetPoseCacheForTesting(Lattice, Deltas);
+
+	TArray<FVector> Pose;
+	FBox Drawn(ForceInit);
+	if (!TestTrue(TEXT("idle pose resolves"),
+		Component->GetCurrentPoseVertexPositions(Pose))
+		|| !TestEqual(TEXT("idle pose vertex count"), Pose.Num(), 3))
+	{
+		return false;
+	}
+	TestTrue(TEXT("an idle component shows frame zero, not the lattice"),
+		Pose[0].Equals(FVector(0.0, 0.0, 0.0), 1.e-4)
+		&& Pose[1].Equals(FVector(10.0, 0.0, 0.0), 1.e-4)
+		&& Pose[2].Equals(FVector(0.0, 10.0, 0.0), 1.e-4));
+	TestTrue(TEXT("the idle drawn box is frame zero"),
+		Component->GetCurrentPoseDrawnBox(Drawn)
+		&& Drawn.Min.Equals(FVector(0.0, 0.0, 0.0), 1.e-4)
+		&& Drawn.Max.Equals(FVector(10.0, 10.0, 0.0), 1.e-4));
+
+	// Frame zero carries the weight the other frames leave.
+	Component->SetFrameMorphsForTesting(1, 0.25f, INDEX_NONE, 0.0f);
+	Component->GetCurrentPoseVertexPositions(Pose);
+	TestTrue(TEXT("a quarter of frame one leaves three quarters of frame zero"),
+		Pose.Num() == 3 && Pose[2].Equals(FVector(0.0, 10.0, 2.5), 1.e-4)
+		&& Pose[1].Equals(FVector(10.0, 0.0, 0.0), 1.e-4));
+	Component->SetFrameMorphsForTesting(0, 0.5f, 1, 0.5f);
+	Component->GetCurrentPoseVertexPositions(Pose);
+	TestTrue(TEXT("naming frame zero does not count it twice"),
+		Pose.Num() == 3 && Pose[2].Equals(FVector(0.0, 10.0, 5.0), 1.e-4));
+	Component->SetFrameMorphsForTesting(1, 1.0f, INDEX_NONE, 0.0f);
+	Component->GetCurrentPoseVertexPositions(Pose);
+	TestTrue(TEXT("a full frame one leaves nothing of frame zero"),
+		Pose.Num() == 3 && Pose[2].Equals(FVector(0.0, 10.0, 10.0), 1.e-4));
+	TestTrue(TEXT("the drawn box follows the pose"),
+		Component->GetCurrentPoseDrawnBox(Drawn)
+		&& Drawn.Min.Equals(FVector(0.0, 0.0, 0.0), 1.e-4)
+		&& Drawn.Max.Equals(FVector(10.0, 10.0, 10.0), 1.e-4));
+
+	// An imported mesh's cache has no frame-zero delta: its base is that pose.
+	const TArray<FVector3f> FrameZero = {
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(10.0f, 0.0f, 0.0f),
+		FVector3f(0.0f, 10.0f, 0.0f)};
+	TMap<int32, TArray<FVector3f>> ImportedDeltas;
+	ImportedDeltas.Add(1, {
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(0.0f, 0.0f, 0.0f),
+		FVector3f(0.0f, 0.0f, 10.0f)});
+	UWoTVertexAnimComponent* Imported =
+		NewObject<UWoTVertexAnimComponent>(GetTransientPackage());
+	Imported->SetPoseCacheForTesting(FrameZero, ImportedDeltas);
+	Imported->GetCurrentPoseVertexPositions(Pose);
+	TestTrue(TEXT("an idle imported cache shows its base"),
+		Pose.Num() == 3 && Pose[2].Equals(FVector(0.0, 10.0, 0.0), 1.e-4));
+	Imported->SetFrameMorphsForTesting(1, 0.25f, INDEX_NONE, 0.0f);
+	Imported->GetCurrentPoseVertexPositions(Pose);
+	TestTrue(TEXT("an imported cache blends from its base"),
+		Pose.Num() == 3 && Pose[2].Equals(FVector(0.0, 10.0, 2.5), 1.e-4));
+	return !HasAnyErrors();
+}
+
 #if !WOT_GUARDED_BOOTSTRAP
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTPayloadMeshPackageHandlerSpec,
 	"WoT.Payload.Mesh.PackageHandlerAndToggleOff",

@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "WoT First Person",
+	"Description": "Optional first-person held-artifact presentation. Turn Held Artifact off in the FIRST PERSON settings section, disable this plugin, or ship without it to retain the original view.",
+	"Category": "WoT",
+	"CreatedBy": "WoT Reborn contributors",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "WoTFirstPerson",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

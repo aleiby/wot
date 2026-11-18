@@ -60,7 +60,7 @@ unchanged (the onboarding aids that teach items and counters, say), ships as
 an optional plugin rather than as a change to the port:
 
 - The plugin lives under `Plugins/` and reaches the game only through a small
-  seam header in the game module (`Source/WoT/WoTOnboardingSeams.h`). A seam
+  seam header in the game module (`Source/WoT/WoTExtensionSeams.h`). A seam
   does nothing when nothing listens, so the game builds and plays the same
   with the plugin disabled or absent.
 - A master setting turns the plugin off while the game runs. Switched off, it

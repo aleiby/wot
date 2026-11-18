@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Widgets/Text/STextBlock.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 struct FGeometry;
 class FWoTOnboardingFaces;
