@@ -500,6 +500,11 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTHookFixScreenSizeSpec,
 
 bool FWoTHookFixScreenSizeSpec::RunTest(const FString&)
 {
+#if PLATFORM_MAC
+	// Headless editable-text focus has no native NSWindow for the macOS IME.
+	AddExpectedError(TEXT("context failed when its window couldn't be found"),
+		EAutomationExpectedErrorFlags::Contains, -1, /*IsRegex*/ false);
+#endif
 	using namespace WoTHookFixTest;
 	FGuard Guard;
 	FScreens S;
