@@ -19,6 +19,7 @@
 #include "WoTMenuStyle.h"
 #include "WoTSessionSubsystem.h"
 #include "WoTFrontEndSlate.h"
+#include "WoTLocalPlayerHooks.h"
 #include "Updater/WoTInstallerLocations.h"
 #include "Updater/WoTGameBootstrapWorker.h"
 #include "Updater/WoTReleaseIdentity.h"
@@ -86,6 +87,20 @@ void SetWoTFrontEndHandoffTestAdapter(
 	GWoTFrontEndHandoffTestAdapter = Adapter;
 }
 #endif
+
+void AWoTFrontEndPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+	// The front end has no pawn or HUD; local-player hooks register input here too.
+	FWoTLocalPlayerHooks::PrepareInput(*this, InputComponent);
+}
+
+void AWoTFrontEndPlayerController::PreClientTravel(const FString& PendingURL,
+	ETravelType TravelType, bool bIsSeamlessTravel)
+{
+	FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::Travel);
+	Super::PreClientTravel(PendingURL, TravelType, bIsSeamlessTravel);
+}
 
 void AWoTFrontEndPlayerController::BeginPlay()
 {
@@ -515,6 +530,7 @@ void AWoTFrontEndPlayerController::HandleCancelInstallerCopy()
 
 void AWoTFrontEndPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 {
+	FWoTLocalPlayerHooks::ControllerEnded(*this, Reason);
 	if (GetWorld() != nullptr)
 	{
 		GetWorldTimerManager().ClearTimer(SetupBackdropTimer);

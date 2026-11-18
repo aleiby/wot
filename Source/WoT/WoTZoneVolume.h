@@ -34,7 +34,8 @@ public:
 	// as a retail SetActorZone before erasing a still-live tracked actor.
 	void RemoveActor(AActor* Actor);
 	// Explicit UE1 SetLocation/FarMove seam for non-tick relocations. Ordinary
-	// movement is refreshed once by this subsystem's post-movement Tick.
+	// movement is refreshed once by this subsystem's post-movement Tick. A local
+	// player's relocated pawn is also reported to the local-player hooks.
 	static void RefreshAfterRelocation(AActor* Actor);
 	class AWoTZoneVolume* GetRegion(const AActor* Actor) const;
 	class AWoTZoneVolume* GetFootRegion(const APawn* Pawn) const;

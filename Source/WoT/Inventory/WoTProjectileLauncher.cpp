@@ -1,6 +1,7 @@
 #include "WoTProjectileLauncher.h"
 
 #include "../WoTCharacter.h"
+#include "../WoTPlayerController.h"
 #include "../Projectiles/WoTGenericProjectile.h"
 #include "../Projectiles/WoTSeekingProjectile.h"
 
@@ -103,6 +104,13 @@ void AWoTProjectileLauncher::LaunchProjectile()
 		return;
 	}
 	APawn* SourcePawn = Cast<APawn>(Source);
+	// A held or repeating cast launches along the caster's current aim: a local
+	// aim provider updates the view rotation the target pick and launch read.
+	if (AWoTPlayerController* CasterController = SourcePawn
+		? Cast<AWoTPlayerController>(SourcePawn->GetController()) : nullptr)
+	{
+		CasterController->RefreshLocalAim();
+	}
 
 	// Resolve a destination only for projectile classes that use one
 	// (ProjectileLauncher.uc:192).

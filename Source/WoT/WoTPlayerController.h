@@ -62,7 +62,19 @@ class AWoTPlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	/** With a local aim provider (WoTLocalPlayerHooks.h), its absolute yaw and pitch
+	 * replace mouse and stick look, still bounded by the view limits and gameplay
+	 * pitch constraints. */
 	virtual void UpdateRotation(float DeltaTime) override;
+	/** Re-sample a local aim provider now, so a cast, launch or RPC reads the
+	 * current aim; nothing without one. */
+	void RefreshLocalAim();
+	/** Also tells the local-player hooks that held input ended. */
+	virtual void FlushPressedKeys() override;
+	/** Also while a local movement provider holds the body still
+	 * (FWoTLocalPlayerHooks::HoldMovement), which this controller's own ignore
+	 * count never carries. */
+	virtual bool IsMoveInputIgnored() const override;
 	/** The legacy yaw/pitch input scales AddYaw/PitchInput multiply by (BaseGame.ini
 	 * 2.5 / -2.5), or 1 when legacy input scales are off. */
 	FVector2D GetLegacyLookInputScale() const;

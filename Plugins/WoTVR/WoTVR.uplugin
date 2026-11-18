@@ -1,0 +1,55 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "WoT VR Play",
+	"Description": "Optional VR play for PC clients: tracked stereo view, head aim, head-relative movement, turning and in-place VR/flat switching, built on the game module's local-player hooks. Absent, disabled or switched off, the game creates no XR instance and plays flat exactly as without it.",
+	"Category": "WoT",
+	"CreatedBy": "WoT Reborn contributors",
+	"CreatedByURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "WoTVRGate",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		},
+		{
+			"Name": "WoTVR",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"PlatformAllowList": [
+				"Win64"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "OpenXR",
+			"Enabled": true
+		},
+		{
+			"Name": "XRBase",
+			"Enabled": true
+		},
+		{
+			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
+			"Name": "OpenXRHandTracking",
+			"Enabled": true,
+			"PlatformAllowList": [
+				"Win64"
+			],
+			"TargetAllowList": [
+				"Editor"
+			]
+		}
+	]
+}

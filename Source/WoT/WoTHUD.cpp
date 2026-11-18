@@ -7,6 +7,7 @@
 #include "WoTCharacter.h"
 #include "WoTHUDFonts.h"
 #include "WoTHUDTextures.h"
+#include "WoTLocalPlayerHooks.h"
 #include "WoTPlayerController.h"
 #include "WoTPlayerState.h"
 #include "WoTPreferencesSubsystem.h"
@@ -1749,213 +1750,111 @@ bool AWoTHUD::ShouldDrawCitadelTeamOverview() const
 	return false;
 }
 
-void AWoTHUD::DrawArenaScoreboard(UCanvas* CanvasObject)
+UFont* AWoTHUD::ResolveCommandFont(const FWoTHUDDrawCmd& Command,
+	int32 ViewportWidth) const
 {
-	if (!CanvasObject || !ShouldDrawArenaScoreboard())
+	if (UFont* Bound = Command.Font.Get())
 	{
-		return;
+		return Bound;
 	}
-	UFont* Font = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
-	if (!Font)
-	{
-		return;
-	}
-	float TestWidth = 0.0f;
-	float FontLineHeight = 0.0f;
-	CanvasObject->StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
-	(void)TestWidth;
+	return Command.FontId.IsNone() ? nullptr : ResolveFont(Command.FontId, ViewportWidth);
+}
 
-	TMap<FName, UTexture2D*> IconTextures;
-	bool bIconsAvailable = true;
-	for (const FName TextureId : FWoTArenaScoreboard::AllIconTextureIds())
+UTexture2D* AWoTHUD::ResolveCommandTexture(EWoTHUDSection Section,
+	const FWoTHUDDrawCmd& Command) const
+{
+	if (Section == EWoTHUDSection::Health)
 	{
-		UTexture2D* Texture = ResolveHUDTexture(TextureId);
-		IconTextures.Add(TextureId, Texture);
-		bIconsAvailable &= Texture != nullptr;
-	}
-	const bool bStandalone = GetWorld() &&
-		GetWorld()->GetNetMode() == NM_Standalone;
-	// giMPBattle.ScoreBoardType=CitadelScoreBoard vs giMPArena's ArenaScoreBoard
-	// (giMPBattle.uc:533 / giMPArena.uc:23): the citadel game state selects the board.
-	const bool bCitadel = GetWorld()
-		&& Cast<AWoTCitadelGameState>(GetWorld()->GetGameState()) != nullptr;
-	const FWoTArenaScoreboard ArenaBoard;
-	const FWoTCitadelScoreboard CitadelBoard;
-	const FWoTArenaScoreboard& Scoreboard = bCitadel
-		? static_cast<const FWoTArenaScoreboard&>(CitadelBoard) : ArenaBoard;
-	// Below a 2x HUD the board is laid out on half the canvas and drawn at 2x
-	// (or, where even the compact form overflows, at 1x as before).
-	const FWoTScoreboardBoard Board = Scoreboard.LayoutBoard(
-		GatherArenaScoreboard(), CanvasObject->SizeX, CanvasObject->SizeY,
-		FontLineHeight, HUDTextScale, bStandalone, bIconsAvailable);
-	const FWoTHUDIntegerUpscaleGuard BoardGuard(*CanvasObject, Board.BoardScale);
-	FWoTCanvasScale CanvasScale;
-	if (Board.BoardScale == 1)
-	{
-		CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	}
-	for (const FWoTHUDDrawCmd& Command : Board.Commands)
-	{
-		if (!Command.Text.IsEmpty())
+		// The pawn's own health icon, resolved by the pawn for this frame.
+		if (UTexture2D* Live = Command.Texture.Get())
 		{
-			CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
-				Command.Text, Font, Command.bCenterX, Command.Tint,
-				Command.TextAlignment);
-		}
-		else if (!Command.TexId.IsNone())
-		{
-			UTexture2D* const* Texture = IconTextures.Find(Command.TexId);
-			CanvasScale.DrawIconAt(CanvasObject, Texture ? *Texture : nullptr,
-				Command.X, Command.Y, Command.Scale, Command.Style, Command.Tint);
+			return Live;
 		}
 	}
+	// A command bound to an item's authored texture (StatusIcon/Frame, e.g.
+	// Texture'WOT.UI.I_SSeal') resolves ONLY that path. Its TexId is just
+	// the asset leaf, which is not a HUD registry id: resolving it first
+	// asked guarded builds for /Game/WoT/UI/I_SSeal, a path outside every
+	// retail identity, and every citadel hand frame recorded a failed
+	// texture (T6-2 assets-resolved failed_textures=20 host / 90-180 client).
+#if WOT_GUARDED_BOOTSTRAP
+	const FSoftObjectPath TexturePath = CommandTexturePath(Command);
+	return TexturePath.IsNull()
+		? nullptr : UWoTRuntimeAssets::ResolveTexturePath(TexturePath);
+#else
+	return Command.Texture.IsNull()
+		? ResolveHUDTexture(Command.TexId)
+		: UWoTRuntimeAssets::ResolveTexturePath(Command.Texture.ToSoftObjectPath());
+#endif
 }
 
-void AWoTHUD::DrawCitadelTeamOverview(UCanvas* CanvasObject)
+void AWoTHUD::DrawSections(UCanvas& CanvasObject,
+	TConstArrayView<FWoTHUDSection> Sections) const
 {
-	if (!IsValid(CanvasObject) || !ShouldDrawCitadelTeamOverview())
+	// Faces resolve for the canvas the sections were placed on, outside any
+	// board scale (the scoreboards resolved theirs before their board guard).
+	const int32 FontWidth = CanvasObject.SizeX;
+	TArray<FName> BoardIcons;
+	for (const FWoTHUDSection& Section : Sections)
 	{
-		return;
-	}
-	UFont* Font = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
-	if (!IsValid(Font))
-	{
-		return;
-	}
-	float TestWidth = 0.0f;
-	float FontLineHeight = 0.0f;
-	CanvasObject->StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
-	(void)TestWidth;
-
-	const FWoTCitadelTeamOverview Overview;
-	const FWoTScoreboardBoard Board = Overview.LayoutBoard(
-		GatherCitadelTeamOverview(), CanvasObject->SizeX, CanvasObject->SizeY,
-		FontLineHeight, HUDTextScale);
-	const FWoTHUDIntegerUpscaleGuard BoardGuard(*CanvasObject, Board.BoardScale);
-	FWoTCanvasScale CanvasScale;
-	if (Board.BoardScale == 1)
-	{
-		CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	}
-	for (const FWoTHUDDrawCmd& Command : Board.Commands)
-	{
-		if (!Command.Text.IsEmpty())
+		if (Section.Section == EWoTHUDSection::Scoreboard && BoardIcons.IsEmpty())
 		{
-			CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
-				Command.Text, Font, Command.bCenterX, Command.Tint,
-				Command.TextAlignment);
+			BoardIcons = FWoTArenaScoreboard::AllIconTextureIds();
 		}
-	}
-}
-
-void AWoTHUD::DrawHealth(UCanvas* CanvasObject)
-{
-	if (!CanvasObject || !ShouldDrawWoTHUD() ||
-		!CurrentSurfaceVisibility().bHealth)
-	{
-		return;
-	}
-
-	const APlayerController* OwningController = GetOwningPlayerController();
-	const AWoTCharacter* Pawn = OwningController
-		? Cast<AWoTCharacter>(OwningController->GetPawn()) : nullptr;
-	if (!Pawn)
-	{
-		return;
-	}
-
-	UTexture2D* HealthTexture = Pawn->GetHealthIcon();
-	if (!HealthTexture)
-	{
-		return;
-	}
-
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	const TArray<FWoTHUDDrawCmd> Commands = LayoutHealth(
-		GatherReadout(), HealthTexture->GetFName(), Pawn->SeekerCount != 0);
-	for (const FWoTHUDDrawCmd& Command : Commands)
-	{
-		if (!Command.Text.IsEmpty())
+		// A doubled scoreboard lays out half the canvas and draws under a 2x
+		// transform; a scale of 1 changes nothing.
+		const FWoTHUDIntegerUpscaleGuard BoardGuard(CanvasObject, Section.BoardScale);
+		FWoTCanvasScale CanvasScale;
+		if (Section.Path == EWoTHUDDrawPath::Scaled)
 		{
-			UFont* CommandFont = ResolveFont(
-				Command.FontId, static_cast<int32>(CanvasObject->SizeX));
-			CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
-				Command.Text, CommandFont, Command.bCenterX, Command.Tint,
-				Command.TextAlignment);
-			continue;
+			CanvasScale.ComputeFactors(CanvasObject.SizeX, CanvasObject.SizeY);
 		}
-
-		UTexture2D* Texture = Command.TexId == HealthTexture->GetFName()
-			? HealthTexture
-			: ResolveHUDTexture(Command.TexId);
-		CanvasScale.DrawIconAt(CanvasObject, Texture, Command.X, Command.Y,
-			Command.Scale, Command.Style, Command.Tint);
-	}
-}
-
-void AWoTHUD::DrawStatusIcons(UCanvas* CanvasObject)
-{
-	if (!CanvasObject || !ShouldDrawWoTHUD() || bHideStatusIcons ||
-		!CurrentSurfaceVisibility().bStatusIcons)
-	{
-		return;
-	}
-	const APlayerController* OwningController = GetOwningPlayerController();
-	const AWoTCharacter* Pawn = OwningController
-		? Cast<AWoTCharacter>(OwningController->GetPawn()) : nullptr;
-	if (!IsValid(Pawn))
-	{
-		return;
-	}
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	for (const FWoTHUDDrawCmd& Command : LayoutStatusIcons(
-		Pawn->StatusIcons, ScaledViewportWidth(CanvasObject->SizeX)))
-	{
-		CanvasScale.DrawIconAt(CanvasObject, ResolveHUDTexture(Command.TexId),
-			Command.X, Command.Y, Command.Scale, Command.Style, Command.Tint);
-	}
-}
-
-void AWoTHUD::DrawCrosshair(UCanvas* CanvasObject)
-{
-	if (!CanvasObject || !ShouldDrawWoTHUD())
-	{
-		return;
-	}
-
-	// MainHUD.DrawCursor uses the live ClipX/ClipY and Canvas.DrawIcon directly,
-	// unlike the health path's LegendCanvas scaling. Unit factors preserve that.
-	const FWoTCanvasScale CanvasScale;
-	for (const FWoTHUDDrawCmd& Command :
-		LayoutCrosshair(Crosshair, static_cast<int32>(CanvasObject->ClipX),
-			static_cast<int32>(CanvasObject->ClipY)))
-	{
-		CanvasScale.DrawIconAt(CanvasObject, ResolveHUDTexture(Command.TexId),
-			Command.X, Command.Y, Command.Scale, Command.Style, Command.Tint);
-	}
-}
-
-void AWoTHUD::DrawEditorCursor(UCanvas* CanvasObject)
-{
-	if (!CanvasObject || !ShouldDrawWoTHUD())
-	{
-		return;
-	}
-	UTexture2D* CursorTexture = UWoTRuntimeAssets::ResolveTexturePath(
-		EditorCursorTexture.ToSoftObjectPath());
-	if (!IsValid(CursorTexture))
-	{
-		return;
-	}
-	const FWoTCanvasScale CanvasScale;
-	for (const FWoTHUDDrawCmd& Command : LayoutEditorCursor(
-		static_cast<int32>(CanvasObject->ClipX),
-		static_cast<int32>(CanvasObject->ClipY)))
-	{
-		CanvasScale.DrawIconAt(CanvasObject, CursorTexture, Command.X, Command.Y,
-			Command.Scale, Command.Style, Command.Tint);
+		for (const FWoTHUDDrawCmd& Command : Section.Commands)
+		{
+			if (Section.Path == EWoTHUDDrawPath::TextItems)
+			{
+				// Messages, the team prompt and the player ID: canvas text
+				// items at their final positions; a run without a face is not
+				// drawn.
+				if (UFont* Font = ResolveCommandFont(Command, FontWidth))
+				{
+					FWoTCanvasScale::SubmitText(&CanvasObject, Command.Text, Font,
+						FVector2D(Command.X, Command.Y), Command.Tint, Command.Style,
+						Command.Scale, Command.bCenterX);
+				}
+				continue;
+			}
+			if (!Command.Text.IsEmpty())
+			{
+				CanvasScale.DrawScaledTextAt(&CanvasObject, Command.X, Command.Y,
+					Command.Text, ResolveCommandFont(Command, FontWidth),
+					Command.bCenterX, Command.Tint, Command.TextAlignment,
+					Command.Scale);
+				continue;
+			}
+			UTexture2D* Texture = nullptr;
+			if (Section.Section == EWoTHUDSection::TeamOverview)
+			{
+				// The overview draws its text only.
+				continue;
+			}
+			if (Section.Section == EWoTHUDSection::Scoreboard)
+			{
+				// The board draws its own icon set, and nothing without an id.
+				if (Command.TexId.IsNone())
+				{
+					continue;
+				}
+				Texture = BoardIcons.Contains(Command.TexId)
+					? ResolveHUDTexture(Command.TexId) : nullptr;
+			}
+			else
+			{
+				Texture = ResolveCommandTexture(Section.Section, Command);
+			}
+			CanvasScale.DrawIconAt(&CanvasObject, Texture, Command.X, Command.Y,
+				Command.Scale, Command.Style, Command.Tint);
+		}
 	}
 }
 
@@ -1970,107 +1869,37 @@ bool AWoTHUD::IsCurrentHandDisplayActive(float CurrentTimeSeconds) const
 		CurrentTimeSeconds >= HandSelectionTime;
 }
 
-void AWoTHUD::ExecuteHandCommands(UCanvas* CanvasObject,
-	const TArray<FWoTHUDDrawCmd>& Commands)
+bool AWoTHUD::BeginPresentationFrame()
 {
-	if (!CanvasObject)
+	// Once per local-player frame: a second draw in the same frame (another
+	// destination, a repeated draw) reuses this frame's update.
+	if (bPresentationFrameStarted && PresentationFrame == GFrameCounter)
 	{
-		return;
+		return false;
 	}
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	for (const FWoTHUDDrawCmd& Command : Commands)
-	{
-		if (!Command.Text.IsEmpty())
-		{
-			CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
-				Command.Text, ResolveFont(Command.FontId, CanvasObject->SizeX),
-				Command.bCenterX, Command.Tint, Command.TextAlignment);
-			continue;
-		}
-		// A command bound to an item's authored texture (StatusIcon/Frame, e.g.
-		// Texture'WOT.UI.I_SSeal') resolves ONLY that path. Its TexId is just
-		// the asset leaf, which is not a HUD registry id: resolving it first
-		// asked guarded builds for /Game/WoT/UI/I_SSeal, a path outside every
-		// retail identity, and every citadel hand frame recorded a failed
-		// texture (T6-2 assets-resolved failed_textures=20 host / 90-180 client).
-#if WOT_GUARDED_BOOTSTRAP
-		const FSoftObjectPath TexturePath = CommandTexturePath(Command);
-		UTexture2D* Texture = TexturePath.IsNull()
-			? nullptr : UWoTRuntimeAssets::ResolveTexturePath(TexturePath);
-#else
-		UTexture2D* Texture = Command.Texture.IsNull()
-			? ResolveHUDTexture(Command.TexId)
-			: UWoTRuntimeAssets::ResolveTexturePath(
-				Command.Texture.ToSoftObjectPath());
-#endif
-		CanvasScale.DrawIconAt(CanvasObject, Texture, Command.X, Command.Y,
-			Command.Scale, Command.Style, Command.Tint);
-	}
+	bPresentationFrameStarted = true;
+	PresentationFrame = GFrameCounter;
+	++PresentationSerial;
+	return true;
 }
 
-void AWoTHUD::DrawHands(UCanvas* CanvasObject)
+void AWoTHUD::UpdatePresentation()
 {
-	const APlayerController* Controller = GetOwningPlayerController();
-	const AWoTCharacter* Pawn = Controller
-		? Cast<AWoTCharacter>(Controller->GetPawn()) : nullptr;
-	if (!Pawn || !ShouldDrawWoTHUD())
-	{
-		return;
-	}
-	if (!CurrentSurfaceVisibility().bHands)
-	{
-		return;
-	}
-	const int32 ScaledX = FMath::Max(640, CanvasObject->SizeX);
-	const int32 ScaledY = FMath::Max(480, CanvasObject->SizeY);
-	if (InterfaceLevel == EWoTInterfaceLevel::Normal)
-	{
-		ExecuteHandCommands(CanvasObject,
-			LayoutHands(Pawn->CurrentHandSet, ScaledX, ScaledY));
-		return;
-	}
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	ExecuteHandCommands(CanvasObject, LayoutMinimizedHands(Pawn->CurrentHandSet,
-		ScaledX, ScaledY, InterfaceLevel, IsCurrentHandDisplayActive(Now),
-		Now, HandSelectionTime, HandDisplayTime));
-}
+	const UWorld* HUDWorld = GetWorld();
+	const float Now = HUDWorld ? HUDWorld->GetTimeSeconds() : 0.0f;
+	const bool bHUDVisible = ShouldDrawWoTHUD();
+	const FWoTHUDSurfaceVisibility Surface = CurrentSurfaceVisibility();
+	const APlayerController* OwningController = GetOwningPlayerController();
+	AWoTCharacter* Pawn = OwningController
+		? Cast<AWoTCharacter>(OwningController->GetPawn()) : nullptr;
 
-void AWoTHUD::DrawCurrentHand(UCanvas* CanvasObject)
-{
-	const APlayerController* Controller = GetOwningPlayerController();
-	const AWoTCharacter* Pawn = Controller
-		? Cast<AWoTCharacter>(Controller->GetPawn()) : nullptr;
-	if (!Pawn || !ShouldDrawWoTHUD())
-	{
-		return;
-	}
-	ExecuteHandCommands(CanvasObject, LayoutCurrentHand(Pawn->CurrentHandSet,
-		FMath::Max(640, CanvasObject->SizeX), FMath::Max(480, CanvasObject->SizeY),
-		InterfaceLevel));
-}
-
-void AWoTHUD::DrawAddedItems(UCanvas* CanvasObject)
-{
-	APlayerController* Controller = GetOwningPlayerController();
-	AWoTCharacter* Pawn = Controller
-		? Cast<AWoTCharacter>(Controller->GetPawn()) : nullptr;
-	if (!Pawn || !ShouldDrawWoTHUD() ||
-		!CurrentSurfaceVisibility().bAddedItems)
-	{
-		return;
-	}
-	// BaseHUD.uc:588 reads WOTPlayer(Owner).CurrentHandSet — the added-items slide (and
-	// its expiry sweep below) follows the ACTIVE hand set, exactly like the other two
-	// hand draw paths, not the angreal set specifically.
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	const TArray<FWoTHUDDrawCmd> Commands = LayoutAddedItems(Pawn->CurrentHandSet,
-		FMath::Max(640, CanvasObject->SizeX), FMath::Max(480, CanvasObject->SizeY),
-		Now, HandDisplayTime);
-	ExecuteHandCommands(CanvasObject, Commands);
-	// DrawAddedItems clears stale notification state after the pure layout snapshot
-	// has been assembled (BaseHUD.uc:596-600), including level-time rollback.
-	if (Pawn->CurrentHandSet)
+	// The added-items slide clears stale notification state, including
+	// level-time rollback, wherever it could draw (BaseHUD.uc:596-600). The
+	// slide follows the ACTIVE hand set (BaseHUD.uc:588 reads
+	// WOTPlayer(Owner).CurrentHandSet). The notices it clears are exactly the
+	// ones its layout leaves out, so clearing them first draws the same.
+	if (!IsCurrentHandDisplayActive(Now) && Pawn && bHUDVisible
+		&& Surface.bAddedItems && Pawn->CurrentHandSet)
 	{
 		for (int32 HandIndex = 0; HandIndex < UWoTHandSet::NumHands; ++HandIndex)
 		{
@@ -2082,120 +1911,150 @@ void AWoTHUD::DrawAddedItems(UCanvas* CanvasObject)
 			}
 		}
 	}
+
+	// BaseHUD updates LastTimeSeconds inside the overall HUD gate even when a
+	// WOTWindow's bHideMessages flag suppresses DrawMessages, and updates the
+	// queues only while DrawMessages is allowed to run, so bHideMessages
+	// pauses rather than silently expires messages.
+	const float MessageDeltaTime = UpdateMessageRenderTime(bHUDVisible, Now);
+	if (ShouldDrawMessages(bHUDVisible && Surface.bMessages))
+	{
+		TickMessages(MessageDeltaTime);
+	}
+	bPlayerIDUpdated = false;
+	bFlashShown = false;
+	if (bHUDVisible)
+	{
+		if (bTurtleEnabled)
+		{
+			UpdateTurtle(MessageDeltaTime);
+		}
+		if (bPlayerIDEnabled)
+		{
+			UpdatePlayerID(nullptr, MessageDeltaTime);
+			bPlayerIDUpdated = true;
+		}
+		if (FlashTextureTimer > 0.0f)
+		{
+			// The flash shows at its fade before this frame's time runs off.
+			bFlashShown = true;
+			FlashShownId = FlashTextureId;
+			FlashShownFade = FlashFade(FlashTextureTimer, FlashTextureTime);
+			FlashTextureTimer -= MessageDeltaTime;
+		}
+	}
 }
 
-void AWoTHUD::DrawProgressMessages(UCanvas* CanvasObject)
+bool AWoTHUD::MakePlayerIDCommand(const UCanvas& CanvasObject,
+	FWoTHUDDrawCmd& OutCommand) const
 {
-	const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetOwningPlayerController());
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	if (!CanvasObject || !WoTController || !ShouldDrawWoTHUD() ||
-		!CurrentSurfaceVisibility().bProgress ||
-		!WoTController->AreProgressMessagesActive(Now))
+	if (IdentifyFadeTime <= 0.0f || IdentifyTarget.IsEmpty()
+		|| !ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject.SizeX))
 	{
-		return;
+		return false;
 	}
-	UFont* Font = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
-	if (!Font)
-	{
-		return;
-	}
-	float TestWidth = 0.0f;
-	float FontLineHeight = 0.0f;
-	CanvasObject->StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
-	(void)TestWidth;
-	const FWoTCanvasScale CanvasScale;
-	for (const FWoTHUDDrawCmd& Command : LayoutProgressMessages(
-		WoTController->GetProgressEntries(), CanvasObject->SizeX,
-		CanvasObject->SizeY, FontLineHeight, HUDTextScale))
-	{
-		CanvasScale.DrawScaledTextAt(CanvasObject, Command.X, Command.Y,
-			Command.Text, Font, Command.bCenterX, Command.Tint,
-			Command.TextAlignment, Command.Scale);
-	}
+	const float Intensity = FMath::Clamp(IdentifyFadeTime * 0.5f / 255.0f,
+		0.0f, 1.0f);
+	OutCommand = FWoTHUDDrawCmd();
+	OutCommand.Text = IdentifyTarget;
+	OutCommand.FontId = FName(TEXT("F_WOTReg14"));
+	OutCommand.X = 0.5f * CanvasObject.SizeX;
+	OutCommand.Y = CanvasObject.SizeY * FMath::Clamp(PlayerIDYOffsetRatio, 0.0f, 1.0f);
+	OutCommand.Tint = FadedHUDColor(Intensity);
+	OutCommand.Style = EWoTHUDStyle::Translucent;
+	// The centring measures the scaled text (FCanvasTextItemBase::Draw).
+	OutCommand.Scale = static_cast<float>(FMath::Max(HUDTextScale, 1));
+	OutCommand.bCenterX = true;
+	return true;
 }
 
-void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
+void AWoTHUD::LayoutMessages(UCanvas& CanvasObject, FWoTHUDSnapshot& Built) const
 {
-	if (!CanvasObject)
-	{
-		return;
-	}
-
-	// BaseHUD updates the queues only while DrawMessages is allowed to run, so
-	// bHideMessages intentionally pauses rather than silently expires messages.
-	TickMessages(DeltaTime);
-	UFont* RegularFont = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
+	UFont* RegularFont = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject.SizeX);
 	if (!RegularFont)
 	{
 		return;
 	}
 
 	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
+	CanvasScale.ComputeFactors(CanvasObject.SizeX, CanvasObject.SizeY);
 	// Every message draws at the HUD's text scale, and every size measured to
 	// place or stack one is the scaled size.
 	const float MessageTextScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
-	auto TextSize = [CanvasObject, MessageTextScale](UFont* Font, const FString& Text)
+	UCanvas* const Measure = &CanvasObject;
+	auto TextSize = [Measure, MessageTextScale](UFont* Font, const FString& Text)
 	{
 		FVector2D Size(0.0f, 0.0f);
-		CanvasObject->StrLen(Font, Text, Size.X, Size.Y);
+		Measure->StrLen(Font, Text, Size.X, Size.Y);
 		return Size * MessageTextScale;
 	};
-	auto DrawMessageText = [CanvasObject, MessageTextScale](const FString& Text,
-		UFont* Font, float X, float Y, uint8 Intensity, float FadeScale, bool bCenterX,
-		float WrapWidth = 0.0f)
+	TArray<FWoTHUDDrawCmd> Commands;
+	auto AddLine = [&Commands, RegularFont, MessageTextScale](const FString& Line,
+		UFont* Font, float X, float Y, float Opacity, bool bCenterX)
+	{
+		FWoTHUDDrawCmd& Command = Commands.AddDefaulted_GetRef();
+		Command.Text = Line;
+		if (Font == RegularFont)
+		{
+			Command.FontId = FName(TEXT("F_WOTReg14"));
+		}
+		else
+		{
+			Command.Font = Font;
+		}
+		Command.X = X;
+		Command.Y = Y;
+		Command.Scale = MessageTextScale;
+		Command.Style = EWoTHUDStyle::Translucent;
+		Command.Tint = FadedHUDColor(Opacity);
+		Command.bCenterX = bCenterX;
+	};
+	auto AddMessageText = [&Built, &AddLine, Measure, MessageTextScale](
+		EWoTHUDMessageKind Kind, const FString& Text, UFont* Font, float X, float Y,
+		uint8 Intensity, float FadeScale, bool bCenterX, float WrapWidth = 0.0f)
 	{
 		if (!Font || Intensity == 0 || FadeScale <= 0.0f)
 		{
 			return;
 		}
 		const float Opacity = static_cast<float>(Intensity) * FadeScale / 255.0f;
-		const FVector2D ItemScale(MessageTextScale, MessageTextScale);
+		FWoTHUDMessage& Shown = Built.Messages.AddDefaulted_GetRef();
+		Shown.Kind = Kind;
+		Shown.Text = Text;
+		Shown.Opacity = Opacity;
 		if (WrapWidth > 0.0f)
 		{
 			const TArray<FString> Lines = WrapMessageLines(Text, WrapWidth,
-				[CanvasObject, Font, MessageTextScale](const FString& Line)
+				[Measure, Font, MessageTextScale](const FString& Line)
 				{
 					float Width = 0.0f;
 					float Height = 0.0f;
-					CanvasObject->StrLen(Font, Line, Width, Height);
+					Measure->StrLen(Font, Line, Width, Height);
 					return Width * MessageTextScale;
 				});
 			const bool bCenterLine = bCenterX && Lines.Num() == 1;
 			float LineY = Y;
 			for (const FString& Line : Lines)
 			{
-				FCanvasTextItem LineItem(FVector2D(X, LineY), FText::FromString(Line),
-					Font, FadedHUDColor(Opacity));
-				LineItem.BlendMode = SE_BLEND_Translucent;
-				LineItem.bCentreX = bCenterLine;
-				LineItem.Scale = ItemScale;
-				CanvasObject->DrawItem(LineItem);
+				AddLine(Line, Font, X, LineY, Opacity, bCenterLine);
 
 				float LineWidth = 0.0f;
 				float LineHeight = 0.0f;
-				CanvasObject->StrLen(Font, Line.IsEmpty() ? TEXT(" ") : Line,
+				Measure->StrLen(Font, Line.IsEmpty() ? TEXT(" ") : Line,
 					LineWidth, LineHeight);
 				LineY += LineHeight * MessageTextScale;
 			}
 			return;
 		}
-
-		FCanvasTextItem TextItem(FVector2D(X, Y), FText::FromString(Text), Font,
-			FadedHUDColor(Opacity));
-		TextItem.BlendMode = SE_BLEND_Translucent;
-		TextItem.bCentreX = bCenterX;
-		TextItem.Scale = ItemScale;
-		CanvasObject->DrawItem(TextItem);
+		AddLine(Text, Font, X, Y, Opacity, bCenterX);
 	};
 
 	if (HandMessage.LifeSpan > 0.0f && HandMessageIntensity > 0)
 	{
 		const FVector2D Size = TextSize(RegularFont, HandMessage.Message);
-		DrawMessageText(HandMessage.Message, RegularFont,
-			(static_cast<float>(CanvasObject->SizeX) - Size.X) * 0.5f,
-			static_cast<float>(CanvasObject->SizeY) -
+		AddMessageText(EWoTHUDMessageKind::Hand, HandMessage.Message, RegularFont,
+			(static_cast<float>(CanvasObject.SizeX) - Size.X) * 0.5f,
+			static_cast<float>(CanvasObject.SizeY) -
 				(CanvasScale.ScaleValY(96.0f) + Size.Y),
 			HandMessageIntensity, MessageFadeScale(HandMessage.LifeSpan,
 				HandMessageDuration, HandMessageFadePercent), false);
@@ -2209,7 +2068,8 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			if (Entry.LifeSpan > 0.0f)
 			{
 				const FVector2D Size = TextSize(RegularFont, Entry.Message);
-				DrawMessageText(Entry.Message, RegularFont, 0.0f, Y, LeftMessageIntensity,
+				AddMessageText(EWoTHUDMessageKind::Left, Entry.Message, RegularFont,
+					0.0f, Y, LeftMessageIntensity,
 					MessageFadeScale(Entry.LifeSpan, LeftMessageDuration,
 						LeftMessageFadePercent), false);
 				Y += Size.Y;
@@ -2225,8 +2085,8 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			if (Entry.LifeSpan > 0.0f)
 			{
 				const FVector2D Size = TextSize(RegularFont, Entry.Message);
-				DrawMessageText(Entry.Message, RegularFont,
-					static_cast<float>(CanvasObject->SizeX) - Size.X - 1.0f, Y,
+				AddMessageText(EWoTHUDMessageKind::Right, Entry.Message, RegularFont,
+					static_cast<float>(CanvasObject.SizeX) - Size.X - 1.0f, Y,
 					RightMessageIntensity, MessageFadeScale(Entry.LifeSpan,
 						RightMessageDuration, RightMessageFadePercent), false);
 				Y += Size.Y;
@@ -2242,8 +2102,8 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			if (Entry.LifeSpan > 0.0f)
 			{
 				const FVector2D Size = TextSize(RegularFont, Entry.Message);
-				DrawMessageText(Entry.Message, RegularFont,
-					(static_cast<float>(CanvasObject->SizeX) - Size.X) * 0.5f, Y,
+				AddMessageText(EWoTHUDMessageKind::Center, Entry.Message, RegularFont,
+					(static_cast<float>(CanvasObject.SizeX) - Size.X) * 0.5f, Y,
 					CenterMessageIntensity, MessageFadeScale(Entry.LifeSpan,
 						CenterMessageDuration, CenterMessageFadePercent), false);
 				Y += Size.Y;
@@ -2253,16 +2113,16 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 
 	if (SubtitleMessageIntensity > 0 && SubtitleMessage.LifeSpan > 0.0f)
 	{
-		const float SubtitleWidth = 0.8f * static_cast<float>(CanvasObject->SizeX);
+		const float SubtitleWidth = 0.8f * static_cast<float>(CanvasObject.SizeX);
 		const bool bHasForcedBreak = SubtitleMessage.Message.Contains(TEXT("\n")) ||
 			SubtitleMessage.Message.Contains(TEXT("\r"));
 		const bool bOneLine = !bHasForcedBreak &&
 			TextSize(RegularFont, SubtitleMessage.Message).X <= SubtitleWidth;
 		// The shipped OrgX/ClipX window is the middle 8/10ths. Canvas.bCenter only
 		// centers a one-line subtitle; wrapped subtitles remain left justified.
-		DrawMessageText(SubtitleMessage.Message, RegularFont,
-			bOneLine ? 0.5f * static_cast<float>(CanvasObject->SizeX)
-				: 0.1f * static_cast<float>(CanvasObject->SizeX),
+		AddMessageText(EWoTHUDMessageKind::Subtitle, SubtitleMessage.Message, RegularFont,
+			bOneLine ? 0.5f * static_cast<float>(CanvasObject.SizeX)
+				: 0.1f * static_cast<float>(CanvasObject.SizeX),
 			0.0f, SubtitleMessageIntensity,
 			MessageFadeScale(SubtitleMessage.LifeSpan, SubtitleMessageDuration,
 				SubtitleMessageFadePercent), bOneLine, SubtitleWidth);
@@ -2286,57 +2146,337 @@ void AWoTHUD::DrawMessages(UCanvas* CanvasObject, float DeltaTime)
 			{
 				// UE1 centers within the remaining clip region from CurX to the right.
 				X = GenericMessageCenterX(X,
-					static_cast<float>(CanvasObject->SizeX));
+					static_cast<float>(CanvasObject.SizeX));
 			}
-			DrawMessageText(Entry.Message, EntryFont, X,
+			AddMessageText(EWoTHUDMessageKind::Generic, Entry.Message, EntryFont, X,
 				CanvasScale.ScaleValY(static_cast<float>(Entry.Y)), EntryIntensity,
 				MessageFadeScale(Entry.LifeSpan, GenericMessageDuration,
 					GenericMessageFadePercent), Entry.bCenter);
 		}
 	}
+
+	if (!Commands.IsEmpty())
+	{
+		FWoTHUDSection& Section = Built.Sections.AddDefaulted_GetRef();
+		Section.Section = EWoTHUDSection::Messages;
+		Section.Path = EWoTHUDDrawPath::TextItems;
+		Section.Commands = MoveTemp(Commands);
+	}
 }
 
-void AWoTHUD::DrawTeamSelect(UCanvas* CanvasObject)
+void AWoTHUD::BuildSnapshot(UCanvas& CanvasObject, int32 HUDUpscale)
 {
-	if (!CanvasObject || !ShouldDrawWoTHUD())
-	{
-		return;
-	}
+	FWoTHUDSnapshot Built;
+	const UWorld* HUDWorld = GetWorld();
+	const float Now = HUDWorld ? HUDWorld->GetTimeSeconds() : 0.0f;
+	Built.Serial = PresentationSerial;
+	Built.TimeSeconds = Now;
+	Built.CanvasSize = FIntPoint(CanvasObject.SizeX, CanvasObject.SizeY);
+	Built.Upscale = HUDUpscale;
+	Built.TextScale = HUDTextScale;
+	const bool bHUDVisible = ShouldDrawWoTHUD();
+	Built.bVisible = bHUDVisible;
+	const FWoTHUDSurfaceVisibility Surface = CurrentSurfaceVisibility();
+	const APlayerController* OwningController = GetOwningPlayerController();
 	const AWoTPlayerController* WoTController =
-		Cast<AWoTPlayerController>(GetOwningPlayerController());
-	if (WoTController && WoTController->IsItemInfoOpen())
+		Cast<AWoTPlayerController>(OwningController);
+	AWoTCharacter* Pawn = OwningController
+		? Cast<AWoTCharacter>(OwningController->GetPawn()) : nullptr;
+	const FName MessageFont(TEXT("F_WOTReg14"));
+	auto AddSection = [&Built](EWoTHUDSection Section, EWoTHUDDrawPath Path,
+		TArray<FWoTHUDDrawCmd>&& Commands, int32 BoardScale = 1)
 	{
-		// BattleHUD.PostRender suppresses the team prompt while a WOTWindow lives.
-		return;
-	}
-	const AWoTPlayerState* WoTState = WoTController
-		? WoTController->GetPlayerState<AWoTPlayerState>() : nullptr;
-	if (!WoTController || !WoTState)
+		if (Commands.IsEmpty())
+		{
+			return;
+		}
+		FWoTHUDSection& Added = Built.Sections.AddDefaulted_GetRef();
+		Added.Section = Section;
+		Added.Path = Path;
+		Added.BoardScale = BoardScale;
+		Added.Commands = MoveTemp(Commands);
+	};
+
+	// Health (BaseHUD's health icon and number).
+	if (ShouldDrawHealth(HUDMode) && bHUDVisible && Surface.bHealth && Pawn)
 	{
-		return;
+		if (UTexture2D* HealthTexture = Pawn->GetHealthIcon())
+		{
+			const FWoTHUDReadout Readout = GatherReadout();
+			TArray<FWoTHUDDrawCmd> Commands = LayoutHealth(
+				Readout, HealthTexture->GetFName(), Pawn->SeekerCount != 0);
+			for (FWoTHUDDrawCmd& Command : Commands)
+			{
+				if (Command.Text.IsEmpty() && Command.TexId == HealthTexture->GetFName())
+				{
+					Command.Texture = HealthTexture;
+				}
+			}
+			Built.bHealth = Readout.bHasPawn;
+			Built.Health = FMath::Max(0, Readout.Health);
+			AddSection(EWoTHUDSection::Health, EWoTHUDDrawPath::Scaled, MoveTemp(Commands));
+		}
 	}
 
-	const FString Prompt = TeamSelectPrompt(WoTState->Team, BattleTeamCount(),
-		WoTController->JoinTeamTimeout, WoTController->IsJoystickInputEnabled());
-	UFont* PromptFont = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
-	if (Prompt.IsEmpty() || !PromptFont)
+	// Status icons.
+	if (bHUDVisible && !bHideStatusIcons && Surface.bStatusIcons && IsValid(Pawn))
 	{
-		return;
+		for (const FWoTStatusIconEntry& Entry : Pawn->StatusIcons)
+		{
+			FWoTHUDStatus& Status = Built.Status.AddDefaulted_GetRef();
+			Status.Icon = Entry.IconTexture;
+			Status.bGood = Entry.bGood;
+			// The flat timer's own frame (LayoutStatusIcons draws T32_<step+1>).
+			Status.TimerStep = StatusTimerIndex(Entry.InitialDuration, Entry.RemainingDuration);
+		}
+		AddSection(EWoTHUDSection::StatusIcons, EWoTHUDDrawPath::Scaled,
+			LayoutStatusIcons(Pawn->StatusIcons, ScaledViewportWidth(CanvasObject.SizeX)));
 	}
 
-	float TextHeight = 0.0f;
-	float TextWidth = 0.0f;
-	CanvasObject->StrLen(PromptFont, Prompt, TextWidth, TextHeight);
-	// BattleHUD centres the prompt and drops it three text heights: both
-	// follow the scaled text.
-	const float PromptScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
-	FCanvasTextItem PromptItem(
-		TeamSelectPosition(static_cast<float>(CanvasObject->SizeX),
-			TextWidth * PromptScale, TextHeight * PromptScale),
-		FText::FromString(Prompt), PromptFont, FLinearColor::White);
-	PromptItem.BlendMode = SE_BLEND_Masked;
-	PromptItem.Scale = FVector2D(PromptScale, PromptScale);
-	CanvasObject->DrawItem(PromptItem);
+	// The reticle. MainHUD.DrawCursor uses the live ClipX/ClipY and
+	// Canvas.DrawIcon directly, unlike the health path's LegendCanvas scaling:
+	// unit factors preserve that.
+	if (bHUDVisible)
+	{
+		if (IsEditorMode())
+		{
+			UTexture2D* CursorTexture = UWoTRuntimeAssets::ResolveTexturePath(
+				EditorCursorTexture.ToSoftObjectPath());
+			if (IsValid(CursorTexture))
+			{
+				TArray<FWoTHUDDrawCmd> Commands = LayoutEditorCursor(
+					static_cast<int32>(CanvasObject.ClipX),
+					static_cast<int32>(CanvasObject.ClipY));
+				for (FWoTHUDDrawCmd& Command : Commands)
+				{
+					Command.Texture = EditorCursorTexture;
+				}
+				AddSection(EWoTHUDSection::Reticle, EWoTHUDDrawPath::Unscaled,
+					MoveTemp(Commands));
+			}
+		}
+		else
+		{
+			AddSection(EWoTHUDSection::Reticle, EWoTHUDDrawPath::Unscaled,
+				LayoutCrosshair(Crosshair, static_cast<int32>(CanvasObject.ClipX),
+					static_cast<int32>(CanvasObject.ClipY)));
+		}
+	}
+
+	// The groups: the current-hand fan or the added-item slide, then the bar.
+	const int32 HandSizeX = FMath::Max(640, CanvasObject.SizeX);
+	const int32 HandSizeY = FMath::Max(480, CanvasObject.SizeY);
+	if (IsCurrentHandDisplayActive(Now))
+	{
+		if (Pawn && bHUDVisible)
+		{
+			AddSection(EWoTHUDSection::CurrentHand, EWoTHUDDrawPath::Scaled,
+				LayoutCurrentHand(Pawn->CurrentHandSet, HandSizeX, HandSizeY,
+					InterfaceLevel));
+		}
+	}
+	else if (Pawn && bHUDVisible && Surface.bAddedItems)
+	{
+		AddSection(EWoTHUDSection::AddedItems, EWoTHUDDrawPath::Scaled,
+			LayoutAddedItems(Pawn->CurrentHandSet, HandSizeX, HandSizeY,
+				Now, HandDisplayTime));
+	}
+	if (Pawn && bHUDVisible && Surface.bHands)
+	{
+		AddSection(EWoTHUDSection::Hands, EWoTHUDDrawPath::Scaled,
+			InterfaceLevel == EWoTInterfaceLevel::Normal
+				? LayoutHands(Pawn->CurrentHandSet, HandSizeX, HandSizeY)
+				: LayoutMinimizedHands(Pawn->CurrentHandSet, HandSizeX, HandSizeY,
+					InterfaceLevel, IsCurrentHandDisplayActive(Now), Now,
+					HandSelectionTime, HandDisplayTime));
+		const UWoTHandInfo* Hand = Pawn->CurrentHandSet
+			? Pawn->CurrentHandSet->GetSelectedHand() : nullptr;
+		const int32 Slot = WoTHUD_DisplaySlot(Hand);
+		if (Hand && Slot != INDEX_NONE)
+		{
+			Built.Artifact = Hand->GetClassName(Slot);
+			const AWoTInventory* LiveItem = Hand->GetItem(Slot);
+			if (const AWoTAngrealInventory* Angreal = Cast<AWoTAngrealInventory>(LiveItem))
+			{
+				Built.Charges = Angreal->ChargeCost == 0 ? -1 : Angreal->CurCharges;
+			}
+			else
+			{
+				const int32 DisplayCount = Hand->GetDisplayCount(Slot);
+				Built.Charges = DisplayCount != INDEX_NONE
+					? DisplayCount : (LiveItem ? LiveItem->Count : -1);
+			}
+		}
+	}
+
+	// Progress lines.
+	if (WoTController && bHUDVisible && Surface.bProgress
+		&& WoTController->AreProgressMessagesActive(Now))
+	{
+		if (UFont* Font = ResolveFont(MessageFont, CanvasObject.SizeX))
+		{
+			float TestWidth = 0.0f;
+			float FontLineHeight = 0.0f;
+			CanvasObject.StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
+			(void)TestWidth;
+			for (const FWoTProgressEntry& Entry : WoTController->GetProgressEntries())
+			{
+				if (!Entry.Message.IsEmpty())
+				{
+					Built.Progress.Add(Entry);
+				}
+			}
+			AddSection(EWoTHUDSection::Progress, EWoTHUDDrawPath::Unscaled,
+				LayoutProgressMessages(WoTController->GetProgressEntries(),
+					CanvasObject.SizeX, CanvasObject.SizeY, FontLineHeight,
+					HUDTextScale));
+		}
+	}
+
+	// The team prompt. BattleHUD.PostRender suppresses it while a WOTWindow
+	// lives.
+	if (bHUDVisible && !(WoTController && WoTController->IsItemInfoOpen()))
+	{
+		const AWoTPlayerState* WoTState = WoTController
+			? WoTController->GetPlayerState<AWoTPlayerState>() : nullptr;
+		if (WoTController && WoTState)
+		{
+			const FString Prompt = TeamSelectPrompt(WoTState->Team, BattleTeamCount(),
+				WoTController->JoinTeamTimeout, WoTController->IsJoystickInputEnabled());
+			UFont* PromptFont = ResolveFont(MessageFont, CanvasObject.SizeX);
+			if (!Prompt.IsEmpty() && PromptFont)
+			{
+				float TextHeight = 0.0f;
+				float TextWidth = 0.0f;
+				CanvasObject.StrLen(PromptFont, Prompt, TextWidth, TextHeight);
+				// BattleHUD centres the prompt and drops it three text heights:
+				// both follow the scaled text.
+				const float PromptScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
+				const FVector2D Position = TeamSelectPosition(
+					static_cast<float>(CanvasObject.SizeX),
+					TextWidth * PromptScale, TextHeight * PromptScale);
+				TArray<FWoTHUDDrawCmd> Commands;
+				FWoTHUDDrawCmd& Command = Commands.AddDefaulted_GetRef();
+				Command.Text = Prompt;
+				Command.FontId = MessageFont;
+				Command.X = static_cast<float>(Position.X);
+				Command.Y = static_cast<float>(Position.Y);
+				Command.Scale = PromptScale;
+				Command.Style = EWoTHUDStyle::Masked;
+				Built.TeamPrompt = Prompt;
+				AddSection(EWoTHUDSection::TeamPrompt, EWoTHUDDrawPath::TextItems,
+					MoveTemp(Commands));
+			}
+		}
+	}
+
+	// Messages.
+	if (ShouldDrawMessages(bHUDVisible && Surface.bMessages))
+	{
+		LayoutMessages(CanvasObject, Built);
+	}
+
+	if (bHUDVisible)
+	{
+		// The player ID, as this frame's update left it.
+		FWoTHUDDrawCmd NameCommand;
+		if (bPlayerIDUpdated && MakePlayerIDCommand(CanvasObject, NameCommand))
+		{
+			Built.PlayerID = NameCommand.Text;
+			Built.PlayerIDOpacity = NameCommand.Tint.A;
+			AddSection(EWoTHUDSection::PlayerID, EWoTHUDDrawPath::TextItems,
+				TArray<FWoTHUDDrawCmd>({NameCommand}));
+		}
+		// The flash texture at the fade this frame shows.
+		if (bFlashShown && ResolveHUDTexture(FlashShownId))
+		{
+			TArray<FWoTHUDDrawCmd> Commands;
+			FWoTHUDDrawCmd& Command = Commands.AddDefaulted_GetRef();
+			Command.TexId = FlashShownId;
+			Command.X = FlashTextureX(CanvasObject.SizeX);
+			Command.Y = 64.0f;
+			Command.Scale = 1.0f;
+			Command.Style = EWoTHUDStyle::Translucent;
+			Command.Tint = FadedHUDColor(FlashShownFade);
+			Built.FlashTexture = FlashShownId;
+			Built.FlashOpacity = Command.Tint.A;
+			AddSection(EWoTHUDSection::Flash, EWoTHUDDrawPath::Scaled, MoveTemp(Commands));
+		}
+		// The warning icon.
+		if (bWarningEnabled && TimedExtraActive(TriggerWarningTime, TimeOut, Now))
+		{
+			TArray<FWoTHUDDrawCmd> Commands;
+			FWoTHUDDrawCmd& Command = Commands.AddDefaulted_GetRef();
+			Command.TexId = FName(TEXT("Warn"));
+			Command.X = WarningTextureX(CanvasObject.SizeX);
+			Command.Y = 0.0f;
+			Command.Scale = 1.0f;
+			Command.Style = EWoTHUDStyle::Normal;
+			Built.bWarning = true;
+			AddSection(EWoTHUDSection::Warning, EWoTHUDDrawPath::Scaled, MoveTemp(Commands));
+		}
+	}
+
+	// The scoreboard overlays every ordinary HUD element. Below a 2x HUD the
+	// board is laid out on half the canvas and drawn at 2x (or, where even the
+	// compact form overflows, at 1x as before).
+	if (ShouldDrawArenaScoreboard())
+	{
+		if (UFont* Font = ResolveFont(MessageFont, CanvasObject.SizeX))
+		{
+			float TestWidth = 0.0f;
+			float FontLineHeight = 0.0f;
+			CanvasObject.StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
+			(void)TestWidth;
+			bool bIconsAvailable = true;
+			for (const FName TextureId : FWoTArenaScoreboard::AllIconTextureIds())
+			{
+				bIconsAvailable &= ResolveHUDTexture(TextureId) != nullptr;
+			}
+			const bool bStandalone = HUDWorld && HUDWorld->GetNetMode() == NM_Standalone;
+			// giMPBattle.ScoreBoardType=CitadelScoreBoard vs giMPArena's
+			// ArenaScoreBoard (giMPBattle.uc:533 / giMPArena.uc:23): the citadel
+			// game state selects the board.
+			const bool bCitadel = HUDWorld
+				&& Cast<AWoTCitadelGameState>(HUDWorld->GetGameState()) != nullptr;
+			const FWoTArenaScoreboard ArenaBoard;
+			const FWoTCitadelScoreboard CitadelBoard;
+			const FWoTArenaScoreboard& Scoreboard = bCitadel
+				? static_cast<const FWoTArenaScoreboard&>(CitadelBoard) : ArenaBoard;
+			FWoTScoreboardSnapshot Players = GatherArenaScoreboard();
+			FWoTScoreboardBoard Board = Scoreboard.LayoutBoard(Players,
+				CanvasObject.SizeX, CanvasObject.SizeY, FontLineHeight, HUDTextScale,
+				bStandalone, bIconsAvailable);
+			Built.bScoreboard = true;
+			Built.bCitadelScoreboard = bCitadel;
+			Built.bStandalone = bStandalone;
+			Built.Scoreboard = MoveTemp(Players);
+			AddSection(EWoTHUDSection::Scoreboard, Board.BoardScale == 1
+				? EWoTHUDDrawPath::Scaled : EWoTHUDDrawPath::Unscaled,
+				MoveTemp(Board.Commands), Board.BoardScale);
+		}
+	}
+	if (ShouldDrawCitadelTeamOverview())
+	{
+		UFont* Font = ResolveFont(MessageFont, CanvasObject.SizeX);
+		if (IsValid(Font))
+		{
+			float TestWidth = 0.0f;
+			float FontLineHeight = 0.0f;
+			CanvasObject.StrLen(Font, TEXT("TEST"), TestWidth, FontLineHeight);
+			(void)TestWidth;
+			const FWoTCitadelTeamOverview Overview;
+			FWoTCitadelTeamOverviewSnapshot Teams = GatherCitadelTeamOverview();
+			FWoTScoreboardBoard Board = Overview.LayoutBoard(Teams,
+				CanvasObject.SizeX, CanvasObject.SizeY, FontLineHeight, HUDTextScale);
+			Built.bTeamOverview = true;
+			Built.TeamOverview = MoveTemp(Teams);
+			AddSection(EWoTHUDSection::TeamOverview, Board.BoardScale == 1
+				? EWoTHUDDrawPath::Scaled : EWoTHUDDrawPath::Unscaled,
+				MoveTemp(Board.Commands), Board.BoardScale);
+		}
+	}
+	HUDSnapshot = MoveTemp(Built);
 }
 
 void AWoTHUD::UpdatePlayerID(UCanvas* CanvasObject, float DeltaTime)
@@ -2380,28 +2520,15 @@ void AWoTHUD::UpdatePlayerID(UCanvas* CanvasObject, float DeltaTime)
 		}
 	}
 
-	if (!CanvasObject || IdentifyFadeTime <= 0.0f || IdentifyTarget.IsEmpty())
+	// With a canvas, the name also draws at once (DrawHUD draws it from the
+	// snapshot instead, and passes none).
+	FWoTHUDDrawCmd NameCommand;
+	if (CanvasObject && MakePlayerIDCommand(*CanvasObject, NameCommand))
 	{
-		return;
+		const FWoTHUDSection Name{EWoTHUDSection::PlayerID, EWoTHUDDrawPath::TextItems,
+			1, {NameCommand}};
+		DrawSections(*CanvasObject, MakeArrayView(&Name, 1));
 	}
-	UFont* IDFont = ResolveFont(FName(TEXT("F_WOTReg14")), CanvasObject->SizeX);
-	if (!IDFont)
-	{
-		return;
-	}
-	const float Intensity = FMath::Clamp(IdentifyFadeTime * 0.5f / 255.0f,
-		0.0f, 1.0f);
-	FCanvasTextItem NameItem(
-		FVector2D(0.5f * CanvasObject->SizeX,
-			CanvasObject->SizeY * FMath::Clamp(PlayerIDYOffsetRatio, 0.0f, 1.0f)),
-		FText::FromString(IdentifyTarget), IDFont,
-		FadedHUDColor(Intensity));
-	NameItem.BlendMode = SE_BLEND_Translucent;
-	NameItem.bCentreX = true;
-	// The centring measures the scaled text (FCanvasTextItemBase::Draw).
-	const float NameScale = static_cast<float>(FMath::Max(HUDTextScale, 1));
-	NameItem.Scale = FVector2D(NameScale, NameScale);
-	CanvasObject->DrawItem(NameItem);
 }
 
 void AWoTHUD::SetFlashTexture(FName TextureId, float Duration)
@@ -2445,25 +2572,6 @@ void AWoTHUD::SetTurtleFadeTime(float InFadeTime)
 	TurtleFadeTime = InFadeTime;
 }
 
-void AWoTHUD::DrawFlashTexture(UCanvas* CanvasObject, float DeltaTime)
-{
-	if (!CanvasObject || FlashTextureTimer <= 0.0f)
-	{
-		return;
-	}
-	UTexture2D* Texture = ResolveHUDTexture(FlashTextureId);
-	if (Texture)
-	{
-		const float Fade = FlashFade(FlashTextureTimer, FlashTextureTime);
-		FWoTCanvasScale CanvasScale;
-		CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-		CanvasScale.DrawIconAt(CanvasObject, Texture,
-			FlashTextureX(CanvasObject->SizeX), 64.0f, 1.0f,
-			EWoTHUDStyle::Translucent, FadedHUDColor(Fade));
-	}
-	FlashTextureTimer -= DeltaTime;
-}
-
 void AWoTHUD::SetWarning()
 {
 	TriggerWarningTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
@@ -2475,22 +2583,6 @@ void AWoTHUD::ClientWarn()
 	// timestamp-only behavior.
 	bWarningEnabled = true;
 	SetWarning();
-}
-
-void AWoTHUD::DrawWarning(UCanvas* CanvasObject)
-{
-	const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-	if (!CanvasObject || !bWarningEnabled ||
-		!TimedExtraActive(TriggerWarningTime, TimeOut, Now))
-	{
-		return;
-	}
-	FWoTCanvasScale CanvasScale;
-	CanvasScale.ComputeFactors(CanvasObject->SizeX, CanvasObject->SizeY);
-	CanvasScale.DrawIconAt(CanvasObject,
-		ResolveHUDTexture(FName(TEXT("Warn"))),
-		WarningTextureX(CanvasObject->SizeX), 0.0f, 1.0f,
-		EWoTHUDStyle::Normal);
 }
 
 void AWoTHUD::DrawDebugReadout(UCanvas* CanvasObject)
@@ -2537,6 +2629,11 @@ void AWoTHUD::DrawHUD()
 	const int32 HUDUpscale = FWoTCanvasScale::ComputeUpscale(
 		Canvas->SizeX, Canvas->SizeY,
 		CVarWoTHUDScale.GetValueOnGameThread());
+	APlayerController* OwningController = GetOwningPlayerController();
+	// H5: while a local-player consumer owns the HUD's destination, the flat
+	// Canvas HUD is not drawn; the HUD still updates and describes itself.
+	const bool bFlat = !FWoTLocalPlayerHooks::OwnsHUDDestination(OwningController);
+	bool bUpdated = false;
 	{
 		// The retail HUD draws on a logical canvas scaled by an integer factor; the
 		// debug readout below uses an engine runtime font and stays at native size.
@@ -2552,65 +2649,33 @@ void AWoTHUD::DrawHUD()
 			HUDTextScale = FWoTCanvasScale::ComputeTextScale(HUDUpscale, FaceHeight);
 		}
 
-		if (ShouldDrawHealth(HUDMode))
+		// Update once per local-player frame, then describe what shows. A
+		// second draw in the same frame on another canvas lays the same state
+		// out again.
+		if (BeginPresentationFrame())
 		{
-			DrawHealth(Canvas);
+			UpdatePresentation();
+			bUpdated = true;
 		}
-		DrawStatusIcons(Canvas);
-		if (IsEditorMode())
+		if (bUpdated || HUDSnapshot.CanvasSize != FIntPoint(Canvas->SizeX, Canvas->SizeY)
+			|| HUDSnapshot.Upscale != HUDUpscale || HUDSnapshot.TextScale != HUDTextScale)
 		{
-			DrawEditorCursor(Canvas);
+			BuildSnapshot(*Canvas, HUDUpscale);
 		}
-		else
+		if (bFlat)
 		{
-			DrawCrosshair(Canvas);
+			// The scoreboard overlays every ordinary HUD element and remains
+			// immediately before the opt-in developer readout.
+			DrawSections(*Canvas, HUDSnapshot.Sections);
 		}
-		const float Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-		if (IsCurrentHandDisplayActive(Now))
-		{
-			DrawCurrentHand(Canvas);
-		}
-		else
-		{
-			DrawAddedItems(Canvas);
-		}
-		DrawHands(Canvas);
-		DrawProgressMessages(Canvas);
-		DrawTeamSelect(Canvas);
-		const bool bHUDVisible = ShouldDrawWoTHUD();
-		const FWoTHUDSurfaceVisibility Surface = CurrentSurfaceVisibility();
-		const bool bMessagesVisible = bHUDVisible && Surface.bMessages;
-		// BaseHUD updates LastTimeSeconds inside the overall HUD gate even when a
-		// WOTWindow's bHideMessages flag suppresses DrawMessages.
-		const float MessageDeltaTime = UpdateMessageRenderTime(bHUDVisible, Now);
-		if (ShouldDrawMessages(bMessagesVisible))
-		{
-			DrawMessages(Canvas, MessageDeltaTime);
-		}
-		if (bHUDVisible)
-		{
-			if (bTurtleEnabled)
-			{
-				UpdateTurtle(MessageDeltaTime);
-			}
-			if (bPlayerIDEnabled)
-			{
-				UpdatePlayerID(Canvas, MessageDeltaTime);
-			}
-			if (FlashTextureTimer > 0.0f)
-			{
-				DrawFlashTexture(Canvas, MessageDeltaTime);
-			}
-			DrawWarning(Canvas);
-		}
-		// Scoreboard overlays every ordinary HUD element and remains immediately before
-		// the opt-in developer readout.
-		DrawArenaScoreboard(Canvas);
-		DrawCitadelTeamOverview(Canvas);
 	}
-	if (CVarWoTHUDDebug.GetValueOnGameThread() != 0)
+	if (bFlat && CVarWoTHUDDebug.GetValueOnGameThread() != 0)
 	{
 		DrawDebugReadout(Canvas);
+	}
+	if (bUpdated && OwningController)
+	{
+		FWoTLocalPlayerHooks::HUDUpdated(*OwningController, HUDSnapshot);
 	}
 }
 

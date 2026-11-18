@@ -1,6 +1,7 @@
 #include "WoTGamepadLayer.h"
 
 #include "../WoTCharacter.h"
+#include "../WoTLocalPlayerHooks.h"
 #include "../WoTHUD.h"
 #include "../WoTPlayerController.h"
 #include "../WoTPreferencesSubsystem.h"
@@ -180,6 +181,11 @@ void UWoTGamepadLayer::ApplyMode(EWoTGamepadMode NewMode)
 		return;   // no local player yet: try again next tick
 	}
 	ReleaseHeldEdges();
+	// A context change ends every other held input source's holds too.
+	if (AWoTPlayerController* PC = Controller.Get())
+	{
+		FWoTLocalPlayerHooks::Notify(*PC, EWoTLocalPlayerEvent::InputContextChanged);
+	}
 	// Rebuild now, not at the input module's next frame tick: the new context
 	// then applies to this frame's input, which Tick precedes.
 	FModifyContextOptions Options;
