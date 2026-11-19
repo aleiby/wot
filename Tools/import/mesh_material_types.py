@@ -2,6 +2,7 @@
 
 Pure Python by design: import_map.py runs inside Unreal's embedded Python.
 """
+import re
 
 TYPE_SUFFIXES = ("_Mod", "_2S", "_M", "_T")
 
@@ -88,3 +89,22 @@ def effective_material_type_suffix(slot_suffix, actor_style):
 def slot_zero_skin_reference(props):
     """Return UE1 slot-zero Skin/MultiSkins override, if one is authored."""
     return props.get("Skin") or props.get("MultiSkins(0)") or None
+
+
+# Fire/Wet/Ice procedural textures have no still asset in the editor import:
+# the fractal subsystem simulates them live and finds a consumer by its
+# material's "<Pkg>__<Tex>" identity name (WoTFractalSubsystem.cpp
+# FindRecordByMaterialName). WaveTexture skins keep their imported frame.
+_PROCEDURAL_SKIN_RE = re.compile(
+    r"(?:FireTexture|WetTexture|IceTexture)'([\w\-]+)\.(?:[\w\-]+\.)*([\w\-]+)'$")
+
+
+def procedural_skin_identity(reference):
+    """``(package, texture)`` of a Fire/Wet/IceTexture skin reference, else None."""
+    match = _PROCEDURAL_SKIN_RE.match(str(reference or "").strip())
+    return (match.group(1), match.group(2)) if match else None
+
+
+def procedural_skin_slug(package, texture):
+    """The fractal identity key spelling: '-' folds to '_' as the importers do."""
+    return f"{package}__{texture}".replace("-", "_")

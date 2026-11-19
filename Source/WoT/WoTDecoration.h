@@ -79,6 +79,16 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void ConfigureRuntimeCollision(bool bInCollideActors, bool bInBlockActors,
 		bool bInBlockPlayers, float Radius, float HalfHeight);
+	// ConfigureRuntimeCollision for the editor import (Tools/import), which
+	// otherwise leaves every placed decoration on the class-default blocking
+	// cylinder: Arena_06's teleporter shimmer quads turn bCollideActors off.
+	UFUNCTION(BlueprintCallable, Category = "WoT|Collision")
+	void SetUE1Collision(bool bInCollideActors, bool bInBlockActors,
+		bool bInBlockPlayers, float Radius, float HalfHeight)
+	{
+		ConfigureRuntimeCollision(bInCollideActors, bInBlockActors, bInBlockPlayers,
+			Radius, HalfHeight);
+	}
 	void ConfigureRuntimePhysics(uint8 Physics, const FRotator& RotationRate,
 		bool bFixedRotationDir);
 	void ConfigureRuntimeVisualPresentation(

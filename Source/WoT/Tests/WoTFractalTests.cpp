@@ -1084,9 +1084,14 @@ bool FWoTFractalIdentityBindingSpec::RunTest(const FString& Parameters)
 	// Chained suffixes are real shipped data: Battle2_02's pond portals are
 	// ScottT__s_rainwater_T_2S / JHPFireEng__SLWater01_T_2S (translucent AND
 	// two-sided) — the strip must peel until it hits the identity.
+	// The BSP split also appends _U/_Sky/_SL (unlit, fake backdrop, special
+	// lit): Arena_06's fountain portal is ScottT__S_ForFountain001_Mod_2S_U and
+	// Arena_08's pond JHPFireEng__SLWater02_T_2S_SL in the editor-imported maps.
 	for (const TCHAR* Suffixed : {TEXT("MI_W_Pkg1__TexA_2S"),
 		TEXT("MI_W_Pkg1__TexA_M"), TEXT("MI_W_Pkg1__TexA_T"),
-		TEXT("MI_W_Pkg1__TexA_Mod"), TEXT("MI_W_Pkg1__TexA_T_2S")})
+		TEXT("MI_W_Pkg1__TexA_Mod"), TEXT("MI_W_Pkg1__TexA_T_2S"),
+		TEXT("MI_W_Pkg1__TexA_U"), TEXT("MI_W_Pkg1__TexA_Mod_2S_U"),
+		TEXT("MI_W_Pkg1__TexA_T_2S_SL"), TEXT("MI_W_Pkg1__TexA_Sky")})
 	{
 		UMaterialInstanceConstant* SuffixedMI = NewObject<UMaterialInstanceConstant>(
 			GetTransientPackage(), Suffixed);

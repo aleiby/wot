@@ -1,6 +1,7 @@
-"""Restamp TeleporterWithEffects presentation on already-imported MP maps.
+"""Restamp TeleporterWithEffects presentation and the authored UE1 touch
+cylinder on already-imported MP maps.
 
-The stdlib plan_map() half imports without unreal for dry-runs.
+The stdlib plan_map()/collision_plan() half imports without unreal for dry-runs.
 
 UnrealEditor-Cmd WoT.uproject -run=pythonscript
   -script="...import_teleporter_fx.py [<Map> ...]"
@@ -48,6 +49,38 @@ def plan_map(map_name):
     return plan
 
 
+# Teleporter class defaults (CollisionRadius=18, CollisionHeight=40);
+# TeleporterWithEffects.uc authors no defaults of its own.
+TELEPORTER_COLLISION_DEFAULTS = (18.0, 40.0)
+
+
+def teleporter_collision(props):
+    """The authored UE1 (CollisionRadius, CollisionHeight) of a teleporter."""
+    radius, height = TELEPORTER_COLLISION_DEFAULTS
+    return (float(props.get("CollisionRadius", radius)),
+            float(props.get("CollisionHeight", height)))
+
+
+def collision_plan(map_name):
+    """actor label -> authored UE1 (radius, height). Maps imported before the
+    exact touch cylinder kept these on the capsule only, which clamps
+    HalfHeight >= Radius (Battle2_02's 64x50 pads read back 64x64)."""
+    actors = typed(parse(T3D_DIR / f"{map_name}.t3d"))
+    return {actor["name"]: teleporter_collision(actor["props"])
+            for actor in actors
+            if actor["cls"] in ("TeleporterWithEffects", "Teleporter")}
+
+
+def restamp_collision(actor, radius, height):
+    """Author the exact cylinder; return whether it changed."""
+    current = (float(actor.get_editor_property("ue1_collision_radius")),
+               float(actor.get_editor_property("ue1_collision_half_height")))
+    if abs(current[0] - radius) < 1e-3 and abs(current[1] - height) < 1e-3:
+        return False
+    actor.set_ue1_collision_size(radius, height)
+    return True
+
+
 def _actor_value(value):
     text = str(value or "")
     return "" if text == "None" else text
@@ -77,13 +110,16 @@ def main():
         by_label = {actor.get_actor_label(): actor
                     for actor in eas.get_all_level_actors()}
         stamped = miss = 0
+        collision = collision_plan(map_name)
         for label, payload in plan_map(map_name).items():
             actor = by_label.get(label)
             if not isinstance(actor, unreal.WoTTeleporter):
                 if any(payload.values()):
                     miss += 1
                 continue
-            if restamp_actor(actor, payload):
+            presentation = restamp_actor(actor, payload)
+            cylinder = restamp_collision(actor, *collision[label])
+            if presentation or cylinder:
                 stamped += 1
         if stamped:
             les.save_current_level()
