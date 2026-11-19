@@ -90,19 +90,32 @@ void AWoTDecoration::ConfigureRuntimeDistanceFade(float VisibilityRadius,
 	SetActorTickEnabled(true);
 }
 
-void AWoTDecoration::ConfigureRuntimeReplication()
+void AWoTDecoration::ConfigureRuntimeReplication(uint8 InRemoteRole, bool bInTemporary)
 {
+	// The original sends a decoration to clients as its network role says, its
+	// class's own or the map's. One whose role is ROLE_None is never sent
+	// (Fish.uc:65): every machine keeps its own, so a swap moves it on the
+	// server alone.
+	if (InRemoteRole == UE1RoleNone)
+	{
+		SetReplicatingMovement(false);
+		SetReplicates(false);
+		return;
+	}
 	// The breakable and bounceable classes replicate their falls. A decoration
 	// that is not static can also be moved during play: the swap artifact trades
 	// places with one (HangingLight.uc:20, HangingLightChain.uc:20). The
-	// original's non-static decorations are replicated actors, so every machine
-	// sees one where it was moved; here its movement replicates, precisely,
-	// while it sleeps until something moves it, and every client has it.
+	// original's other non-static decorations are replicated actors, so every
+	// machine sees one where it was moved; here its movement replicates,
+	// precisely, while it sleeps until something moves it, and every client has
+	// it. A temporary one (SeaweedA.uc:24-25) is sent once, when it first
+	// appears, and never updated after: it stays awake, so each client is sent
+	// it as soon as it connects.
 	if (!GetIsReplicated() && !bStatic)
 	{
 		SetReplicates(true);
 		SetReplicatingMovement(true);
-		NetDormancy = DORM_Initial;
+		if (!bInTemporary) NetDormancy = DORM_Initial;
 		bAlwaysRelevant = true;
 		FRepMovement& Movement = GetReplicatedMovement_Mutable();
 		Movement.LocationQuantizationLevel = EVectorQuantization::RoundTwoDecimals;
@@ -110,6 +123,7 @@ void AWoTDecoration::ConfigureRuntimeReplication()
 	}
 	if (GetIsReplicated())
 	{
+		bNetTemporary = bInTemporary;
 		SetReplicates(true);
 		SetNetAddressable();
 	}

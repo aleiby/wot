@@ -21,12 +21,16 @@
 #include "../Payload/WoTRuntimeRegistry.h"
 #include "../Payload/WoTRuntimeWorldResource.h"
 #include "../Projectiles/WoTSwapPlacesProjectile.h"
+#include "../WoTActorRotator.h"
 #include "../World/WoTRuntimeBSPRenderer.h"
 #include "../World/WoTRuntimeClassDefaults.h"
 #include "../World/WoTRuntimeMapSky.h"
+#include "../World/WoTRuntimeWorldProperties.h"
 #include "../World/WoTWorldMaterializer.h"
 #include "../World/WoTWorldProjector.h"
 #include "../WoTBSPPayload.h"
+#include "../WoTBounceableDecoration.h"
+#include "../WoTBreakableDecoration.h"
 #include "../WoTCharacter.h"
 #include "../WoTCollisionBlocker.h"
 #include "../WoTDecoration.h"
@@ -56,6 +60,8 @@
 #include "WoTRetailReader/RegistryLocalization.h"
 #include "WoTRetailReader/Testing/ReferencePaths.h"
 #if WITH_EDITOR
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
 #include "Tests/NetTestHelpers.h"
 #endif
 
@@ -523,6 +529,25 @@ void InitializeAsLevelActor(AActor& Actor)
 	}
 }
 
+// Each projected actor set up as a level's network actor, then finished and
+// begun play, in that order.
+void FinishProjectedActors(const FWoTWorldProjectionResult& Out)
+{
+	for (AActor* Actor : Out.DeferredActors)
+	{
+		if (IsValid(Actor)) InitializeAsLevelActor(*Actor);
+	}
+	for (AActor* Actor : Out.DeferredActors)
+	{
+		if (IsValid(Actor) && !Actor->IsActorInitialized())
+			Actor->FinishSpawning(Actor->GetActorTransform(), true);
+	}
+	for (AActor* Actor : Out.DeferredActors)
+	{
+		if (IsValid(Actor) && !Actor->HasActorBegunPlay()) Actor->DispatchBeginPlay();
+	}
+}
+
 // A dedicated server and one connected client.
 bool Connect(FAutomationTestBase& Test, UE::Net::FTestWorlds& Worlds)
 {
@@ -586,20 +611,68 @@ bool ProjectIntoPlayingWorld(FAutomationTestBase& Test, FFixture& Fixture, FStri
 	{
 		Test.AddInfo(FString(Map) + TEXT(" skipped ") + Skipped);
 	}
-	for (AActor* Actor : Out.DeferredActors)
-	{
-		if (IsValid(Actor)) InitializeAsLevelActor(*Actor);
-	}
-	for (AActor* Actor : Out.DeferredActors)
-	{
-		if (IsValid(Actor) && !Actor->IsActorInitialized())
-			Actor->FinishSpawning(Actor->GetActorTransform(), true);
-	}
-	for (AActor* Actor : Out.DeferredActors)
-	{
-		if (IsValid(Actor) && !Actor->HasActorBegunPlay()) Actor->DispatchBeginPlay();
-	}
+	FinishProjectedActors(Out);
 	return true;
+}
+
+// Only the records of Map that Keep selects, projected into a world already in
+// play as ProjectIntoPlayingWorld projects a whole map. OutRecords are the kept
+// records, in projection order (RecordIndexOf indexes them).
+bool ProjectRecordsIntoPlayingWorld(FAutomationTestBase& Test, FFixture& Fixture,
+	FStringView Map, TFunctionRef<bool(const FWoTRuntimeWorldActor&)> Keep, UWorld& World,
+	FWoTWorldProjectionResult& Out, TArray<FWoTRuntimeWorldActor>& OutRecords)
+{
+	const FWoTWorldDescriptor* Descriptor = Fixture.Find(Map);
+	if (!Test.TestNotNull(FString(Map) + TEXT(" is in the world set"), Descriptor))
+		return false;
+	FWoTRuntimeWorldResource Resource;
+	if (!DecodeWorld(Test, Fixture, *Descriptor, Resource)) return false;
+	OutRecords.Reset();
+	for (const FWoTRuntimeWorldActor& Record : Resource.Actors())
+	{
+		if (Keep(Record)) OutRecords.Add(Record);
+	}
+	FWoTWorldProjectionSource Source;
+	FillProjectionSource(Resource, Source);
+	Source.Records = OutRecords;
+	// The leaves' lights name light records left out here.
+	Source.Leaves = {};
+	Source.ModelLights = {};
+	FString Error;
+	if (!Test.TestTrue(FString(Map) + TEXT(" records project into ") + World.GetName(),
+		FWoTWorldProjector::ProjectDeferred(World, Source, *Fixture.Defaults, Out, Error)))
+	{
+		Test.AddError(Error);
+		return false;
+	}
+	FinishProjectedActors(Out);
+	return true;
+}
+
+// A name property the record itself carries ("" when it has none).
+FString RecordName(const FWoTRuntimeWorldActor& Record, const TCHAR* Property)
+{
+	const FWoTRuntimeWorldProperty* Value = WoTRuntimeWorldFindProperty(Record, Property);
+	return Value && Value->Type == EWoTRuntimeWorldPropertyType::Name
+		? Value->NameValue : FString();
+}
+
+// The projected decorations of one class, in record order.
+TArray<AWoTDecoration*> DecorationsOfClass(const FWoTWorldProjectionResult& Projection,
+	const TArray<FWoTRuntimeWorldActor>& Records, const TCHAR* Leaf)
+{
+	TArray<AWoTDecoration*> Found;
+	for (AActor* Actor : Projection.DeferredActors)
+	{
+		AWoTDecoration* Decoration = Cast<AWoTDecoration>(Actor);
+		const int32 Index = RecordIndexOf(Actor);
+		if (IsValid(Decoration) && Records.IsValidIndex(Index)
+			&& ClassLeaf(Records[Index].ClassIdentity).Equals(Leaf, ESearchCase::IgnoreCase))
+		{
+			Found.Add(Decoration);
+		}
+	}
+	return Found;
 }
 
 template <typename T>
@@ -1042,11 +1115,16 @@ bool FWoTRelocationWhirlwindSpec::RunTest(const FString&)
 }
 
 // A decoration that is not static can be moved during play, by the swap
-// artifact among others (HangingLight.uc:20, HangingLightChain.uc:20). The
-// original's non-static decorations were replicated actors, so every machine
-// saw one where it was moved. The projection makes each such decoration
-// replicate its movement, asleep until something moves it and known to every
-// client by name; a static decoration stays local to each machine.
+// artifact among others, and the original sends it to clients as its network
+// role says, its class's own or the map's: one whose role is ROLE_None is never
+// sent (Fish.uc:65, and the dragonflies and hanging lights Battle2_01 sets so),
+// a temporary one is sent once, when it first appears (SeaweedA.uc:24-25,
+// Crow.uc:29-30, Rat.uc:27-28, Spider.uc:24-25), and the rest are replicated
+// actors (HangingLight.uc:20, HangingLightChain.uc:20). The projection keeps a
+// static decoration, and one whose role is ROLE_None, local to each machine; a
+// temporary one replicates once, awake from the start; every other one
+// replicates its movement, asleep until something moves it, and is known to
+// every client by name.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRelocationProjectedMovableDecorationsSpec,
 	"WoT.Relocation.ProjectedMovableDecorationsReplicate",
 	WoTRelocationRealMap::Flags)
@@ -1061,10 +1139,24 @@ bool FWoTRelocationProjectedMovableDecorationsSpec::RunTest(const FString&)
 	}
 	FFixture& Fixture = TheFixture();
 	if (!Fixture.Load(*this)) return false;
+	// UE1 ENetRole: ROLE_None is 0.
+	constexpr uint8 RoleNone = 0;
+	auto IsOneOf = [](const FString& Class, std::initializer_list<const TCHAR*> Classes)
+	{
+		for (const TCHAR* Candidate : Classes)
+		{
+			if (Class.Equals(Candidate, ESearchCase::IgnoreCase)) return true;
+		}
+		return false;
+	};
 	int32 Movable = 0;
 	int32 Static = 0;
+	int32 NeverSent = 0;
+	int32 SentOnce = 0;
+	TMap<FString, FString> RolesByClass;
 	TArray<FString> Wrong;
-	for (const TCHAR* Map : {TEXT("Arena_12"), TEXT("Battle2_05")})
+	for (const TCHAR* Map : {TEXT("Arena_12"), TEXT("Battle2_01"), TEXT("Battle2_03"),
+		TEXT("Battle2_05")})
 	{
 		const FWoTWorldDescriptor* Descriptor = Fixture.Find(Map);
 		if (!TestNotNull(FString(Map) + TEXT(" is in the world set"), Descriptor)) continue;
@@ -1086,33 +1178,96 @@ bool FWoTRelocationProjectedMovableDecorationsSpec::RunTest(const FString&)
 			AddError(Error);
 			continue;
 		}
+		const TArray<FWoTRuntimeWorldActor>& Records = Resource.Actors();
 		for (AActor* Actor : Projection.DeferredActors)
 		{
 			const AWoTDecoration* Decoration = Cast<AWoTDecoration>(Actor);
-			if (IsValid(Decoration))
+			const int32 Index = RecordIndexOf(Actor);
+			if (IsValid(Decoration) && Records.IsValidIndex(Index))
 			{
-				const FString Name = FString(Map) + TEXT(".") + Decoration->GetName();
+				const FWoTRuntimeWorldActor& Record = Records[Index];
+				const FString Class = ClassLeaf(Record.ClassIdentity);
+				const FString Name = FString(Map) + TEXT(".") + Decoration->GetName()
+					+ TEXT(" (") + Class + TEXT(")");
+				// What the class defaults say, for the record.
+				uint8 ClassRole = 255;
+				bool bClassTemporary = false;
+				if (const FWoTRuntimeWorldProperty* Role = Fixture.Defaults->FindClassProperty(
+					Record.ClassIdentity, TEXT("RemoteRole")))
+				{
+					WoTRuntimeWorldPropertyByte(*Role, ClassRole);
+				}
+				if (const FWoTRuntimeWorldProperty* Temporary = Fixture.Defaults->FindClassProperty(
+					Record.ClassIdentity, TEXT("bNetTemporary")))
+				{
+					WoTRuntimeWorldPropertyBool(*Temporary, bClassTemporary);
+				}
+				RolesByClass.FindOrAdd(Class) = FString::Printf(TEXT("%s RemoteRole=%d%s"),
+					*Class, ClassRole, bClassTemporary ? TEXT(" bNetTemporary") : TEXT(""));
+				// What the shipped scripts and the map say.
+				uint8 PlacedRole = 1;
+				bool bPlacedTemporary = false;
+				const FWoTRuntimeWorldProperty* RoleOverride =
+					WoTRuntimeWorldFindProperty(Record, TEXT("RemoteRole"));
+				const FWoTRuntimeWorldProperty* TemporaryOverride =
+					WoTRuntimeWorldFindProperty(Record, TEXT("bNetTemporary"));
+				const bool bNone = RoleOverride
+					? WoTRuntimeWorldPropertyByte(*RoleOverride, PlacedRole) && PlacedRole == RoleNone
+					: IsOneOf(Class, {TEXT("Fish")});
+				const bool bOnce = !bNone && (TemporaryOverride
+					? WoTRuntimeWorldPropertyBool(*TemporaryOverride, bPlacedTemporary)
+						&& bPlacedTemporary
+					: IsOneOf(Class, {TEXT("SeaweedA"), TEXT("SeaweedB"), TEXT("SeaweedC"),
+						TEXT("Crow"), TEXT("Rat"), TEXT("Spider")}));
 				if (Decoration->bStatic)
 				{
 					++Static;
-					if (Decoration->GetIsReplicated()) Wrong.Add(Name + TEXT(" (static, replicated)"));
+					if (Decoration->GetIsReplicated()) Wrong.Add(Name + TEXT(" static, replicated"));
+				}
+				else if (bNone)
+				{
+					++NeverSent;
+					if (Decoration->GetIsReplicated()) Wrong.Add(Name + TEXT(" ROLE_None, replicated"));
 				}
 				else
 				{
 					++Movable;
+					SentOnce += bOnce ? 1 : 0;
 					const bool bLoose = Decoration->IsReplicatingMovement()
 						&& Decoration->GetIsReplicated() && Decoration->IsNameStableForNetworking();
-					if (!bLoose) Wrong.Add(Name + TEXT(" (movable, does not replicate its movement)"));
+					if (!bLoose) Wrong.Add(Name + TEXT(" movable, does not replicate its movement"));
+					else if (Decoration->bNetTemporary != bOnce)
+						Wrong.Add(Name + (bOnce ? TEXT(" temporary, updated after it first appears")
+							: TEXT(" sent only when it first appears")));
+					else if (Decoration->NetDormancy
+						!= (bOnce ? DORM_Awake : DORM_Initial)
+						&& !Cast<AWoTBreakableDecoration>(Decoration)
+						&& !Cast<AWoTBounceableDecoration>(Decoration))
+						Wrong.Add(Name + (bOnce ? TEXT(" temporary, asleep")
+							: TEXT(" awake before anything moves it")));
 				}
 			}
 			if (IsValid(Actor)) Actor->FinishSpawning(Actor->GetActorTransform(), true);
 		}
 	}
-	AddInfo(FString::Printf(TEXT("%d movable and %d static decorations"), Movable, Static));
-	TestTrue(TEXT("the maps place movable decorations"), Movable > 0);
+	TArray<FString> Roles;
+	RolesByClass.GenerateValueArray(Roles);
+	Roles.Sort();
+	const FString Census = FString::Printf(TEXT("%d replicated (%d of them sent once), "
+		"%d never sent and %d static decorations; class defaults: %s"), Movable, SentOnce,
+		NeverSent, Static, *FString::Join(Roles, TEXT(", ")));
+	AddInfo(Census);
+	UE_LOG(LogTemp, Display, TEXT("ProjectedMovableDecorationsReplicate: %s"), *Census);
+	TestTrue(TEXT("the maps place replicated decorations"), Movable > SentOnce);
+	TestTrue(TEXT("decorations sent once"), SentOnce > 0);
+	TestTrue(TEXT("decorations never sent"), NeverSent > 0);
 	TestTrue(TEXT("and static ones"), Static > 0);
-	TestEqual(FString::Printf(TEXT("each replicates when it can be moved and only then (first: %s)"),
+	TestEqual(FString::Printf(TEXT("each replicates as its network role says (first: %s)"),
 		Wrong.IsEmpty() ? TEXT("none") : *Wrong[0]), Wrong.Num(), 0);
+	for (int32 Index = 1; Index < FMath::Min(Wrong.Num(), 12); ++Index)
+	{
+		AddError(TEXT("also: ") + Wrong[Index]);
+	}
 	return !HasAnyErrors();
 }
 
@@ -1257,7 +1412,8 @@ bool FWoTRelocationDecorationNetSpec::RunTest(const FString&)
 		if (!Light) return nullptr;
 		Light->ConfigureRuntimeCollision(true, true, true, 22.0f, 17.0f);
 		Light->bStatic = false;
-		Light->ConfigureRuntimeReplication();
+		// A hanging light keeps Actor's network role (HangingLight.uc sets none).
+		Light->ConfigureRuntimeReplication(AWoTDecoration::UE1RoleDumbProxy, false);
 		InitializeAsLevelActor(*Light);
 		Light->FinishSpawning(At, true);
 		if (!Light->HasActorBegunPlay()) Light->DispatchBeginPlay();
@@ -1286,6 +1442,241 @@ bool FWoTRelocationDecorationNetSpec::RunTest(const FString&)
 		*Light->GetActorRotation().ToString()), bArrived);
 	Worlds.TickAll(60);
 	TestTrue(TEXT("and stays there"), SamePose(*Light, *ClientLight));
+#endif
+	return !HasAnyErrors();
+}
+
+// A fish is never sent to clients (Fish.uc:65, RemoteRole=ROLE_None): every
+// machine swims its own, so a swap moves a fish on the server alone. On a
+// dedicated server with a client connected, both running Battle2_05's school of
+// fish and the rotator that swims it (ActorRotator.uc), the fish a swap strikes
+// takes the caster's place on the server, and the server sends nothing about
+// it, then or once the rotator has carried it on round its circle.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRelocationSwappedFishSpec,
+	"WoT.Relocation.SwappedFishStaysOnTheServer",
+	WoTRelocationRealMap::Flags)
+
+bool FWoTRelocationSwappedFishSpec::RunTest(const FString&)
+{
+	using namespace WoTRelocationRealMap;
+	if (!WoTReferenceTreeExists())
+	{
+		AddWarning(TEXT("real retail data absent: the swapped fish is not verified"));
+		return true;
+	}
+#if WITH_EDITOR
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	FScopedReadyWorlds Ready;
+	UE::Net::FTestWorlds Worlds(TEXT("/Engine/Maps/Entry"), TEXT("/Script/WoT.WoTGameMode"));
+	Worlds.SetDescription(TEXT("a swap moves a fish on a dedicated server"));
+	if (!Connect(*this, Worlds)) return false;
+	UWorld& ServerWorld = *Worlds.Server.GetWorld();
+	UWorld& ClientWorld = *Worlds.Clients[0].GetWorld();
+	// Battle2_05's school of fish and the rotator that swims it, on each machine.
+	auto SchoolOfFish = [](const FWoTRuntimeWorldActor& Record)
+	{
+		const FString Class = ClassLeaf(Record.ClassIdentity);
+		return Class.Equals(TEXT("Fish"), ESearchCase::IgnoreCase)
+			|| (Class.Equals(TEXT("ActorRotator"), ESearchCase::IgnoreCase)
+				&& RecordName(Record, TEXT("Event")).Equals(TEXT("SchoolOfFish01"),
+					ESearchCase::IgnoreCase));
+	};
+	FWoTWorldProjectionResult ClientProjection;
+	FWoTWorldProjectionResult ServerProjection;
+	TArray<FWoTRuntimeWorldActor> ClientRecords;
+	TArray<FWoTRuntimeWorldActor> ServerRecords;
+	if (!ProjectRecordsIntoPlayingWorld(*this, Fixture, TEXT("Battle2_05"), SchoolOfFish,
+			ClientWorld, ClientProjection, ClientRecords)
+		|| !ProjectRecordsIntoPlayingWorld(*this, Fixture, TEXT("Battle2_05"), SchoolOfFish,
+			ServerWorld, ServerProjection, ServerRecords)) return false;
+	const TArray<AWoTDecoration*> School =
+		DecorationsOfClass(ServerProjection, ServerRecords, TEXT("Fish"));
+	if (!TestEqual(TEXT("Battle2_05's school has six fish"), School.Num(), 6)) return false;
+	Worlds.TickAll(30);
+	for (AWoTDecoration* Fish : School)
+	{
+		TestFalse(Fish->GetName() + TEXT(" is not a replicated actor (Fish.uc:65)"),
+			Fish->GetIsReplicated());
+		TestFalse(TEXT("the server sends nothing about ") + Fish->GetName(),
+			Worlds.IsServerObjectReplicated(Fish));
+	}
+	// The fish standing clearest of the others, so the caster fits where it is.
+	AWoTDecoration* Fish = nullptr;
+	double Clearance = -1.0;
+	for (AWoTDecoration* Candidate : School)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		for (AWoTDecoration* Other : School)
+		{
+			if (Other != Candidate)
+			{
+				Nearest = FMath::Min(Nearest, FVector::Dist2D(
+					Candidate->GetActorLocation(), Other->GetActorLocation()));
+			}
+		}
+		if (Nearest > Clearance)
+		{
+			Clearance = Nearest;
+			Fish = Candidate;
+		}
+	}
+	if (!TestNotNull(TEXT("a fish to swap with"), Fish)) return false;
+	AWoTDecoration* ClientFish = ClientCopy<AWoTDecoration>(ClientWorld, *Fish);
+	if (!TestNotNull(TEXT("the client swims its own fish of the same name"), ClientFish))
+		return false;
+	bool bSwum = false;
+	for (TActorIterator<AWoTActorRotator> It(&ServerWorld); It; ++It)
+	{
+		for (const TSoftObjectPtr<AActor>& Driven : It->DrivenActors)
+		{
+			bSwum |= Driven.Get() == Fish;
+		}
+	}
+	TestTrue(TEXT("a rotator swims the fish"), bSwum);
+
+	AWoTCharacter* Caster = FlyingBody(ServerWorld,
+		Fish->GetActorLocation() + FVector(0, 0, 400), 0.0f);
+	if (!TestNotNull(TEXT("caster"), Caster)) return false;
+	const FVector CasterBefore = Caster->GetActorLocation();
+	if (!CastSwapOnto(*this, ServerWorld, *Caster, *Fish)) return false;
+	if (!TestTrue(FString::Printf(TEXT("the server's fish takes the caster's place (now %s)"),
+		*Fish->GetActorLocation().ToString()),
+		Fish->GetActorLocation().Equals(CasterBefore, 1.0))) return false;
+	// The swap projectile's replicated destination names the fish (by its name,
+	// which every machine shares); the fish itself is never sent: the server
+	// opens no channel for it, while the swap lands or after.
+	UNetDriver* Driver = ServerWorld.GetNetDriver();
+	UNetConnection* Connection = Driver && !Driver->ClientConnections.IsEmpty()
+		? Driver->ClientConnections[0].Get() : nullptr;
+	if (!TestNotNull(TEXT("the server's connection to its client"), Connection)) return false;
+	if (!TestFalse(TEXT("the server replicates through actor channels"),
+		Driver->IsUsingIrisReplication())) return false;
+	int32 TicksWithChannel = 0;
+	for (int32 Tick = 0; Tick < 60; ++Tick)
+	{
+		Worlds.TickAll();
+		TicksWithChannel += Connection->FindActorChannelRef(Fish) ? 1 : 0;
+	}
+	TestFalse(FString::Printf(TEXT("the rotator has carried the fish on (now %s)"),
+		*Fish->GetActorLocation().ToString()),
+		Fish->GetActorLocation().Equals(CasterBefore, 1.0));
+	TestFalse(TEXT("the fish is still not a replicated actor"), Fish->GetIsReplicated());
+	TestEqual(TEXT("ticks the server had a channel open for the fish"), TicksWithChannel, 0);
+#endif
+	return !HasAnyErrors();
+}
+
+// A seaweed is sent to clients once, when it first appears, and never updated
+// after (SeaweedA.uc:24-25, bNetTemporary with ROLE_SimulatedProxy). On a
+// dedicated server with a client connected, both running Battle2_05's weeds,
+// the client takes a weed where the server has it when the weed first reaches
+// it, and a swap after that moves the weed on the server alone.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRelocationSwappedSeaweedSpec,
+	"WoT.Relocation.SwappedSeaweedStaysWhereClientsFirstSawIt",
+	WoTRelocationRealMap::Flags)
+
+bool FWoTRelocationSwappedSeaweedSpec::RunTest(const FString&)
+{
+	using namespace WoTRelocationRealMap;
+	if (!WoTReferenceTreeExists())
+	{
+		AddWarning(TEXT("real retail data absent: the swapped seaweed is not verified"));
+		return true;
+	}
+#if WITH_EDITOR
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	FScopedReadyWorlds Ready;
+	UE::Net::FTestWorlds Worlds(TEXT("/Engine/Maps/Entry"), TEXT("/Script/WoT.WoTGameMode"));
+	Worlds.SetDescription(TEXT("a swap moves a seaweed on a dedicated server"));
+	if (!Connect(*this, Worlds)) return false;
+	UWorld& ServerWorld = *Worlds.Server.GetWorld();
+	UWorld& ClientWorld = *Worlds.Clients[0].GetWorld();
+	auto Seaweed = [](const FWoTRuntimeWorldActor& Record)
+	{
+		return ClassLeaf(Record.ClassIdentity).StartsWith(TEXT("Seaweed"),
+			ESearchCase::IgnoreCase);
+	};
+	FWoTWorldProjectionResult ClientProjection;
+	FWoTWorldProjectionResult ServerProjection;
+	TArray<FWoTRuntimeWorldActor> ClientRecords;
+	TArray<FWoTRuntimeWorldActor> ServerRecords;
+	if (!ProjectRecordsIntoPlayingWorld(*this, Fixture, TEXT("Battle2_05"), Seaweed,
+			ClientWorld, ClientProjection, ClientRecords)
+		|| !ProjectRecordsIntoPlayingWorld(*this, Fixture, TEXT("Battle2_05"), Seaweed,
+			ServerWorld, ServerProjection, ServerRecords)) return false;
+	TArray<AWoTDecoration*> Weeds;
+	for (const TCHAR* Class : {TEXT("SeaweedA"), TEXT("SeaweedB"), TEXT("SeaweedC")})
+	{
+		Weeds.Append(DecorationsOfClass(ServerProjection, ServerRecords, Class));
+	}
+	if (!TestEqual(TEXT("Battle2_05 places nine weeds"), Weeds.Num(), 9)) return false;
+	// The weed standing clearest of the others, so the caster fits where it is.
+	AWoTDecoration* Weed = nullptr;
+	double Clearance = -1.0;
+	for (AWoTDecoration* Candidate : Weeds)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		for (AWoTDecoration* Other : Weeds)
+		{
+			if (Other != Candidate)
+			{
+				Nearest = FMath::Min(Nearest, FVector::Dist2D(
+					Candidate->GetActorLocation(), Other->GetActorLocation()));
+			}
+		}
+		if (Nearest > Clearance)
+		{
+			Clearance = Nearest;
+			Weed = Candidate;
+		}
+	}
+	if (!TestNotNull(TEXT("a weed to swap with"), Weed)) return false;
+	AWoTDecoration* ClientWeed = ClientCopy<AWoTDecoration>(ClientWorld, *Weed);
+	if (!TestNotNull(TEXT("the client's weed of the same name"), ClientWeed)) return false;
+	TestTrue(TEXT("a weed is a replicated actor"), Weed->GetIsReplicated());
+	UNetDriver* Driver = ServerWorld.GetNetDriver();
+	UNetConnection* Connection = Driver && !Driver->ClientConnections.IsEmpty()
+		? Driver->ClientConnections[0].Get() : nullptr;
+	if (!TestNotNull(TEXT("the server's connection to its client"), Connection)) return false;
+	const bool bLegacy = !Driver->IsUsingIrisReplication();
+
+	// The server has the weed a little above its place when it first reaches
+	// the client, which takes it there.
+	const FVector Placed = ClientWeed->GetActorLocation();
+	Weed->SetActorLocation(Placed + FVector(0, 0, 40));
+	const FVector FirstSeen = Weed->GetActorLocation();
+	const bool bReached = Worlds.TickUntil([ClientWeed, &FirstSeen]()
+	{
+		return ClientWeed->GetActorLocation().Equals(FirstSeen, 0.05);
+	}, 120);
+	TestTrue(FString::Printf(TEXT("the client takes the weed where the server has it "
+		"(client %s, server %s)"), *ClientWeed->GetActorLocation().ToString(),
+		*FirstSeen.ToString()), bReached);
+	if (bLegacy)
+	{
+		TestTrue(TEXT("sent to the client as a temporary actor"),
+			Connection->SentTemporaries.Contains(static_cast<AActor*>(Weed)));
+	}
+
+	AWoTCharacter* Caster = FlyingBody(ServerWorld, FirstSeen + FVector(0, 0, 400), 0.0f);
+	if (!TestNotNull(TEXT("caster"), Caster)) return false;
+	const FVector CasterBefore = Caster->GetActorLocation();
+	if (!CastSwapOnto(*this, ServerWorld, *Caster, *Weed)) return false;
+	if (!TestTrue(FString::Printf(TEXT("the server's weed takes the caster's place (now %s)"),
+		*Weed->GetActorLocation().ToString()),
+		Weed->GetActorLocation().Equals(CasterBefore, 1.0))) return false;
+	Worlds.TickAll(60);
+	TestTrue(FString::Printf(TEXT("the client's weed stays where it first saw it "
+		"(client %s, first seen %s, server %s)"), *ClientWeed->GetActorLocation().ToString(),
+		*FirstSeen.ToString(), *Weed->GetActorLocation().ToString()),
+		ClientWeed->GetActorLocation().Equals(FirstSeen, 0.05));
+	if (bLegacy)
+	{
+		TestNull(TEXT("the server keeps no channel open for it"),
+			Connection->FindActorChannelRef(Weed));
+	}
 #endif
 	return !HasAnyErrors();
 }
