@@ -268,7 +268,7 @@ bool FixesFromJson(const TSharedPtr<FJsonObject>& Object, FFixes& Out)
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Object->Values)
 	{
 		const int32 Joint = JointForBone(FName(*Field.Key));
-		FVector Turn;
+		FVector Turn = FVector::ZeroVector;
 		if (Joint == INDEX_NONE || !TrackReadNumbers(Field.Value, Turn)) return false;
 		Read.Fix[Joint] = FRotator(Turn.X, Turn.Y, Turn.Z).Quaternion();
 	}
@@ -302,11 +302,11 @@ bool PoseFromJson(const TSharedPtr<FJsonObject>& Object, FCapturedPose& Out)
 	FCapturedPose Read;
 	for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : (*Bones)->Values)
 	{
-		FVector Angles;
+		FVector Angles = FVector::ZeroVector;
 		if (JointForBone(FName(*Field.Key)) == INDEX_NONE || !TrackReadNumbers(Field.Value, Angles)) return false;
 		Read.Bones.Add(FName(*Field.Key), Angles);
 	}
-	FVector Turn;
+	FVector Turn = FVector::ZeroVector;
 	if (!TrackReadNumbers((*Wrist)->TryGetField(TEXT("location")), Read.WristLocation)
 		|| !TrackReadNumbers((*Wrist)->TryGetField(TEXT("rotation")), Turn)) return false;
 	Read.WristRotation = FRotator(Turn.X, Turn.Y, Turn.Z);
