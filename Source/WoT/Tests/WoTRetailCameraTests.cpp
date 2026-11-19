@@ -8,10 +8,12 @@
 
 #if WITH_AUTOMATION_TESTS
 
+#include "../Projectiles/WoTAMAPearl.h"
 #include "../WoTCharacter.h"
 #include "../WoTPlayerController.h"
 
 #include "Camera/PlayerCameraManager.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Misc/ScopeExit.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailCameraEffectsReachPawnViewSpec,
@@ -106,6 +108,101 @@ bool FWoTRetailCameraEffectsSkipForeignPawnSpec::RunTest(const FString& Paramete
 		View.Location.Equals(EyeLocation, 0.01f));
 	TestFalse(TEXT("an uncontrolled pawn's view carries no flash fog"),
 		View.PostProcessSettings.bOverride_ColorOffset);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTRetailCameraAMADomeTintSpec,
+	"WoT.Camera.AMADomeTintKeepsNeutralScale",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWoTRetailCameraAMADomeTintSpec::RunTest(const FString& Parameters)
+{
+	// A pawn inside an anti-magic dome gets ClientAdjustGlow(4.0, ColorVect)
+	// (AMAPearl.uc:497-501, ColorVect=(150,100,200) at :598). The glow scale
+	// feeds the view flash, whose scale the original snaps to exactly 1 once
+	// it passes 0.981, so it never brightens the view (FlashScale 1 is
+	// "normal brightness", TriggeredViewFog.uc:17). Only the fog,
+	// 0.001 * ColorVect, tints it. A scale left free to reach 1 + 4 multiplied
+	// the whole view by five and washed it out pink and white. The world ticks
+	// at 60 Hz, where a per-frame fog snap held the 0.1 green at zero and
+	// turned the lavender tint magenta (PORT_NOTES "View flash at high frame
+	// rates").
+	UWorld* World = WoTTest::CreateSpecWorld();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	if (!TestNotNull(TEXT("spec world"), World))
+	{
+		return false;
+	}
+
+	FActorSpawnParameters Spawn;
+	Spawn.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>(
+		FVector::ZeroVector, FRotator::ZeroRotator, Spawn);
+	AWoTCharacter* Pawn = World->SpawnActor<AWoTCharacter>(
+		FVector(0, 0, 100), FRotator::ZeroRotator, Spawn);
+	if (!TestNotNull(TEXT("controller"), Controller) || !TestNotNull(TEXT("pawn"), Pawn))
+	{
+		return false;
+	}
+	Controller->SetAsLocalPlayerController();
+	Controller->Possess(Pawn);
+	// The spec world has no floor: hold the pawn inside the dome.
+	Pawn->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+	APlayerCameraManager* Camera = Controller->PlayerCameraManager;
+	if (!TestNotNull(TEXT("camera manager"), Camera))
+	{
+		return false;
+	}
+	Camera->bUseClientSideCameraUpdates = false;
+	const FVector DomeFog = FVector(150.0f, 100.0f, 200.0f) * 0.001f;
+
+	// Entering the glow changes only the accumulated glow; the presented colour
+	// scale must not jump before the view flash has run.
+	Controller->ClientAdjustGlow(4.0f, FVector(150.0f, 100.0f, 200.0f));
+	Camera->UpdateCamera(0.0f);
+	TestTrue(FString::Printf(TEXT("the glow itself leaves the presented colour scale neutral (got %s)"),
+		*Camera->ColorScale.ToString()),
+		Camera->ColorScale.Equals(FVector::OneVector, 0.001f));
+	Controller->ClientAdjustGlow(-4.0f, FVector(-150.0f, -100.0f, -200.0f));
+	WoTTest::TickWorld(World, 0.5f);
+
+	// The real path: a dome dropped on the pawn affects it through its own poll.
+	AWoTAMAPearl* Pearl = World->SpawnActor<AWoTAMAPearl>(
+		AWoTAMAPearl::StaticClass(), Pawn->GetActorLocation(),
+		FRotator::ZeroRotator, Spawn);
+	if (!TestNotNull(TEXT("dome"), Pearl))
+	{
+		return false;
+	}
+	Pearl->Go();
+	WoTTest::TickWorld(World, 1.5f);
+	TestEqual(TEXT("the dome applied its glow to the pawn inside"),
+		Controller->ConstantGlowScale, 4.0f);
+	TestEqual(TEXT("inside the dome the view flash scale holds at neutral"),
+		Controller->CurrentViewFlashScale, 1.0f, 0.001f);
+	TestTrue(FString::Printf(TEXT("inside the dome the view fog is 0.001 * ColorVect (got %s)"),
+		*Controller->CurrentViewFlashFog.ToString()),
+		Controller->CurrentViewFlashFog.Equals(DomeFog, 0.002f));
+	Camera->UpdateCamera(0.0f);
+	TestTrue(FString::Printf(TEXT("the presented colour scale stays neutral inside the dome (got %s)"),
+		*Camera->ColorScale.ToString()),
+		Camera->ColorScale.Equals(FVector::OneVector, 0.001f));
+	const FMinimalViewInfo& View = Camera->GetCameraCacheView();
+	TestTrue(TEXT("the seen view carries the dome fog"),
+		View.PostProcessSettings.bOverride_ColorOffset
+		&& FVector(View.PostProcessSettings.ColorOffset).Equals(DomeFog, 0.002f));
+
+	// The dome holds for Duration, fades, and its teardown removes the tint.
+	const float DomeLife = Pearl->Duration + Pearl->FadeTime + 1.0f;
+	const TWeakObjectPtr<AWoTAMAPearl> WeakPearl(Pearl);
+	WoTTest::TickWorld(World, DomeLife);
+	TestFalse(TEXT("the dome is gone"), WeakPearl.IsValid());
+	TestEqual(TEXT("leaving the dome removes the glow"),
+		Controller->ConstantGlowScale, 0.0f, 0.001f);
+	TestEqual(TEXT("the view flash scale is neutral after the dome"),
+		Controller->CurrentViewFlashScale, 1.0f, 0.001f);
+	TestTrue(TEXT("the view fog clears after the dome"),
+		Controller->CurrentViewFlashFog.IsNearlyZero(0.002f));
 	return true;
 }
 

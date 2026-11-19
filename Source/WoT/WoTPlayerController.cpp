@@ -4980,17 +4980,12 @@ void AWoTPlayerController::ClientPlayUISound_Implementation(FName SoundSubPath, 
 void AWoTPlayerController::ClientAdjustGlow_Implementation(float Scale, FVector Fog)
 {
 	// Engine PlayerPawn.ClientAdjustGlow: ConstantGlowScale += scale;
-	// ConstantGlowFog += .001*fog. UE5's camera color scale is the nearest
-	// presentation seat for the same additive RGB view treatment.
+	// ConstantGlowFog += .001*fog, and nothing else. The view picks the glow up
+	// through the view flash (TickUE1ViewFlash), which never lets the scale
+	// brighten the view. Presenting 1 + scale here made the anti-magic dome's
+	// +4 (AMAPearl.uc:500) multiply the view by five.
 	ConstantGlowScale += Scale;
 	ConstantGlowFog += Fog * 0.001f;
-	if (PlayerCameraManager)
-	{
-		const FVector Desired = FVector(1.0f + ConstantGlowScale) + ConstantGlowFog;
-		PlayerCameraManager->SetDesiredColorScale(FVector(
-			FMath::Max(Desired.X, 0.0f), FMath::Max(Desired.Y, 0.0f),
-			FMath::Max(Desired.Z, 0.0f)), 0.0f);
-	}
 }
 
 void AWoTPlayerController::ClientSetCameraFOV_Implementation(float NewFOV)
@@ -5218,14 +5213,24 @@ void AWoTPlayerController::TickUE1ViewFlash(float DeltaTime)
 	DesiredFlashFog -= DesiredFlashFog * 2.0f * Delta;
 	CurrentViewFlashScale += (GoalScale - CurrentViewFlashScale) * 10.0f * Delta;
 	CurrentViewFlashFog += (GoalFog - CurrentViewFlashFog) * 10.0f * Delta;
-	if (GoalScale > 0.981f && CurrentViewFlashScale > 0.981f
-		&& CurrentViewFlashScale < 1.0f)
+	// The original snaps a scale above 0.981 to exactly 1 and a fog channel
+	// below 0.019 to 0. The scale therefore never brightens the view: a
+	// positive glow (the anti-magic dome's +4, AMAPearl.uc:500) holds it at
+	// neutral and only the glow's fog tints. The original applies both snaps
+	// every frame, so at high frame rates a small first step toward a target
+	// past the snap point is snapped back and never starts (the dome fog's
+	// green 0.1 at 60 fps; WaterZone.uc:21's darkening). The port snaps only
+	// when the target is on the snapped side, so the view settles on the same
+	// target at any frame rate (PORT_NOTES "View flash at high frame rates").
+	if (CurrentViewFlashScale > 0.981f
+		&& (GoalScale > 0.981f || CurrentViewFlashScale > 1.0f))
 		CurrentViewFlashScale = 1.0f;
 	else if (CurrentViewFlashScale < 0.019f)
 		CurrentViewFlashScale = 0.0f;
 	for (int32 Axis = 0; Axis < 3; ++Axis)
 	{
-		if (CurrentViewFlashFog[Axis] > 0.0f && CurrentViewFlashFog[Axis] < 0.019f)
+		if (CurrentViewFlashFog[Axis] > 0.0f && CurrentViewFlashFog[Axis] < 0.019f
+			&& GoalFog[Axis] < 0.019f)
 			CurrentViewFlashFog[Axis] = 0.0f;
 	}
 	// Compatibility/probe surface: presentation now separates UE1's multiplicative

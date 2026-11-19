@@ -620,6 +620,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** The Glide ramp, the 1999 default device, is applied to the 3D scene. HUD and menus draw after it and keep their unramped brightness.
 - **Why:** Engine difference. The ramp is applied in post-processing instead of on the display hardware.
 
+### View flash at high frame rates
+- **Original:** Screen tints and flashes ease toward their target a little each frame. Every frame, a brightness scale above 0.981 is set to exactly 1 and a tint channel below 0.019 is set to 0. At high frame rates the first small step toward a target past one of those points is undone every frame, so the change never starts: the green part of the anti-magic dome's tint stays off at 60 fps, and underwater darkening stays off above about 40 fps.
+- **Port:** A value snaps only when its target is on the snapped side, so the view settles on the same tint and brightness at any frame rate. The brightness scale still never goes above 1.
+- **Why:** Presentation that does not depend on frame rate. The targets themselves are unchanged.
+
 ### World geometry crack and sliver repair
 - **Original:** Small T-junction cracks, thin fan slivers and a few near-black lightmap ribbons showed in some maps.
 - **Port:** At load time the render copy of world and mover geometry is repaired: cracks are closed, bad fan diagonals are swapped, and isolated sub-unit dark ribbons borrow the lighting of the coplanar edge next to them. Collision and the original data are untouched.
