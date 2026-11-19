@@ -253,7 +253,9 @@ void AWoTTrigger::UE1UnTouch(AActor* Other)
 	{
 		return;
 	}
-	if (ActiveUE1Overlaps.Remove(Other) > 0 && IsRelevantOverlap(Other))
+	// Release an accepted touch even after possession or collision changes.
+	// Pawn teardown can clear possession before it ends the overlap.
+	if (ActiveUE1Overlaps.Remove(Other) > 0)
 	{
 		APawn* P = Cast<APawn>(Other);
 		if (!P && Other)
