@@ -5,6 +5,9 @@
 
 namespace
 {
+	TArray<FWoTHostOptionRow> WoTFrontEnd_HostOptions;
+	uint64 WoTFrontEnd_HostOptionsRevision = 0;
+
 	FString WoTFrontEnd_URLWithoutOptions(const FString& MapPackage)
 	{
 		int32 CutIndex = MapPackage.Len();
@@ -515,6 +518,82 @@ void FWoTFrontEndModel::UpdateSealGoal(FWoTHostRequest& Request,
 	UpdateSealBudget(Request, Request.SealBudget, NumCitadels);
 }
 
+bool FWoTFrontEndModel::RegisterHostOption(FWoTHostOptionRow Row)
+{
+	if (Row.Owner.IsNone() || Row.URLKey.IsEmpty() || !Row.Label || !Row.Max)
+	{
+		return false;
+	}
+	for (TCHAR Character : Row.URLKey)
+	{
+		if (!WoTFrontEnd_IsASCIIAlphaNumeric(Character) && Character != TEXT('_'))
+		{
+			return false;
+		}
+	}
+	const TCHAR* Reserved[] = { TEXT("listen"), TEXT("bIsLanMatch"), TEXT("game"),
+		TEXT("FragLimit"), TEXT("TimeLimit"), TEXT("Cycle"), TEXT("MaxPlayers"),
+		TEXT("MaxClientTickRate"), TEXT("SealGoal"), TEXT("SealBudget"),
+		TEXT("AutoTeamSelect"), TEXT("MaxTeamSize"), TEXT("AdminPassword"),
+		TEXT("GamePassword"), TEXT("Password"), TEXT("PasswordToken"),
+		TEXT("Class"), TEXT("Skin"), TEXT("Name") };
+	for (const TCHAR* Key : Reserved)
+	{
+		if (Row.URLKey.Equals(Key, ESearchCase::IgnoreCase)) return false;
+	}
+	if (WoTFrontEnd_HostOptions.ContainsByPredicate([&Row](const FWoTHostOptionRow& Existing)
+		{ return Existing.URLKey.Equals(Row.URLKey, ESearchCase::IgnoreCase); }))
+	{
+		return false;
+	}
+	WoTFrontEnd_HostOptions.Add(MoveTemp(Row));
+	++WoTFrontEnd_HostOptionsRevision;
+	return true;
+}
+
+void FWoTFrontEndModel::UnregisterHostOptions(FName Owner)
+{
+	if (WoTFrontEnd_HostOptions.RemoveAll([Owner](const FWoTHostOptionRow& Row)
+		{ return Row.Owner == Owner; }) > 0)
+	{
+		++WoTFrontEnd_HostOptionsRevision;
+	}
+}
+
+const TArray<FWoTHostOptionRow>& FWoTFrontEndModel::HostOptions()
+{
+	return WoTFrontEnd_HostOptions;
+}
+
+const FWoTHostOptionRow* FWoTFrontEndModel::FindHostOption(FName Owner, const FString& URLKey)
+{
+	return HostOptions().FindByPredicate([Owner, &URLKey](const FWoTHostOptionRow& Row)
+	{
+		return Row.Owner == Owner && Row.URLKey == URLKey;
+	});
+}
+
+uint64 FWoTFrontEndModel::HostOptionsRevision()
+{
+	return WoTFrontEnd_HostOptionsRevision;
+}
+
+int32 FWoTFrontEndModel::HostOptionValue(const FWoTHostRequest& Request,
+	const FWoTHostOptionRow& Row)
+{
+	const int32* Value = Request.ExtraValues.Find(Row.URLKey);
+	return FMath::Clamp(Value ? *Value : Row.DefaultValue,
+		Row.Min, FMath::Max(Row.Min, Row.Max(Request)));
+}
+
+void FWoTFrontEndModel::ClampHostOptions(FWoTHostRequest& Request)
+{
+	for (const FWoTHostOptionRow& Row : HostOptions())
+	{
+		Request.ExtraValues.Add(Row.URLKey, HostOptionValue(Request, Row));
+	}
+}
+
 FWoTHostRequest FWoTFrontEndModel::DefaultHostRequest(const FString& MapPackage)
 {
 	FWoTHostRequest Request;
@@ -641,6 +720,12 @@ FString FWoTFrontEndModel::BuildHostTravelURL(const FWoTHostRequest& Request,
 	if (!GamePassword.IsEmpty())
 	{
 		URL = WoTFrontEnd_AppendOption(URL, TEXT("GamePassword=") + GamePassword);
+	}
+	Clamped.MaxPlayers = FMath::Clamp(Clamped.MaxPlayers, 2, 16);
+	for (const FWoTHostOptionRow& Row : HostOptions())
+	{
+		URL = WoTFrontEnd_AppendOption(URL, FString::Printf(TEXT("%s=%d"),
+			*Row.URLKey, HostOptionValue(Clamped, Row)));
 	}
 	return AppendPlayerOptions(URL, Faction, SkinColor);
 }

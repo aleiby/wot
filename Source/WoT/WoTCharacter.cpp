@@ -1222,6 +1222,7 @@ int32 AWoTCharacter::ApplyDamageChain(int32 Damage, FName WoTDamageType,
 		SpawnCarcassNow(/*bGibbed*/ true);
 	}
 
+	if (HasAuthority() && Actual > 0) OnDamageApplied.Broadcast(this, EventInstigator, DamageCauser, Actual);
 	return Actual;
 }
 
@@ -1393,13 +1394,10 @@ bool AWoTCharacter::IsCastingBlocked() const
 void AWoTCharacter::NotifyChargeUsed(AWoTAngrealInventory* Ang)
 {
 	// AngrealUser.ChargeUsed runs before the inherited reflector fan-out. Keep
-	// the NPC adapter callback synchronous with the real inventory expenditure.
-	if (IsNPCPawn())
+	// the caster callback synchronous with the real inventory expenditure.
+	if (UWoTCasterComponent* Caster = FindComponentByClass<UWoTCasterComponent>())
 	{
-		if (UWoTCasterComponent* Caster = FindComponentByClass<UWoTCasterComponent>())
-		{
-			Caster->NotifyChargeUsed(Ang);
-		}
+		Caster->NotifyChargeUsed(Ang);
 	}
 	TArray<UWoTReflector*> Reflectors;
 	GetOrderedReflectors(Reflectors);
@@ -5060,20 +5058,28 @@ bool AWoTCharacter::ServerDropSeals_Validate() { return true; }
 
 void AWoTCharacter::ServerUseAngreal_Implementation(FRotator AimRotation)
 {
-	// Never trust only the autonomous proxy's predicted gate: reject a forged or
-	// late cast RPC throughout the authoritative PlayerLanded interval too.
+	AuthorityUseAngreal(AimRotation);
+}
+
+bool AWoTCharacter::CanCastNow() const
+{
 	if (IsHardLanding())
 	{
-		return;
+		return false;
 	}
-	// Authority guard: a decided match casts nothing, even if a stale/modified client still
-	// sends the cast RPC (the well-behaved client re-routes it to a restart in UseAngreal).
 	if (const AWoTPlayerController* WPC = Cast<AWoTPlayerController>(GetController()))
 	{
-		if (WPC->IsMatchEnded())
-		{
-			return;
-		}
+		return !WPC->IsMatchEnded();
+	}
+	const AWoTGameMode* Game = GetWorld() ? GetWorld()->GetAuthGameMode<AWoTGameMode>() : nullptr;
+	return !Game || !Game->bGameEnded;
+}
+
+bool AWoTCharacter::AuthorityUseAngreal(FRotator AimRotation)
+{
+	if (!CanCastNow())
+	{
+		return false;
 	}
 	const bool bSelectedSeal = InventoryComponent
 		&& Cast<AWoTSeal>(InventoryComponent->SelectedItem) != nullptr;
@@ -5101,10 +5107,15 @@ void AWoTCharacter::ServerUseAngreal_Implementation(FRotator AimRotation)
 			DrivenLocomotionAnim = FName(TEXT("Wait"));
 		}
 	}
-	InventoryComponent->UseAngreal();
+	return InventoryComponent->UseAngreal();
 }
 
 void AWoTCharacter::ServerCeaseUsingAngreal_Implementation()
+{
+	AuthorityCeaseUsingAngreal();
+}
+
+void AWoTCharacter::AuthorityCeaseUsingAngreal()
 {
 	bPlayerAnimFireHeld = false;
 	DrivenLocomotionAnim = NAME_None;

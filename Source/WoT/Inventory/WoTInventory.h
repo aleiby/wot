@@ -43,7 +43,7 @@ struct FWoTInventoryFallState
 // item authors PlayerViewMesh and WOTPlayer pins Weapon=None — P01 census),
 // travel.
 UCLASS(Abstract)
-class AWoTInventory : public AActor
+class WOT_API AWoTInventory : public AActor
 {
 	GENERATED_BODY()
 

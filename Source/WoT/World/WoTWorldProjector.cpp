@@ -4442,6 +4442,11 @@ void ReadLevelTitle(const FWoTWorldProjectionSource& Source,
 }
 }
 
+UClass* WoTResolveNativePickupClass(FStringView RetailClassIdentity)
+{
+	return ResolveNativePickupClass(RetailClassIdentity);
+}
+
 #if WITH_AUTOMATION_TESTS
 bool WoTBuildMoverMeshForTesting(AWoTMover& Mover,
 	const FWoTRuntimeMoverModel& Model, FString& OutError)

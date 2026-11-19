@@ -185,6 +185,7 @@ bool FWoTFrontEndViewModel::SelectMap(const FString& PackageName)
 			{
 				HostRequest.bCycleLevels = true;
 			}
+			FWoTFrontEndModel::ClampHostOptions(HostRequest);
 			return true;
 		}
 	}
@@ -233,6 +234,20 @@ void FWoTFrontEndViewModel::SetMaxPlayers(int32 MaxPlayers)
 	{
 		FWoTFrontEndModel::UpdateBattlePlayerLimits(HostRequest, Citadels);
 	}
+	FWoTFrontEndModel::ClampHostOptions(HostRequest);
+}
+
+void FWoTFrontEndViewModel::SetHostOption(const FString& URLKey, int32 Value)
+{
+	for (const FWoTHostOptionRow& Row : FWoTFrontEndModel::HostOptions())
+	{
+		if (Row.URLKey == URLKey)
+		{
+			HostRequest.ExtraValues.Add(URLKey, Value);
+			FWoTFrontEndModel::ClampHostOptions(HostRequest);
+			return;
+		}
+	}
 }
 
 void FWoTFrontEndViewModel::SetMaxTeamSize(int32 MaxTeamSize)
@@ -242,6 +257,7 @@ void FWoTFrontEndViewModel::SetMaxTeamSize(int32 MaxTeamSize)
 		FWoTFrontEndModel::BattleCitadelCount(HostRequest.MapPackage);
 	FWoTFrontEndModel::UpdateBattlePlayerLimits(
 		HostRequest, Citadels > 0 ? Citadels : 2);
+	FWoTFrontEndModel::ClampHostOptions(HostRequest);
 }
 
 void FWoTFrontEndViewModel::SetAutoTeamSelect(bool bEnabled)
@@ -251,6 +267,7 @@ void FWoTFrontEndViewModel::SetAutoTeamSelect(bool bEnabled)
 		FWoTFrontEndModel::BattleCitadelCount(HostRequest.MapPackage);
 	FWoTFrontEndModel::UpdateBattlePlayerLimits(
 		HostRequest, Citadels > 0 ? Citadels : 2);
+	FWoTFrontEndModel::ClampHostOptions(HostRequest);
 }
 
 void FWoTFrontEndViewModel::SetMaxClientTickRate(int32 TickRate)

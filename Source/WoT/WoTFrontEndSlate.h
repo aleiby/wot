@@ -583,6 +583,7 @@ private:
 	float PlayCheckGlyphSize = 0.0f;
 	// Widest host-panel label in LargeBodyFont: the shared label column.
 	float HostLabelColumnWidth = 0.0f;
+	uint64 HostOptionRowsRevision = 0;
 	float MainMenuSafeWidth = 0.0f;
 	float MainMenuListWidth = 0.0f;
 	float MainMenuItemHeight = 0.0f;

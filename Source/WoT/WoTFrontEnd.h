@@ -60,6 +60,18 @@ struct FWoTHostRequest
 	FString AdminPassword;
 	FString GamePassword;
 	bool bLAN = true;
+	TMap<FString, int32> ExtraValues;
+};
+
+/** Optional integer host control, owned and removed as a module unit. */
+struct FWoTHostOptionRow
+{
+	FName Owner;
+	FString URLKey;
+	TFunction<FText()> Label;
+	int32 Min = 0;
+	TFunction<int32(const FWoTHostRequest&)> Max;
+	int32 DefaultValue = 0;
 };
 
 // The return URL is withheld while an OSS session destroy is outstanding. The
@@ -91,9 +103,18 @@ private:
 
 // Pure front-end data and URL construction. Slate and the OSS both consume
 // this seam so initial travel never grows a second, subtly different path.
-class FWoTFrontEndModel
+class WOT_API FWoTFrontEndModel
 {
 public:
+	static bool RegisterHostOption(FWoTHostOptionRow Row);
+	static void UnregisterHostOptions(FName Owner);
+	static const TArray<FWoTHostOptionRow>& HostOptions();
+	static const FWoTHostOptionRow* FindHostOption(FName Owner, const FString& URLKey);
+	static uint64 HostOptionsRevision();
+	static int32 HostOptionValue(const FWoTHostRequest& Request,
+		const FWoTHostOptionRow& Row);
+	static void ClampHostOptions(FWoTHostRequest& Request);
+
 	/** Ready + live payload capability gate for every normal menu/session edge. */
 	static bool CanConstructNormalFrontEnd(const UGameInstance* GameInstance);
 	static const TArray<FWoTFactionChoice>& FactionChoices();

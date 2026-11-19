@@ -3584,6 +3584,7 @@ class SourceSnapshotLockstepTests(unittest.TestCase):
         self.assertEqual(current["paths"],
                          list(packager.SOURCE_SNAPSHOT_PATHS))
         self.assertIn("Plugins/WoTOnboarding", current["paths"])
+        self.assertIn("Plugins/WoTBots", current["paths"])
         self.assertEqual(current, packager._source_snapshot(packager.REPO))
 
 
@@ -3610,22 +3611,41 @@ class ReleaseCookedPathDescriptorTests(unittest.TestCase):
             funnel._validate_release_cooked_paths(
                 self._paths("../../../WoT/Plugins/Other/Other.uplugin"))
 
-    def test_allows_the_optional_onboarding_descriptor(self):
+    def test_allows_optional_code_plugin_descriptors(self):
         baseline = funnel._validate_release_cooked_paths(self._paths())
-        self.assertEqual(funnel._validate_release_cooked_paths(self._paths(
-            "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")),
-            baseline)
+        descriptors = []
+        for name in ("WoTOnboarding", "WoTBots"):
+            descriptor = f"../../../WoT/Plugins/{name}/{name}.uplugin"
+            self.assertEqual(funnel._validate_release_cooked_paths(
+                self._paths(descriptor)), baseline)
+            descriptors.append(descriptor)
+        self.assertEqual(funnel._validate_release_cooked_paths(
+            self._paths(*descriptors)), baseline)
 
-    def test_onboarding_descriptor_never_stands_in_for_the_shell(self):
-        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
-            funnel._validate_release_cooked_paths(self._paths(
-                "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin",
-                drop_shell=True))
+    def test_code_plugin_descriptors_never_stand_in_for_the_shell(self):
+        for name in ("WoTOnboarding", "WoTBots"):
+            with self.subTest(plugin=name):
+                with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+                    funnel._validate_release_cooked_paths(self._paths(
+                        f"../../../WoT/Plugins/{name}/{name}.uplugin",
+                        drop_shell=True))
 
-    def test_refuses_an_onboarding_descriptor_elsewhere(self):
-        with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
-            funnel._validate_release_cooked_paths(self._paths(
-                "../../../WoT/Plugins/Other/WoTOnboarding.uplugin"))
+    def test_refuses_code_plugin_descriptors_elsewhere(self):
+        for name in ("WoTOnboarding", "WoTBots"):
+            for descriptor in (
+                    f"../../../WoT/Plugins/{name}/{name.lower()}.uplugin",
+                    f"../../../WoT/Plugins/Other/{name}.uplugin"):
+                with self.subTest(descriptor=descriptor):
+                    with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
+                        funnel._validate_release_cooked_paths(self._paths(descriptor))
+
+    def test_refuses_duplicate_code_plugin_descriptors(self):
+        for name in ("WoTOnboarding", "WoTBots"):
+            with self.subTest(plugin=name):
+                descriptor = f"../../../WoT/Plugins/{name}/{name}.uplugin"
+                with self.assertRaisesRegex(funnel.FunnelFailure, "duplicate plugin descriptor"):
+                    funnel._validate_release_cooked_paths(
+                        self._paths(descriptor, descriptor))
 
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,7 @@ public:
 	bool IsBattleMapSelected() const
 		{ return FWoTFrontEndModel::IsBattleMap(HostRequest.MapPackage); }
 	void SetMaxPlayers(int32 MaxPlayers);
+	void SetHostOption(const FString& URLKey, int32 Value);
 	void SetMaxTeamSize(int32 MaxTeamSize);
 	void SetAutoTeamSelect(bool bEnabled);
 	void SetCycleLevels(bool bEnabled) { HostRequest.bCycleLevels = bEnabled; }

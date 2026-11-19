@@ -7,7 +7,7 @@
 // Menu-world rules only: create the local front-end controller, but never a
 // gameplay pawn or HUD behind the Slate menu.
 UCLASS()
-class AWoTFrontEndGameMode : public AGameModeBase
+class WOT_API AWoTFrontEndGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 

@@ -15,7 +15,7 @@ class AWoTInventory;
 // HandInfo groups that flat chain for the HUD; BagHolding is a world pickup
 // whose server-owned item array feeds this component again when looted.
 UCLASS(ClassGroup = (WoT), meta = (BlueprintSpawnableComponent))
-class UWoTInventoryComponent : public UActorComponent
+class WOT_API UWoTInventoryComponent : public UActorComponent
 {
 	GENERATED_BODY()
 

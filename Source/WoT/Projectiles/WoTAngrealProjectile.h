@@ -12,7 +12,7 @@
 // UE1's unreliable fast-projectile Touch; reimplemented as a timer +
 // sphere-overlap diff feeding the same ProjTouch/ProjUnTouch virtuals.
 UCLASS(Abstract)
-class AWoTAngrealProjectile : public AWoTProjectile
+class WOT_API AWoTAngrealProjectile : public AWoTProjectile
 {
 	GENERATED_BODY()
 

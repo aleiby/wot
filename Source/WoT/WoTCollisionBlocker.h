@@ -46,7 +46,7 @@ enum class EWoTCollisionBlockerMode : uint8
 
 /** Runtime representation of Engine.BlockAll/BlockPlayer and WOT.BlockMonsters. */
 UCLASS()
-class AWoTCollisionBlocker final : public AActor,
+class WOT_API AWoTCollisionBlocker final : public AActor,
 	public IWoTRetailProjectileTarget
 {
 	GENERATED_BODY()
