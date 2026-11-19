@@ -46,6 +46,7 @@
 #include "../WoTSkyBox.h"
 #include "../WoTUE1Collision.h"
 
+#include "Components/CapsuleComponent.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -1752,6 +1753,67 @@ bool FWoTRelocationIceNetSpec::RunTest(const FString&)
 		&& IsValid(ClientFrozen) && ClientFrozen->GetActorLocation().Equals(FrozenAt, 1.0));
 #endif
 	return !HasAnyErrors();
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTArenaDoorUnTriggerSpec,
+	"WoT.Mover.UnTrigger.Arena02Door", WoTRelocationRealMap::Flags)
+bool FWoTArenaDoorUnTriggerSpec::RunTest(const FString&)
+{
+	using namespace WoTRelocationRealMap;
+	if (!WoTReferenceTreeExists())
+	{
+		AddWarning(TEXT("real retail data absent: Arena_02's door trigger skipped"));
+		return true;
+	}
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	UWorld* World = WoTTest::CreateSpecWorld();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	FWoTWorldProjectionResult Projection;
+	TArray<FWoTRuntimeWorldActor> Records;
+	const auto Keep = [](const FWoTRuntimeWorldActor& Record)
+	{
+		return Record.Identity.EndsWith(TEXT(".Trigger0"))
+			|| Record.Identity.EndsWith(TEXT(".Mover0"));
+	};
+	if (!ProjectRecordsIntoPlayingWorld(*this, Fixture, TEXT("Arena_02"), Keep,
+		*World, Projection, Records)) return false;
+	AWoTMover* Door = nullptr;
+	AWoTTrigger* Trigger = nullptr;
+	for (AActor* Actor : Projection.DeferredActors)
+	{
+		if (AWoTMover* Mover = Cast<AWoTMover>(Actor)) Door = Mover;
+		if (AWoTTrigger* Candidate = Cast<AWoTTrigger>(Actor)) Trigger = Candidate;
+	}
+	if (!TestNotNull(TEXT("Arena_02's door trigger"), Trigger)
+		|| !TestNotNull(TEXT("the projected door"), Door)) return false;
+	TestEqual(TEXT("the authored door uses TriggerControl"), Door->InitialState,
+		EWoTMoverState::TriggerControl);
+	TestTrue(TEXT("the authored trigger addresses the door"), Trigger->EventName == Door->TagName);
+	const FVector Outside = Trigger->GetActorLocation() + FVector(2000, 0, 0);
+	AWoTCharacter* Body = World->SpawnActor<AWoTCharacter>(Outside,
+		FRotator::ZeroRotator, AlwaysSpawn());
+	AWoTPlayerController* Controller = World->SpawnActor<AWoTPlayerController>();
+	if (!TestNotNull(TEXT("player body"), Body)
+		|| !TestNotNull(TEXT("player controller"), Controller)) return false;
+	Controller->Possess(Body);
+	Body->GetCharacterMovement()->DisableMovement();
+	Body->SetActorLocation(Trigger->GetActorLocation());
+	WoTTest::TickWorld(World, Door->DelayTime + Door->MoveTime + 0.2f);
+	TestEqual(TEXT("Arena_02's door trigger opens for the player body"),
+		Door->GetMoverPhase(), EWoTMoverPhase::Open);
+	WoTTest::TickWorld(World, Door->StayOpenTime + Door->MoveTime + 0.2f);
+	TestEqual(TEXT("the door stays open while the player body stands in the trigger"),
+		Door->GetMoverPhase(), EWoTMoverPhase::Open);
+	Body->SetActorLocation(Outside);
+	WoTTest::TickWorld(World, 2);
+	TestEqual(TEXT("the door starts closing within two ticks of the body leaving"),
+		Door->GetMoverPhase(), EWoTMoverPhase::Closing);
+	WoTTest::TickWorld(World, Door->MoveTime + 0.2f);
+	TestEqual(TEXT("the door closes after the body leaves"),
+		Door->GetMoverPhase(), EWoTMoverPhase::Closed);
+	return true;
 }
 
 #endif // WITH_AUTOMATION_TESTS

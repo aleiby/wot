@@ -1834,6 +1834,7 @@ bool ConfigureMoverProperties(AWoTMover& Mover,
 	};
 	if (!ReadFloat(D,A,TEXT("MoveTime"),Mover.MoveTime)) return Invalid(TEXT("MoveTime"));
 	if (!ReadFloat(D,A,TEXT("StayOpenTime"),Mover.StayOpenTime)) return Invalid(TEXT("StayOpenTime"));
+	if (!ReadFloat(D,A,TEXT("OtherTime"),Mover.OtherTime)) return Invalid(TEXT("OtherTime"));
 	if (!ReadFloat(D,A,TEXT("DelayTime"),Mover.DelayTime)) return Invalid(TEXT("DelayTime"));
 	if (!ReadByte(D,A,TEXT("KeyNum"),SerializedKeyNum)) return Invalid(TEXT("KeyNum"));
 	if (!ReadByte(D,A,TEXT("BumpType"),SerializedBumpType)
