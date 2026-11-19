@@ -19,8 +19,8 @@ class DecorationSkinPlanTests(unittest.TestCase):
         (script / "WoTDecorations" / "twotriangles.uc").write_text(
             "class TwoTriangles expands WOTDecoration;\n"
             "defaultproperties\n{\n     Mesh=Mesh'WoTDecorations.twotriangles'\n}\n")
-        (script / "WoTDecorations" / "Grass.uc").write_text(
-            "class Grass expands WOTDecoration;\n"
+        (script / "WoTDecorations" / "Cylinder.uc").write_text(
+            "class Cylinder expands WOTDecoration;\n"
             "defaultproperties\n{\n     Style=STY_Masked\n     bCollideActors=False\n}\n")
         (root / "SpecMap.t3d").write_text("""Begin Map
 Begin Actor Class=twotriangles Name=twotriangles0
@@ -35,8 +35,8 @@ Begin Actor Class=twotriangles Name=TwoTriangles13
     MultiSkins(0)=WaveTexture'JHPFireEng.RiverWave01'
     Name=TwoTriangles13
 End Actor
-Begin Actor Class=Grass Name=Grass0
-    Name=Grass0
+Begin Actor Class=Cylinder Name=Cylinder0
+    Name=Cylinder0
 End Actor
 Begin Actor Class=twotriangles Name=twotriangles5
     Skin=FireTexture'Pkg.Group.Flame-01'
@@ -70,7 +70,7 @@ End Map
         # A WaveTexture skin keeps its imported frame and the class collides.
         self.assertNotIn("TwoTriangles13", plan)
         # Class-default collision off reaches through the shipped .uc chain.
-        self.assertEqual(plan["Grass0"], {
+        self.assertEqual(plan["Cylinder0"], {
             "skin": None, "style": "STY_Masked", "collision_off": True})
         self.assertEqual(plan["twotriangles5"], {
             "skin": ("Pkg", "Flame-01"), "style": "", "collision_off": False})
