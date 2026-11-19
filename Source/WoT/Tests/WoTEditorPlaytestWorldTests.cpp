@@ -474,11 +474,19 @@ bool FWoTEditorPlaytestProceduralCensusSpec::RunTest(const FString&)
 				}
 			}
 		}
+		// Loading a map package in the editor initializes its (inactive) world
+		// (UEditorEngine::OnAssetLoaded). Clean it up here, or a later garbage
+		// collection purges an initialized world and its subsystems ensure.
+		if (MapWorld->bIsWorldInitialized)
+		{
+			MapWorld->CleanupWorld();
+		}
 	}
 	AddInfo(FString::Printf(TEXT("census: %d procedural slots, %d unbound materials"),
 		Candidates, Missed));
 	TestEqual(TEXT("every procedural-named slot of the imported MP maps resolves"), Missed, 0);
 	WoTTest::DestroySpecWorld(SpecWorld);
+	CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
 	return !HasAnyErrors();
 }
 
