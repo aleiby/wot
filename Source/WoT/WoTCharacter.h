@@ -56,6 +56,16 @@ class FWoTRuntimeClassDefaults;
 WOT_API bool WoTDecodePlayerHealthDefault(
 	const FWoTRuntimeClassDefaults& Defaults, int32& OutHealth, FString& OutError);
 
+// The original's player test (Pawn.bIsPlayer, or a WOTPlayer cast) is a property
+// of the player's BODY, not of whoever drives it: a player body counts whether a
+// person, an AI (a bot) or nobody (a dead or unpossessed body) controls it. Only
+// NPC bodies (AWoTNPCCharacter) are not players. World objects that react to
+// players only (proximity triggers, player-bump movers, the seal altar, ...) ask
+// this. Whether a person controls the pawn is a different question
+// (IsPlayerControlled, a PlayerController cast) that belongs to things a person
+// owns: the HUD, input, messages, the camera.
+WOT_API bool WoTIsPlayerBody(const APawn* Pawn);
+
 // AngrealInvDisguise CopyDisguisePawnProperties (uc:285-384): the replicated
 // driver that reproduces a mimicked pawn's LIVE look on every client. UE1
 // replicated the raw Mesh/MultiSkins/DrawScale/collision natively; UE5 does not,

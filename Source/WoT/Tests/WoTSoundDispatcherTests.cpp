@@ -209,8 +209,7 @@ bool FWoTSoundDispatcherLatchSpec::RunTest(const FString&)
 	AWoTSoundDispatcher* Dispatcher = SoundDispatcherSpecSpawnDispatcher(
 		World, {Entry}, TEXT("LatchLoop"), TEXT("LatchLoop"));
 
-	// The touch leg mirrors the authored portal shape (TT_AnyProximity —
-	// PlayerProximity would reject the controllerless fixture pawn).
+	// The touch leg mirrors the authored portal shape (TT_AnyProximity).
 	Dispatcher->TriggerType = EWoTTriggerType::AnyProximity;
 	Dispatcher->WoTTrigger(nullptr, Pawn);
 	Dispatcher->WoTTrigger(nullptr, Pawn);

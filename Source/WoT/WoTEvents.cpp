@@ -1,5 +1,6 @@
 #include "WoTEvents.h"
 
+#include "WoTCharacter.h"
 #include "WoTStageTrigger.h"
 #include "WoTUE1Collision.h"
 #include "Payload/WoTPayloadActivation.h"
@@ -271,7 +272,10 @@ bool AWoTTrigger::IsRelevantOverlap(AActor* Other) const
 	switch (TriggerType)
 	{
 	case EWoTTriggerType::PlayerProximity:
-		return Pawn && Pawn->IsPlayerControlled();
+		// The engine Trigger's player-proximity test reads the toucher's bIsPlayer
+		// (as ElevatorTrigger.uc:38 spells it out): a player body, whoever drives
+		// it, so an AI-driven player body fires the trigger and an NPC does not.
+		return WoTIsPlayerBody(Pawn);
 	case EWoTTriggerType::PawnProximity:
 		return Pawn != nullptr;
 	case EWoTTriggerType::ClassProximity:

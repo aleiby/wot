@@ -5,6 +5,7 @@
 
 #if WITH_AUTOMATION_TESTS
 
+#include "WoTTestAIClasses.h"
 #include "../Inventory/WoTAngrealInvFireball.h"
 #include "../Inventory/WoTInventoryComponent.h"
 #include "../Inventory/WoTSeal.h"
@@ -417,7 +418,9 @@ bool FWoTMoverEncroachCrushSpec::RunTest(const FString&)
 		World, EWoTMoverEncroachType::CrushWhenEncroach);
 	AWoTCharacter* PlayerPawn = World ? World->SpawnActor<AWoTCharacter>(
 		FVector(1000, 0, 0), FRotator::ZeroRotator) : nullptr;
-	AWoTCharacter* NPC = World ? World->SpawnActor<AWoTCharacter>(
+	// The non-player is an NPC body: a player body is crushed whoever drives
+	// it, even with no controller.
+	AWoTCharacter* NPC = World ? World->SpawnActor<AWoTTestNPCCharacter>(
 		FVector(1200, 0, 0), FRotator::ZeroRotator) : nullptr;
 	APlayerController* PC = World ? World->SpawnActor<APlayerController>() : nullptr;
 	if (!TestNotNull(TEXT("mover"), Mover) ||
