@@ -112,12 +112,14 @@ bool CollidesWithWorld(const AActor& Actor)
 		|| Actor.IsA<AWoTBounceableDecoration>();
 }
 
-// The original's movers, its decorations that are not static and a frozen
-// pawn's ice are replicated actors, so its clients saw the far end of a swap
-// where the server had put it. The port shows them the way each kind
+// The original's movers, most of its decorations that are not static and a
+// frozen pawn's ice are replicated actors, so its clients saw the far end of a
+// swap where the server had put it. The port shows them the way each kind
 // replicates: a mover holds the pose as part of its replicated state, a
 // decoration that sleeps until it is moved wakes to send where it now stands,
-// and the ice's place is part of its frozen pawn's replicated effect.
+// and the ice's place is part of its frozen pawn's replicated effect. A
+// decoration the original never sends (Fish.uc:65) or sends only when it first
+// appears (SeaweedA.uc:24-25) is moved on the server alone.
 void ShowClientsWhereItStands(AActor& Moved)
 {
 	if (AWoTMover* Mover = Cast<AWoTMover>(&Moved))

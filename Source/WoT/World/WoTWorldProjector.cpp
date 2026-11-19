@@ -1116,7 +1116,18 @@ bool ProjectDecoration(UWorld& World, const FWoTWorldProjectionSource& Source,
 		bBlockPlayers, CollisionRadius, CollisionHeight);
 	Decoration->ConfigureRuntimePhysics(
 		Physics, RotationRate, bFixedRotationDir);
-	Decoration->ConfigureRuntimeReplication();
+	// How the original sends this decoration to clients: Actor.RemoteRole and
+	// Actor.bNetTemporary, the class's own (Fish.uc:65, SeaweedA.uc:24-25) or
+	// the map's. A decoration nothing overrides keeps Actor's ROLE_DumbProxy.
+	uint8 RemoteRole = AWoTDecoration::UE1RoleDumbProxy;
+	bool bNetTemporary = false;
+	if (!ReadByte(D, A, TEXT("RemoteRole"), RemoteRole)
+		|| !ReadBool(D, A, TEXT("bNetTemporary"), bNetTemporary))
+	{
+		Error = TEXT("a decoration network role is malformed");
+		Decoration->Destroy(); return false;
+	}
+	Decoration->ConfigureRuntimeReplication(RemoteRole, bNetTemporary);
 	FName RenderIteratorClass;
 	float VisibilityRadius = 0.0f;
 	float VisibilityHeight = 0.0f;
