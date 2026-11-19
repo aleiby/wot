@@ -577,10 +577,10 @@ bool DropOnto(FAutomationTestBase& Test, UWorld& World, AWoTMover& Mover,
 	for (float Elapsed = 0.0f; Elapsed < 1.0f; Elapsed += Step)
 	{
 		WoTTest::TickWorld(&World, 1, Step);
-		const UPrimitiveComponent* Base = Body.GetMovementBase();
+		const UPrimitiveComponent* Base = Cast<UPrimitiveComponent>(Body.GetMovementBaseObject());
 		if (Base && Base->GetOwner() == &Mover) return true;
 	}
-	const UPrimitiveComponent* Base = Body.GetMovementBase();
+	const UPrimitiveComponent* Base = Cast<UPrimitiveComponent>(Body.GetMovementBaseObject());
 	Test.AddWarning(FString::Printf(TEXT("the dropped body rests at %s on %s"),
 		*Body.GetActorLocation().ToString(),
 		Base && Base->GetOwner() ? *Base->GetOwner()->GetName() : TEXT("nothing")));
