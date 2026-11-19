@@ -6,7 +6,7 @@
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingDeathRecap.h"
 #include "WoTOnboardingModule.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTOnboardingSettings.h"
 
 #include "Misc/ScopeExit.h"
@@ -242,7 +242,7 @@ bool FWoTOnboardingDeathRecapHandlerSpec::RunTest(const FString&)
 	Live.SetShowDeathCounterHints(true);
 	const TArray<FName> SeenBefore = Live.SeenPickupCards;
 
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TStrongObjectPtr<UWoTAngrealGuide> Guide(WoTOnboardingRecapMakeGuide());
 	// No retail window open, whatever an earlier spec's world left installed.
 	TFunction<bool()> SavedWindowQuery = MoveTemp(Seams.IsClientWindowOpen);
@@ -253,7 +253,7 @@ bool FWoTOnboardingDeathRecapHandlerSpec::RunTest(const FString&)
 	ON_SCOPE_EXIT
 	{
 		Module.SetPickupCardGuideForTesting(nullptr);
-		FWoTOnboardingSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
+		FWoTExtensionSeams::Get().IsClientWindowOpen = MoveTemp(SavedWindowQuery);
 	};
 
 	const int32 Before = Module.GetDeathRecapsShownForTesting();

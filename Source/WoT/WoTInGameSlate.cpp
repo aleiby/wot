@@ -59,7 +59,7 @@ namespace
 	// The heading's gap above the entries.
 	constexpr float WoTInGameMenu_HeadingGap = 24.0f;
 
-	// Seam extension rows (FWoTOnboardingSeams::MenuRows) sit after the other
+	// Seam extension rows (FWoTExtensionSeams::MenuRows) sit after the other
 	// entries, just above Quit; their ids carry the row index offset past the
 	// retail enum, so the Tick snapshot/live comparison treats them like any
 	// other entry and rebuilds when the registry changes under the open menu.
@@ -200,14 +200,14 @@ namespace
 		// plugin renders exactly the retail list. Labels resolve here
 		// (snapshot time) so Tick's live/snapshot comparison follows label
 		// changes too.
-		const TArray<FWoTOnboardingRow>& ExtensionRows =
-			FWoTOnboardingSeams::Get().MenuRows;
+		const TArray<FWoTExtensionRow>& ExtensionRows =
+			FWoTExtensionSeams::Get().MenuRows;
 		const int32 ExtensionCapacity = 0xFF - WoTInGameSlate_ExtensionIdBase;
 		for (int32 RowIndex = 0;
 			RowIndex < ExtensionRows.Num() && RowIndex < ExtensionCapacity;
 			++RowIndex)
 		{
-			const FWoTOnboardingRow& Row = ExtensionRows[RowIndex];
+			const FWoTExtensionRow& Row = ExtensionRows[RowIndex];
 			Entries.Add({static_cast<EWoTInGameMenuEntry>(
 					WoTInGameSlate_ExtensionIdBase + RowIndex),
 				Row.Label ? Row.Label() : FString()});
@@ -728,7 +728,7 @@ TSharedRef<SWidget> SWoTInGameMenuOverlay::BuildMainMenu()
 	// Captured with the labels: extension activation must run the invoke that
 	// belongs to the rendered row even if the registry changes before Tick's
 	// snapshot comparison rebuilds the list.
-	ExtensionMenuRows = FWoTOnboardingSeams::Get().MenuRows;
+	ExtensionMenuRows = FWoTExtensionSeams::Get().MenuRows;
 	const TArray<FWoTInGameMenuEntry> MenuEntries = WoTInGameSlate_MenuEntries(
 		PlayerController.Get(), Preferences.Get()
 #if WITH_AUTOMATION_TESTS
@@ -1538,7 +1538,7 @@ FReply SWoTInGameMenuOverlay::ActivateExtensionEntry(int32 RowIndex)
 	// Copy before Resume: leaving the menu releases the controller's reference
 	// to this overlay, so members are not touched after it. Activation mirrors
 	// ActivateHelp: leave the menu first, then run the row's action.
-	const FWoTOnboardingRow Row = ExtensionMenuRows[RowIndex];
+	const FWoTExtensionRow Row = ExtensionMenuRows[RowIndex];
 	if (AWoTPlayerController* Controller = PlayerController.Get())
 	{
 		Controller->ResumeFromInGameMenu();

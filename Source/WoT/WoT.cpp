@@ -12,6 +12,8 @@
 #include "Updater/Mac/WoTMacUpdateSwap.h"
 #endif
 #include "World/WoTWorldMaterializer.h"
+#include "World/WoTItemPresentation.h"
+#include "World/WoTHandPresentation.h"
 #include "WoTBootFailureReceipt.h"
 #include "WoTBootstrapHeartbeat.h"
 #include "WoTNetVersion.h"
@@ -19,7 +21,7 @@
 #include "WoTMenuStyle.h"
 #include "WoTWindowActivation.h"
 #include "WoTMetalLayerRefresh.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTRandom.h"
 #include "WoTRetailText.h"
 #include "Testing/WoTStereoNonRealtimeAudio.h"
@@ -132,7 +134,7 @@ public:
 		// wrapped mechanism resolves the owning file from the section, so the
 		// file argument is address documentation. Behavior-neutral: nothing
 		// in the game module reads through this slot.
-		FWoTOnboardingSeams::Get().ResolveRetailText =
+		FWoTExtensionSeams::Get().ResolveRetailText =
 			[](const FString&, const FString& Section, const FString& Property)
 			{
 				FWoTRetailText::EnsureLoaded();
@@ -147,7 +149,7 @@ public:
 		// widget keeps it alive through the chrome and collapses with its
 		// revocation. Unset while the guarded faces are unavailable or
 		// revoked; a consumer then draws with its own fallback.
-		FWoTOnboardingSeams::Get().ResolveMenuChrome =
+		FWoTExtensionSeams::Get().ResolveMenuChrome =
 			[]() -> TOptional<FWoTOnboardingMenuChrome>
 			{
 				APlayerController* Controller = WoTOnboardingLocalController();
@@ -172,8 +174,19 @@ public:
 			};
 		// Onboarding seams: the original UI art and the item icons, resolved
 		// the way the HUD and the item-info window resolve theirs.
-		FWoTOnboardingSeams::Get().ResolveRetailTexture = &WoTOnboardingRetailTexture;
-		FWoTOnboardingSeams::Get().ResolveItemIcon = &WoTOnboardingItemIcon;
+		FWoTExtensionSeams::Get().ResolveRetailTexture = &WoTOnboardingRetailTexture;
+		FWoTExtensionSeams::Get().ResolveItemIcon = &WoTOnboardingItemIcon;
+		FWoTExtensionSeams::Get().SpawnItemPresentation =
+			[](UWorld* World, FName ClassName, const FTransform& Transform) -> AActor*
+			{
+				return AWoTItemPresentation::Spawn(World, ClassName, Transform);
+			};
+		FWoTExtensionSeams::Get().HandStyleForPawn = &AWoTHandPresentation::StyleForPawn;
+		FWoTExtensionSeams::Get().SpawnHandPresentation =
+			[](UWorld* World, FName HandClass, int32 Color, const FTransform& Transform) -> AActor*
+			{
+				return AWoTHandPresentation::Spawn(World, HandClass, Color, Transform);
+			};
 #if WOT_WITH_BOOTSTRAP_TEST_HARNESSES
 		WoTStereoNonRealtimeAudio::Register();
 #endif

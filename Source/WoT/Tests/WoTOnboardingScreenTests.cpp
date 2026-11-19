@@ -8,7 +8,7 @@
 #include "../WoTGameInstance.h"
 #include "../WoTInGameSlate.h"
 #include "../WoTMenuStyle.h"
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
 
@@ -26,7 +26,7 @@
 #include "Widgets/Text/STextBlock.h"
 
 // The settings screen's seam extension group (plan Task 4): rows registered
-// in FWoTOnboardingSeams::SettingsRows render before the Controls bindings.
+// in FWoTExtensionSeams::SettingsSections render before the Controls bindings.
 // An empty registry renders exactly today's screen. The specs swap the
 // live registry for fixture rows and restore it, so they hold with or
 // without the onboarding plugin (and whatever it registered). All fixture
@@ -220,34 +220,36 @@ struct FWoTOnboardingScreenPrefsFixture
 /** Empties the live seam settings registry for the spec; restores on exit. */
 struct FWoTOnboardingScreenRowsGuard
 {
-	TArray<FWoTOnboardingRow> Saved;
+	TArray<FWoTExtensionSettingsSection> Saved;
 
 	FWoTOnboardingScreenRowsGuard()
 	{
-		Saved = MoveTemp(FWoTOnboardingSeams::Get().SettingsRows);
-		FWoTOnboardingSeams::Get().SettingsRows.Reset();
+		Saved = MoveTemp(FWoTExtensionSeams::Get().SettingsSections);
+		FWoTExtensionSeams::Get().SettingsSections.Reset();
+		FWoTExtensionSeams::Get().SettingsSections.Add({NAME_None,
+			[]() { return FString(TEXT("ONBOARDING")); }, 100, {}});
 	}
 
 	~FWoTOnboardingScreenRowsGuard()
 	{
-		FWoTOnboardingSeams::Get().SettingsRows = MoveTemp(Saved);
+		FWoTExtensionSeams::Get().SettingsSections = MoveTemp(Saved);
 	}
 };
 
 /** Empties the live seam MENU registry for the spec; restores on exit. */
 struct FWoTOnboardingScreenMenuRowsGuard
 {
-	TArray<FWoTOnboardingRow> Saved;
+	TArray<FWoTExtensionRow> Saved;
 
 	FWoTOnboardingScreenMenuRowsGuard()
 	{
-		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
-		FWoTOnboardingSeams::Get().MenuRows.Reset();
+		Saved = MoveTemp(FWoTExtensionSeams::Get().MenuRows);
+		FWoTExtensionSeams::Get().MenuRows.Reset();
 	}
 
 	~FWoTOnboardingScreenMenuRowsGuard()
 	{
-		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+		FWoTExtensionSeams::Get().MenuRows = MoveTemp(Saved);
 	}
 };
 
@@ -303,9 +305,9 @@ bool FWoTOnboardingScreenExtensionParitySpec::RunTest(const FString&)
 		WoTOnboardingScreenHasText(BaselineTexts, TEXT("ONBOARDING")));
 
 	// Two registered rows add exactly one group header and one label each.
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
+	FWoTExtensionSeams::Get().SettingsSections[0].Rows.Add({
 		[]() { return FString(TEXT("Fixture Aid Alpha")); }, []() {}});
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
+	FWoTExtensionSeams::Get().SettingsSections[0].Rows.Add({
 		[]() { return FString(TEXT("Fixture Aid Beta")); }, []() {}});
 	const TSharedRef<SWoTSettingsScreen> Extended =
 		MakeWoTOnboardingScreen(Fixture.Owner, Authority);
@@ -323,6 +325,42 @@ bool FWoTOnboardingScreenExtensionParitySpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTExtensionSectionsOrderSpec,
+	"WoT.Extension.SettingsSectionsOrder", WoTOnboardingScreenFlags)
+
+bool FWoTExtensionSectionsOrderSpec::RunTest(const FString&)
+{
+	FWoTOnboardingScreenPrefsFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	FWoTOnboardingScreenRowsGuard RegistryGuard;
+	auto& Sections = FWoTExtensionSeams::Get().SettingsSections;
+	Sections.Reset();
+	Sections.Add({TEXT("Late"), []() { return FString(TEXT("LATE GROUP")); }, 200,
+		{{[]() { return FString(TEXT("Late Row")); }, []() {}}}});
+	Sections.Add({TEXT("Empty"), []() { return FString(TEXT("EMPTY GROUP")); }, 0, {}});
+	Sections.Add({TEXT("Early"), []() { return FString(TEXT("EARLY GROUP")); }, 100,
+		{{[]() { return FString(TEXT("Early Row")); }, []() {}}}});
+	const auto Screen = MakeWoTOnboardingScreen(Fixture.Owner, MakeWoTOnboardingScreenAuthority());
+	// An open screen owns its callbacks even after the registry changes.
+	Sections.Reset();
+	Screen->SlatePrepass(1.0f);
+	TArray<TSharedRef<STextBlock>> Texts;
+	WoTOnboardingScreenCollectText(Screen, Texts);
+	TestFalse(TEXT("empty sections add no header"),
+		WoTOnboardingScreenHasText(Texts, TEXT("EMPTY GROUP")));
+	const auto Rows = WoTOnboardingScreenFindRows(Screen, TEXT("EARLY GROUP"));
+	if (!TestTrue(TEXT("sections render"), Rows.IsValid())) return false;
+	const int32 Early = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("EARLY GROUP"));
+	const int32 Late = WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("LATE GROUP"));
+	TestTrue(TEXT("sections sort by order rather than registration"), Early >= 0 && Late > Early);
+	TestEqual(TEXT("one header and one row in the first section"), Late - Early, 2);
+	TestEqual(TEXT("early row follows its header"),
+		WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("Early Row")), Early + 1);
+	TestEqual(TEXT("late row follows its header"),
+		WoTOnboardingScreenTextSlot(Rows.ToSharedRef(), TEXT("Late Row")), Late + 1);
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingScreenSettingsOrderSpec,
 	"WoT.Onboarding.ScreenSettingsOrder", WoTOnboardingScreenFlags)
 
@@ -331,7 +369,7 @@ bool FWoTOnboardingScreenSettingsOrderSpec::RunTest(const FString&)
 	FWoTOnboardingScreenPrefsFixture Fixture;
 	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
 	FWoTOnboardingScreenRowsGuard RegistryGuard;
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
+	FWoTExtensionSeams::Get().SettingsSections[0].Rows.Add({
 		[]() { return FString(TEXT("Fixture Aid")); }, []() {}});
 	const TSharedRef<SWoTSettingsScreen> Screen = MakeWoTOnboardingScreen(
 		Fixture.Owner, MakeWoTOnboardingScreenAuthority());
@@ -362,7 +400,7 @@ bool FWoTOnboardingScreenExtensionRowsSpec::RunTest(const FString&)
 	bool bAidOn = false;
 	int32 Invocations = 0;
 	FWoTOnboardingScreenRowsGuard RegistryGuard;
-	FWoTOnboardingSeams::Get().SettingsRows.Add({
+	FWoTExtensionSeams::Get().SettingsSections[0].Rows.Add({
 		[&bAidOn]()
 		{
 			return FString::Printf(TEXT("Fixture Aid Gamma: %s"),
@@ -425,7 +463,7 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 	// One registered row adds exactly one entry, just above Quit, which stays
 	// last; its activation runs the row's invoke.
 	int32 Invocations = 0;
-	FWoTOnboardingSeams::Get().MenuRows.Add({
+	FWoTExtensionSeams::Get().MenuRows.Add({
 		[]() { return FString(TEXT("Fixture Guide Row")); },
 		[&Invocations]() { ++Invocations; },
 		FName(TEXT("FixtureOwner"))});
@@ -449,7 +487,7 @@ bool FWoTOnboardingInGameMenuExtensionSpec::RunTest(const FString&)
 
 	// The live/snapshot comparison rebuilds the open menu when the registry
 	// drifts (the guide row follows the master toggle live).
-	FWoTOnboardingSeams::Get().MenuRows.Reset();
+	FWoTExtensionSeams::Get().MenuRows.Reset();
 	Extended->Tick(FGeometry::MakeRoot(FVector2D(1280.0f, 720.0f),
 		FSlateLayoutTransform()), 0.0, 0.0f);
 	TestTrue(TEXT("an unregistered row leaves the open menu on the next tick"),
@@ -490,7 +528,7 @@ bool FWoTOnboardingFrontEndMenuExtensionSpec::RunTest(const FString&)
 		TEXT("FIXTUREHARDWARE"), TEXT("FIXTUREQUIT")});
 
 	int32 Invocations = 0;
-	FWoTOnboardingSeams::Get().MenuRows.Add({
+	FWoTExtensionSeams::Get().MenuRows.Add({
 		[]() { return FString(TEXT("Fixture Guide Row")); },
 		[&Invocations]() { ++Invocations; },
 		FName(TEXT("FixtureOwner"))});
@@ -516,7 +554,7 @@ bool FWoTOnboardingFrontEndMenuExtensionSpec::RunTest(const FString&)
 
 	// Registry drift while the main screen shows rebuilds it from the live
 	// rows on the next tick.
-	FWoTOnboardingSeams::Get().MenuRows.Reset();
+	FWoTExtensionSeams::Get().MenuRows.Reset();
 	Extended->Tick(Geometry, 0.0, 0.0f);
 	CheckLabels(Extended, {TEXT("FIXTUREPLAY"), TEXT("FIXTURECONTROL"),
 		TEXT("FIXTUREHARDWARE"), TEXT("FIXTUREQUIT")});
@@ -536,7 +574,7 @@ bool FWoTOnboardingFrontEndRegistrySelectionSpec::RunTest(const FString&)
 	for (const FName SharedOwner : {FName(TEXT("FixtureOwner")), FName()})
 	{
 		int32 SecondInvocations = 0;
-		TArray<FWoTOnboardingRow>& Rows = FWoTOnboardingSeams::Get().MenuRows;
+		TArray<FWoTExtensionRow>& Rows = FWoTExtensionSeams::Get().MenuRows;
 		Rows = {
 			{[]() { return FString(TEXT("Fixture First")); }, []() {}, SharedOwner},
 			{[]() { return FString(TEXT("Fixture Second")); },
@@ -549,7 +587,7 @@ bool FWoTOnboardingFrontEndRegistrySelectionSpec::RunTest(const FString&)
 		const TSharedPtr<SWoTMenuButton> Second = Menu->MainMenuButtonForTesting(2);
 		if (!TestTrue(TEXT("the second registered row exists"), Second.IsValid())) return false;
 		Second->OnFocusReceived(Geometry, FFocusEvent(EFocusCause::Navigation, 0));
-		Rows.Insert(FWoTOnboardingRow{[]() { return FString(TEXT("Fixture Inserted")); }, []() {},
+		Rows.Insert(FWoTExtensionRow{[]() { return FString(TEXT("Fixture Inserted")); }, []() {},
 			FName(TEXT("AnotherOwner"))}, 0);
 		Menu->Tick(Geometry, 0.0, 0.0f);
 		TestTrue(TEXT("registry insertion preserves the second row for its owner"),

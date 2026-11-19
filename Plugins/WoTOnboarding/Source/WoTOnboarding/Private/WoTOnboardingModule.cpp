@@ -5,7 +5,7 @@
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingDeathRecap.h"
 #include "WoTOnboardingPickupCards.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTOnboardingSettings.h"
 
 #include "Engine/Engine.h"
@@ -106,9 +106,9 @@ FString WoTOnboardingAidRowLabel(const TCHAR* Name, bool bOn, bool bMasterOn)
 	return Label;
 }
 
-void WoTOnboardingRemoveOwnedRows(TArray<FWoTOnboardingRow>& Rows)
+void WoTOnboardingRemoveOwnedRows(TArray<FWoTExtensionRow>& Rows)
 {
-	Rows.RemoveAll([](const FWoTOnboardingRow& Row)
+	Rows.RemoveAll([](const FWoTExtensionRow& Row)
 	{
 		return Row.Owner == FWoTOnboardingModule::SettingsRowOwner();
 	});
@@ -148,11 +148,16 @@ void FWoTOnboardingModule::StartupModule()
 	// in-game way to turn the aids back on, so the master switch must never
 	// hide them. Only aid BEHAVIOR gates on the toggles (Tasks 5-7). Labels
 	// resolve lazily at draw time, so they always show the live values.
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	// Restart-safe: a reload never leaves a previous registration to double
 	// the rows.
-	WoTOnboardingRemoveOwnedRows(Seams.SettingsRows);
-	Seams.SettingsRows.Add({
+	Seams.SettingsSections.RemoveAll([](const FWoTExtensionSettingsSection& Section)
+	{ return Section.Owner == SettingsRowOwner(); });
+	FWoTExtensionSettingsSection& Section = Seams.SettingsSections.AddDefaulted_GetRef();
+	Section.Owner = SettingsRowOwner();
+	Section.Header = []() { return FString(TEXT("ONBOARDING")); };
+	Section.Order = 100;
+	Section.Rows.Add({
 		[]()
 		{
 			return FString::Printf(TEXT("Onboarding Aids: %s"),
@@ -161,7 +166,7 @@ void FWoTOnboardingModule::StartupModule()
 		},
 		[]() { UWoTOnboardingSettings::Get().ToggleEnableOnboardingAids(); },
 		SettingsRowOwner()});
-	Seams.SettingsRows.Add({
+	Section.Rows.Add({
 		[]()
 		{
 			const UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
@@ -170,7 +175,7 @@ void FWoTOnboardingModule::StartupModule()
 		},
 		[]() { UWoTOnboardingSettings::Get().ToggleShowFirstPickupCards(); },
 		SettingsRowOwner()});
-	Seams.SettingsRows.Add({
+	Section.Rows.Add({
 		[]()
 		{
 			const UWoTOnboardingSettings& Settings = UWoTOnboardingSettings::Get();
@@ -200,7 +205,7 @@ void FWoTOnboardingModule::ShutdownModule()
 {
 	CloseGuideBrowser();
 	ClosePickupCard();
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	UnbindSeamHandlers();
 	PickupCardTestGuide.Reset();
 	bGuideAbsent = false;
@@ -219,13 +224,14 @@ void FWoTOnboardingModule::ShutdownModule()
 		}
 		SettingsChangedHandle.Reset();
 	}
-	WoTOnboardingRemoveOwnedRows(Seams.SettingsRows);
+	Seams.SettingsSections.RemoveAll([](const FWoTExtensionSettingsSection& Section)
+	{ return Section.Owner == SettingsRowOwner(); });
 	WoTOnboardingRemoveOwnedRows(Seams.MenuRows);
 }
 
 void FWoTOnboardingModule::RefreshMenuRowRegistration()
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	WoTOnboardingRemoveOwnedRows(Seams.MenuRows);
 	if (!UWoTOnboardingSettings::Get().bEnableOnboardingAids)
 	{
@@ -244,7 +250,7 @@ void FWoTOnboardingModule::RefreshSeamBindings()
 	{
 		return;
 	}
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	ShowGuideHandle = Seams.ShowGuideRequested.AddRaw(
 		this, &FWoTOnboardingModule::HandleShowGuideRequested);
 	CloseWindowsHandle = Seams.CloseClientWindows.AddRaw(
@@ -257,7 +263,7 @@ void FWoTOnboardingModule::RefreshSeamBindings()
 
 void FWoTOnboardingModule::UnbindSeamHandlers()
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	if (ShowGuideHandle.IsValid())
 	{
 		Seams.ShowGuideRequested.Remove(ShowGuideHandle);
@@ -342,7 +348,7 @@ void FWoTOnboardingModule::HandleClientItemAdded(FName ClassName)
 	{
 		Guide = ResolveGuide();
 	}
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const bool bScreenBusy = PickupCard.IsValid() || GuideBrowser.IsValid()
 		|| (Seams.IsClientWindowOpen && Seams.IsClientWindowOpen());
 	if (WoTOnboardingPickupCards::Decide(Settings, Guide, ClassName, bScreenBusy)
@@ -379,7 +385,7 @@ void FWoTOnboardingModule::HandleClientKilledBy(FName ClassName)
 	}
 	// A pickup card does not hold the screen against a recap, which
 	// replaces it.
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const bool bScreenBusy = GuideBrowser.IsValid()
 		|| (Seams.IsClientWindowOpen && Seams.IsClientWindowOpen());
 	if (WoTOnboardingDeathRecap::Decide(Settings, Guide, ClassName, bScreenBusy)
@@ -426,7 +432,7 @@ void FWoTOnboardingModule::ShowPickupCard(const FWoTAngrealGuideRow& Row)
 		[](const FString& Section, const FString& Property)
 		{
 			// The resolver derives the owning file from the section.
-			return FWoTOnboardingSeams::Get().ResolveText(
+			return FWoTExtensionSeams::Get().ResolveText(
 				FString(), Section, Property);
 		},
 		WoTOnboardingGuideKeyName()),
@@ -444,7 +450,7 @@ void FWoTOnboardingModule::ShowDeathRecap(const UWoTAngrealGuide& Guide,
 		[](const FWoTAngrealGuideRow& TitleRow)
 		{
 			// The retail localization address: section = the class name.
-			return FWoTOnboardingSeams::Get().ResolveText(
+			return FWoTExtensionSeams::Get().ResolveText(
 				FString(), TitleRow.ClassName.ToString(), TEXT("Title"));
 		},
 		WoTOnboardingGuideKeyName()),
@@ -544,7 +550,7 @@ void FWoTOnboardingModule::OpenGuideBrowser()
 	// While the player is dead, the guide opens at the item that killed
 	// them; else at the card's item or the item in the player's selected hand.
 	// Captured first, because the close broadcast below removes the card.
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const FName InitialRow = SWoTGuideBrowser::OpeningRow(*Guide,
 		Seams.KilledByItemClass ? Seams.KilledByItemClass() : NAME_None, PickupCardClass,
 		Seams.SelectedItemClass ? Seams.SelectedItemClass() : NAME_None);
@@ -613,7 +619,7 @@ void FWoTOnboardingModule::CloseGuideBrowser()
 	}
 	GuideBrowser.Reset();
 	GuideViewport.Reset();
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	if (Seams.SetOverlayInput)
 	{
 		Seams.SetOverlayInput(false, nullptr);

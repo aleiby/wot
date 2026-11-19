@@ -5,7 +5,7 @@
 #include "WoTOnboardingModule.h"
 #include "WoTOnboardingSettings.h"
 
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 #include "Misc/ScopeExit.h"
 #include "Modules/ModuleManager.h"
@@ -47,14 +47,14 @@ struct FWoTOnboardingSettingsSnapshot
 };
 
 /** This module's rows in the live seam registry, in registration order. */
-TArray<const FWoTOnboardingRow*> WoTOnboardingCollectModuleRows()
+TArray<const FWoTExtensionRow*> WoTOnboardingCollectModuleRows()
 {
-	TArray<const FWoTOnboardingRow*> Rows;
-	for (const FWoTOnboardingRow& Row : FWoTOnboardingSeams::Get().SettingsRows)
+	TArray<const FWoTExtensionRow*> Rows;
+	for (const FWoTExtensionSettingsSection& Section : FWoTExtensionSeams::Get().SettingsSections)
 	{
-		if (Row.Owner == FWoTOnboardingModule::SettingsRowOwner())
+		if (Section.Owner == FWoTOnboardingModule::SettingsRowOwner())
 		{
-			Rows.Add(&Row);
+			for (const FWoTExtensionRow& Row : Section.Rows) Rows.Add(&Row);
 		}
 	}
 	return Rows;
@@ -141,7 +141,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingSettingsRowsRegisteredSpec,
 
 bool FWoTOnboardingSettingsRowsRegisteredSpec::RunTest(const FString&)
 {
-	TArray<const FWoTOnboardingRow*> Rows = WoTOnboardingCollectModuleRows();
+	TArray<const FWoTExtensionRow*> Rows = WoTOnboardingCollectModuleRows();
 	if (!TestEqual(TEXT("the module registered exactly three settings rows"),
 		Rows.Num(), 3))
 	{

@@ -3616,6 +3616,18 @@ class ReleaseCookedPathDescriptorTests(unittest.TestCase):
             "../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")),
             baseline)
 
+    def test_accepts_both_optional_plugin_switches(self):
+        baseline = funnel._validate_release_cooked_paths(self._paths())
+        for onboarding in (False, True):
+            for first_person in (False, True):
+                with self.subTest(onboarding=onboarding, first_person=first_person):
+                    paths = self._paths()
+                    if onboarding:
+                        paths.append("../../../WoT/Plugins/WoTOnboarding/WoTOnboarding.uplugin")
+                    if first_person:
+                        paths.append("../../../WoT/Plugins/WoTFirstPerson/WoTFirstPerson.uplugin")
+                    self.assertEqual(funnel._validate_release_cooked_paths(paths), baseline)
+
     def test_onboarding_descriptor_never_stands_in_for_the_shell(self):
         with self.assertRaisesRegex(funnel.FunnelFailure, "plugin descriptor"):
             funnel._validate_release_cooked_paths(self._paths(

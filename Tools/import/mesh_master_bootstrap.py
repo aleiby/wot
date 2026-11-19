@@ -18,7 +18,7 @@ NEUTRAL_PATH = "/Game/WoT/Textures/WOTDetail/T_WoT_Neutral"
 LIGHT_WAVE_COLLECTION_PATH = "/Game/WoT/Materials/MPC_WoTLightWave"
 KEYCOLOR_GRAPH_VERSION = "1"
 KEYCOLOR_GRAPH_TAG = "WoT.MeshLit.KeyColorGraph"
-LIGHT_GRAPH_VERSION = "wave-groups-dynamic-g45-v2"
+LIGHT_GRAPH_VERSION = "wave-groups-dynamic-g45-v3"
 LIGHT_GRAPH_TAG = "WoT.MeshLit.LightGraph"
 
 _ML_HLSL = """
@@ -129,6 +129,11 @@ def _wire_light(unreal, material, expr):
             ("Nrm", unreal.MaterialExpressionVertexNormalWS, 80),
             ("Cam", unreal.MaterialExpressionCameraPositionWS, 160)):
         node = expr(cls, -700, y)
+        if name == "WP":
+            # Sample the real mesh position before first-person shader warping.
+            node.set_editor_property(
+                "world_position_shader_offset",
+                unreal.WorldPositionIncludedOffsets.WPT_EXCLUDE_ALL_SHADER_OFFSETS)
         item = unreal.CustomInput()
         item.set_editor_property("input_name", name)
         inputs.append(item)

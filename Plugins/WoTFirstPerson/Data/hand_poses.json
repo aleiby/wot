@@ -1,0 +1,961 @@
+{
+ "_doc": "First-person hand poses and how each artifact sits in its grip. bones: [flex, spread, twist] degrees per bone in the hand skeleton contract. Grip poses add the hand's camera-space placement and the held item's line, front, centre and lead in grip_r's frame. items: per artifact class, its grip, the local axis that leads along the grip line, the local axis turned toward the viewer, its half-size in the hand and a slide along the line (cm). Compiled by Tools/import/generate_hand_poses.py.",
+ "poses": {
+  "relaxed": {
+   "bones": {
+    "thumb_metacarpal_r": [
+     5
+    ],
+    "thumb_proximal_r": [
+     8
+    ],
+    "thumb_distal_r": [
+     10
+    ],
+    "index_proximal_r": [
+     10
+    ],
+    "index_intermediate_r": [
+     15
+    ],
+    "index_distal_r": [
+     8
+    ],
+    "middle_proximal_r": [
+     14
+    ],
+    "middle_intermediate_r": [
+     18
+    ],
+    "middle_distal_r": [
+     10
+    ],
+    "ring_metacarpal_r": [
+     2
+    ],
+    "ring_proximal_r": [
+     18
+    ],
+    "ring_intermediate_r": [
+     20
+    ],
+    "ring_distal_r": [
+     12
+    ],
+    "little_metacarpal_r": [
+     4
+    ],
+    "little_proximal_r": [
+     22
+    ],
+    "little_intermediate_r": [
+     22
+    ],
+    "little_distal_r": [
+     14
+    ]
+   }
+  },
+  "rod": {
+   "bones": {
+    "wrist_r": [
+     15.82,
+     14.38,
+     0.0
+    ],
+    "index_proximal_r": [
+     67.06,
+     2.21,
+     0.0
+    ],
+    "index_intermediate_r": [
+     109.82,
+     0.0,
+     0.0
+    ],
+    "index_distal_r": [
+     76.35,
+     0.0,
+     0.0
+    ],
+    "middle_proximal_r": [
+     78.66,
+     -0.49,
+     0.0
+    ],
+    "middle_intermediate_r": [
+     109.43,
+     0.0,
+     0.0
+    ],
+    "middle_distal_r": [
+     78.09,
+     0.0,
+     0.0
+    ],
+    "ring_proximal_r": [
+     94.85,
+     -0.35,
+     0.0
+    ],
+    "ring_intermediate_r": [
+     85.12,
+     0.0,
+     0.0
+    ],
+    "ring_distal_r": [
+     59.09,
+     0.0,
+     0.0
+    ],
+    "little_proximal_r": [
+     95.0,
+     -1.2,
+     0.0
+    ],
+    "little_intermediate_r": [
+     61.55,
+     0.0,
+     0.0
+    ],
+    "little_distal_r": [
+     40.81,
+     0.0,
+     0.0
+    ],
+    "ring_metacarpal_r": [
+     1.91,
+     0.0,
+     0.0
+    ],
+    "little_metacarpal_r": [
+     12.5,
+     0.0,
+     0.0
+    ],
+    "thumb_metacarpal_r": [
+     10.42,
+     -3.16,
+     18.89
+    ],
+    "thumb_proximal_r": [
+     15.66,
+     0.0,
+     0.0
+    ],
+    "thumb_distal_r": [
+     1.92,
+     0.0,
+     0.0
+    ]
+   },
+   "hand": {
+    "offset": [
+     33.044,
+     21.242,
+     -8.317
+    ],
+    "rotator": [
+     29.747,
+     -28.511,
+     91.851
+    ],
+    "scale": 1.1795
+   },
+   "item": {
+    "axis": [
+     0.8012,
+     -0.5909,
+     0.0937
+    ],
+    "front": [
+     -0.1595,
+     -0.362,
+     -0.9184
+    ],
+    "point": [
+     4.602,
+     -1.997,
+     4.208
+    ],
+    "roll": 0,
+    "half_length": 11.0,
+    "lead": 0.333
+   }
+  },
+  "figurine": {
+   "bones": {
+    "wrist_r": [
+     11.54,
+     10.96,
+     0.0
+    ],
+    "index_proximal_r": [
+     92.05,
+     0.72,
+     0.0
+    ],
+    "index_intermediate_r": [
+     94.43,
+     0.0,
+     0.0
+    ],
+    "index_distal_r": [
+     66.39,
+     0.0,
+     0.0
+    ],
+    "middle_proximal_r": [
+     93.57,
+     2.37,
+     0.0
+    ],
+    "middle_intermediate_r": [
+     88.0,
+     0.0,
+     0.0
+    ],
+    "middle_distal_r": [
+     58.95,
+     0.0,
+     0.0
+    ],
+    "ring_proximal_r": [
+     94.92,
+     1.59,
+     0.0
+    ],
+    "ring_intermediate_r": [
+     71.47,
+     0.0,
+     0.0
+    ],
+    "ring_distal_r": [
+     52.7,
+     0.0,
+     0.0
+    ],
+    "little_proximal_r": [
+     94.11,
+     2.25,
+     0.0
+    ],
+    "little_intermediate_r": [
+     61.39,
+     0.0,
+     0.0
+    ],
+    "little_distal_r": [
+     43.23,
+     0.0,
+     0.0
+    ],
+    "ring_metacarpal_r": [
+     0.39,
+     0.0,
+     0.0
+    ],
+    "little_metacarpal_r": [
+     8.38,
+     0.0,
+     0.0
+    ],
+    "thumb_metacarpal_r": [
+     -1.71,
+     17.0,
+     -21.84
+    ],
+    "thumb_proximal_r": [
+     47.8,
+     0.0,
+     0.0
+    ],
+    "thumb_distal_r": [
+     33.6,
+     0.0,
+     0.0
+    ]
+   },
+   "hand": {
+    "offset": [
+     32.483,
+     22.837,
+     -9.105
+    ],
+    "rotator": [
+     44.753,
+     -35.747,
+     76.928
+    ],
+    "scale": 1.2514
+   },
+   "item": {
+    "axis": [
+     0.5629,
+     -0.8263,
+     0.019
+    ],
+    "front": [
+     -0.3436,
+     -0.2548,
+     -0.9039
+    ],
+    "point": [
+     4.896,
+     -6.359,
+     3.894
+    ],
+    "roll": 0,
+    "half_length": 7.0,
+    "lead": 0.6
+   }
+  },
+  "orb": {
+   "bones": {
+    "wrist_r": [
+     2.86,
+     13.58,
+     0.0
+    ],
+    "index_proximal_r": [
+     69.21,
+     0.21,
+     0.0
+    ],
+    "index_intermediate_r": [
+     25.51,
+     0.0,
+     0.0
+    ],
+    "index_distal_r": [
+     15.9,
+     0.0,
+     0.0
+    ],
+    "middle_proximal_r": [
+     63.61,
+     -0.0,
+     0.0
+    ],
+    "middle_intermediate_r": [
+     27.44,
+     0.0,
+     0.0
+    ],
+    "middle_distal_r": [
+     18.42,
+     0.0,
+     0.0
+    ],
+    "ring_proximal_r": [
+     46.65,
+     -2.45,
+     0.0
+    ],
+    "ring_intermediate_r": [
+     31.3,
+     0.0,
+     0.0
+    ],
+    "ring_distal_r": [
+     22.18,
+     0.0,
+     0.0
+    ],
+    "little_proximal_r": [
+     41.72,
+     -0.63,
+     0.0
+    ],
+    "little_intermediate_r": [
+     22.91,
+     0.0,
+     0.0
+    ],
+    "little_distal_r": [
+     16.18,
+     0.0,
+     0.0
+    ],
+    "ring_metacarpal_r": [
+     11.25,
+     0.0,
+     0.0
+    ],
+    "little_metacarpal_r": [
+     17.22,
+     0.0,
+     0.0
+    ],
+    "thumb_metacarpal_r": [
+     -6.29,
+     -7.61,
+     -25.61
+    ],
+    "thumb_proximal_r": [
+     50.03,
+     0.0,
+     0.0
+    ],
+    "thumb_distal_r": [
+     65.23,
+     0.0,
+     0.0
+    ]
+   },
+   "hand": {
+    "offset": [
+     36.028,
+     24.774,
+     -12.361
+    ],
+    "rotator": [
+     9.906,
+     16.931,
+     134.489
+    ],
+    "scale": 1.2631
+   },
+   "item": {
+    "axis": [
+     -0.026,
+     0.0024,
+     -0.9997
+    ],
+    "front": [
+     -0.9947,
+     0.0996,
+     0.0261
+    ],
+    "point": [
+     -0.005,
+     0.238,
+     -0.643
+    ],
+    "roll": 0,
+    "half_length": 4.5,
+    "lead": 1.0
+   }
+  },
+  "disc": {
+   "bones": {
+    "wrist_r": [
+     0.23,
+     0.42,
+     0.0
+    ],
+    "index_proximal_r": [
+     30.52,
+     -1.22,
+     0.0
+    ],
+    "index_intermediate_r": [
+     14.65,
+     0.0,
+     0.0
+    ],
+    "index_distal_r": [
+     8.8,
+     0.0,
+     0.0
+    ],
+    "middle_proximal_r": [
+     31.26,
+     -9.11,
+     0.0
+    ],
+    "middle_intermediate_r": [
+     8.13,
+     0.0,
+     0.0
+    ],
+    "middle_distal_r": [
+     1.66,
+     0.0,
+     0.0
+    ],
+    "ring_proximal_r": [
+     -1.09,
+     2.93,
+     0.0
+    ],
+    "ring_intermediate_r": [
+     1.53,
+     0.0,
+     0.0
+    ],
+    "ring_distal_r": [
+     0.01,
+     0.0,
+     0.0
+    ],
+    "little_proximal_r": [
+     -2.8,
+     -0.82,
+     0.0
+    ],
+    "little_intermediate_r": [
+     4.03,
+     0.0,
+     0.0
+    ],
+    "little_distal_r": [
+     2.21,
+     0.0,
+     0.0
+    ],
+    "ring_metacarpal_r": [
+     0.02,
+     0.0,
+     0.0
+    ],
+    "little_metacarpal_r": [
+     0.09,
+     0.0,
+     0.0
+    ],
+    "thumb_metacarpal_r": [
+     31.72,
+     -6.63,
+     9.27
+    ],
+    "thumb_proximal_r": [
+     -9.22,
+     0.0,
+     0.0
+    ],
+    "thumb_distal_r": [
+     -9.59,
+     0.0,
+     0.0
+    ]
+   },
+   "hand": {
+    "offset": [
+     32.627,
+     22.408,
+     -10.872
+    ],
+    "rotator": [
+     19.367,
+     6.824,
+     116.469
+    ],
+    "scale": 1.2543
+   },
+   "item": {
+    "axis": [
+     0.7342,
+     0.001,
+     -0.6789
+    ],
+    "front": [
+     -0.6788,
+     -0.0156,
+     -0.7341
+    ],
+    "point": [
+     9.548,
+     -4.103,
+     1.069
+    ],
+    "roll": 0,
+    "half_length": 4.5,
+    "lead": 1.0
+   }
+  }
+ },
+ "items": {
+  "AngrealInvDart": {
+   "grip": "rod",
+   "axis": "+Y",
+   "front": "-X",
+   "size": 13.413,
+   "slide": -0.803
+  },
+  "AngrealInvReflect": {
+   "grip": "rod",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 8.462,
+   "slide": 1.179
+  },
+  "AngrealInvLightGlobe": {
+   "grip": "figurine",
+   "axis": [
+    0,
+    0.5,
+    0.87
+   ],
+   "front": "-X",
+   "size": 7.756,
+   "slide": 0.597,
+   "offset": [
+    0,
+    -0.288,
+    0.629
+   ]
+  },
+  "AngrealInvSpecial": {
+   "grip": "rod",
+   "axis": [
+    0,
+    -0.79,
+    0.61
+   ],
+   "front": "-X",
+   "size": 9.595,
+   "slide": 0.002,
+   "offset": [
+    -1.195,
+    3.486,
+    -2.968
+   ]
+  },
+  "AngrealInvAirBurst": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.474,
+   "slide": 1.215,
+   "offset": [
+    1.105,
+    0,
+    -1.006
+   ]
+  },
+  "AngrealInvDecay": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 5.067,
+   "slide": 0.56,
+   "offset": [
+    0.58,
+    0.01,
+    -0.436
+   ]
+  },
+  "AngrealInvTaint": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.07,
+   "slide": 1.158,
+   "offset": [
+    -0.083,
+    0.14,
+    0.135
+   ]
+  },
+  "AngrealInvSwapPlaces": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 5.165,
+   "slide": 1.101
+  },
+  "AngrealInvFork": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 6.315,
+   "slide": 0.711,
+   "offset": [
+    0.642,
+    1.816,
+    -0.765
+   ]
+  },
+  "AngrealInvChampion": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 6.852,
+   "slide": 0.089,
+   "offset": [
+    -0.089,
+    -0.194,
+    0.016
+   ]
+  },
+  "AngrealInvGuardian": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 5.447,
+   "slide": 0.932,
+   "offset": [
+    0.088,
+    -0.172,
+    -0.151
+   ]
+  },
+  "AngrealInvMinion": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.91,
+   "slide": 1.254,
+   "offset": [
+    1.156,
+    -0.046,
+    -1.629
+   ]
+  },
+  "AngrealInvIllusion": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 7.292,
+   "slide": -0.475,
+   "offset": [
+    0.073,
+    0.065,
+    -0.069
+   ]
+  },
+  "AngrealInvHeal": {
+   "grip": "figurine",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.626,
+   "slide": 0.524
+  },
+  "AngrealInvLevitate": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 5.089,
+   "slide": 1.411,
+   "offset": [
+    -0.338,
+    -0.18,
+    -0.612
+   ]
+  },
+  "AngrealInvSeeker": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.308,
+   "slide": 1.692,
+   "offset": [
+    1.618,
+    -0.119,
+    -0.103
+   ]
+  },
+  "AngrealInvSoulBarb": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.108,
+   "slide": 1.892,
+   "offset": [
+    0.012,
+    -0.628,
+    2.15
+   ]
+  },
+  "AngrealInvShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.303,
+   "slide": 1.697
+  },
+  "AngrealInvFireShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.486,
+   "slide": 1.514
+  },
+  "AngrealInvAirShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.486,
+   "slide": 1.514
+  },
+  "AngrealInvEarthShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.486,
+   "slide": 1.514
+  },
+  "AngrealInvWaterShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.486,
+   "slide": 1.514
+  },
+  "AngrealInvSpiritShield": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.486,
+   "slide": 1.514
+  },
+  "AngrealInvAMA": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.3,
+   "slide": 1.7
+  },
+  "AngrealInvExpWard": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.366,
+   "slide": 1.634
+  },
+  "AngrealInvTrapDetect": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.63,
+   "slide": 1.87
+  },
+  "AngrealInvLightning": {
+   "grip": "orb",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.284,
+   "slide": 1.716,
+   "offset": [
+    0.051,
+    -0.754,
+    -2.405
+   ]
+  },
+  "AngrealInvAbsorb": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.669,
+   "slide": 1.331,
+   "offset": [
+    0,
+    -0.326,
+    1.848
+   ]
+  },
+  "AngrealInvShift": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.441,
+   "slide": 1.559,
+   "offset": [
+    -0.005,
+    0.206,
+    -0.045
+   ]
+  },
+  "AngrealInvRemoveCurse": {
+   "grip": "orb",
+   "axis": "+Y",
+   "front": "-X",
+   "size": 3.074,
+   "slide": 1.426,
+   "offset": [
+    -0.858,
+    0.013,
+    -0.754
+   ]
+  },
+  "AngrealInvWallOfAir": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.64,
+   "slide": 1.36
+  },
+  "AngrealInvIce": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 2.983,
+   "slide": 1.517
+  },
+  "AngrealInvTarget": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 3.284,
+   "slide": 1.216
+  },
+  "AngrealInvWhirlwind": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.259,
+   "slide": 0.741,
+   "offset": [
+    -0.948,
+    -0.527,
+    0.358
+   ]
+  },
+  "AngrealInvDisguise": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.661,
+   "slide": 1.339,
+   "offset": [
+    0.353,
+    -0.262,
+    0.206
+   ]
+  },
+  "AngrealInvTracer": {
+   "grip": "disc",
+   "axis": [
+    1,
+    0,
+    0
+   ],
+   "front": [
+    0,
+    -0.7071,
+    -0.7071
+   ],
+   "size": 3.285,
+   "slide": 1.215
+  },
+  "AngrealInvDistantEye": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-Y",
+   "size": 4.329,
+   "slide": 0.171
+  },
+  "AngrealInvBalefire": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 2.958,
+   "slide": 2.042
+  },
+  "AngrealInvFireball": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.116,
+   "slide": 1.384
+  },
+  "AngrealInvEarthTremor": {
+   "grip": "disc",
+   "axis": "+Z",
+   "front": "-X",
+   "size": 3.284,
+   "slide": 1.216
+  }
+ }
+}

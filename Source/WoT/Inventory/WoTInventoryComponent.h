@@ -73,7 +73,7 @@ private:
 	bool DispatchCastInterception(bool bUse);
 
 	// Onboarding seam support: item classes this component has already
-	// announced through FWoTOnboardingSeams::ClientItemAdded. Transient and
+	// announced through FWoTExtensionSeams::ClientItemAdded. Transient and
 	// grow-only, so each class announces once per component lifetime (one
 	// pawn life); the plugin owns any longer-lived seen-set.
 	TSet<FName> OnboardingAnnouncedClasses;

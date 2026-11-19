@@ -5,6 +5,7 @@
 #include "WoTAnimData.h"
 #include "WoTCharacter.h"
 #include "WoTMeshLight.h"
+#include "WoTMeshPayloadLayout.h"
 #include "WoTPayloadSubsystem.h"
 #include "Animation/MorphTarget.h"
 #include "Components/ExternalMorphSet.h"
@@ -25,6 +26,10 @@
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/RenderCommandPipes.h"
+#include "Camera/PlayerCameraManager.h"
+#include "DrawDebugHelpers.h"
+#include "GameFramework/PlayerController.h"
+#include "HAL/IConsoleManager.h"
 #if WITH_EDITOR
 #include "Rendering/SkeletalMeshModel.h"
 #endif
@@ -1219,21 +1224,73 @@ bool UWoTVertexAnimComponent::GetCurrentPoseVertexPositions(
 	{
 		OutPositions.Add(FVector(BasePosition));
 	}
-	for (const TPair<int32, float>& FrameWeight : CurrentPoseWeights)
+	auto AddFrame = [this, &OutPositions](const int32 Frame, const float Weight)
 	{
-		const TArray<FVector3f>* Deltas =
-			PoseFrameDeltas.Find(FrameWeight.Key);
+		const TArray<FVector3f>* Deltas = PoseFrameDeltas.Find(Frame);
 		if (!Deltas || Deltas->Num() != OutPositions.Num())
 		{
-			continue;
+			return;
 		}
 		for (int32 Vertex = 0; Vertex < OutPositions.Num(); ++Vertex)
 		{
-			OutPositions[Vertex] +=
-				FVector((*Deltas)[Vertex]) * FrameWeight.Value;
+			OutPositions[Vertex] += FVector((*Deltas)[Vertex]) * Weight;
+		}
+	};
+	// Frame zero is the implicit base of the frame-morph player: it carries the
+	// weight the other frames leave, a full one when nothing plays. An imported
+	// mesh has no frame-zero delta (its base is that pose); a payload cache does.
+	float BaseWeight = 1.0f;
+	for (const TPair<int32, float>& FrameWeight : CurrentPoseWeights)
+	{
+		if (FrameWeight.Key != 0)
+		{
+			BaseWeight -= FrameWeight.Value;
+			AddFrame(FrameWeight.Key, FrameWeight.Value);
 		}
 	}
+	AddFrame(0, BaseWeight);
 	return true;
+}
+
+bool UWoTVertexAnimComponent::GetCurrentPoseDrawnBox(FBox& OutBox) const
+{
+	OutBox = FBox(ForceInit);
+	if (RuntimeVertexMesh.IsValid())
+	{
+		if (!RuntimePoseStorage) return false;
+		// Render vertices also cover invisible and attachment faces; the slots
+		// index the drawn ones.
+		for (const FWoTRuntimeVertexMeshSlot& Slot : RuntimeVertexMesh->GetSlots())
+		{
+			for (const uint32 Index : Slot.Indices)
+			{
+				const int32 Vertex = static_cast<int32>(Index);
+				if (RuntimePoseStorage->RenderPositions.IsValidIndex(Vertex))
+				{
+					OutBox += FVector(RuntimePoseStorage->RenderPositions[Vertex]);
+				}
+			}
+		}
+		return OutBox.IsValid != 0;
+	}
+	TArray<FVector> Positions;
+	if (!GetCurrentPoseVertexPositions(Positions)) return false;
+	// A stripped carrier's own base is a placeholder lattice until its payload
+	// pose cache arrives.
+	USkeletalMesh* Mesh = GetSkeletalMeshAsset();
+	const UWoTMeshPayloadLayout* Layout = Mesh
+		? Cast<UWoTMeshPayloadLayout>(Mesh->GetAssetUserDataOfClass(
+			UWoTMeshPayloadLayout::StaticClass()))
+		: nullptr;
+	if (Layout && Layout->bStrippedBasePositions && !bPayloadPoseCacheInstalled)
+	{
+		return false;
+	}
+	for (const FVector& Position : Positions)
+	{
+		OutBox += Position;
+	}
+	return OutBox.IsValid != 0;
 }
 
 void UWoTVertexAnimComponent::RequestCurrentPoseCPUAccess()
@@ -1895,10 +1952,70 @@ void UWoTVertexAnimComponent::ApplyFrame()
 	               S->StartFrame + NextLocal, T);
 }
 
+#if ENABLE_DRAW_DEBUG
+static TAutoConsoleVariable<float> CVarWoTDebugMeshNormals(
+	TEXT("wot.DebugMeshNormals"), 0.0f,
+	TEXT("Draw each vertex mesh's render normals as lines this many units long (0 = off; ")
+	TEXT("8 = 6 inches at 16 units per foot). Green faces the viewer, red faces away."));
+static TAutoConsoleVariable<float> CVarWoTDebugMeshNormalsRadius(
+	TEXT("wot.DebugMeshNormalsRadius"), 1024.0f,
+	TEXT("Only meshes within this distance of the local camera draw normals."));
+#endif
+
+void UWoTVertexAnimComponent::DrawDebugNormals() const
+{
+#if ENABLE_DRAW_DEBUG
+	const float Length = CVarWoTDebugMeshNormals.GetValueOnGameThread();
+	UWorld* World = GetWorld();
+	if (Length <= 0.0f || !World || !World->IsGameWorld() || !IsVisible()) return;
+	const APlayerController* Viewer = World->GetFirstPlayerController();
+	if (!Viewer || !Viewer->PlayerCameraManager) return;
+	// The local first-person body is owner-no-see; its normals would fill the view.
+	if (bOwnerNoSee && GetOwner() && GetOwner() == Viewer->GetViewTarget()) return;
+	const FVector Eye = Viewer->PlayerCameraManager->GetCameraLocation();
+	const float Radius = CVarWoTDebugMeshNormalsRadius.GetValueOnGameThread();
+	if (FVector::DistSquared(Eye, Bounds.Origin) > FMath::Square(Radius + Bounds.SphereRadius)) return;
+	if (!RuntimeVertexMesh.IsValid() || !RuntimePoseStorage)
+	{
+		static TSet<FString> Reported;
+		const FString Name = GetPathName();
+		if (!Reported.Contains(Name))
+		{
+			Reported.Add(Name);
+			UE_LOG(LogTemp, Warning, TEXT("wot.DebugMeshNormals: %s has no runtime pose (imported morph path); not drawn."), *Name);
+		}
+		return;
+	}
+	const FWoTRuntimeVertexMeshPose& Pose = *RuntimePoseStorage;
+	const TArray<FWoTRuntimeVertexMeshRenderVertex>& RenderVertices = RuntimeVertexMesh->GetRenderVertices();
+	const int32 Count = FMath::Min3(Pose.RenderPositions.Num(), Pose.RenderNormals.Num(), RenderVertices.Num());
+	// Normals transform by the inverse transpose, as the vertex factory does,
+	// so mirrored or non-uniform scale draws what the renderer lights.
+	const FTransform& ToWorld = GetComponentTransform();
+	const FMatrix NormalToWorld = ToWorld.ToMatrixWithScale().Inverse().GetTransposed();
+	TBitArray<> Drawn(false, RuntimeVertexMesh->GetPositionVertexCount());
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		// UV seams split render vertices; draw each shared source vertex once.
+		const int32 Source = static_cast<int32>(RenderVertices[Index].SourceVertex);
+		if (Drawn.IsValidIndex(Source))
+		{
+			if (Drawn[Source]) continue;
+			Drawn[Source] = true;
+		}
+		const FVector Point = ToWorld.TransformPosition(FVector(Pose.RenderPositions[Index]));
+		const FVector Normal = NormalToWorld.TransformVector(FVector(Pose.RenderNormals[Index])).GetSafeNormal();
+		const FColor Color = FVector::DotProduct(Normal, Eye - Point) >= 0.0 ? FColor::Green : FColor::Red;
+		DrawDebugLine(World, Point, Point + Normal * Length, Color, false, -1.0f, SDPG_World, 0.0f);
+	}
+#endif
+}
+
 void UWoTVertexAnimComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                                             FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	DrawDebugNormals();
 
 	if (bTweening)
 	{

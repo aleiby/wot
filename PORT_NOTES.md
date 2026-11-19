@@ -700,6 +700,12 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** One scene capture per mirror plane renders the whole reflected view. A mirror seen inside a reflection shows its own main reflection. The sky stays centered on the viewer, first-person-only items do not appear, and the underside of a one-sided pond is not drawn. Platforms without clip-plane support skip mirrors.
 - **Why:** Engine difference. This is the closest modern equivalent within the frame budget.
 
+### Optional held-artifact presentation
+- **Original:** First person has no visible held pickup model.
+- **Port:** The optional first-person plugin attaches the selected artifact's pickup model to the local camera, with its own field of view, bounds fitting, wall clearance (the view's near clip plane drops from 10 to 2 units while the model shows), idle motion, view sway, walk bob, and cosmetic Fire and selection feedback. Where the hand art is present, a first-person hand and forearm for the player's class, in the team colour, holds the model in one of four grips: rod, figurine, orb or disc. The hand takes the world's lights at reduced strength, plus a key light that follows the view, so it stays shaded in dark corners and next to torches. It is presentation only: simulation, replication, RPCs, and the existing HUD are unchanged. Mirrors exclude this model, consistent with the port's mirror behaviour above.
+- **Control:** Turn off **Held Artifact** in the **FIRST PERSON** Settings section; **Motion** at zero keeps the model still. Disable the `WoTFirstPerson` plugin for a parity build.
+- **Why:** Optional first-person presence using existing pickup art. If the capsule leaves no space between the near-plane margin and wall margin, the model hides until clearance returns.
+
 ### Procedural textures animate when recently seen
 - **Original:** A procedural fire, water or ice texture advances only on frames where a visible surface draws it.
 - **Port:** A texture advances when any surface using it was drawn within the last 0.1 seconds. Each live texture also runs its warm-up steps as soon as it is bound, so it never shows its raw starting image.

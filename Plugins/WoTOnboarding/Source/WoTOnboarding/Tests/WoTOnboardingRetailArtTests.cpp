@@ -6,7 +6,7 @@
 #include "SWoTGuideBrowser.h"
 #include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
@@ -42,14 +42,14 @@ struct FWoTOnboardingRetailArtSeamScope
 
 	FWoTOnboardingRetailArtSeamScope()
 	{
-		const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 		SavedTexture = Seams.ResolveRetailTexture;
 		SavedIcon = Seams.ResolveItemIcon;
 	}
 
 	~FWoTOnboardingRetailArtSeamScope()
 	{
-		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 		Seams.ResolveRetailTexture = SavedTexture;
 		Seams.ResolveItemIcon = SavedIcon;
 	}
@@ -127,7 +127,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingRetailArtPiecesSpec,
 bool FWoTOnboardingRetailArtPiecesSpec::RunTest(const FString&)
 {
 	const FWoTOnboardingRetailArtSeamScope Scope;
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const EWoTRetailArtPiece Pieces[] = {EWoTRetailArtPiece::Window,
 		EWoTRetailArtPiece::Divider, EWoTRetailArtPiece::GemBar,
 		EWoTRetailArtPiece::Band};
@@ -211,7 +211,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingRetailArtIconsSpec,
 bool FWoTOnboardingRetailArtIconsSpec::RunTest(const FString&)
 {
 	const FWoTOnboardingRetailArtSeamScope Scope;
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TStrongObjectPtr<UTexture2D> Icon(UTexture2D::CreateTransient(64, 64));
 	Icon->SRGB = false;
 	int32 Calls = 0;
@@ -279,7 +279,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingRetailArtLinearGammaSpec,
 bool FWoTOnboardingRetailArtLinearGammaSpec::RunTest(const FString&)
 {
 	const FWoTOnboardingRetailArtSeamScope Scope;
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TStrongObjectPtr<UTexture2D> Corner(UTexture2D::CreateTransient(128, 128));
 	const TStrongObjectPtr<UTexture2D> Other(UTexture2D::CreateTransient(128, 256));
 	if (!TestNotNull(TEXT("corner fixture"), Corner.Get())
@@ -464,7 +464,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserArtWidgetsSpec,
 bool FWoTOnboardingBrowserArtWidgetsSpec::RunTest(const FString&)
 {
 	const FWoTOnboardingRetailArtSeamScope Scope;
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TStrongObjectPtr<UTexture2D> Icon(UTexture2D::CreateTransient(61, 59));
 	const TStrongObjectPtr<UTexture2D> Mask(UTexture2D::CreateTransient(63, 57));
 	const TStrongObjectPtr<UTexture2D> Frame(UTexture2D::CreateTransient(67, 53));

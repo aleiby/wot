@@ -825,17 +825,17 @@ bool FWoTFrontEndEscapeOverlaySpec::RunTest(const FString&)
     entry) must not count as retail entries. */
 struct FWoTFrontEndTestsMenuRowsGuard
 {
-	TArray<FWoTOnboardingRow> Saved;
+	TArray<FWoTExtensionRow> Saved;
 
 	FWoTFrontEndTestsMenuRowsGuard()
 	{
-		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
-		FWoTOnboardingSeams::Get().MenuRows.Reset();
+		Saved = MoveTemp(FWoTExtensionSeams::Get().MenuRows);
+		FWoTExtensionSeams::Get().MenuRows.Reset();
 	}
 
 	~FWoTFrontEndTestsMenuRowsGuard()
 	{
-		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+		FWoTExtensionSeams::Get().MenuRows = MoveTemp(Saved);
 	}
 };
 

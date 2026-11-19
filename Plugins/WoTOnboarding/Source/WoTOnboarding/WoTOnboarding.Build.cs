@@ -7,7 +7,7 @@ public class WoTOnboarding : ModuleRules
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
 		// Deliberately minimal. The plugin consumes the game module's
-		// onboarding seams (WoTOnboardingSeams.h: plain delegates, TFunction
+		// onboarding seams (WoTExtensionSeams.h: plain delegates, TFunction
 		// rows, the row registries) and links no other game surface, so
 		// disabling or omitting the plugin costs the game nothing and the
 		// parity lanes can run without it.

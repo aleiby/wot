@@ -10,7 +10,7 @@ using FWoTNavRow = TArray<TSharedPtr<SWidget>>;
 /**
  * Explicit menu focus graphs (spec r3 §1, "Wrap and focus graphs"). Every
  * helper takes the menu's runtime entry list, so rows a seam adds at runtime
- * (the onboarding MenuRows and SettingsRows) are part of the graph. Links are
+ * (the onboarding MenuRows and SettingsSections) are part of the graph. Links are
  * custom navigation delegates evaluated when the player navigates: an entry
  * that is collapsed, hidden or disabled at that moment is skipped, so one
  * graph covers rows that come and go (Battle-only host rows, the update

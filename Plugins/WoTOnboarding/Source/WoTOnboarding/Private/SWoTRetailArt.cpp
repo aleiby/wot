@@ -1,6 +1,6 @@
 #include "SWoTRetailArt.h"
 
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
@@ -106,7 +106,7 @@ TUniquePtr<FWoTRetailArt::FBrushEntry> FWoTRetailArt::MakeEntry(UTexture2D* Text
 TSharedRef<FWoTRetailArt> FWoTRetailArt::Resolve()
 {
 	TSharedRef<FWoTRetailArt> Art = MakeShared<FWoTRetailArt>();
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	if (Seams.ResolveRetailTexture)
 	{
 		// The frame pieces draw at whole-number scales and stay crisp; the
@@ -144,7 +144,7 @@ const FSlateBrush* FWoTRetailArt::ItemIcon(FName ClassName, bool bSmooth)
 	{
 		return Found->IsValid() ? &(*Found)->Brush : nullptr;
 	}
-	const FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	const FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	TUniquePtr<FBrushEntry> Entry = MakeEntry(Seams.ResolveItemIcon
 		? Seams.ResolveItemIcon(ClassName, bSmooth) : nullptr);
 	// The entry lives on the heap, so the brush keeps its address however

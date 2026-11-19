@@ -26,7 +26,7 @@ public class WoT : ModuleRules
 
 		// The module is flat (no Public/ split), which exposes nothing to
 		// dependent modules by default. The optional WoTOnboarding plugin
-		// consumes WoTOnboardingSeams.h, so expose the module root; the
+		// consumes WoTExtensionSeams.h, so expose the module root; the
 		// plugin's build rules document the seam-only discipline, and a
 		// dedicated seams module is the eventual shape if a real extension
 		// API ever grows out of this.

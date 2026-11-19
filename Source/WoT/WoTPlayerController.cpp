@@ -20,7 +20,7 @@
 #include "WoTMenuStyle.h"
 #include "WoTPlayerState.h"
 #include "WoTBootstrapHeartbeat.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "WoTPreferencesSubsystem.h"
 #include "Settings/WoTGameSettings.h"
 #include "WoTRetailText.h"
@@ -535,7 +535,7 @@ void AWoTPlayerController::BeginPlay()
 	}
 	if (IsLocalController())
 	{
-		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 		// A foreign exclusive window is opening: close the retail windows it
 		// would stack over. Weak-bound, and removed again on EndPlay.
 		OnboardingCloseWindowsHandle = Seams.CloseClientWindows.AddWeakLambda(
@@ -609,6 +609,22 @@ void AWoTPlayerController::BeginPlay()
 			{
 				const AWoTPlayerController* Controller = WeakThis.Get();
 				return Controller ? Controller->GetKilledByItemWhileDead() : FName();
+			};
+		Seams.IsFirstPersonViewActive = [WeakThis = TWeakObjectPtr<AWoTPlayerController>(this)]()
+			{
+				const AWoTPlayerController* Controller = WeakThis.Get();
+				if (!Controller || !Controller->IsLocalController()
+					|| Controller->IsOwnerEditingCitadel() || Controller->IsEditingCitadel()
+					|| Controller->GetCitadelEditCameraMode() != EWoTCitadelEditCameraMode::Inactive
+					|| Controller->IsMatchEnded() || Controller->IsInState(NAME_Spectating)
+					|| Controller->GetPlayerStateMachineState() != EWoTPlayerStateMachineState::Playing)
+				{
+					return false;
+				}
+				const APlayerState* State = Controller->GetPlayerState<APlayerState>();
+				const AWoTCharacter* Character = Cast<AWoTCharacter>(Controller->GetPawn());
+				return Character && Character->IsAlive() && Controller->GetViewTarget() == Character
+					&& (!State || (!State->IsSpectator() && !State->IsOnlyASpectator()));
 			};
 	}
 	ClearProgressMessages();
@@ -3150,7 +3166,7 @@ void AWoTPlayerController::ToggleInGameMenu()
 		// The menu claims the screen: a foreign exclusive window (the
 		// onboarding guide) closes, as the retail windows above already did
 		// on this path.
-		FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(
+		FWoTExtensionSeams::Get().CloseClientWindows.Broadcast(
 			WoTWindowKeeperInGameMenu);
 		CreateInGameMenuWidget();
 	}
@@ -4004,7 +4020,7 @@ void AWoTPlayerController::ShowHelp()
 	}
 	// Help follows WOTPlayer.ShowHelp's RemoveWindows discipline; the seam
 	// extends it to foreign windows (the onboarding guide closes too).
-	FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(WoTWindowKeeperHelp);
+	FWoTExtensionSeams::Get().CloseClientWindows.Broadcast(WoTWindowKeeperHelp);
 	bHelpOpen = true;
 	CreateHelpWidget(Content);
 }
@@ -4185,7 +4201,7 @@ void AWoTPlayerController::ShowInventoryInfo()
 	}
 	// Item info is about to open and stay: any foreign exclusive window (the
 	// onboarding guide) closes. Inert when nothing foreign listens.
-	FWoTOnboardingSeams::Get().CloseClientWindows.Broadcast(
+	FWoTExtensionSeams::Get().CloseClientWindows.Broadcast(
 		WoTWindowKeeperItemInfo);
 	bItemInfoOpen = true;
 	ItemInfoItem = SelectedItem;
@@ -4400,7 +4416,7 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 	UnbindProgressFailureDelegates();
 	if (IsLocalController())
 	{
-		FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+		FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 		// Gameplay teardown: no window stays (an improvement module's window
 		// closes with the match, as the retail windows below do). The input
 		// seam goes last so that close can still restore game input. The window
@@ -4414,6 +4430,7 @@ void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 		Seams.SetOverlayInput = nullptr;
 		Seams.IsClientWindowOpen = nullptr;
 		Seams.SelectedItemClass = nullptr;
+		Seams.IsFirstPersonViewActive = nullptr;
 		Seams.KilledByItemClass = nullptr;
 	}
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
@@ -4564,7 +4581,7 @@ void AWoTPlayerController::SetupInputComponent()
 			Binding.ActionDelegate.GetDelegateForManualSet().BindWeakLambda(
 				this, []()
 				{
-					FWoTOnboardingSeams::Get().ShowGuideRequested.Broadcast();
+					FWoTExtensionSeams::Get().ShowGuideRequested.Broadcast();
 				});
 			InputComponent->AddActionBinding(MoveTemp(Binding));
 		}
@@ -4903,7 +4920,7 @@ void AWoTPlayerController::ClientKilledBy_Implementation(FName ItemClassName)
 	KilledByItemClass = ItemClassName;
 	if (!ItemClassName.IsNone())
 	{
-		FWoTOnboardingSeams::Get().ClientKilledBy.Broadcast(ItemClassName);
+		FWoTExtensionSeams::Get().ClientKilledBy.Broadcast(ItemClassName);
 	}
 }
 

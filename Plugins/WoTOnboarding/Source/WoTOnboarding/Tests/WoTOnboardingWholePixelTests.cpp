@@ -3,7 +3,7 @@
 #if WITH_AUTOMATION_TESTS
 #include "SWoTGuideBrowser.h"
 #include "WoTOnboardingChrome.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 #include "Layout/Geometry.h"
 #include "Misc/ScopeExit.h"
 #include "Styling/AppStyle.h"
@@ -92,7 +92,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserWholePixelTextSpec,
 	"WoT.Onboarding.BrowserWholePixelText", WoTOnboardingWholePixelFlags)
 bool FWoTOnboardingBrowserWholePixelTextSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const auto SavedResolver = Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
 	TArray<TPair<FName, int32>> Asked;
@@ -143,7 +143,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingBrowserReadingStepSpec,
 	"WoT.Onboarding.BrowserReadingStep", WoTOnboardingWholePixelFlags)
 bool FWoTOnboardingBrowserReadingStepSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const auto SavedResolver = Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
 	TArray<TPair<FName, int32>> Asked;

@@ -6,7 +6,7 @@
 #include "SWoTPickupCard.h"
 #include "WoTAngrealGuide.h"
 #include "WoTOnboardingChrome.h"
-#include "WoTOnboardingSeams.h"
+#include "WoTExtensionSeams.h"
 
 #include "Layout/Geometry.h"
 #include "Misc/ScopeExit.h"
@@ -257,7 +257,7 @@ bool FWoTOnboardingLegibilityWindowScaleSpec::RunTest(const FString&)
 
 	// The faces follow the strike scale: the published faces are asked for
 	// the strike the window opened at.
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -299,7 +299,7 @@ bool FWoTOnboardingLegibilityFloorSpec::RunTest(const FString&)
 		WoTOnboardingChrome::DeckMinimumTextPixels,
 		WoTOnboardingLegibilityTolerance);
 
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -369,7 +369,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingLegibilityWidgetsSpec,
 
 bool FWoTOnboardingLegibilityWidgetsSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };
@@ -443,7 +443,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTOnboardingTextFaceGoldSpec,
 
 bool FWoTOnboardingTextFaceGoldSpec::RunTest(const FString&)
 {
-	FWoTOnboardingSeams& Seams = FWoTOnboardingSeams::Get();
+	FWoTExtensionSeams& Seams = FWoTExtensionSeams::Get();
 	const TFunction<TOptional<FWoTOnboardingMenuChrome>()> SavedResolver =
 		Seams.ResolveMenuChrome;
 	ON_SCOPE_EXIT { Seams.ResolveMenuChrome = SavedResolver; };

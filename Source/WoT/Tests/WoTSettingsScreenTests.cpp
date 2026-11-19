@@ -8,7 +8,7 @@
 #include "../WoTGameInstance.h"
 #include "../WoTHUD.h"
 #include "../WoTMenuStyle.h"
-#include "../WoTOnboardingSeams.h"
+#include "../WoTExtensionSeams.h"
 #include "../WoTPreferencesSubsystem.h"
 #include "../Payload/WoTPayloadActivation.h"
 #include "../Online/WoTInstallerSharingSubsystem.h"
@@ -46,17 +46,17 @@ constexpr EAutomationTestFlags ScreenFlags =
     entry, which sits after Multiplayer) must not shift those entries. */
 struct FWoTSettingsScreenTestsMenuRowsGuard
 {
-	TArray<FWoTOnboardingRow> Saved;
+	TArray<FWoTExtensionRow> Saved;
 
 	FWoTSettingsScreenTestsMenuRowsGuard()
 	{
-		Saved = MoveTemp(FWoTOnboardingSeams::Get().MenuRows);
-		FWoTOnboardingSeams::Get().MenuRows.Reset();
+		Saved = MoveTemp(FWoTExtensionSeams::Get().MenuRows);
+		FWoTExtensionSeams::Get().MenuRows.Reset();
 	}
 
 	~FWoTSettingsScreenTestsMenuRowsGuard()
 	{
-		FWoTOnboardingSeams::Get().MenuRows = MoveTemp(Saved);
+		FWoTExtensionSeams::Get().MenuRows = MoveTemp(Saved);
 	}
 };
 
