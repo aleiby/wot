@@ -40,6 +40,7 @@ REPO = IMPORT_DIR.parents[1]
 # what it acquires. import_mesh.py needs a mesh argument to import, so its
 # manifest (slot census + texture resolution) lives in import_mesh_policy.py.
 CLAIM_PROVIDERS = {
+    "import_first_person_hands": "import_first_person_hands",
     "import_flame_fx": "import_flame_fx",
     "import_flipbooks": "import_flipbooks",
     "import_gore_fx": "import_gore_fx",

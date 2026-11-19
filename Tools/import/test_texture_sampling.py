@@ -602,6 +602,9 @@ NON_TEXTURE_IMPORT_SITES = {
     "Tools/import/import_sounds.py": "WAV sound import (SoundWave factory)",
     "Art/hands/tools/ue_import_dump.py":
         "glTF skeleton dump into a scratch destination; saves nothing",
+    "Tools/import/import_first_person_hands.py":
+        "glTF skeletal mesh import (Interchange); its team-colour textures "
+        "go through import_texture",
 }
 # Metadata-only texture loads (no sampling decision is made there).
 METADATA_LOAD_SITES = {
