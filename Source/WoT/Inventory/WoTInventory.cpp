@@ -1,4 +1,5 @@
 #include "WoTInventory.h"
+#include "Testing/WoTSoakEvents.h"
 #include "../AI/WoTPathNodeIterator.h"
 #include "../WoTRetailText.h"
 
@@ -351,6 +352,7 @@ bool AWoTInventory::TryPickupBy(AActor* Other)
 	}
 	APawn* P = CastChecked<APawn>(Other);
 	SpawnCopy(P);
+	WOT_SOAK_EVENT(Pickup, this, P);
 	if (APlayerController* PC = Cast<APlayerController>(P->GetController()))
 	{
 		// Inventory.Touch notifies with type 'Pickup' (the original engine's

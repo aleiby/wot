@@ -722,6 +722,16 @@ void SWoTFrontEndRoot::Tick(
 		HostLabelColumnWidth = FMath::Max(HostLabelColumnWidth,
 			FWoTMenuLayout::MeasureText(RetailText(LabelId), LargeBodyFont()).X);
 	}
+	for (const FWoTHostOptionRow& Row : FWoTFrontEndModel::HostOptions())
+	{
+		HostLabelColumnWidth = FMath::Max(HostLabelColumnWidth,
+			FWoTMenuLayout::MeasureText(Row.Label(), LargeBodyFont()).X);
+	}
+	if (ViewModel.GetScreen() == EWoTFrontEndScreen::Play
+		&& HostOptionRowsRevision != FWoTFrontEndModel::HostOptionsRevision())
+	{
+		RebuildScreen();
+	}
 	if (!FMath::IsNearlyEqual(PreviousCheckGlyph, PlayCheckGlyphSize))
 	{
 		FWoTMenuStyle::SizeCheckBoxImages(PlayCheckBoxStyle, PlayCheckGlyphSize);
@@ -1925,6 +1935,7 @@ void SWoTFrontEndRoot::CommitServerPassword(
 
 TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 {
+	HostOptionRowsRevision = FWoTFrontEndModel::HostOptionsRevision();
 	// One scroll-box slot per row: Up/Down then walks the rows and scrolls each
 	// into view, and any focus change scrolls its row into view. A single slot
 	// holding every row left clipped rows, Host Match included, unreachable
@@ -2171,6 +2182,50 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			})),
 			[this]() { return FText::AsNumber(ViewModel.GetHostRequest().MaxPlayers); }))
 	];
+	for (const FWoTHostOptionRow& Row : FWoTFrontEndModel::HostOptions())
+	{
+		const FString URLKey = Row.URLKey;
+		const FName Owner = Row.Owner;
+		Panel->AddSlot().AutoSize().Padding(0.0f, 4.0f, 0.0f, 6.0f)
+		[
+			InlineRow(TAttribute<FText>::CreateLambda([URLKey, Owner]()
+				{
+					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
+					return Live ? Live->Label() : FText::GetEmpty();
+				}), SliderWithValue(
+				HostControl(SNew(SWoTRetailSlider)
+				.Value_Lambda([this, URLKey, Owner]()
+				{
+					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
+					if (!Live) return 0.0f;
+					const FWoTHostRequest& Request = ViewModel.GetHostRequest();
+					const int32 Max = FMath::Max(Live->Min, Live->Max(Request));
+					return Max > Live->Min
+						? (FWoTFrontEndModel::HostOptionValue(Request, *Live) - Live->Min)
+							/ static_cast<float>(Max - Live->Min) : 0.0f;
+				})
+				.Positions_Lambda([this, URLKey, Owner]()
+				{
+					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
+					return Live ? FMath::Max(1, Live->Max(ViewModel.GetHostRequest()) - Live->Min + 1) : 1;
+				})
+				.OnValueChanged_Lambda([this, URLKey, Owner](float Value)
+				{
+					if (!IsPresentationReady()) return;
+					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
+					if (!Live) return;
+					const int32 Max = FMath::Max(Live->Min, Live->Max(ViewModel.GetHostRequest()));
+					ViewModel.SetHostOption(URLKey,
+						Live->Min + FMath::RoundToInt(Value * (Max - Live->Min)));
+				})),
+				[this, URLKey, Owner]()
+				{
+					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
+					return Live ? FText::AsNumber(FWoTFrontEndModel::HostOptionValue(
+						ViewModel.GetHostRequest(), *Live)) : FText::GetEmpty();
+				}))
+		];
+	}
 	Panel->AddSlot().AutoSize()
 	[
 		HostControl(SNew(SCheckBox)
@@ -3405,7 +3460,7 @@ TSharedRef<ITableRow> SWoTFrontEndRoot::GenerateSessionRow(
 	const FString Ping = Item.IsValid() ? SessionPingText(*Item) : FString();
 	const FString Map = Item.IsValid() ? Item->MapName : FString();
 	const FString Players = Item.IsValid()
-		? FString::Printf(TEXT("%d/%d"), Item->CurrentPlayers, Item->MaxPlayers)
+		? Item->PlayerCountText()
 		: FString();
 	return SNew(STableRow<FSessionItem>, OwnerTable)
 		.Style(Style.TableRowStyle())

@@ -262,6 +262,6 @@ public:
 		int32 DerivedFormatVersion = 1,
 		const FString& TangentAlgorithm = TEXT("ue-mikk-preserve-normals-v1"));
 
-	static bool DecodePayload(TConstArrayView<uint8> Bytes,
+	WOT_API static bool DecodePayload(TConstArrayView<uint8> Bytes,
 		FWoTBSPPayloadData& OutData, FString& OutError);
 };

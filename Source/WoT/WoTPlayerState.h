@@ -11,7 +11,7 @@ class AWoTCharacter;
 // FragLimit check is giWOT.CalcScore = Kills - Suicides (a free-for-all frag count).
 // Team/citadel scoring (giMPBattle) lands with that mode.
 UCLASS()
-class AWoTPlayerState : public APlayerState
+class WOT_API AWoTPlayerState : public APlayerState
 {
 	GENERATED_BODY()
 

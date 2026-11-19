@@ -265,7 +265,7 @@ public:
 // Process-local owner for the player-generated payload cache. This subsystem
 // deliberately does not participate in replication or gameplay state.
 UCLASS()
-class UWoTPayloadSubsystem : public UGameInstanceSubsystem
+class WOT_API UWoTPayloadSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 

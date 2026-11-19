@@ -22,6 +22,8 @@ struct FWoTSessionListEntry
 	int32 ResultIndex = INDEX_NONE;
 	FString ServerName;
 	FString MapName;
+	int32 BotCount = 0;
+	FString PlayerCountText() const;
 	int32 CurrentPlayers = 0;
 	int32 MaxPlayers = 0;
 	int32 PingMs = 0;
@@ -80,7 +82,7 @@ enum class EWoTPasswordChallenge : uint8
 //    missing SDK, or Epic being unreachable only disable the internet half.
 // The host is a LISTEN server; the Steam N7 layer is dormant (DefaultEngine.ini).
 UCLASS()
-class UWoTSessionSubsystem : public UGameInstanceSubsystem
+class WOT_API UWoTSessionSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
@@ -94,6 +96,9 @@ public:
 	// Parameterized menu host. The chosen map/rules/class URL is captured before
 	// CreateSession and traveled only after a successful completion callback.
 	bool Host(const FWoTHostRequest& Request);
+
+	/** Retained across world travel; changed values refresh an existing session. */
+	void SetAdvertisedInt(FName Key, int32 Value);
 
 	// Async search; provider results remain private while UI-safe copies land in
 	// GetSearchResults and are announced through OnSearchComplete. An overlapping
@@ -249,6 +254,11 @@ public:
 	{
 		CreateSessionDispatchHookForTesting = MoveTemp(Hook);
 	}
+	using FWoTUpdateSessionDispatchHook = TFunction<bool(TFunction<bool()>&&)>;
+	void SetUpdateSessionDispatchHookForTesting(FWoTUpdateSessionDispatchHook&& Hook)
+	{
+		UpdateSessionDispatchHookForTesting = MoveTemp(Hook);
+	}
 	using FWoTDetachedDestroyDispatchHook =
 		TFunction<bool(TFunction<bool()>&&)>;
 	static void SetDetachedDestroyDispatchHookForTesting(
@@ -369,6 +379,17 @@ public:
 		bool bHasNamedSession);
 
 private:
+	TMap<FName, int32> AdvertisedInts;
+	uint64 AdvertisedIntsGeneration = 0;
+	uint64 PublishedAdvertisedIntsGeneration = 0;
+	uint64 NextAdvertisedUpdateSerial = 0;
+	uint64 ActiveAdvertisedUpdateSerial = 0;
+	FDelegateHandle AdvertisedUpdateHandle;
+	IOnlineSessionPtr AdvertisedUpdateSessions;
+	void FlushAdvertisedInts();
+	void ClearAdvertisedUpdate();
+	void OnAdvertisedUpdateComplete(IOnlineSessionPtr ExactProvider,
+		uint64 OperationSerial, uint64 Generation, FName SessionName, bool bOk);
 	enum class EWoTPendingInternetAction : uint8
 	{
 		None,
@@ -562,6 +583,7 @@ private:
 	FWoTClientTravelHook ClientTravelHookForTesting;
 	FWoTServerTravelHook ServerTravelHookForTesting;
 	FWoTCreateSessionDispatchHook CreateSessionDispatchHookForTesting;
+	FWoTUpdateSessionDispatchHook UpdateSessionDispatchHookForTesting;
 	TWeakObjectPtr<APlayerController> ClientTravelControllerForTesting;
 #endif
 };

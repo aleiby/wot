@@ -25,7 +25,7 @@ UWoTCasterComponent::UWoTCasterComponent()
 void UWoTCasterComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	if (GetOwner() && GetOwner()->HasAuthority())
+	if (bBuildLoadout && GetOwner() && GetOwner()->HasAuthority())
 	{
 		BuildLoadout();
 	}
@@ -88,7 +88,7 @@ void UWoTCasterComponent::BuildLoadout()
 	}
 }
 
-AWoTAngrealInventory* UWoTCasterComponent::SelectOffensiveWeave(AActor* Victim)
+AWoTAngrealInventory* UWoTCasterComponent::SelectOffensiveWeave(AActor* Victim, FItemFilter Filter)
 {
 	// SelectOffensiveAngreal (AngrealWeaponAdapter.uc:319): interval gate,
 	// then the highest GetEffectivePriority among bOffensive items with the
@@ -108,7 +108,7 @@ AWoTAngrealInventory* UWoTCasterComponent::SelectOffensiveWeave(AActor* Victim)
 	for (AWoTInventory* Item : Inv->Items)
 	{
 		AWoTAngrealInventory* Weave = Cast<AWoTAngrealInventory>(Item);
-		if (!Weave || Weave == AdaptedWeave || !Weave->bOffensive)
+		if (!Weave || Weave == AdaptedWeave || !Weave->bOffensive || !Filter(Weave))
 		{
 			continue;
 		}
@@ -235,7 +235,7 @@ bool UWoTCasterComponent::RejectOffender(AActor* Offender) const
 	return Arrival < DR_MinResponseTime || Arrival > DR_MaxResponseTime;
 }
 
-AWoTAngrealInventory* UWoTCasterComponent::SelectDefensiveWeave(AActor* Offender)
+AWoTAngrealInventory* UWoTCasterComponent::SelectDefensiveWeave(AActor* Offender, FItemFilter Filter)
 {
 	// SelectDefensiveAngreal (AngrealWeaponAdapter.uc:282): interval gate, then the
 	// highest GetEffectivePriority among bDefensive items with the incoming projectile
@@ -254,7 +254,7 @@ AWoTAngrealInventory* UWoTCasterComponent::SelectDefensiveWeave(AActor* Offender
 	for (AWoTInventory* Item : Inv->Items)
 	{
 		AWoTAngrealInventory* Weave = Cast<AWoTAngrealInventory>(Item);
-		if (!Weave || Weave == AdaptedWeave || !Weave->bDefensive)
+		if (!Weave || Weave == AdaptedWeave || !Weave->bDefensive || !Filter(Weave))
 		{
 			continue;
 		}
@@ -282,8 +282,22 @@ void UWoTCasterComponent::BeginCast(AWoTAngrealInventory* Weave)
 	{
 		return;
 	}
-	Inv->CeaseUsingAngreal();
-	Inv->SelectedItem = Weave;
+	AWoTCharacter* Character = Cast<AWoTCharacter>(GetOwner());
+	const bool bPlayerPath = Character && !Character->IsNPCPawn();
+	if (bPlayerPath)
+	{
+		if (!Character->CanCastNow())
+		{
+			return;
+		}
+		Character->AuthorityCeaseUsingAngreal();
+		Inv->SelectItem(Weave);
+	}
+	else
+	{
+		Inv->CeaseUsingAngreal();
+		Inv->SelectedItem = Weave;
+	}
 	ActiveWeave = Weave;
 	AdaptedWeave = Weave;
 	LastSeenCharges = Weave->CurCharges;
@@ -304,7 +318,10 @@ void UWoTCasterComponent::BeginCast(AWoTAngrealInventory* Weave)
 	// Keep ActiveWeave installed across the synchronous call so ChargeUsed can
 	// address this adapter, but publish casting presentation only after the real
 	// DefaultCastReflector/NoCast gate accepts the activation.
-	if (!Inv->UseAngreal())
+	const bool bActivated = bPlayerPath
+		? Character->AuthorityUseAngreal(Character->GetViewRotation())
+		: Inv->UseAngreal();
+	if (!bActivated)
 	{
 		Release();
 		return;
@@ -317,7 +334,15 @@ void UWoTCasterComponent::Release()
 	AWoTAngrealInventory* Released = ActiveWeave;
 	if (UWoTInventoryComponent* Inv = GetInventory(); Inv && ActiveWeave)
 	{
-		Inv->CeaseUsingAngreal();
+		if (AWoTCharacter* Character = Cast<AWoTCharacter>(GetOwner());
+			Character && !Character->IsNPCPawn())
+		{
+			Character->AuthorityCeaseUsingAngreal();
+		}
+		else
+		{
+			Inv->CeaseUsingAngreal();
+		}
 	}
 	if (Released)
 	{
@@ -332,6 +357,11 @@ void UWoTCasterComponent::Release()
 	}
 	ActiveWeave = nullptr;
 	EndCastPresentation();
+}
+
+void UWoTCasterComponent::ResetAdaptation()
+{
+	AdaptedWeave = nullptr;
 }
 
 void UWoTCasterComponent::NotifyTargetKilled(AActor* Victim)
@@ -372,7 +402,8 @@ void UWoTCasterComponent::BeginContinuousCastPresentation()
 	{
 		return;
 	}
-	if (AWoTCharacter* Character = Cast<AWoTCharacter>(GetOwner()))
+	if (AWoTCharacter* Character = Cast<AWoTCharacter>(GetOwner());
+		Character && Character->IsNPCPawn())
 	{
 		if (!Character->LoopSlotAnim(TEXT("AttackRun")))
 		{
@@ -387,7 +418,7 @@ void UWoTCasterComponent::BeginContinuousCastPresentation()
 void UWoTCasterComponent::StampChargeUsedPresentation()
 {
 	AWoTCharacter* Character = Cast<AWoTCharacter>(GetOwner());
-	if (!Character)
+	if (!Character || !Character->IsNPCPawn())
 	{
 		return;
 	}

@@ -126,6 +126,7 @@ struct FWoTScoreboardPlayer
 	uint8 Color = 0;
 	uint8 PlayerType = 0;
 	bool bHighlight = false;
+	bool bIsBot = false;
 	// CitadelScoreBoard.InitializePlayer (uc:121-128): per-row team identity/score
 	// so the citadel sort keys ride the same stable-sort machinery.
 	uint8 Team = 255;

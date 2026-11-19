@@ -200,7 +200,7 @@ enum class EWoTPlayerMovementConstraint : uint8
 // inventory component's cast gate (WOTPlayer's replication block routed
 // ServerUseAngreal/CeaseUsingAngreal the same way).
 UCLASS()
-class AWoTCharacter : public ACharacter
+class WOT_API AWoTCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
@@ -330,6 +330,9 @@ public:
 	void DecrementSeekerCount();
 
 	bool IsAlive() const { return Health > 0 && !bDead; }
+	// Authority notification after the ordinary damage chain has completed.
+	DECLARE_MULTICAST_DELEGATE_FourParams(FDamageApplied, AWoTCharacter*, AController*, AActor*, float);
+	FDamageApplied OnDamageApplied;
 
 	// Pawn.UnderWaterTime — seconds of breath once the head submerges. Base
 	// Engine.Pawn leaves it UNSET (0 = never drowns); WOTPlayer authors 30
@@ -971,6 +974,9 @@ public:
 	// carries client data, so it is checked for NaN/Inf; the rest are parameterless.
 	UFUNCTION(Server, Reliable, WithValidation) void ServerUseAngreal(FRotator AimRotation);
 	UFUNCTION(Server, Reliable, WithValidation) void ServerCeaseUsingAngreal();
+	bool CanCastNow() const;
+	bool AuthorityUseAngreal(FRotator AimRotation);
+	void AuthorityCeaseUsingAngreal();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerNextInventory();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerPrevInventory();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerSelectAngreal(FName ClassName);

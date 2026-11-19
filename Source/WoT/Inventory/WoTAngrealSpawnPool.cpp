@@ -1,5 +1,7 @@
 #include "WoTAngrealSpawnPool.h"
+#include "Testing/WoTSoakEvents.h"
 #include "../WoTRandom.h"
+#include "../WoTGameMode.h"
 
 #include "WoTAngrealInventory.h"
 #include "../WoTMapLightTable.h"
@@ -113,6 +115,7 @@ void AWoTAngrealSpawnPool::SpawnFromPool(bool bAnnounce)
 	}
 
 	PickupItem = Item;
+	WOT_SOAK_EVENT(PoolStock, this, Item);
 	Item->SetActorEnableCollision(false);
 	if (bAnnounce && HasAuthority())
 	{
@@ -179,6 +182,7 @@ void AWoTAngrealSpawnPool::HandlePoolTouch(AActor* Other)
 	}
 
 	AWoTInventory* Item = PickupItem;
+	WOT_SOAK_EVENT(PoolCollect, this, Other);
 	PickupItem = nullptr;
 	Item->RespawnTime = 0.0f;
 	// Hand the touch to the ITEM (retail PickupItem.Touch(Other)) so its own
@@ -195,7 +199,9 @@ void AWoTAngrealSpawnPool::HandlePoolTouch(AActor* Other)
 		const UWoTMapLightTable* Table = UWoTMeshLight::FindMapLightTable(GetWorld());
 		AGameModeBase* GameMode = GetWorld()->GetAuthGameMode();
 		const int32 Ideal = Table ? Table->IdealPlayerCount : 0;
-		const int32 NumPlayers = GameMode ? GameMode->GetNumPlayers() : 0;
+		const AWoTGameMode* WoTGameMode = Cast<AWoTGameMode>(GameMode);
+		const int32 NumPlayers = WoTGameMode ? WoTGameMode->GetNumCombatants()
+			: (GameMode ? GameMode->GetNumPlayers() : 0);
 		const float Delay = ComputeRespawnDelay(RespawnTime, Ideal, NumPlayers);
 		GetWorldTimerManager().SetTimer(RespawnTimer, this,
 			&AWoTAngrealSpawnPool::RespawnPool, Delay);
