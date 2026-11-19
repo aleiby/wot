@@ -10,6 +10,7 @@
 #include "../WoTGradualMover.h"
 #include "../WoTLoopMover.h"
 #include "../WoTRotatingMover.h"
+#include "WoTTestAIClasses.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -291,7 +292,13 @@ bool FWoTControlPlayerExitSpec::RunTest(const FString&)
 		}
 		else
 		{
-			ACharacter* Destination = MakeBody(World, FVector(1500, 0, 0));
+			// The swap carries its other end into the trigger: an NPC, which a
+			// player-proximity trigger ignores, so the door's only occupant leaves.
+			FActorSpawnParameters NpcParams;
+			NpcParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ACharacter* Destination = World->SpawnActor<AWoTTestNPCCharacter>(
+				AWoTTestNPCCharacter::StaticClass(), FVector(1500, 0, 0), FRotator::ZeroRotator, NpcParams);
+			Destination->GetCharacterMovement()->DisableMovement();
 			AWoTSwapPlacesProjectile* Swap = World->SpawnActor<AWoTSwapPlacesProjectile>(
 				FVector(2000, 0, 1000), FRotator::ZeroRotator);
 			Controller->UnPossess();
