@@ -235,12 +235,14 @@ bool FBotDecisionRouteEndSpec::RunTest(const FString&)
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	BuildNav(W);
 	AWoTBotController* B = Bot(W, FVector(0, 0, 50));
-	// Raised above the floor: the route ends below it and the body never touches it.
+	// Within a jump's reach above the floor, but behind a plate the mesh does
+	// not see: the route ends below it and neither standing nor jumping touches it.
+	Box(W, FVector(500, 0, 105), FVector(60, 60, 2), false);
 	AWoTAngrealSpawnPool* High = Pool(W, FVector(500, 0, 150), TEXT("/Script/WoT.WoTAngrealInvFireball"));
 	AWoTAngrealSpawnPool* Far = Pool(W, FVector(-900, 0, 30), TEXT("/Script/WoT.WoTAngrealInvFireball"));
 	WoTTest::TickWorld(W, .2f);
 	TestTrue(TEXT("nearer raised pool chosen"), B->GetBehaviourState() == EWoTBotState::SeekItem && B->GetDestination().X > 0);
-	WoTTest::TickWorld(W, 2.5f);
+	WoTTest::TickWorld(W, 5.0f);
 	TestNotNull(TEXT("raised item really out of reach"), High->PickupItem.Get());
 	TestFalse(TEXT("route end releases the claim"), W->GetSubsystem<UWoTBotRoster>()->IsPoolClaimed(High, nullptr));
 	TestTrue(TEXT("bot moves on to the reachable pool"), B->GetDestination().X < 0 || !Far->PickupItem);

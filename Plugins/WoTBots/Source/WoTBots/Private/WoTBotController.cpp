@@ -102,8 +102,10 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 	bNavigationUnavailable = false;
 	LastOffensiveCastTime = LastDefensiveCastTime = -1e9f;
 	NextRepathTime = 0.0f;
+	ClimbBlockedSince = -1.0f;
+	bArrivedByTeleport = false;
 	LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
-	ProgressPosition = Body->GetActorLocation();
+	ProgressPosition = LastBodyLocation = Body->GetActorLocation();
 	SetActorTickEnabled(true);
 	InventoryPulse();
 	if (!bFrozen && !bRetiring)

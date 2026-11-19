@@ -23,6 +23,12 @@ void AWoTBotNavMesh::PostInitProperties()
 	}
 }
 
+void AWoTBotNavMesh::OnNavMeshTilesUpdated(const TArray<FNavTileRef>& ChangedTiles)
+{
+	Super::OnNavMeshTilesUpdated(ChangedTiles);
+	TileUpdates += ChangedTiles.Num();
+}
+
 void UWoTBotNavigationSystem::PostInitProperties()
 {
 	Super::PostInitProperties();

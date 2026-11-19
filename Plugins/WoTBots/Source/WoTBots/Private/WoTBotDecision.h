@@ -21,6 +21,41 @@ constexpr float RoamWeight = .45f;
 // Disengage after this long without sight of the target or damage either way.
 constexpr float NoProgressSeconds = 3.0f;
 constexpr float CloseRange = 600.0f;
+// A pickup on a ledge or pedestal is collected by jumping toward it (player
+// jump: 325 up against 950 gravity, about 55 units of rise, with full air
+// control). At the top of the jump the 92-unit body reaches 147 above its
+// floor, touching a 30-unit pickup sphere centred up to about 160 above it.
+// Beyond this reach from the route's end it is not chosen.
+constexpr float HopReach = 110.0f;
+constexpr float HopRiseMin = -10.0f;
+constexpr float HopRiseMax = 160.0f;
+constexpr int32 MaxHops = 2;
+// A pool reached but not collected, even by jumping, is not chosen again for this long.
+constexpr float UncollectableSeconds = 60.0f;
+// A blocked body jumps a step its walk cannot climb when the route rises at
+// least this much, and the jump clears it at this height.
+constexpr float ClimbRise = 15.0f;
+constexpr float ClimbReach = 100.0f;
+// Only a ledge higher than the walk steps (25, plus its 2.4 hover) is jumped,
+// after the body has been held back this long.
+constexpr float ClimbStep = 22.0f;
+constexpr float ClimbBlockedSeconds = .2f;
+constexpr float ClimbClearance = 50.0f;
+
+enum class EPickupReach : uint8 { Stand, Hop, None };
+// Collecting means overlapping the pickup sphere. From feet on the route's end,
+// a standing body (radius 17, height 92) touches it, a jump toward it does, or
+// nothing does (below the floor, out of reach).
+inline EPickupReach PickupReach(const FVector& Feet, const FVector& Pickup, float PickupRadius,
+	float BodyRadius = 17.0f, float BodyHeight = 92.0f)
+{
+	const FVector Bottom = Feet + FVector(0, 0, BodyRadius), Top = Feet + FVector(0, 0, BodyHeight - BodyRadius);
+	if (FVector::Dist(FMath::ClosestPointOnSegment(Pickup, Bottom, Top), Pickup) < BodyRadius + PickupRadius)
+		return EPickupReach::Stand;
+	const float Rise = Pickup.Z - Feet.Z;
+	return FVector::Dist2D(Feet, Pickup) <= HopReach && Rise >= HopRiseMin && Rise <= HopRiseMax
+		? EPickupReach::Hop : EPickupReach::None;
+}
 
 inline bool ClearlyBetter(float Challenger, float Current)
 {

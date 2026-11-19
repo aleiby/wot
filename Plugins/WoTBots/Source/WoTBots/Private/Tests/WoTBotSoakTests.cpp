@@ -6,6 +6,14 @@
 #include "Testing/WoTSoakEvents.h"
 #include "EngineUtils.h"
 #include "GameFramework/PhysicsVolume.h"
+#include "GameFramework/PlayerStart.h"
+#include "Components/CapsuleComponent.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "NavigationSystem.h"
+#include "NavMesh/RecastNavMesh.h"
+#include "AI/WoTPathNode.h"
+#include "Algo/BinarySearch.h"
+#include "WoTBotRoster.h"
 #include "HAL/PlatformProcess.h"
 #include "HAL/FileManager.h"
 #include "Misc/CommandLine.h"
@@ -55,6 +63,7 @@ struct FObserver
 	double LastSampleTime = 0;
 	int32 LastClusterSecond = 0;
 	TSet<TWeakObjectPtr<AWoTAngrealSpawnPool>> VisitedPools;
+	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, double> ClosestApproach;
 	TArray<double> PairDistances;
 	FObserver(UWorld* W, const FObject& R, FLogCapture& L) : World(W), Report(R), Logs(L)
 	{
@@ -85,11 +94,310 @@ struct FObserver
 				Event->SetStringField(TEXT("kind"), Key);
 				Event->SetNumberField(TEXT("seconds"), Time);
 				Event->SetStringField(TEXT("position"), Position(Participant ? Participant->GetActorLocation() : Subject->GetActorLocation()));
+				DescribeStuck(Event, B);
 				Recoveries.Add(Value(Event));
 			}
 		});
 	}
 	~FObserver() { WoTSoakEvents::Events().Remove(Handle); }
+	static const ANavigationData* BotNavigation(UWorld* W, UNavigationSystemV1*& Nav)
+	{
+		Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(W);
+		if (!Nav) return nullptr;
+		for (ANavigationData* Data : Nav->NavDataSet) if (Data && Data->IsA<AWoTBotNavMesh>()) return Data;
+		return nullptr;
+	}
+	static bool CompletePath(UNavigationSystemV1* Nav, const ANavigationData* Data, const FVector& From, const FVector& To, double* Length = nullptr)
+	{
+		FPathFindingQuery Query(nullptr, *Data, From, To);
+		Query.SetAllowPartialPaths(false);
+		const FPathFindingResult Path = Nav->FindPathSync(Data->GetConfig(), Query);
+		if (!Path.IsSuccessful() || !Path.Path.IsValid() || Path.Path->IsPartial()) return false;
+		if (Length) *Length = Path.Path->GetLength();
+		return true;
+	}
+	// Why a recovery fired: where the route led, what the body stands on, and what
+	// blocks a step along the current path segment.
+	void DescribeStuck(const FObject& Event, AWoTBotController* B)
+	{
+		static const TCHAR* StateNames[] = { TEXT("roam"), TEXT("seek"), TEXT("engage"), TEXT("dead"), TEXT("frozen") };
+		Event->SetStringField(TEXT("state"), StateNames[int32(B->GetBehaviourState())]);
+		const AWoTCharacter* Body = Cast<AWoTCharacter>(B->GetPawn());
+		if (!Body) return;
+		const float HalfHeight = Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		const FVector Here = Body->GetActorLocation(), Feet = Here - FVector(0, 0, HalfHeight);
+		const FVector Goal = B->GetDestination();
+		Event->SetStringField(TEXT("destination"), Position(Goal));
+		Event->SetNumberField(TEXT("destination_2d"), FVector::Dist2D(Here, Goal));
+		Event->SetNumberField(TEXT("destination_dz"), Goal.Z - Feet.Z);
+		Event->SetBoolField(TEXT("navigation_unavailable"), B->IsNavigationUnavailable());
+		Event->SetNumberField(TEXT("since_jump"), World->GetTimeSeconds() - B->GetLastJumpTime());
+		if (const AWoTAngrealSpawnPool* P = B->GetSeekingPool())
+		{
+			Event->SetStringField(TEXT("pool"), P->GetName());
+			Event->SetStringField(TEXT("pool_position"), Position(P->GetActorLocation()));
+			Event->SetBoolField(TEXT("pool_stocked"), P->PickupItem != nullptr);
+			Event->SetNumberField(TEXT("pool_2d"), FVector::Dist2D(Here, P->GetActorLocation()));
+			Event->SetNumberField(TEXT("pool_dz"), P->GetActorLocation().Z - Feet.Z);
+		}
+		const UCharacterMovementComponent* Move = Body->GetCharacterMovement();
+		Event->SetStringField(TEXT("movement"), Move->GetMovementName());
+		Event->SetNumberField(TEXT("speed"), Body->GetVelocity().Size());
+		if (const AActor* Floor = Move->CurrentFloor.HitResult.GetActor()) Event->SetStringField(TEXT("floor"), Floor->GetName());
+		const UPathFollowingComponent* Follow = B->GetPathFollowingComponent();
+		Event->SetNumberField(TEXT("follow_status"), int32(Follow->GetStatus()));
+		FVector Next = Goal;
+		if (Follow->HasValidPath())
+		{
+			const FNavPathSharedPtr Path = Follow->GetPath();
+			const int32 Index = Follow->GetCurrentPathIndex();
+			Event->SetNumberField(TEXT("path_points"), Path->GetPathPoints().Num());
+			Event->SetNumberField(TEXT("path_index"), Index);
+			Event->SetBoolField(TEXT("path_partial"), Path->IsPartial());
+			if (Path->GetPathPoints().IsValidIndex(Index + 1)) Next = Path->GetPathPoints()[Index + 1].Location;
+			Event->SetStringField(TEXT("path_next"), Position(Next));
+			Event->SetNumberField(TEXT("path_next_dz"), Next.Z - Feet.Z);
+			// A route that continues well above the feet: what holds that mesh up?
+			if (Next.Z - Feet.Z > 20) Event->SetStringField(TEXT("path_next_below"), Below(World, Next));
+		}
+		UNavigationSystemV1* Nav = nullptr;
+		if (const ANavigationData* Data = BotNavigation(World, Nav))
+		{
+			FNavLocation OnMesh;
+			const bool bOnMesh = Nav->ProjectPointToNavigation(Body->GetNavAgentLocation(), OnMesh, FVector(50, 50, 100), Data);
+			Event->SetBoolField(TEXT("on_navigation"), bOnMesh);
+			if (bOnMesh)
+			{
+				Event->SetNumberField(TEXT("navigation_offset_2d"), FVector::Dist2D(OnMesh.Location, Here));
+				Event->SetBoolField(TEXT("route_complete"), CompletePath(Nav, Data, OnMesh.Location, Goal));
+			}
+		}
+		const FVector Direction = (Next - Here).GetSafeNormal2D();
+		if (!Direction.IsNearlyZero())
+		{
+			FHitResult Hit;
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(WoTBotSoakStuck), false, Body);
+			if (World->SweepSingleByChannel(Hit, Here, Here + Direction * 40.0f, FQuat::Identity,
+				Body->GetCapsuleComponent()->GetCollisionObjectType(), Body->GetCapsuleComponent()->GetCollisionShape(), Params))
+			{
+				Event->SetStringField(TEXT("blocked_by"), Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("none"));
+				Event->SetStringField(TEXT("blocked_class"), Hit.GetActor() ? Hit.GetActor()->GetClass()->GetName() : TEXT("none"));
+				Event->SetNumberField(TEXT("blocked_impact_dz"), Hit.ImpactPoint.Z - Feet.Z);
+				Event->SetNumberField(TEXT("blocked_normal_z"), Hit.ImpactNormal.Z);
+				Event->SetNumberField(TEXT("blocked_distance"), Hit.Distance);
+			}
+		}
+	}
+	// Per pool: where it projects on the bots' mesh, whether standing there touches
+	// its pickup, and from how many player starts a complete route leads there.
+	void DescribeReachability()
+	{
+		UNavigationSystemV1* Nav = nullptr;
+		const ANavigationData* Data = BotNavigation(World, Nav);
+		if (!Data) return;
+		TArray<TPair<FString, FVector>> Starts;
+		for (TActorIterator<APlayerStart> It(World); It; ++It)
+		{
+			FNavLocation Start;
+			if (Nav->ProjectPointToNavigation(It->GetActorLocation(), Start, FVector(50, 50, 150), Data)) Starts.Emplace(It->GetName(), Start.Location);
+			else Starts.Emplace(It->GetName(), FVector(std::numeric_limits<double>::quiet_NaN()));
+		}
+		TMap<FString, int32> StartReach;
+		int32 Projected = 0;
+		for (const auto& Pair : Pools)
+		{
+			const AWoTAngrealSpawnPool* P = Pair.Key.Get();
+			if (!P) continue;
+			const FObject Row = Pair.Value;
+			FNavLocation End;
+			if (!Nav->ProjectPointToNavigation(P->GetActorLocation(), End, FVector(80, 80, 160), Data))
+			{ Row->SetBoolField(TEXT("on_navigation"), false); continue; }
+			++Projected;
+			Row->SetBoolField(TEXT("on_navigation"), true);
+			Row->SetStringField(TEXT("navigation_point"), Position(End.Location));
+			Row->SetNumberField(TEXT("navigation_offset_2d"), FVector::Dist2D(End.Location, P->GetActorLocation()));
+			Row->SetNumberField(TEXT("navigation_offset_z"), P->GetActorLocation().Z - End.Location.Z);
+			// A player body (17 x 46) standing at the point, against the 30-unit pickup sphere.
+			const FVector Bottom = End.Location + FVector(0, 0, 17), Top = End.Location + FVector(0, 0, 92 - 17);
+			const FVector Closest = FMath::ClosestPointOnSegment(P->GetActorLocation(), Bottom, Top);
+			Row->SetBoolField(TEXT("touch_from_navigation"), FVector::Dist(Closest, P->GetActorLocation()) < 17 + P->GetPickupCollisionRadius());
+			int32 Reaching = 0;
+			for (const auto& Start : Starts)
+				if (!Start.Value.ContainsNaN() && CompletePath(Nav, Data, Start.Value, End.Location)) { ++Reaching; ++StartReach.FindOrAdd(Start.Key); }
+			Row->SetNumberField(TEXT("starts_reaching"), Reaching);
+			Row->SetNumberField(TEXT("starts"), Starts.Num());
+		}
+		TArray<TSharedPtr<FJsonValue>> StartRows;
+		for (const auto& Start : Starts)
+		{
+			FObject Row = Object();
+			Row->SetStringField(TEXT("id"), Start.Key);
+			Row->SetBoolField(TEXT("on_navigation"), !Start.Value.ContainsNaN());
+			if (!Start.Value.ContainsNaN()) Row->SetStringField(TEXT("navigation_point"), Position(Start.Value));
+			Row->SetNumberField(TEXT("pools_reached"), StartReach.FindRef(Start.Key));
+			Row->SetNumberField(TEXT("pools_on_navigation"), Projected);
+			StartRows.Add(Value(Row));
+		}
+		Report->SetArrayField(TEXT("player_starts"), StartRows);
+	}
+	// Opt-in (WOT_BOT_SOAK_NAVDUMP=1): every bot-mesh polygon with its connected
+	// island, plus the retail path nodes, for offline plotting.
+	void DumpNavigation(const FString& Path)
+	{
+		UNavigationSystemV1* Nav = nullptr;
+		const ARecastNavMesh* Mesh = Cast<ARecastNavMesh>(BotNavigation(World, Nav));
+		if (!Mesh) return;
+		TArray<FNavTileRef> Tiles; Mesh->GetAllNavMeshTiles(Tiles);
+		TArray<NavNodeRef> Polys;
+		TMap<NavNodeRef, int32> Index;
+		for (FNavTileRef Tile : Tiles)
+		{
+			TArray<FNavPoly> InTile; Mesh->GetPolysInTile(Tile, InTile);
+			for (const FNavPoly& P : InTile) { Index.Add(P.Ref, Polys.Num()); Polys.Add(P.Ref); }
+		}
+		TArray<int32> Parent; Parent.SetNum(Polys.Num());
+		for (int32 I = 0; I < Parent.Num(); ++I) Parent[I] = I;
+		const auto Find = [&Parent](int32 I) { while (Parent[I] != I) I = Parent[I] = Parent[Parent[I]]; return I; };
+		for (int32 I = 0; I < Polys.Num(); ++I)
+		{
+			TArray<NavNodeRef> Neighbours; Mesh->GetPolyNeighbors(Polys[I], Neighbours);
+			for (NavNodeRef N : Neighbours) if (const int32* J = Index.Find(N)) Parent[Find(I)] = Find(*J);
+		}
+		TArray<TSharedPtr<FJsonValue>> Rows;
+		for (int32 I = 0; I < Polys.Num(); ++I)
+		{
+			TArray<FVector> Verts; Mesh->GetPolyVerts(Polys[I], Verts);
+			TArray<TSharedPtr<FJsonValue>> Flat;
+			for (const FVector& V : Verts) for (double C : { V.X, V.Y, V.Z }) Flat.Add(MakeShared<FJsonValueNumber>(FMath::RoundToDouble(C)));
+			FObject Row = Object(); Row->SetNumberField(TEXT("island"), Find(I)); Row->SetArrayField(TEXT("v"), Flat);
+			Rows.Add(Value(Row));
+		}
+		FObject Dump = Object(); Dump->SetArrayField(TEXT("polys"), Rows);
+		const auto IslandAt = [&](const FVector& Point, FVector Extent) -> int32
+		{
+			FNavLocation Projected;
+			if (!Nav->ProjectPointToNavigation(Point, Projected, Extent, Mesh)) return -1;
+			const int32* I = Index.Find(Projected.NodeRef);
+			return I ? Find(*I) : -1;
+		};
+		TArray<TSharedPtr<FJsonValue>> PoolRows;
+		for (TActorIterator<AWoTAngrealSpawnPool> It(World); It; ++It)
+		{
+			FObject Row = Object(); Row->SetStringField(TEXT("id"), It->GetName());
+			Row->SetStringField(TEXT("position"), Position(It->GetActorLocation()));
+			Row->SetNumberField(TEXT("island"), IslandAt(It->GetActorLocation(), FVector(80, 80, 160)));
+			PoolRows.Add(Value(Row));
+		}
+		Dump->SetArrayField(TEXT("pools"), PoolRows);
+		TArray<TSharedPtr<FJsonValue>> Nodes;
+		for (TActorIterator<AWoTPathNode> It(World); It; ++It)
+		{
+			FObject Row = Object(); Row->SetStringField(TEXT("id"), It->GetName());
+			Row->SetNumberField(TEXT("island"), IslandAt(It->GetActorLocation(), FVector(50, 50, 150)));
+			Row->SetStringField(TEXT("class"), It->SourceClass.ToString());
+			Row->SetStringField(TEXT("position"), Position(It->GetActorLocation()));
+			TArray<TSharedPtr<FJsonValue>> Out;
+			for (const FWoTPathEdge& E : It->OutEdges) if (E.Other) Out.Add(MakeShared<FJsonValueString>(E.Other->GetName()));
+			Row->SetArrayField(TEXT("out"), Out);
+			Nodes.Add(Value(Row));
+		}
+		Dump->SetArrayField(TEXT("nodes"), Nodes);
+		Save(Dump, Path);
+	}
+	// The same cluster rule for as many bodies placed uniformly at random on the
+	// mesh island holding most player starts: what the map's size alone yields.
+	void RandomClusterBaseline()
+	{
+		const int32 Bodies = FMath::RoundToInt(Number(Report, TEXT("cluster_living_sum")) / FMath::Max(1.0, Number(Report, TEXT("cluster_samples"))));
+		UNavigationSystemV1* Nav = nullptr;
+		const ARecastNavMesh* Mesh = Cast<ARecastNavMesh>(BotNavigation(World, Nav));
+		if (!Mesh || Bodies < 3) return;
+		TArray<FNavTileRef> Tiles; Mesh->GetAllNavMeshTiles(Tiles);
+		TArray<NavNodeRef> Polys; TMap<NavNodeRef, int32> Index;
+		for (FNavTileRef Tile : Tiles)
+		{
+			TArray<FNavPoly> InTile; Mesh->GetPolysInTile(Tile, InTile);
+			for (const FNavPoly& P : InTile) { Index.Add(P.Ref, Polys.Num()); Polys.Add(P.Ref); }
+		}
+		TArray<int32> Parent; Parent.SetNum(Polys.Num());
+		for (int32 I = 0; I < Parent.Num(); ++I) Parent[I] = I;
+		const auto Find = [&Parent](int32 I) { while (Parent[I] != I) I = Parent[I] = Parent[Parent[I]]; return I; };
+		for (int32 I = 0; I < Polys.Num(); ++I)
+		{
+			TArray<NavNodeRef> Neighbours; Mesh->GetPolyNeighbors(Polys[I], Neighbours);
+			for (NavNodeRef N : Neighbours) if (const int32* J = Index.Find(N)) Parent[Find(I)] = Find(*J);
+		}
+		TMap<int32, int32> Starts;
+		for (TActorIterator<APlayerStart> It(World); It; ++It)
+		{
+			FNavLocation At;
+			if (Nav->ProjectPointToNavigation(It->GetActorLocation(), At, FVector(50, 50, 150), Mesh))
+				if (const int32* I = Index.Find(At.NodeRef)) ++Starts.FindOrAdd(Find(*I));
+		}
+		int32 Main = INDEX_NONE, Most = 0;
+		for (const auto& Pair : Starts) if (Pair.Value > Most) { Most = Pair.Value; Main = Pair.Key; }
+		if (Main == INDEX_NONE) return;
+		struct FTriangle { FVector A, B, C; };
+		TArray<FTriangle> Triangles; TArray<double> Cumulative; double Area = 0;
+		for (int32 I = 0; I < Polys.Num(); ++I)
+		{
+			if (Find(I) != Main) continue;
+			TArray<FVector> Verts; Mesh->GetPolyVerts(Polys[I], Verts);
+			for (int32 V = 2; V < Verts.Num(); ++V)
+			{
+				Area += .5 * FVector::CrossProduct(Verts[V - 1] - Verts[0], Verts[V] - Verts[0]).Size();
+				Triangles.Add({ Verts[0], Verts[V - 1], Verts[V] }); Cumulative.Add(Area);
+			}
+		}
+		if (Triangles.IsEmpty() || Area <= 0) return;
+		FRandomStream Rng(MapSeed(Report->GetStringField(TEXT("map"))));
+		const auto RandomPoint = [&]()
+		{
+			const int32 T = FMath::Min(Algo::LowerBound(Cumulative, Rng.FRand() * Area), Triangles.Num() - 1);
+			float U = Rng.FRand(), V = Rng.FRand();
+			if (U + V > 1) { U = 1 - U; V = 1 - V; }
+			return Triangles[T].A + U * (Triangles[T].B - Triangles[T].A) + V * (Triangles[T].C - Triangles[T].A);
+		};
+		int32 Clustered = 0; double PairSum = 0; int32 Pairs = 0;
+		constexpr int32 Trials = 2000;
+		TArray<FVector> Points;
+		for (int32 Trial = 0; Trial < Trials; ++Trial)
+		{
+			Points.Reset();
+			for (int32 I = 0; I < Bodies; ++I) Points.Add(RandomPoint());
+			bool bClustered = false;
+			for (int32 A = 0; A < Points.Num(); ++A)
+				for (int32 B = A + 1; B < Points.Num(); ++B)
+				{
+					PairSum += FVector::Dist(Points[A], Points[B]); ++Pairs;
+					for (int32 C = B + 1; C < Points.Num() && !bClustered; ++C)
+						bClustered = FVector::DistSquared(Points[A], Points[B]) <= 360000
+							&& FVector::DistSquared(Points[A], Points[C]) <= 360000
+							&& FVector::DistSquared(Points[B], Points[C]) <= 360000;
+				}
+			Clustered += bClustered;
+		}
+		Report->SetNumberField(TEXT("cluster_bodies"), Bodies);
+		Report->SetNumberField(TEXT("cluster_share_random"), double(Clustered) / Trials);
+		Report->SetNumberField(TEXT("mean_pair_distance_random"), PairSum / FMath::Max(1, Pairs));
+		Report->SetNumberField(TEXT("main_island_area"), Area);
+	}
+	// What a downward trace finds below a point, by every primitive type.
+	static FString Below(UWorld* W, const FVector& Point)
+	{
+		TArray<FHitResult> Hits;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(WoTBotSoakBelow), true);
+		W->LineTraceMultiByObjectType(Hits, Point + FVector(0, 0, 20), Point - FVector(0, 0, 60), FCollisionObjectQueryParams::AllObjects, Params);
+		FString Text;
+		for (const FHitResult& Hit : Hits)
+		{
+			const UPrimitiveComponent* C = Hit.GetComponent();
+			Text += FString::Printf(TEXT("%s/%s z=%.0f pawn=%d nav=%d; "), Hit.GetActor() ? *Hit.GetActor()->GetName() : TEXT("-"),
+				C ? *C->GetName() : TEXT("-"), Hit.ImpactPoint.Z, C ? int32(C->GetCollisionResponseToChannel(ECC_Pawn)) : -1,
+				C ? int32(C->IsNavigationRelevant()) : -1);
+		}
+		return Text;
+	}
 	FObject Bot(AWoTBotController* B)
 	{
 		if (const FObject* Found = Bots.Find(B)) return *Found;
@@ -129,9 +437,18 @@ struct FObserver
 				}
 				else Living.Add(Body->GetActorLocation());
 				for (const auto& P : Pools)
-					if (P.Key.IsValid() && FVector::DistSquared(Body->GetActorLocation(), P.Key->GetActorLocation()) <= FMath::Square(120.0f))
-						VisitedPools.Add(P.Key);
+				{
+					if (!P.Key.IsValid()) continue;
+					const double Distance = FVector::Dist(Body->GetActorLocation(), P.Key->GetActorLocation());
+					if (Distance <= 120.0) VisitedPools.Add(P.Key);
+					double& Closest = ClosestApproach.FindOrAdd(P.Key, TNumericLimits<double>::Max());
+					Closest = FMath::Min(Closest, Distance);
+				}
+				if (AWoTAngrealSpawnPool* Goal = It->GetSeekingPool())
+					Increment(Pool(Goal), It->GetBehaviourState() == EWoTBotState::SeekItem ? TEXT("sought_seconds") : TEXT("roam_goal_seconds"), Delta);
 			}
+			R->SetNumberField(TEXT("climb_jumps"), It->GetClimbJumpCount());
+			R->SetNumberField(TEXT("hops"), It->GetHopCount());
 			if (const AWoTPlayerState* S = It->GetPlayerState<AWoTPlayerState>())
 			{
 				R->SetNumberField(TEXT("kills"), S->Kills);
@@ -156,6 +473,7 @@ struct FObserver
 				}
 			Increment(Report, TEXT("cluster_samples"));
 			Increment(Report, TEXT("clustered_samples"), Clustered ? 1 : 0);
+			Increment(Report, TEXT("cluster_living_sum"), Living.Num());
 		}
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
@@ -200,7 +518,11 @@ struct FObserver
 		int32 Kills = 0, Deaths = 0, Unvisited = 0;
 		TArray<TSharedPtr<FJsonValue>> BotRows, PoolRows;
 		for (const auto& P : Bots) { BotRows.Add(Value(P.Value)); Kills += int32(Number(P.Value,TEXT("kills"))); Deaths += int32(Number(P.Value,TEXT("deaths"))); }
-		for (const auto& P : Pools) { PoolRows.Add(Value(P.Value)); Unvisited += Number(P.Value,TEXT("collected")) == 0; }
+		for (const auto& P : Pools)
+		{
+			if (const double* Closest = ClosestApproach.Find(P.Key)) P.Value->SetNumberField(TEXT("closest_approach"), *Closest);
+			PoolRows.Add(Value(P.Value)); Unvisited += Number(P.Value,TEXT("collected")) == 0;
+		}
 		Report->SetArrayField(TEXT("bots"), BotRows); Report->SetArrayField(TEXT("pools"), PoolRows);
 		Report->SetArrayField(TEXT("actor_anomalies"), Anomalies); Report->SetArrayField(TEXT("recovery_events"), Recoveries);
 		Report->SetNumberField(TEXT("kills"), Kills); Report->SetNumberField(TEXT("deaths"), Deaths);
@@ -209,8 +531,19 @@ struct FObserver
 		for (const auto& P : Bots) Pickups += Number(P.Value, TEXT("pickups"));
 		Report->SetNumberField(TEXT("pickups_per_bot_minute"), Pickups * 60 / FMath::Max(1.0, Number(Report, TEXT("bot_seconds"))));
 		Report->SetNumberField(TEXT("unique_pools_visited"), VisitedPools.Num());
+		if (const UWoTBotRoster* Roster = World->GetSubsystem<UWoTBotRoster>()) Report->SetNumberField(TEXT("navigation_links"), Roster->GetLinkCount());
+		// Tiles the bot mesh built or rebuilt; after the first checkpoint (links in
+		// place), further rebuilds come from movers and other runtime changes.
+		UNavigationSystemV1* Nav = nullptr;
+		if (const AWoTBotNavMesh* Mesh = Cast<AWoTBotNavMesh>(BotNavigation(World, Nav)))
+		{
+			if (!Report->HasField(TEXT("navigation_tile_updates_first_checkpoint")))
+				Report->SetNumberField(TEXT("navigation_tile_updates_first_checkpoint"), Mesh->GetTileUpdateCount());
+			Report->SetNumberField(TEXT("navigation_tile_updates"), Mesh->GetTileUpdateCount());
+		}
 		Report->SetNumberField(TEXT("unique_pools_collected"), Pools.Num() - Unvisited);
 		Report->SetNumberField(TEXT("cluster_share"), Number(Report, TEXT("clustered_samples")) / FMath::Max(1.0, Number(Report, TEXT("cluster_samples"))));
+		RandomClusterBaseline();
 		Report->SetNumberField(TEXT("mean_pair_distance"), Number(Report, TEXT("pair_distance_sum")) / FMath::Max(1.0, Number(Report, TEXT("pair_samples"))));
 		if (!PairDistances.IsEmpty())
 		{
@@ -292,6 +625,9 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 	AWoTGameMode* Game = W->GetAuthGameMode<AWoTGameMode>();
 	Game->SetInstalledMapsForTesting({Map});
 	for (TActorIterator<AWoTAngrealSpawnPool> It(W); It; ++It) Observer.Pool(*It);
+	Observer.DescribeReachability();
+	if (FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_BOT_SOAK_NAVDUMP")) == TEXT("1"))
+		Observer.DumpNavigation(FPaths::GetPath(Output) / (TEXT("NavDump-") + FPaths::GetCleanFilename(Output)));
 	W->InitializeActorsForPlay(URL);
 	W->BeginPlay();
 	Observer.Sample();
@@ -392,13 +728,25 @@ bool FBotSoakSpec::RunTest(const FString&)
 		if (Fact.Domain == EWoTFactDomain::World && FPaths::GetBaseFilename(Fact.SourcePath).StartsWith(TEXT("Arena_"))) Names.AddUnique(FPaths::GetBaseFilename(Fact.SourcePath));
 	Names.Sort();
 	if (Names.IsEmpty()) { AddError(TEXT("No Arena maps in production contract")); return false; }
+	// Optional subset for iterating on one map: WOT_BOT_SOAK_MAPS=Arena_06,Arena_11.
+	TArray<FString> Subset;
+	FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_BOT_SOAK_MAPS")).ParseIntoArray(Subset, TEXT(","));
+	if (!Subset.IsEmpty())
+	{
+		Names.RemoveAll([&Subset](const FString& Map) { return !Subset.Contains(Map); });
+		if (Names.IsEmpty()) { AddError(TEXT("WOT_BOT_SOAK_MAPS names no Arena map")); return false; }
+	}
+	// Workers inherit the parent's core limit.
+	int32 CoreLimit = 0;
+	const FString WorkerLimit = FParse::Value(FCommandLine::Get(), TEXT("corelimit="), CoreLimit) && CoreLimit > 0
+		? FString::Printf(TEXT(" -corelimit=%d"), CoreLimit) : FString();
 	TArray<FObject> Reports;
 	for (const FString& Map : Names)
 	{
 		const FString Output = Directory / (Map + TEXT(".json"));
 		const FString Log = Directory / (Map + TEXT(".log"));
-		const FString Args = FString::Printf(TEXT("\"%s\" \"-ExecCmds=Automation RunTests WoT.Bots.Soak.AllArenaMaps; Quit\" -unattended -nullrhi -nosplash -nopause -nocrashreports -stdout -abslog=\"%s\" -WotBotSoakMap=\"%s\" -WotBotSoakOutput=\"%s\""),
-			*FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()), *Log, *Map, *Output);
+		const FString Args = FString::Printf(TEXT("\"%s\" \"-ExecCmds=Automation RunTests WoT.Bots.Soak.AllArenaMaps; Quit\" -unattended -nullrhi -nosplash -nopause -nocrashreports -stdout -abslog=\"%s\" -WotBotSoakMap=\"%s\" -WotBotSoakOutput=\"%s\"%s"),
+			*FPaths::ConvertRelativePathToFull(FPaths::GetProjectFilePath()), *Log, *Map, *Output, *WorkerLimit);
 		UE_LOG(LogTemp, Display, TEXT("BOT_SOAK_START map=%s seed=%d log=%s"), *Map, MapSeed(Map), *Log);
 		FProcHandle Process = FPlatformProcess::CreateProc(FPlatformProcess::ExecutablePath(), *Args, false, true, true, nullptr, 0, nullptr, nullptr);
 		int32 ExitCode = -1; bool bTimedOut = false;

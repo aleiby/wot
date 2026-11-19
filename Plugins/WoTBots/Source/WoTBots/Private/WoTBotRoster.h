@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "WoTBotLinks.h"
 #include "WoTBotRoster.generated.h"
 
 class AWoTBotController;
@@ -33,6 +34,12 @@ public:
 	// Engaged living bots per target, excluding one bot: shared intent, not position.
 	void CountFighters(const AWoTBotController* Except, TMap<const AWoTCharacter*, int32>& Counts) const;
 	int32 FightersFor(const AWoTCharacter* Target, const AWoTBotController* Except) const;
+	// Links added to the bot mesh along the map's path network; INDEX_NONE until built.
+	int32 GetLinkCount() const { return LinkCount; }
+	// Builds those links once the bot mesh is built; returns GetLinkCount().
+	int32 BuildLinks();
+	// Teleporter reaches no link carries (too long for the mesh), routed by the bots.
+	const TArray<WoTBotLinks::FDistantTeleport>& GetDistantTeleports() const { return DistantTeleports; }
 private:
 	struct FDeparture
 	{
@@ -58,6 +65,7 @@ private:
 	TArray<FDeparture> Departures;
 	TSet<TWeakObjectPtr<APlayerState>> ExitingStates;
 	TArray<TWeakObjectPtr<UClass>> ClassDeck;
+	TArray<WoTBotLinks::FDistantTeleport> DistantTeleports;
 	FTimerHandle EvaluationTimer;
 	FTimerHandle AddTimer;
 	FTimerHandle DepartureTimer;
@@ -69,6 +77,7 @@ private:
 	double LastPublishTime = -2;
 	int32 LastPublishedCount = INDEX_NONE;
 	int32 FillTarget = 0;
+	int32 LinkCount = INDEX_NONE;
 	bool bActive = false;
 	bool bFrozen = false;
 	bool bEvaluating = false;

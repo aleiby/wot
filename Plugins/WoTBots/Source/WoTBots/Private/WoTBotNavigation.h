@@ -12,6 +12,11 @@ class AWoTBotNavMesh : public ARecastNavMesh
 public:
 	AWoTBotNavMesh();
 	virtual void PostInitProperties() override;
+	virtual void OnNavMeshTilesUpdated(const TArray<FNavTileRef>& ChangedTiles) override;
+	// Tiles built or rebuilt since this mesh was created (soak diagnostics).
+	int32 GetTileUpdateCount() const { return TileUpdates; }
+private:
+	int32 TileUpdates = 0;
 };
 
 // A null preferred class matches every nav class in the engine. Keep the

@@ -8,6 +8,7 @@
 
 class UWoTCasterComponent;
 class UWoTBotRoster;
+namespace WoTBotLinks { struct FDistantTeleport; }
 class AWoTAngrealInventory;
 class AWoTAngrealSpawnPool;
 class AWoTResourceSpawnerInv;
@@ -18,6 +19,7 @@ struct FWoTBotRegressionAccess;
 struct FWoTBotCastCompletionAccess;
 struct FWoTBotBehaviourAccess;
 struct FWoTBotDecisionAccess;
+struct FWoTBotTraversalAccess;
 }
 #endif
 
@@ -41,8 +43,13 @@ public:
 	bool IsTargetVisible() const { return bTargetVisible; }
 	FVector GetLastKnownPosition() const { return LastKnownPosition; }
 	FVector GetDestination() const { return Destination; }
+	AWoTAngrealSpawnPool* GetSeekingPool() const { return SeekingPool.Get(); }
+	bool IsNavigationUnavailable() const { return bNavigationUnavailable; }
 	uint64 GetThinkCount() const { return ThinkCount; }
 	uint64 GetRepathCount() const { return RepathCount; }
+	uint64 GetClimbJumpCount() const { return ClimbJumps; }
+	uint64 GetHopCount() const { return Hops; }
+	float GetLastJumpTime() const { return LastJumpTime; }
 	float GetAimErrorLimit() const;
 	bool CanSee(const AWoTCharacter* Candidate) const;
 	virtual void Tick(float DeltaSeconds) override;
@@ -59,6 +66,7 @@ private:
 	friend struct WoTBotTest::FWoTBotCastCompletionAccess;
 	friend struct WoTBotTest::FWoTBotBehaviourAccess;
 	friend struct WoTBotTest::FWoTBotDecisionAccess;
+	friend struct WoTBotTest::FWoTBotTraversalAccess;
 #endif
 	void InventoryPulse();
 	void Think();
@@ -69,6 +77,8 @@ private:
 	void DamageApplied(AWoTCharacter* Victim, AController* InstigatorController, AActor* Causer, float Amount);
 	void UpdateAim();
 	void UpdateStuck();
+	void UpdateClimb();
+	void Hop(const AWoTAngrealSpawnPool* Pool);
 	void ChooseDestination(bool bForce = false);
 	bool NavigateTo(const FVector& Point);
 	AWoTAngrealSpawnPool* BestPool(float& Score, bool bRoaming = false);
@@ -85,6 +95,12 @@ private:
 	void UpdateCastCompletion();
 	AWoTAngrealInventory* MovementOffence() const;
 	float StandoffRange() const;
+	// The shortest complete route from From to To through a teleporter whose reach
+	// no mesh link carries, and the route's length; null when none. Legs from From
+	// to each entry are measured once and kept in EntryLegs when given.
+	const WoTBotLinks::FDistantTeleport* DistantTeleportRoute(const FVector& From, const FVector& To, float& Length, TArray<float>* EntryLegs = nullptr) const;
+	// Walks to a point on the mesh beyond Reach of the teleporter's pad.
+	bool StepOffPad(const WoTBotLinks::FDistantTeleport& Via, float Reach);
 	EWoTBotState State = EWoTBotState::Dead;
 	TWeakObjectPtr<AWoTCharacter> Target;
 	TWeakObjectPtr<AWoTAngrealSpawnPool> SeekingPool;
@@ -92,6 +108,17 @@ private:
 	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> PoolVisits;
 	// Pools with no complete path from this body, retried after a delay.
 	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> UnreachablePools;
+	// Pools reached but not collected, even by jumping for them (kept across respawns).
+	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> UncollectablePools;
+	// The pool this body is jumping for, how often, and when it last left the ground.
+	TWeakObjectPtr<const AWoTAngrealSpawnPool> HopPool;
+	int32 HopCount = 0;
+	float HopTime = -1e9f;
+	float NextJumpTime = 0.0f;
+	float ClimbBlockedSince = -1.0f;
+	// Where a teleporter (or a swap) last set this body down.
+	FVector ArrivalLocation = FVector::ZeroVector;
+	bool bArrivedByTeleport = false;
 	float LastCombatProgress = -1e9f;
 	float LastSeenTargetHealth = 1.0f;
 	TWeakObjectPtr<AWoTAngrealInventory> AimingItem;
@@ -114,6 +141,10 @@ private:
 	bool bNavigationUnavailable = false;
 	uint64 ThinkCount = 0;
 	uint64 RepathCount = 0;
+	uint64 ClimbJumps = 0;
+	uint64 Hops = 0;
+	float LastJumpTime = -1e9f;
+	FVector LastBodyLocation = FVector::ZeroVector;
 	void ScheduleRespawn(float Delay);
 	void DestroyLivePawn();
 	void DestroyRespawnCorpse();

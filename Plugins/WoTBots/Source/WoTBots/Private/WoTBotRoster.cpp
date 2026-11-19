@@ -2,6 +2,7 @@
 #include "WoTBotController.h"
 #include "WoTBotFactionProfile.h"
 #include "WoTBotSettings.h"
+#include "WoTBotLinks.h"
 #include "WoTCharacter.h"
 #include "WoTBattleGameMode.h"
 #include "WoTFrontEnd.h"
@@ -134,6 +135,13 @@ AWoTBotController* UWoTBotRoster::RetirementCandidate(bool bUnmarkedOnly) const
 	return Best;
 }
 
+int32 UWoTBotRoster::BuildLinks()
+{
+	DistantTeleports.Reset();
+	LinkCount = WoTBotLinks::Build(*GetWorld(), &DistantTeleports);
+	return LinkCount;
+}
+
 void UWoTBotRoster::Evaluate()
 {
 	if (!bActive || bFrozen || bTearingDown || bEvaluating) return;
@@ -152,6 +160,8 @@ void UWoTBotRoster::Evaluate()
 		Retire(Bot);
 	}
 	ReconcileDepartures();
+	// The bot mesh's links along the map's path network, once that mesh is built.
+	if (LinkCount == INDEX_NONE && (GetBotCount() > 0 || GetDesiredBotCount() > 0)) BuildLinks();
 	FTimerManager& Timers = GetWorld()->GetTimerManager();
 	if (GetBotCount() < GetDesiredBotCount())
 	{

@@ -21,11 +21,16 @@
 #include "WoTGameMode.h"
 #include "WoTPlayerState.h"
 #include "EngineUtils.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
+#include "NavMesh/NavMeshPath.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "WoTRandom.h"
+
+// Where a pool's route ends: its projection onto the bot mesh within this box.
+static const FVector PoolExtent(80, 80, 160);
 
 bool AWoTBotController::CanAct() const
 {
@@ -188,6 +193,8 @@ void AWoTBotController::Think()
 		if (!CanAct()) return;
 	}
 	State = NextState;
+	// Jumps made for an earlier goal do not count against a new one.
+	if (SeekingPool.Get() != Pool) { HopPool.Reset(); HopCount = 0; }
 	SeekingPool = Pool;
 	if (Roster.IsValid()) Roster->ClaimPool(this, Pool);
 	CastArtifacts();
@@ -199,6 +206,8 @@ void AWoTBotController::ReleasePoolGoal()
 {
 	if (Roster.IsValid()) Roster->ReleasePool(this);
 	SeekingPool.Reset();
+	HopPool.Reset();
+	HopCount = 0;
 }
 
 void AWoTBotController::RememberNearbyPools()
@@ -221,11 +230,136 @@ void AWoTBotController::RememberNearbyPools()
 	const bool bRouteEnd = !bWantsMovement && !bNavigationUnavailable
 		&& FVector::Dist2D(GetPawn()->GetActorLocation(), Destination) <= 30.0f
 		&& FVector::DistSquared(Destination, SeekingPool->GetActorLocation()) <= FMath::Square(200.0f);
-	if (bTaken || bRouteEnd)
+	const bool bHopping = HopPool.Get() == SeekingPool.Get() && HopCount > 0;
+	if (bTaken)
+	{
+		PoolVisits.Add(SeekingPool, Now);
+		ReleasePoolGoal();
+		return;
+	}
+	if (State == EWoTBotState::SeekItem && (bRouteEnd || bHopping))
+	{
+		// A pickup on a pedestal or ledge beside the route's end: jump for it, as a
+		// player does, landing first between attempts.
+		const AWoTCharacter* Body = CastChecked<AWoTCharacter>(GetPawn());
+		if (Body->GetCharacterMovement()->IsFalling() || Now - HopTime < .3f) return;
+		const FVector Feet = Body->GetActorLocation() - FVector(0, 0, Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		if (HopCount < WoTBotDecision::MaxHops && WoTBotDecision::PickupReach(Feet, SeekingPool->GetActorLocation(),
+			SeekingPool->GetPickupCollisionRadius()) == WoTBotDecision::EPickupReach::Hop)
+		{
+			Hop(SeekingPool.Get());
+			return;
+		}
+		UncollectablePools.Add(SeekingPool, Now);
+	}
+	if (bRouteEnd || bHopping)
 	{
 		PoolVisits.Add(SeekingPool, Now);
 		ReleasePoolGoal();
 	}
+}
+
+void AWoTBotController::Hop(const AWoTAngrealSpawnPool* Pool)
+{
+	AWoTCharacter* Body = CastChecked<AWoTCharacter>(GetPawn());
+	if (Body->IsHardLanding()) return;
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (HopPool.Get() != Pool) HopCount = 0;
+	HopPool = Pool;
+	++HopCount;
+	HopTime = NextJumpTime = Now;
+	// Steer through the pickup rather than to it: a move that brakes short of it
+	// lands beside the pedestal. Air control carries the jump the rest of the way.
+	const FVector Here = Body->GetActorLocation(), Pickup = Pool->GetActorLocation();
+	const FVector Through = FVector(Pickup.X, Pickup.Y, Here.Z) + (Pickup - Here).GetSafeNormal2D() * 60.0f;
+	Destination = Through;
+	bWantsMovement = true;
+	NextRepathTime = Now + 1.0f;
+	MoveToLocation(Through, 5.0f, false, false, false, false, nullptr, true);
+	Body->Jump();
+	++Hops;
+	LastJumpTime = Now;
+}
+
+void AWoTBotController::UpdateClimb()
+{
+	// The navigation mesh climbs steps of up to its voxel-rounded step height,
+	// a little more than the body's own. Where a route rises into such a step
+	// (out of a sunken floor, onto a pedestal), a blocked body jumps it, as the
+	// original NPCs pick a wall adjustment when they walk into a wall
+	// (LegendPawn.uc HitWall calls PickWallAdjust).
+	AWoTCharacter* Body = CastChecked<AWoTCharacter>(GetPawn());
+	const UCharacterMovementComponent* Move = Body->GetCharacterMovement();
+	const float Now = GetWorld()->GetTimeSeconds();
+	// Any pause in the walk restarts the wait before a climb jump.
+	if (!bWantsMovement || Now < NextJumpTime || !Move->IsMovingOnGround() || Body->IsHardLanding())
+	{
+		ClimbBlockedSince = -1.0f;
+		return;
+	}
+	const UPathFollowingComponent* Follow = GetPathFollowingComponent();
+	if (!Follow || Follow->GetStatus() != EPathFollowingStatus::Moving)
+	{
+		ClimbBlockedSince = -1.0f;
+		return;
+	}
+	const UCapsuleComponent* Capsule = Body->GetCapsuleComponent();
+	const FVector Here = Body->GetActorLocation();
+	const float FeetZ = Here.Z - Capsule->GetScaledCapsuleHalfHeight();
+	const FVector RoutePoint = Follow->GetCurrentTargetLocation();
+	const FVector Direction = (RoutePoint - Here).GetSafeNormal2D();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(WoTBotClimb), false, Body);
+	const ECollisionChannel Channel = Capsule->GetCollisionObjectType();
+	// A link that does not descend (the map's own reach across a gap): leave the
+	// ground at the gap's edge rather than walk into it.
+	if (const FNavPathSharedPtr Path = Follow->GetPath(); Path.IsValid() && !Direction.IsNearlyZero())
+	{
+		const int32 Index = Follow->GetCurrentPathIndex();
+		const TArray<FNavPathPoint>& Points = Path->GetPathPoints();
+		FHitResult Ground;
+		const FVector Ahead = FVector(Here.X, Here.Y, FeetZ) + Direction * (Capsule->GetScaledCapsuleRadius() + 15.0f);
+		if (Points.IsValidIndex(Index + 1) && FNavMeshNodeFlags(Points[Index].Flags).IsNavLink()
+			&& Points[Index + 1].Location.Z - Points[Index].Location.Z > -WoTBotDecision::ClimbClearance
+			&& !GetWorld()->LineTraceSingleByChannel(Ground, Ahead + FVector(0, 0, 10.0f), Ahead - FVector(0, 0, 2.0f * WoTBotDecision::ClimbClearance), Channel, Params))
+		{
+			NextJumpTime = Now + .8f;
+			Body->Jump();
+			++ClimbJumps;
+			LastJumpTime = Now;
+			return;
+		}
+	}
+	// Held back while pressing on: a body that keeps its pace needs no jump.
+	if (Direction.IsNearlyZero() || FVector::DotProduct(Body->GetVelocity(), Direction) > .5f * Move->MaxWalkSpeed)
+	{
+		ClimbBlockedSince = -1.0f;
+		return;
+	}
+	if (ClimbBlockedSince < 0.0f) ClimbBlockedSince = Now;
+	if (Now - ClimbBlockedSince < WoTBotDecision::ClimbBlockedSeconds) return;
+	// The route rises, or turns just past the obstacle (onto a pedestal, over a
+	// sill the mesh steps across): not a wall the route merely skirts.
+	if (RoutePoint.Z - FeetZ < WoTBotDecision::ClimbRise
+		&& FVector::Dist2D(RoutePoint, Here) > WoTBotDecision::ClimbReach) return;
+	const FCollisionShape Shape = Capsule->GetCollisionShape();
+	FHitResult Wall;
+	if (!GetWorld()->SweepSingleByChannel(Wall, Here, Here + Direction * 24.0f, FQuat::Identity, Channel, Shape, Params)
+		|| Wall.ImpactNormal.Z >= Move->GetWalkableFloorZ() || Cast<APawn>(Wall.GetActor())) return;
+	// A ledge just ahead, above what the walk steps and below the jump's reach.
+	FHitResult Ledge;
+	const FVector Probe = FVector(Here.X, Here.Y, FeetZ) + Direction * (Capsule->GetScaledCapsuleRadius() + 12.0f);
+	if (!GetWorld()->LineTraceSingleByChannel(Ledge, Probe + FVector(0, 0, WoTBotDecision::ClimbClearance + 5.0f),
+		Probe - FVector(0, 0, 2.0f), Channel, Params) || Ledge.bStartPenetrating
+		|| Ledge.ImpactPoint.Z - FeetZ <= WoTBotDecision::ClimbStep || Ledge.ImpactNormal.Z < Move->GetWalkableFloorZ()) return;
+	const FVector Raised = Here + FVector(0, 0, WoTBotDecision::ClimbClearance);
+	FHitResult Clear;
+	if (GetWorld()->SweepSingleByChannel(Clear, Here, Raised, FQuat::Identity, Channel, Shape, Params)
+		|| GetWorld()->SweepSingleByChannel(Clear, Raised, Raised + Direction * 24.0f, FQuat::Identity, Channel, Shape, Params)) return;
+	ClimbBlockedSince = -1.0f;
+	NextJumpTime = Now + .8f;
+	Body->Jump();
+	++ClimbJumps;
+	LastJumpTime = Now;
 }
 
 void AWoTBotController::OffensiveSupply(int32& Kinds, int32& Charges) const
@@ -293,7 +427,14 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 			if (Held->GetClass() == Item->GetClass()) { Existing = Cast<AWoTAngrealInventory>(Held); break; }
 		if (!bRoaming && Existing && Existing->CurCharges >= Existing->MaxCharges) continue;
 		FNavLocation End;
-		if (!Nav->ProjectPointToNavigation(It->GetActorLocation(), End, FVector(80, 80, 160), Data)) continue;
+		if (!Nav->ProjectPointToNavigation(It->GetActorLocation(), End, PoolExtent, Data)) continue;
+		if (!bRoaming)
+		{
+			// Collecting needs a touch from the route's end, standing or jumping.
+			if (const float* Failed = UncollectablePools.Find(*It); Failed && Now - *Failed < WoTBotDecision::UncollectableSeconds) continue;
+			if (WoTBotDecision::PickupReach(End.Location, It->GetActorLocation(), It->GetPickupCollisionRadius())
+				== WoTBotDecision::EPickupReach::None) continue;
+		}
 		FCandidate& C = Candidates.AddDefaulted_GetRef();
 		C.Pool = *It;
 		C.End = End.Location;
@@ -315,12 +456,15 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 	}
 	Candidates.Sort([](const FCandidate& A, const FCandidate& B) { return A.Bound > B.Bound; });
 	TOptional<bool> bStartOnNavigation;
+	TArray<float> EntryLegs;
 	const auto Reach = [&](const FCandidate& C, float& Length)
 	{
 		FPathFindingQuery Query(this, *Data, Start, C.End);
 		Query.SetAllowPartialPaths(false);
 		const FPathFindingResult Path = Nav->FindPathSync(Body->GetNavAgentPropertiesRef(), Query);
 		if (Path.IsSuccessful() && Path.Path.IsValid()) { Length = Path.Path->GetLength(); return true; }
+		// Through a teleporter no mesh link carries.
+		if (DistantTeleportRoute(Start, C.End, Length, &EntryLegs)) return true;
 		// Don't search for it again every think, unless the start was the problem
 		// (a body in the air has no path to anywhere).
 		if (!bStartOnNavigation.IsSet())
@@ -566,6 +710,59 @@ AWoTAngrealInventory* AWoTBotController::MovementOffence() const
 	return Best;
 }
 
+const WoTBotLinks::FDistantTeleport* AWoTBotController::DistantTeleportRoute(const FVector& From, const FVector& To, float& Length, TArray<float>* EntryLegs) const
+{
+	if (!Roster.IsValid() || Roster->GetDistantTeleports().IsEmpty()) return nullptr;
+	const TArray<WoTBotLinks::FDistantTeleport>& Teleports = Roster->GetDistantTeleports();
+	const APawn* Body = GetPawn();
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	const ANavigationData* Data = Nav && Body ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
+	if (!Data) return nullptr;
+	// A complete route's length, or a negative length for none.
+	const auto Leg = [&](const FVector& A, const FVector& B)
+	{
+		FPathFindingQuery Query(this, *Data, A, B);
+		Query.SetAllowPartialPaths(false);
+		const FPathFindingResult Path = Nav->FindPathSync(Body->GetNavAgentPropertiesRef(), Query);
+		return Path.IsSuccessful() && Path.Path.IsValid() && !Path.Path->IsPartial() ? float(Path.Path->GetLength()) : -1.0f;
+	};
+	TArray<float> Local;
+	TArray<float>& Legs = EntryLegs ? *EntryLegs : Local;
+	if (Legs.Num() != Teleports.Num())
+	{
+		Legs.Reset();
+		for (const WoTBotLinks::FDistantTeleport& T : Teleports) Legs.Add(Leg(From, T.Entry));
+	}
+	const WoTBotLinks::FDistantTeleport* Best = nullptr;
+	for (int32 I = 0; I < Teleports.Num(); ++I)
+	{
+		if (Legs[I] < 0.0f || (Best && Legs[I] >= Length)) continue;
+		const float Out = Leg(Teleports[I].Exit, To);
+		if (Out < 0.0f || (Best && Legs[I] + Out >= Length)) continue;
+		Best = &Teleports[I];
+		Length = Legs[I] + Out;
+	}
+	return Best;
+}
+
+bool AWoTBotController::StepOffPad(const WoTBotLinks::FDistantTeleport& Via, float Reach)
+{
+	const APawn* Body = GetPawn();
+	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+	const ANavigationData* Data = Nav ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
+	if (!Data) return false;
+	FVector Away = (Body->GetActorLocation() - Via.Pad).GetSafeNormal2D();
+	if (Away.IsNearlyZero()) Away = FVector::ForwardVector;
+	for (const float Angle : { 0.0f, 45.0f, -45.0f, 90.0f, -90.0f, 135.0f, -135.0f, 180.0f })
+	{
+		const FVector Out = Via.Pad + Away.RotateAngleAxis(Angle, FVector::UpVector) * (Reach + 10.0f);
+		FNavLocation Point;
+		if (Nav->ProjectPointToNavigation(FVector(Out.X, Out.Y, Body->GetNavAgentLocation().Z), Point, FVector(30, 30, 100), Data)
+			&& FVector::Dist2D(Point.Location, Via.Pad) >= Reach && NavigateTo(Point.Location)) return true;
+	}
+	return false;
+}
+
 float AWoTBotController::StandoffRange() const
 {
 	AWoTAngrealInventory* Item = MovementOffence();
@@ -588,6 +785,8 @@ bool AWoTBotController::NavigateTo(const FVector& Point)
 	Destination = Projected.Location;
 	bWantsMovement = FVector::Dist2D(Body->GetActorLocation(), Destination) > 30.0f;
 	++RepathCount;
+	// A failed request (no complete route) leaves the body idle with movement
+	// still wanted, so the stuck rule replaces the goal unless the caller does.
 	return MoveToLocation(Destination, 20.0f, false, true, false, false, nullptr, false)
 		!= EPathFollowingRequestResult::Failed;
 }
@@ -606,17 +805,48 @@ void AWoTBotController::ChooseDestination(bool bForce)
 	NextRepathTime = Now + FMath::Max(.1f, GetDefault<UWoTBotSettings>()->StrafeRepathSeconds);
 	APawn* Body = GetPawn();
 	if ((State == EWoTBotState::SeekItem || State == EWoTBotState::Roam) && SeekingPool.IsValid() && !bForce)
-	{ NavigateTo(SeekingPool->GetActorLocation()); return; }
+	{
+		// The route ends where the choice measured it: the pool's own projection
+		// (a wider search could settle on a ledge above it with no route).
+		UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+		const ANavigationData* Data = Nav ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
+		FNavLocation End;
+		const bool bProjected = Data && Nav->ProjectPointToNavigation(SeekingPool->GetActorLocation(), End, PoolExtent, Data);
+		if (NavigateTo(bProjected ? End.Location : SeekingPool->GetActorLocation())) return;
+		// Through a teleporter no mesh link carries: walk into its pad. A pad that
+		// set this body down sends it on only after the body has left the pad's reach
+		// (it re-arms on the end of that overlap, WoTTeleporter.cpp
+		// NotifyActorEndOverlap), so step off first. A body at the entry that was
+		// not taken closes the route.
+		float Length;
+		if (const WoTBotLinks::FDistantTeleport* Via = bProjected ? DistantTeleportRoute(Body->GetNavAgentLocation(), End.Location, Length) : nullptr)
+		{
+			const float Reach = Via->TouchRadius + Body->GetSimpleCollisionRadius() + 15.0f;
+			const bool bInReach = FVector::Dist2D(Body->GetActorLocation(), Via->Pad) < Reach;
+			if (!bInReach) bArrivedByTeleport = false;
+			if (bInReach && bArrivedByTeleport && FVector::Dist2D(ArrivalLocation, Via->Pad) < Reach)
+			{
+				if (StepOffPad(*Via, Reach)) return;
+			}
+			else if (FVector::Dist2D(Body->GetActorLocation(), Via->Entry) > 30.0f && NavigateTo(Via->Entry)) return;
+		}
+		UnreachablePools.Add(SeekingPool, Now);
+		ReleasePoolGoal();
+	}
 	if (State == EWoTBotState::Engage && !bForce)
 	{
-		if (!bTargetVisible) { NavigateTo(LastKnownPosition); return; }
+		// An unseen target is chased to where it was last sensed. When no complete
+		// route leads there (another floor, a ledge, water below), a standoff point
+		// around it, then the roaming fallback, replace an idle wait for recovery.
+		if (!bTargetVisible && NavigateTo(LastKnownPosition)) return;
 		const FVector Away = (Body->GetActorLocation() - LastKnownPosition).GetSafeNormal2D();
-		for (int32 Attempt = 0; Attempt < 4; ++Attempt)
-		{
-			const float Side = WoTRandom::RandBool() ? 1.0f : -1.0f;
-			const FVector Offset = Away.RotateAngleAxis(Side * WoTRandom::FRandRange(25.0f, 65.0f), FVector::UpVector);
-			if (NavigateTo(LastKnownPosition + Offset * StandoffRange())) return;
-		}
+		if (const float Range = StandoffRange(); Range > 0.0f)
+			for (int32 Attempt = 0; Attempt < 4; ++Attempt)
+			{
+				const float Side = WoTRandom::RandBool() ? 1.0f : -1.0f;
+				const FVector Offset = Away.RotateAngleAxis(Side * WoTRandom::FRandRange(25.0f, 65.0f), FVector::UpVector);
+				if (NavigateTo(LastKnownPosition + Offset * Range)) return;
+			}
 	}
 	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	ANavigationData* Data = Nav ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
@@ -629,9 +859,25 @@ void AWoTBotController::ChooseDestination(bool bForce)
 	for (TActorIterator<AWoTAngrealSpawnPool> It(GetWorld()); It; ++It) Pools.Add(*It);
 	if (!Pools.IsEmpty()) Bias = FMath::Lerp(Bias, Pools[WoTRandom::RandHelper(Pools.Num())]->GetActorLocation(), .5f);
 	FNavLocation Point;
-	if (Nav->GetRandomReachablePointInRadius(Bias, bForce ? 600.0f : 1600.0f, Point, Data)
-		|| Nav->GetRandomReachablePointInRadius(Body->GetActorLocation(), 1600.0f, Point, Data)) NavigateTo(Point.Location);
-	else bNavigationUnavailable = true;
+	// A point reachable from the midpoint need not be reachable from this body
+	// (another floor, an island); then one reachable from the body itself.
+	if (Nav->GetRandomReachablePointInRadius(Bias, bForce ? 600.0f : 1600.0f, Point, Data) && NavigateTo(Point.Location)) return;
+	if (Nav->GetRandomReachablePointInRadius(Body->GetActorLocation(), 1600.0f, Point, Data) && NavigateTo(Point.Location)) return;
+	// Off the mesh altogether (on a sill or ledge a jump or a blast left it on):
+	// head straight for the nearest mesh, stepping or dropping back onto the floor.
+	// Mesh straight below (a beam or a high wall top) leaves no walk to make: the
+	// body stays unplaced, so the stuck rule replaces it.
+	FNavLocation Nearest;
+	if (Nav->ProjectPointToNavigation(Body->GetNavAgentLocation(), Nearest, FVector(400, 400, 800), Data)
+		&& FVector::Dist2D(Body->GetActorLocation(), Nearest.Location) > 30.0f
+		&& MoveToLocation(Nearest.Location, 20.0f, false, false, false, false, nullptr, true) != EPathFollowingRequestResult::Failed)
+	{
+		Destination = Nearest.Location;
+		bWantsMovement = true;
+		bNavigationUnavailable = false;
+		return;
+	}
+	bNavigationUnavailable = true;
 }
 
 void AWoTBotController::UpdateStuck()
@@ -679,5 +925,20 @@ void AWoTBotController::Tick(float DeltaSeconds)
 	UpdateAim();
 	UpdateCastCompletion();
 	if (!CanAct()) return;
+	UpdateClimb();
+	// A teleporter (or a swap) moved the body: its route now starts elsewhere.
+	const FVector Here = GetPawn()->GetActorLocation();
+	if (FVector::DistSquared(Here, LastBodyLocation) > FMath::Square(250.0f))
+	{
+		ArrivalLocation = Here;
+		bArrivedByTeleport = true;
+		if (bWantsMovement)
+		{
+			NextRepathTime = 0.0f;
+			ChooseDestination();
+			if (!CanAct()) return;
+		}
+	}
+	LastBodyLocation = Here;
 	UpdateStuck();
 }
