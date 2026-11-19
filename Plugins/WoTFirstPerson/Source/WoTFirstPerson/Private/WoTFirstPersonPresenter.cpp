@@ -15,8 +15,13 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "HAL/FileManager.h"
 #include "HAL/IConsoleManager.h"
 #include "Math/RotationMatrix.h"
+#include "Misc/CommandLine.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "ReferenceSkeleton.h"
 #include "String/LexFromString.h"
 
@@ -43,6 +48,41 @@ double SwitchFraction(double Time)
 	};
 	return Response(FMath::Clamp(Time, 0.0, SwitchSeconds)) / Response(SwitchSeconds);
 }
+
+// Tracked hands render as ordinary world geometry: no first-person field of
+// view or scale. Only changes a component that differs, so it can run every frame.
+void SetPresentationPrimitiveType(AActor* Actor, EFirstPersonPrimitiveType Type)
+{
+	if (!Actor) return;
+	TArray<UPrimitiveComponent*> Primitives;
+	Actor->GetComponents(Primitives);
+	for (UPrimitiveComponent* Primitive : Primitives)
+		if (Primitive->FirstPersonPrimitiveType != Type) Primitive->SetFirstPersonPrimitiveType(Type);
+}
+
+#if !UE_BUILD_SHIPPING
+FString TrackingFile(const TCHAR* Name)
+{
+	return FPaths::ProjectSavedDir() / TEXT("WoTFirstPerson") / Name;
+}
+
+bool SaveTrackingFile(const TCHAR* Name, const TSharedRef<FJsonObject>& Object)
+{
+	const FString Path = TrackingFile(Name);
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+	return FFileHelper::SaveStringToFile(WoTFirstPerson::Tracking::JsonToString(Object), *Path);
+}
+
+TSharedPtr<FJsonObject> LoadTrackingFile(const TCHAR* Name)
+{
+	FString Text;
+	if (!FFileHelper::LoadFileToString(Text, *TrackingFile(Name))) return nullptr;
+	return WoTFirstPerson::Tracking::JsonFromString(Text);
+}
+
+const TCHAR* const TrackFixesFile = TEXT("hand_tracking_fixes.json");
+const TCHAR* const CapturedPosesFile = TEXT("captured_poses.json");
+#endif
 
 }
 
@@ -80,6 +120,21 @@ FWoTFirstPersonPresenter::FWoTFirstPersonPresenter()
 	GripAngleCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("wot.fp.gripangle"),
 		TEXT("Nudge the held item's line about grip_r's Z, in degrees."),
 		FConsoleCommandWithArgsDelegate::CreateRaw(this, &FWoTFirstPersonPresenter::NudgeGripAngle), ECVF_Default);
+	TrackCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("wot.fp.track"),
+		TEXT("Tracked hand: 0 (off), 1 (live joints from the headset runtime) or sim [curl 0-1] (a synthetic hand)."),
+		FConsoleCommandWithArgsDelegate::CreateRaw(this, &FWoTFirstPersonPresenter::SetTrackMode), ECVF_Default);
+	TrackFixCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("wot.fp.trackfix"),
+		TEXT("Tracked hand joint fix: <bone> <pitch> <yaw> <roll>; all (reset every fix); save; load."),
+		FConsoleCommandWithArgsDelegate::CreateRaw(this, &FWoTFirstPersonPresenter::SetTrackFix), ECVF_Default);
+	TrackDumpCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("wot.fp.trackdump"),
+		TEXT("Log the hand trackers, every tracked joint (in view space) and the bone rotation taken from it."),
+		FConsoleCommandWithArgsDelegate::CreateRaw(this, &FWoTFirstPersonPresenter::DumpTracking), ECVF_Default);
+	PoseCaptureCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("wot.fp.posecapture"),
+		TEXT("Save the tracked hand's current pose under <name> in Saved/WoTFirstPerson/captured_poses.json."),
+		FConsoleCommandWithArgsDelegate::CreateRaw(this, &FWoTFirstPersonPresenter::CaptureTrackedPose), ECVF_Default);
+	// Saved fixes apply from the start; -WoTHandTracking turns live tracking on at launch.
+	WoTFirstPerson::Tracking::FixesFromJson(LoadTrackingFile(TrackFixesFile), TrackFixes);
+	if (FParse::Param(FCommandLine::Get(), TEXT("WoTHandTracking"))) TrackMode = ETrackMode::Live;
 #endif
 }
 
@@ -99,6 +154,10 @@ FWoTFirstPersonPresenter::~FWoTFirstPersonPresenter()
 	if (HandGlowCommand) IConsoleManager::Get().UnregisterConsoleObject(HandGlowCommand, false);
 	if (HandLightCommand) IConsoleManager::Get().UnregisterConsoleObject(HandLightCommand, false);
 	if (HandDumpCommand) IConsoleManager::Get().UnregisterConsoleObject(HandDumpCommand, false);
+	if (TrackCommand) IConsoleManager::Get().UnregisterConsoleObject(TrackCommand, false);
+	if (TrackFixCommand) IConsoleManager::Get().UnregisterConsoleObject(TrackFixCommand, false);
+	if (TrackDumpCommand) IConsoleManager::Get().UnregisterConsoleObject(TrackDumpCommand, false);
+	if (PoseCaptureCommand) IConsoleManager::Get().UnregisterConsoleObject(PoseCaptureCommand, false);
 #endif
 	Clear();
 }
@@ -136,6 +195,9 @@ void FWoTFirstPersonPresenter::DestroyHand()
 	HandPoses.Reset();
 	PosedBones.Reset();
 	HandRefPose.Reset();
+	TrackedBones.Reset();
+	TrackedMesh.Reset();
+	bTracked = false;
 }
 
 void FWoTFirstPersonPresenter::Clear()
@@ -371,6 +433,114 @@ void FWoTFirstPersonPresenter::PoseFingers(double Grip)
 	Mesh->MarkRefreshTransformDirty();
 }
 
+bool FWoTFirstPersonPresenter::ReadTrackedJoints(const FMinimalViewInfo& View, WoTFirstPerson::Tracking::FJoints& Out) const
+{
+	if (TrackMode == ETrackMode::Synthetic)
+	{
+		// Ahead of the eye, a little right and below, fingers forward.
+		const FTransform Wrist(View.Rotation, View.Location + View.Rotation.RotateVector(FVector(40, 8, -12)));
+		Out = WoTFirstPerson::Tracking::Synthetic(Wrist, SyntheticCurl);
+		return true;
+	}
+	return TrackMode == ETrackMode::Live && WoTFirstPerson::Tracking::ReadLive(Out);
+}
+
+bool FWoTFirstPersonPresenter::ResolveTrackedBones()
+{
+	using namespace WoTFirstPerson::Tracking;
+	UPoseableMeshComponent* Mesh = HandMesh.Get();
+	if (!Mesh || !Mesh->GetSkinnedAsset() || Mesh->BoneSpaceTransforms.Num() != HandRefPose.Num()) return false;
+	if (TrackedMesh.Get() == Mesh) return TrackedBones.Num() > 0 && ModelChainLength > 0;
+	TrackedMesh = Mesh;
+	TrackedBones.Reset();
+	ModelChainLength = 0;
+	const FReferenceSkeleton& Skeleton = Mesh->GetSkinnedAsset()->GetRefSkeleton();
+	const int32 NumBones = Skeleton.GetNum();
+	if (NumBones != HandRefPose.Num()) return false;
+	TArray<int32> JointOfBone;
+	JointOfBone.Init(INDEX_NONE, NumBones);
+	TArray<FTransform> ComponentPose;
+	ComponentPose.SetNum(NumBones);
+	for (int32 Bone = 0; Bone < NumBones; ++Bone)
+	{
+		JointOfBone[Bone] = JointForBone(Skeleton.GetBoneName(Bone));
+		const int32 ParentBone = Skeleton.GetParentIndex(Bone);
+		ComponentPose[Bone] = ParentBone == INDEX_NONE ? HandRefPose[Bone] : HandRefPose[Bone] * ComponentPose[ParentBone];
+	}
+	const int32 WristBone = Skeleton.FindBoneIndex(BoneForJoint(WristJoint));
+	if (WristBone == INDEX_NONE) return false;
+	WristInComponent = ComponentPose[WristBone];
+	FVector Positions[JointCount];
+	for (int32 Joint = 0; Joint < JointCount; ++Joint)
+	{
+		const int32 Bone = Skeleton.FindBoneIndex(BoneForJoint(Joint));
+		Positions[Joint] = Bone == INDEX_NONE ? FVector::ZeroVector : ComponentPose[Bone].GetLocation();
+	}
+	ModelChainLength = ChainLength(Positions);
+	// Tips end their chains and keep the reference pose; the wrist is placed,
+	// not rotated. A bone is driven only when its parent bone has a joint too.
+	for (int32 Bone = 0; Bone < NumBones; ++Bone)
+	{
+		const int32 Joint = JointOfBone[Bone];
+		const int32 ParentBone = Skeleton.GetParentIndex(Bone);
+		if (Joint == INDEX_NONE || Joint == WristJoint || IsTipJoint(Joint) || ParentBone == INDEX_NONE
+			|| JointOfBone[ParentBone] == INDEX_NONE) continue;
+		TrackedBones.Add({Bone, Joint, JointOfBone[ParentBone]});
+	}
+	return TrackedBones.Num() > 0 && ModelChainLength > 0;
+}
+
+void FWoTFirstPersonPresenter::ApplyTracked(const WoTFirstPerson::Tracking::FJoints& Joints, const FMinimalViewInfo& View)
+{
+	using namespace WoTFirstPerson::Tracking;
+	UPoseableMeshComponent* Mesh = HandMesh.Get();
+	AActor* Hand = HandActor.Get();
+	if (!Mesh || !Hand) return;
+	for (const FTrackedBone& Tracked : TrackedBones)
+	{
+		FTransform Local = HandRefPose[Tracked.Bone];
+		Local.SetRotation(LocalRotation(Joints, TrackFixes, Tracked.Parent, Tracked.Joint));
+		Mesh->BoneSpaceTransforms[Tracked.Bone] = Local;
+	}
+	Mesh->MarkRefreshTransformDirty();
+	// The player's hand size: tracked wrist-to-fingertip over the model's.
+	const double TrackScale = ChainLength(Joints.Positions) / ModelChainLength;
+	const FTransform MeshWorld = ActorPlacement(Joints, TrackFixes, WristInComponent, TrackScale > UE_SMALL_NUMBER ? TrackScale : 1.0);
+	// The mesh sits under the actor's root: place the actor so the mesh lands.
+	const FTransform HandWorld = Mesh == Hand->GetRootComponent() ? MeshWorld : Mesh->GetRelativeTransform().Inverse() * MeshWorld;
+	// The hand rides the camera anchor, which reaches this frame's view only
+	// after the camera modifiers run: place it relative to the view, not to
+	// where the anchor is now.
+	Hand->SetActorRelativeTransform(HandWorld.GetRelativeTransform(FTransform(View.Rotation, View.Location)));
+	Hand->SetActorHiddenInGame(false);
+	SetPresentationPrimitiveType(Hand, EFirstPersonPrimitiveType::None);
+	if (AActor* Item = Model.Get())
+	{
+		Item->SetActorHiddenInGame(false);
+		SetPresentationPrimitiveType(Item, EFirstPersonPrimitiveType::None);
+		PlaceHeldItemInHand();
+	}
+	LightHand(View);
+	LastJoints = Joints;
+	LastView = FTransform(View.Rotation, View.Location);
+	LastTrackScale = TrackScale;
+	bTracked = true;
+}
+
+void FWoTFirstPersonPresenter::EndTracking()
+{
+	// Back to the flat hand: reference bones (the grip pose goes on top this
+	// frame), first-person rendering; the flat path places the actor again.
+	if (UPoseableMeshComponent* Mesh = HandMesh.Get(); Mesh && Mesh->BoneSpaceTransforms.Num() == HandRefPose.Num())
+	{
+		for (const FTrackedBone& Tracked : TrackedBones) Mesh->BoneSpaceTransforms[Tracked.Bone] = HandRefPose[Tracked.Bone];
+		Mesh->MarkRefreshTransformDirty();
+	}
+	SetPresentationPrimitiveType(HandActor.Get(), EFirstPersonPrimitiveType::FirstPerson);
+	SetPresentationPrimitiveType(Model.Get(), EFirstPersonPrimitiveType::FirstPerson);
+	bTracked = false;
+}
+
 void FWoTFirstPersonPresenter::LightHand(const FMinimalViewInfo& View)
 {
 	UPoseableMeshComponent* Mesh = HandMesh.Get();
@@ -444,6 +614,16 @@ TOptional<float> FWoTFirstPersonPresenter::UpdateModel(float DeltaTime, const FM
 	if (!Item || !CurrentPawn) { FlatMode.Hide(); return {}; }
 	const WoTFirstPerson::FFit Fit = CurrentFit();
 	if (!Fit.bVisible) { Clear(); return {}; }
+	if (HandActor.IsValid() && TrackMode != ETrackMode::Off)
+	{
+		WoTFirstPerson::Tracking::FJoints Joints;
+		if (ReadTrackedJoints(View, Joints) && ResolveTrackedBones())
+		{
+			ApplyTracked(Joints, View);
+			return 1.0f;
+		}
+	}
+	if (bTracked) EndTracking();
 	// With a hand, the hand is what the camera frames and the item rides in it.
 	AActor* Placed = HandActor.IsValid() ? HandActor.Get() : Item;
 	const FBox& PlacedBounds = HandActor.IsValid() ? HandBounds : Bounds;
@@ -628,5 +808,114 @@ void FWoTFirstPersonPresenter::NudgeGripAngle(const TArray<FString>& Args)
 	if (Args.Num() != 1 || !LexTryParseString(Delta, *Args[0]) || !FMath::IsFinite(Delta)) return;
 	ItemNudge.GripAngle += Delta;
 	UE_LOG(LogTemp, Display, TEXT("wot.fp.gripangle: %.1f"), ItemNudge.GripAngle);
+}
+
+void FWoTFirstPersonPresenter::SetTrackMode(const TArray<FString>& Args)
+{
+	if (Args.Num() >= 1)
+	{
+		const FString& Mode = Args[0];
+		double Curl = SyntheticCurl;
+		if (Mode == TEXT("0") || Mode.Equals(TEXT("off"), ESearchCase::IgnoreCase)) TrackMode = ETrackMode::Off;
+		else if (Mode == TEXT("1") || Mode.Equals(TEXT("live"), ESearchCase::IgnoreCase)) TrackMode = ETrackMode::Live;
+		else if (Mode.Equals(TEXT("sim"), ESearchCase::IgnoreCase)
+			&& (Args.Num() == 1 || (LexTryParseString(Curl, *Args[1]) && FMath::IsFinite(Curl))))
+		{
+			TrackMode = ETrackMode::Synthetic;
+			SyntheticCurl = FMath::Clamp(Curl, 0.0, 1.0);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("wot.fp.track: expected 0, 1 or sim [curl]"));
+			return;
+		}
+	}
+	static const TCHAR* const Names[] = {TEXT("off"), TEXT("live"), TEXT("sim")};
+	UE_LOG(LogTemp, Display, TEXT("wot.fp.track: %s (curl %.2f); %s"), Names[static_cast<uint8>(TrackMode)], SyntheticCurl,
+		*WoTFirstPerson::Tracking::DescribeTrackers());
+}
+
+void FWoTFirstPersonPresenter::SetTrackFix(const TArray<FString>& Args)
+{
+	using namespace WoTFirstPerson::Tracking;
+	if (Args.Num() == 1 && Args[0] == TEXT("save"))
+	{
+		const bool bSaved = SaveTrackingFile(TrackFixesFile, FixesToJson(TrackFixes));
+		UE_LOG(LogTemp, Display, TEXT("wot.fp.trackfix: %s %s"), bSaved ? TEXT("saved") : TEXT("could not save"), *TrackingFile(TrackFixesFile));
+		return;
+	}
+	if (Args.Num() == 1 && Args[0] == TEXT("load"))
+	{
+		const bool bLoaded = FixesFromJson(LoadTrackingFile(TrackFixesFile), TrackFixes);
+		UE_LOG(LogTemp, Display, TEXT("wot.fp.trackfix: %s %s"), bLoaded ? TEXT("loaded") : TEXT("could not load"), *TrackingFile(TrackFixesFile));
+		return;
+	}
+	if (Args.Num() == 1 && Args[0] == TEXT("all"))
+	{
+		TrackFixes = FFixes();
+		UE_LOG(LogTemp, Display, TEXT("wot.fp.trackfix: every fix reset"));
+		return;
+	}
+	double Turn[3] = {0, 0, 0};
+	const int32 Joint = Args.Num() == 4 ? JointForBone(FName(*Args[0])) : INDEX_NONE;
+	for (int32 Index = 0; Joint != INDEX_NONE && Index < 3; ++Index)
+	{
+		if (!LexTryParseString(Turn[Index], *Args[Index + 1]) || !FMath::IsFinite(Turn[Index]))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("wot.fp.trackfix: %s is not a number"), *Args[Index + 1]);
+			return;
+		}
+	}
+	if (Joint == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("wot.fp.trackfix: expected <bone> <pitch> <yaw> <roll>, all, save or load"));
+		return;
+	}
+	TrackFixes.Fix[Joint] = FRotator(Turn[0], Turn[1], Turn[2]).Quaternion();
+	UE_LOG(LogTemp, Display, TEXT("wot.fp.trackfix: %s %s"), *BoneForJoint(Joint).ToString(), *TrackFixes.Fix[Joint].Rotator().ToString());
+}
+
+void FWoTFirstPersonPresenter::DumpTracking(const TArray<FString>& Args)
+{
+	using namespace WoTFirstPerson::Tracking;
+	UE_LOG(LogTemp, Display, TEXT("WoTHandTrack: tracked %d scale %.4f model chain %.2f; %s"), bTracked ? 1 : 0, LastTrackScale,
+		ModelChainLength, *DescribeTrackers());
+	if (!bTracked) return;
+	UPoseableMeshComponent* Mesh = HandMesh.Get();
+	for (int32 Joint = 0; Joint < JointCount; ++Joint)
+	{
+		const FVector InView = LastView.InverseTransformPosition(LastJoints.Positions[Joint]);
+		FString Bone = TEXT("-");
+		for (const FTrackedBone& Tracked : TrackedBones)
+			if (Tracked.Joint == Joint && Mesh)
+				Bone = FlexSpreadTwist(HandRefPose[Tracked.Bone].GetRotation().Inverse() * Mesh->BoneSpaceTransforms[Tracked.Bone].GetRotation()).ToString();
+		UE_LOG(LogTemp, Display, TEXT("WoTHandTrack: %s at %s; flex/spread/twist %s"), *BoneForJoint(Joint).ToString(), *InView.ToString(), *Bone);
+	}
+}
+
+void FWoTFirstPersonPresenter::CaptureTrackedPose(const TArray<FString>& Args)
+{
+	using namespace WoTFirstPerson::Tracking;
+	UPoseableMeshComponent* Mesh = HandMesh.Get();
+	if (Args.Num() != 1 || !bTracked || !Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("wot.fp.posecapture: needs a name and a tracked hand"));
+		return;
+	}
+	FCapturedPose Captured;
+	for (const FTrackedBone& Tracked : TrackedBones)
+		Captured.Bones.Add(BoneForJoint(Tracked.Joint),
+			FlexSpreadTwist(HandRefPose[Tracked.Bone].GetRotation().Inverse() * Mesh->BoneSpaceTransforms[Tracked.Bone].GetRotation()));
+	const FTransform Wrist((LastJoints.Rotations[WristJoint] * TrackFixes.Fix[WristJoint]).GetNormalized(), LastJoints.Positions[WristJoint]);
+	const FTransform WristInView = Wrist.GetRelativeTransform(LastView);
+	Captured.WristLocation = WristInView.GetLocation();
+	Captured.WristRotation = WristInView.Rotator();
+	Captured.Scale = LastTrackScale;
+	TSharedPtr<FJsonObject> All = LoadTrackingFile(CapturedPosesFile);
+	if (!All.IsValid()) All = MakeShared<FJsonObject>();
+	All->SetObjectField(Args[0], PoseToJson(Captured));
+	const bool bSaved = SaveTrackingFile(CapturedPosesFile, All.ToSharedRef());
+	UE_LOG(LogTemp, Display, TEXT("wot.fp.posecapture: %s %s in %s"), *Args[0], bSaved ? TEXT("saved") : TEXT("could not be saved"),
+		*TrackingFile(CapturedPosesFile));
 }
 #endif

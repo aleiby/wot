@@ -6,6 +6,7 @@
 #include "WoTFirstPersonGrip.h"
 #include "WoTFirstPersonMotion.h"
 #include "WoTFirstPersonTuning.h"
+#include "WoTHandTracking.h"
 
 class APawn;
 class IConsoleObject;
@@ -63,6 +64,14 @@ private:
 	IConsoleObject* HandCommand = nullptr;
 	IConsoleObject* HandPoseCommand = nullptr;
 	IConsoleObject* GripAngleCommand = nullptr;
+	void SetTrackMode(const TArray<FString>& Args);
+	void SetTrackFix(const TArray<FString>& Args);
+	void DumpTracking(const TArray<FString>& Args);
+	void CaptureTrackedPose(const TArray<FString>& Args);
+	IConsoleObject* TrackCommand = nullptr;
+	IConsoleObject* TrackFixCommand = nullptr;
+	IConsoleObject* TrackDumpCommand = nullptr;
+	IConsoleObject* PoseCaptureCommand = nullptr;
 #endif
 
 	FDelegateHandle FirePressedHandle;
@@ -115,4 +124,26 @@ private:
 	void SelectGripPose(FName Name);
 	FQuat HandPoseRotation(FName PoseName, int32 Bone) const;
 	TArray<FTransform> HandRefPose;
+
+	// Tracked hands (docs/specs/hands/2026-11-18-tracked-hands.md): with a
+	// tracking source the hand follows the tracked joints in the world, and
+	// none of the flat framing applies. Off unless a developer turns it on.
+	enum class ETrackMode : uint8 { Off, Live, Synthetic };
+	ETrackMode TrackMode = ETrackMode::Off;
+	double SyntheticCurl = 0.5;
+	WoTFirstPerson::Tracking::FFixes TrackFixes;
+	WoTFirstPerson::Tracking::FJoints LastJoints;
+	FTransform LastView;
+	double LastTrackScale = 1.0;
+	bool bTracked = false;
+	// Every hand bone driven by a joint, with the joint of its parent bone.
+	struct FTrackedBone { int32 Bone = INDEX_NONE; int32 Joint = INDEX_NONE; int32 Parent = INDEX_NONE; };
+	TArray<FTrackedBone> TrackedBones;
+	TWeakObjectPtr<UPoseableMeshComponent> TrackedMesh;
+	FTransform WristInComponent;
+	double ModelChainLength = 0;
+	bool ReadTrackedJoints(const FMinimalViewInfo& View, WoTFirstPerson::Tracking::FJoints& Out) const;
+	bool ResolveTrackedBones();
+	void ApplyTracked(const WoTFirstPerson::Tracking::FJoints& Joints, const FMinimalViewInfo& View);
+	void EndTracking();
 };

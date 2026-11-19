@@ -15,7 +15,10 @@ public class WoTFirstPerson : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"WoT",
-			"SlateCore"
+			"SlateCore",
+			// Tracked hands: the engine's hand-tracker interface and the tuning files.
+			"HeadMountedDisplay",
+			"Json"
 		});
 	}
 }
