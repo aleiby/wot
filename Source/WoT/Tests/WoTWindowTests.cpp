@@ -80,6 +80,7 @@ bool FWoTWindowSettingsMigrationSpec::RunTest(const FString&)
 		{10, 1280, 720, EWoTWindowMode::WindowedFullscreen, {1280, 720}},
 		{10, 1280, 800, EWoTWindowMode::Windowed, {1280, 800}},
 		{11, 1280, 720, EWoTWindowMode::Windowed, {1280, 720}},
+		{12, 1280, 720, EWoTWindowMode::Windowed, {1280, 720}},
 	};
 	FWoTGameSettings Parsed;
 	FString Error;
@@ -90,8 +91,13 @@ bool FWoTWindowSettingsMigrationSpec::RunTest(const FString&)
 		Saved.Height = Entry.SavedHeight;
 		Saved.WindowMode = Entry.Mode;
 		FString Record = FWoTGameSettingsCodec::Serialize(Saved);
-		Record.ReplaceInline(TEXT("GameSettingsVersion=11"),
+		Record.ReplaceInline(TEXT("GameSettingsVersion=12"),
 			*FString::Printf(TEXT("GameSettingsVersion=%d"), Entry.Version));
+		if (Entry.Version < 12)
+		{
+			// Version 12 added the room reverb record.
+			Record.ReplaceInline(TEXT("GameRoomReverb=1\n"), TEXT(""));
+		}
 		const FTCHARToUTF8 Encoded(*Record);
 		TestTrue(TEXT("saved record parses with injected display"),
 			FWoTGameSettingsCodec::Parse(MakeArrayView(
@@ -100,8 +106,8 @@ bool FWoTWindowSettingsMigrationSpec::RunTest(const FString&)
 		TestEqual(TEXT("only the old windowed default migrates"),
 			FIntPoint(Parsed.Width, Parsed.Height), Entry.Expected);
 		TestTrue(TEXT("window mode is retained"), Parsed.WindowMode == Entry.Mode);
-		TestTrue(TEXT("written record is version 11"),
-			FWoTGameSettingsCodec::Serialize(Parsed).StartsWith(TEXT("GameSettingsVersion=11\n")));
+		TestTrue(TEXT("written record is version 12"),
+			FWoTGameSettingsCodec::Serialize(Parsed).StartsWith(TEXT("GameSettingsVersion=12\n")));
 	}
 	const ANSICHAR FreshRecord[] = "Schema=EarlyUI-v1\n";
 	TestTrue(TEXT("fresh profile parses without a game record"),

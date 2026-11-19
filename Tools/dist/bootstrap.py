@@ -1876,8 +1876,8 @@ def convert_movers(ctx: Context) -> int:
 
 
 def _zone_export_has_walk_surfaces(output: Path, manifest_root: Path) -> bool:
-    """Reject schema-stale (pre-G02 / pre-G07) or texture-stale exports despite
-    a completion marker."""
+    """Reject schema-stale (pre-G02 / pre-G07 / pre-reverb) or texture-stale
+    exports despite a completion marker."""
     try:
         data = json.loads(output.read_text(encoding="utf-8"))
         output_mtime = output.stat().st_mtime_ns
@@ -1888,6 +1888,12 @@ def _zone_export_has_walk_surfaces(output: Path, manifest_root: Path) -> bool:
             or not isinstance(data.get("check_walk_surfaces"), bool)
             or not isinstance(data.get("friction_nodes"), list)
             or not isinstance(ideal, int) or isinstance(ideal, bool)):
+        return False
+    # Ambient rows from before the zones' room reverb fields are stale too.
+    ambient_rows = data.get("ambient_zones", [])
+    if (not isinstance(ambient_rows, list)
+            or not all(isinstance(row, dict) and "reverb_zone" in row
+                       for row in ambient_rows)):
         return False
     # zones.py joins BSP surfaces to texture manifests. This dependency check
     # handles a zones-only run made against legacy manifests: once textures are
