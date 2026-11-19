@@ -118,6 +118,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTZoneHealSoundSpec,
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FWoTZoneHealSoundSpec::RunTest(const FString&)
 {
+	// The heal sound is the player body's (a person's here; an AI-driven player
+	// body is WoT.Zone.PlayerBody.HealSoundForAIDrivenBody); an NPC body heals
+	// silently.
 	auto SpawnHealFixture = [](UWorld* World, bool bPlayerControlled, int32 Health)
 	{
 		FActorSpawnParameters SpawnParams;
@@ -133,7 +136,8 @@ bool FWoTZoneHealSoundSpec::RunTest(const FString&)
 		Zone->FinishSpawning(FTransform::Identity);
 
 		AWoTCharacter* Pawn = World->SpawnActor<AWoTCharacter>(
-			AWoTCharacter::StaticClass(), FVector(0, 0, 100),
+			bPlayerControlled ? AWoTCharacter::StaticClass()
+				: AWoTTestNPCCharacter::StaticClass(), FVector(0, 0, 100),
 			FRotator::ZeroRotator, SpawnParams);
 		Pawn->Health = Health;
 		Pawn->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
@@ -171,9 +175,8 @@ bool FWoTZoneHealSoundSpec::RunTest(const FString&)
 		UWorld* World = WoTTest::CreateSpecWorld();
 		AWoTCharacter* Pawn = SpawnHealFixture(World, false, 50);
 		TickSoundWorld(World);
-		TestTrue(TEXT("controller-less NPC still heals"), Pawn->Health > 50);
-		TestEqual(TEXT("controller-less NPC produces no heal marker"),
-			CountMarkers(World), 0);
+		TestTrue(TEXT("NPC still heals"), Pawn->Health > 50);
+		TestEqual(TEXT("NPC produces no heal marker"), CountMarkers(World), 0);
 		WoTTest::DestroySpecWorld(World);
 	}
 

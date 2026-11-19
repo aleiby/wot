@@ -122,6 +122,11 @@ bool WoTDecodePlayerHealthDefault(const FWoTRuntimeClassDefaults& Defaults,
 	return true;
 }
 
+bool WoTIsPlayerBody(const APawn* Pawn)
+{
+	return Pawn != nullptr && !Pawn->IsA<AWoTNPCCharacter>();
+}
+
 bool AWoTCharacter::ApplyRetailPlayerHealthDefaults(
 	const FWoTRuntimeClassDefaults& Defaults, FString& OutError)
 {

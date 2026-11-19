@@ -366,16 +366,18 @@ bool AWoTMover::EncroachingOn(AActor* Other)
 		}
 		return true;
 	case EWoTMoverEncroachType::CrushWhenEncroach:
-		if (AWoTCharacter* Character = Cast<AWoTCharacter>(Other))
+		// The crush calls the victim's KilledBy, which only the player body
+		// overrides (WOTPlayer.uc:1605-1608, Health - GibSometimesFinalHealth
+		// 'Suicided' damage); an NPC's is a no-op, and a dying player's body
+		// ignores it. The override belongs to the body, so a living AI-driven
+		// player body is crushed like a person's.
+		if (AWoTCharacter* Character = Cast<AWoTCharacter>(Other);
+			WoTIsPlayerBody(Character) && Character->IsAlive())
 		{
-			AController* VictimController = Character->GetController();
-			if (IsValid(VictimController) && VictimController->IsPlayerController())
-			{
-				FWoTDamageEvent Suicided;
-				Suicided.WoTDamageType = TEXT("Suicided");
-				Character->TakeDamage(static_cast<float>(Character->Health + 30),
-					Suicided, EventInstigator, this);
-			}
+			FWoTDamageEvent Suicided;
+			Suicided.WoTDamageType = TEXT("Suicided");
+			Character->TakeDamage(static_cast<float>(Character->Health + 30),
+				Suicided, EventInstigator, this);
 		}
 		return false;
 	case EWoTMoverEncroachType::IgnoreWhenEncroach:
@@ -742,11 +744,14 @@ void AWoTMover::NotifyHit(UPrimitiveComponent*, AActor* Other,
 			PawnMass = Movement->Mass;
 		}
 	}
+	// The engine Mover's player-bump test reads the bumper's bIsPlayer: a player
+	// body, whoever drives it. A lift or door with the mover defaults (bump-open,
+	// player bump) therefore starts for an AI-driven player body, never for an NPC.
 	const bool bAcceptedBump = BumpType == EWoTMoverBumpType::AnyBump
 		? IsValid(Other)
 		: BumpType == EWoTMoverBumpType::PawnBump
 			? P != nullptr && PawnMass >= 10.0f
-			: P != nullptr && P->IsPlayerControlled();
+			: WoTIsPlayerBody(P);
 	if (bAcceptedBump && (InitialState == EWoTMoverState::BumpOpenTimed ||
 		InitialState == EWoTMoverState::BumpButton))
 	{

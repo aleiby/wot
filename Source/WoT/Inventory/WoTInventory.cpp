@@ -374,12 +374,13 @@ bool AWoTInventory::TryPickupBy(AActor* Other)
 bool AWoTInventory::ValidTouch(AActor* Other)
 {
 	// Engine.Inventory.ValidTouch: a LIVING PLAYER pawn
-	// only — bIsPlayer && Health > 0. The port's established bIsPlayer identity
-	// is "not AWoTNPCCharacter"; unlike IsPlayerControlled(), this preserves the
-	// unpossessed plain-character fixtures while rejecting NPC inventory carriers.
+	// only — bIsPlayer && Health > 0. bIsPlayer is the body's (WoTIsPlayerBody:
+	// any pawn but an NPC, whoever drives it); unlike IsPlayerControlled(), this
+	// preserves the unpossessed plain-character fixtures and AI-driven player
+	// bodies while rejecting NPC inventory carriers.
 	// The Health gate is now live (a corpse can no longer consume a pickup).
 	APawn* P = Cast<APawn>(Other);
-	if (!P || P->IsA<AWoTNPCCharacter>()
+	if (!WoTIsPlayerBody(P)
 		|| !P->FindComponentByClass<UWoTInventoryComponent>())
 	{
 		return false;
