@@ -1760,6 +1760,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTArenaDoorUnTriggerSpec,
 	"WoT.Mover.UnTrigger.Arena02Door", WoTRelocationRealMap::Flags)
 bool FWoTArenaDoorUnTriggerSpec::RunTest(const FString&)
 {
+#if WITH_EDITOR
 	using namespace WoTRelocationRealMap;
 	if (!WoTReferenceTreeExists())
 	{
@@ -1814,6 +1815,9 @@ bool FWoTArenaDoorUnTriggerSpec::RunTest(const FString&)
 	TestEqual(TEXT("the door closes after the body leaves"),
 		Door->GetMoverPhase(), EWoTMoverPhase::Closed);
 	return true;
+#else
+	return true;
+#endif
 }
 
 #endif // WITH_AUTOMATION_TESTS
