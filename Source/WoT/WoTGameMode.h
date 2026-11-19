@@ -64,7 +64,7 @@ const TCHAR* WoTStartSpawnRejectionName(EWoTStartSpawnRejection Rejection);
 // in the game-rules phase. PickupQuery/ShouldRespawn are the
 // GameInfo inventory queries those ports will refine.
 UCLASS()
-class AWoTGameMode : public AGameModeBase
+class WOT_API AWoTGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 
@@ -89,6 +89,9 @@ public:
 	virtual bool PickupQuery(APawn* Other, AWoTInventory* Item) const;
 	// GameInfo.ShouldRespawn: never in standalone; else RespawnTime != 0
 	virtual bool ShouldRespawn(AWoTInventory* Item) const;
+
+	// Pickup pacing counts participants without consuming connection capacity.
+	int32 GetNumCombatants() const;
 
 	// Seconds a dead player waits before respawning. Retail respawn is player-fire-driven:
 	// the dying state arms OKToFireTime = now + WOTPlayer.RespawnDelaySecs (=1.0;
@@ -447,6 +450,10 @@ private:
 
 	// giCombatBase.bAlreadyChanged: latch so a single decided match rotates the map once.
 	bool bAlreadyChanged = false;
+	// Only participant matches opt into the unattended, clock-free restart.
+	double MatchEndedTime = 0.0;
+	bool bUnattendedParticipantMatch = false;
+	bool bUnattendedRestartRequested = false;
 #if WITH_AUTOMATION_TESTS
 	TArray<FString> InstalledMapsForTesting;
 	bool bHasInstalledMapsForTesting = false;

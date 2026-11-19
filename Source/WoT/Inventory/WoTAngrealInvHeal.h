@@ -10,7 +10,7 @@
 // AWoTCharacter::IncreaseHealth), unless already at full — then it does nothing
 // and spends no charge.
 UCLASS()
-class AWoTAngrealInvHeal : public AWoTAngrealInventory
+class WOT_API AWoTAngrealInvHeal : public AWoTAngrealInventory
 {
 	GENERATED_BODY()
 

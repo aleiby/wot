@@ -11,7 +11,7 @@ class FWoTControllerUIInputRegistration;
 // to UWoTPreferencesSubsystem; this object retains a non-config editor/test
 // fallback and a runtime-only cache override for legacy fixture construction.
 UCLASS()
-class UWoTGameInstance : public UGameInstance
+class WOT_API UWoTGameInstance : public UGameInstance
 {
 	GENERATED_BODY()
 

@@ -17,7 +17,7 @@ class APlayerController;
 // bookkeeping, team membership and faction morphs, citadel editing/economy, teleporter
 // transitions, loadouts, and the JoinTeam/LeaveTeam collision + overview + style flow.
 UCLASS()
-class AWoTBattleGameMode : public AWoTGameMode
+class WOT_API AWoTBattleGameMode : public AWoTGameMode
 {
 	GENERATED_BODY()
 

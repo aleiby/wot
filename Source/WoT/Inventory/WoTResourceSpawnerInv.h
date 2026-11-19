@@ -17,7 +17,7 @@ class AWoTNPCCharacter;
 // WoTCreatureData::SpawnCreature; the caster's faction (which troop table to read)
 // comes from its actual faction class identity through AWoTCharacter::GetSummonFaction.
 UCLASS(Abstract)
-class AWoTResourceSpawnerInv : public AWoTAngrealInventory
+class WOT_API AWoTResourceSpawnerInv : public AWoTAngrealInventory
 {
 	GENERATED_BODY()
 
