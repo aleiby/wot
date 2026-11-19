@@ -24,7 +24,7 @@ namespace WoTSight
 		float SightRadius, const AActor* Target, uint8 TargetVisibility);
 	bool OmniSight(const APawn* Observer, const AActor* Target,
 		uint8 TargetVisibility);
-	bool PawnCanSeeActor(const APawn* Observer, const AActor* Target,
+	WOT_API bool PawnCanSeeActor(const APawn* Observer, const AActor* Target,
 		float FOVCos = 0.0f, bool bTraceActors = false);
 	bool TraceToTarget(const APawn* Observer, const AActor* Target);
 	uint8 VisibilityOf(const AActor* Target);

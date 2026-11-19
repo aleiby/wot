@@ -1,4 +1,5 @@
 #include "WoTCreatureData.h"
+#include "WoTCreatureItemBinding.h"
 
 #include "../Inventory/WoTAngrealInvAirBurst.h"
 #include "../Inventory/WoTAngrealInvDart.h"
@@ -247,16 +248,6 @@ bool WoTCreatureReadObject(const FWoTRuntimeClassDefaults& Defaults,
 	Out = bLeaf ? WoTCreatureLeaf(Property->ObjectIdentity)
 		: FName(*WoTCreaturePublicIdentity(Property->ObjectIdentity));
 	return true;
-}
-
-UClass* WoTCreatureBoundWeave(FName SourcePath)
-{
-	const FString Leaf = WoTCreatureLeafString(SourcePath.ToString());
-	for (const FWoTWeaveBinding& Binding : GWoTWeaveBindings)
-	{
-		if (Leaf.Equals(Binding.Leaf, ESearchCase::IgnoreCase)) return Binding.Class();
-	}
-	return nullptr;
 }
 
 bool WoTCreatureDecodeWeaves(const FWoTRuntimeClassDefaults& Defaults,
@@ -773,6 +764,16 @@ void WoTCreatureSerializeRow(TArray<uint8>& Out, const FWoTCreatureRow& R)
 	Ascii(Out, " movement-bindings "); Integer(Out, R.MovementBindings.Num());
 	for (const auto& Binding : R.MovementBindings) Binding.Serialize(Out);
 }
+}
+
+UClass* WoTCreatureBoundWeave(FName SourcePath)
+{
+	const FString Leaf = WoTCreatureLeafString(SourcePath.ToString());
+	for (const FWoTWeaveBinding& Binding : GWoTWeaveBindings)
+	{
+		if (Leaf.Equals(Binding.Leaf, ESearchCase::IgnoreCase)) return Binding.Class();
+	}
+	return nullptr;
 }
 
 bool FWoTCreatureDataBuilder::Build(const FWoTRetailBuildContext& Context,

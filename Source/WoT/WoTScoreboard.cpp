@@ -425,6 +425,13 @@ void FWoTArenaScoreboard::LayoutPlayerRow(TArray<FWoTHUDDrawCmd>& Commands,
 			static_cast<float>(X[1]), IconY, EWoTHUDStyle::Masked, Tint);
 	}
 	ScoreboardAddText(Commands, Player.Name, static_cast<float>(X[2]), Y, Tint);
+	if (Player.bIsBot)
+	{
+		FWoTHUDDrawCmd& Tag = ScoreboardAddText(Commands, TEXT("bot"),
+			static_cast<float>(X[3] - 12), Y + FontLineHeight * 0.2f,
+			Tint, EWoTTextAlignment::Right);
+		Tag.Scale = 0.65f;
+	}
 	if (!bStandalone)
 	{
 		const FString Loss = Player.PacketLoss >= 0

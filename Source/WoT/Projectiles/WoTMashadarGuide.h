@@ -48,7 +48,7 @@ enum class EWoTMashadarChainPhase : uint8
 // per-frame growth/fade choreography, pain particles, sounds; and the citadel-editor
 // command INPUT/UI (with the rest of the citadel UI). See the scoping doc.
 UCLASS()
-class AWoTMashadarGuide : public AWoTSeekingProjectile
+class WOT_API AWoTMashadarGuide : public AWoTSeekingProjectile
 {
 	GENERATED_BODY()
 

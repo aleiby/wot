@@ -2,6 +2,9 @@
 
 #include "WoTNPCCharacter.h"
 #include "WoTNPCController.h"
+#include "../WoTPlayerState.h"
+#include "../Inventory/WoTInventoryComponent.h"
+#include "../Inventory/WoTAngrealInvDisguise.h"
 #include "../Traps/WoTAlarm.h"
 #include "../Inventory/WoTSeal.h"
 #include "EngineUtils.h"
@@ -33,12 +36,47 @@ namespace
 	}
 }
 
+uint8 WoTAIUtil::ApparentTeamOf(const APawn* Other)
+{
+	if (const AWoTNPCCharacter* NPC = Cast<AWoTNPCCharacter>(Other))
+	{
+		return NPC->AssignedTeam;
+	}
+	// Players present their (possibly disguised) APPARENT team — WOTPawn.IsFriendly
+	// reads GetApparentTeam (WOTPlayer.uc:1912/747/777). A held, active Disguise
+	// substitutes the mimicked pawn's team (AngrealInvDisguise.CopyDisguisePawnProperties:
+	// 364/373); otherwise the real PlayerState team.
+	if (const AWoTCharacter* Player = Cast<AWoTCharacter>(Other))
+	{
+		if (const UWoTInventoryComponent* Inv = Player->InventoryComponent)
+		{
+			for (const TObjectPtr<AWoTInventory>& Item : Inv->Items)
+			{
+				if (const AWoTAngrealInvDisguise* Disguise = Cast<AWoTAngrealInvDisguise>(Item))
+				{
+					const int32 Apparent = Disguise->GetApparentTeam();
+					if (Apparent != -1)   // GetApparentTeam's "not disguised" sentinel
+					{
+						return static_cast<uint8>(Apparent);
+					}
+					break;   // at most one Disguise per inventory
+				}
+			}
+		}
+	}
+	if (const AWoTPlayerState* PS = Other ? Other->GetPlayerState<AWoTPlayerState>() : nullptr)
+	{
+		return PS->Team;
+	}
+	return WoTTeam::None;
+}
+
 uint8 WoTAIUtil::GetActorTeam(const AActor* Other)
 {
 	// WOTUtil.uc:335: pawns → their team byte; seals → Seal.Team; else teamless.
 	if (const APawn* Pawn = Cast<APawn>(Other))
 	{
-		return AWoTNPCCharacter::TeamOf(Pawn);
+		return ApparentTeamOf(Pawn);
 	}
 	if (const AWoTSeal* Seal = Cast<AWoTSeal>(Other))
 	{

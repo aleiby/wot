@@ -58,6 +58,10 @@
 		{
 			"Name": "WoTOnboarding",
 			"Enabled": true
+		},
+		{
+			"Name": "WoTBots",
+			"Enabled": true
 		}
 	]
 }

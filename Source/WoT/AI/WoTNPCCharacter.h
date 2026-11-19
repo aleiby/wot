@@ -76,7 +76,7 @@ struct FWoTMeleeAttack
 // inherited, not re-ported). The brain lives on the
 // controller + UWoTBrainComponent; creature identity arrives as data.
 UCLASS()
-class AWoTNPCCharacter : public AWoTCharacter
+class WOT_API AWoTNPCCharacter : public AWoTCharacter
 {
 	GENERATED_BODY()
 

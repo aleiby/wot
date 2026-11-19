@@ -26,7 +26,7 @@ enum class EWoTDurationType : uint8
 // The Battle team filter and damage-effect dispatch have runtime folds; taint
 // self-damage remains a direct TakeDamage per the ratified convention.
 UCLASS(Abstract)
-class AWoTAngrealInventory : public AWoTInventory
+class WOT_API AWoTAngrealInventory : public AWoTInventory
 {
 	GENERATED_BODY()
 
@@ -214,6 +214,10 @@ public:
 	virtual bool GetOffensivePriority(float& OffensivePriority, AActor* InTarget) const;
 	void SetVictim(AActor* Victim) { Target = Victim; }
 	AActor* GetVictim() const { return Target; }
+	// Repeated overrides retain the exact priority from before the first one.
+	void SetBotPriorityOverride(float NewPriority);
+	// Called when leaving a bot inventory, before another holder can receive us.
+	void ClearBotAIState();
 	virtual FVector GetTrajectorySource() const;
 	// DefaultTargetingReflector.FindBestTarget: direct-trace first, else the
 	// retail targetable actor closest to view center within MaxAngleInDegrees. Lives on
@@ -237,6 +241,9 @@ public:
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 private:
+	bool bHasBotPriorityOverride = false;
+	float SavedBotPriority = 0.0f;
+
 	// AngrealAI cast pacing
 	float LastChargeUsedTime = 0.0f;
 	int32 ChargesUsedInGroup = 0;
