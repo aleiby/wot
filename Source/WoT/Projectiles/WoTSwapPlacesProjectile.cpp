@@ -219,6 +219,13 @@ void AWoTSwapPlacesProjectile::Explode(FVector HitLocation, FVector HitNormal)
 {
 	if (HasAuthority())
 	{
+		// A second strike while the first one's swap is still running (see
+		// bHasStruck) does nothing; the first finishes and destroys the weave.
+		if (bHasStruck)
+		{
+			return;
+		}
+		bHasStruck = true;
 		// Prefer the locked destination; fall back to whatever we struck.
 		AActor* Target = Destination ? Destination.Get() : HitActor.Get();
 		AWoTCharacter* TargetCharacter = Cast<AWoTCharacter>(Target);
@@ -229,6 +236,17 @@ void AWoTSwapPlacesProjectile::Explode(FVector HitLocation, FVector HitNormal)
 		}
 	}
 	Super::Explode(HitLocation, HitNormal);   // impact sound + destroy (no splash)
+}
+
+void AWoTSwapPlacesProjectile::ProcessTouch(AActor* Other, FVector HitLocation)
+{
+	// Ignored whole, before the base touch names a new HitActor, hurts it or
+	// plays the hit-pawn sound: none of that may reach the strike in progress.
+	if (bHasStruck)
+	{
+		return;
+	}
+	Super::ProcessTouch(Other, HitLocation);
 }
 
 void AWoTSwapPlacesProjectile::RedirectSeeker(AWoTSeekingProjectile* Seeker,

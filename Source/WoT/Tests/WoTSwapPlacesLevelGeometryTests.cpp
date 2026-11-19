@@ -15,6 +15,7 @@
 
 #include "WoTTestBattleClasses.h"
 #include "WoTTestLeech.h"
+#include "WoTTestSwapPlacesProjectile.h"
 #include "WoTTestWorld.h"
 #include "../Inventory/WoTAngrealInvSwapPlaces.h"
 #include "../Inventory/WoTIceLeech.h"
@@ -826,6 +827,182 @@ bool FWoTRelocationBreakableFitSpec::RunTest(const FString&)
 	TestEqual(TEXT("a refused swap shows no flashes"), Refused->LastSwapFlashCount, 0);
 	ExpectLastMessage(*this, Caster, TEXT("DestinationFailMessage"),
 		TEXT("the breakable does not fit in the corridor"));
+	return !HasAnyErrors();
+}
+
+namespace WoTSwapPlacesStrikeOnce
+{
+using namespace WoTSwapPlacesLevelGeometry;
+
+// A weave cast by Caster, waiting at Parking, clear of every body. Seeking
+// after Target when one is given, flying straight otherwise.
+AWoTTestCountingSwapProjectile* SpawnWeave(UWorld* World, const FCaster& Caster,
+	AActor* Target, const FVector& Parking)
+{
+	AWoTTestCountingSwapProjectile* Weave = World->SpawnActor<AWoTTestCountingSwapProjectile>(
+		AWoTTestCountingSwapProjectile::StaticClass(), Parking, FRotator::ZeroRotator,
+		AlwaysSpawn());
+	if (!Weave) return nullptr;
+	if (Caster.Artifact) Weave->SetSourceAngreal(Caster.Artifact);
+	Weave->InitiatingPawn = Caster.Pawn;
+	Weave->SetIgnoredPawn(Caster.Pawn);
+	if (Target) Weave->SetDestination(Target);
+	return Weave;
+}
+
+// A body that is not a caster, hovering where it is put.
+AWoTCharacter* SpawnBody(UWorld* World, const FVector& At, float Yaw)
+{
+	AWoTCharacter* Body = World->SpawnActor<AWoTCharacter>(At, FRotator(0, Yaw, 0),
+		AlwaysSpawn());
+	if (Body) Body->GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+	return Body;
+}
+
+// Moves a weave into place inside a body: it flies into it.
+void FlyInto(AActor* Weave, const AActor* Body, const FVector& Offset)
+{
+	Weave->SetActorLocation(Body->GetActorLocation() + Offset, false, nullptr,
+		ETeleportType::TeleportPhysics);
+}
+
+void ExpectStruckOnce(FAutomationTestBase& Test, const TCHAR* Name,
+	const AWoTTestCountingSwapProjectile* Weave)
+{
+	Test.TestEqual(FString::Printf(TEXT("%s strikes once"), Name), Weave->Strikes, 1);
+	Test.TestEqual(FString::Printf(TEXT("%s's swap completes: both ends flash"), Name),
+		Weave->LastSwapFlashCount, 2);
+	Test.TestFalse(FString::Printf(TEXT("%s is spent"), Name), IsValid(Weave));
+}
+
+void ExpectAt(FAutomationTestBase& Test, const TCHAR* Name, const AActor* Body,
+	const FVector& Where, float Yaw)
+{
+	Test.TestTrue(FString::Printf(TEXT("%s ends at %s (now %s)"), Name, *Where.ToString(),
+		*Body->GetActorLocation().ToString()),
+		Body->GetActorLocation().Equals(Where, 0.001));
+	Test.TestTrue(FString::Printf(TEXT("%s ends facing %.0f (now %.3f)"), Name, Yaw,
+		Body->GetActorRotation().Yaw),
+		FMath::IsNearlyZero(FRotator::NormalizeAxis(Body->GetActorRotation().Yaw - Yaw), 0.001));
+}
+}
+
+// A swap weave is still alive while its swap runs: it is destroyed only after
+// (AngrealSwapPlacesProjectile.uc:93-131). Here a caster has cast two weaves
+// at one target, flying straight. The first strikes the target; the swap
+// brings the target to where the caster stood, into the second weave, which
+// strikes it and swaps the two back, into the first weave again. That weave
+// has struck already: it is not struck again (which would swap them again,
+// into the second, and so on until the stack runs out).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSwapPlacesTwoWeavesStrikeOnceSpec,
+	"WoT.Inventory.SwapPlacesRules.TwoWeavesAtOneTargetStrikeOnceEach",
+	WoTSwapPlacesLevelGeometry::Flags)
+
+bool FWoTSwapPlacesTwoWeavesStrikeOnceSpec::RunTest(const FString&)
+{
+	using namespace WoTSwapPlacesStrikeOnce;
+	UWorld* World = WoTTest::CreateSpecWorld();
+	if (!TestNotNull(TEXT("spec world"), World)) return false;
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	UWoTZoneIndex* Zones = World->GetSubsystem<UWoTZoneIndex>();
+	const FVector CasterAt(0, 0, 300), TargetAt(600, 0, 300);
+	FCaster Caster = SpawnCaster(World, CasterAt, 0.0f, true);
+	AWoTCharacter* Target = SpawnBody(World, TargetAt, 90.0f);
+	if (!TestNotNull(TEXT("zone index"), Zones) || !TestNotNull(TEXT("caster"), Caster.Pawn)
+		|| !TestNotNull(TEXT("target"), Target)) return false;
+
+	AWoTTestCountingSwapProjectile* First =
+		SpawnWeave(World, Caster, nullptr, FVector(-3000, 3000, 300));
+	AWoTTestCountingSwapProjectile* Second =
+		SpawnWeave(World, Caster, nullptr, FVector(3000, 3000, 300));
+	if (!TestNotNull(TEXT("first weave"), First) || !TestNotNull(TEXT("second weave"), Second))
+		return false;
+	// The second weave has just left the caster: it is inside it, which it
+	// ignores.
+	FlyInto(Second, Caster.Pawn, FVector(10, 0, 0));
+	if (!TestEqual(TEXT("the second weave ignores its caster"), Second->Strikes, 0)) return false;
+	const int32 CasterMovesBefore = Zones->UpdateCountForTest(Caster.Pawn);
+	const int32 TargetMovesBefore = Zones->UpdateCountForTest(Target);
+
+	FlyInto(First, Target, FVector(-10, 0, 0));
+
+	ExpectStruckOnce(*this, TEXT("the first weave"), First);
+	ExpectStruckOnce(*this, TEXT("the second weave"), Second);
+	TestEqual(TEXT("two swaps move the caster twice"),
+		Zones->UpdateCountForTest(Caster.Pawn) - CasterMovesBefore, 2);
+	TestEqual(TEXT("two swaps move the target twice"),
+		Zones->UpdateCountForTest(Target) - TargetMovesBefore, 2);
+	// Swapped and swapped back.
+	ExpectAt(*this, TEXT("the caster"), Caster.Pawn, CasterAt, 0.0f);
+	ExpectAt(*this, TEXT("the target"), Target, TargetAt, 90.0f);
+	TestTrue(TEXT("the caster's view turns back with it"),
+		FMath::IsNearlyZero(FRotator::NormalizeAxis(
+			Caster.Controller->GetControlRotation().Yaw), 0.001));
+	TestTrue(TEXT("no refusal message"), Caster.Controller->CenterMessages.IsEmpty());
+	return !HasAnyErrors();
+}
+
+// Three bodies and three weaves, each swap bringing the target into the next
+// weave: the first (straight, from the caster) strikes the target; the target
+// lands in a second weave (from a bystander, seeking the target), whose swap
+// lands it in a third (from the caster, seeking the target), whose swap brings
+// it back into the first. Each weave strikes once, so the bodies end where the
+// three swaps put them, in order.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSwapPlacesChainStrikeOnceSpec,
+	"WoT.Inventory.SwapPlacesRules.AChainOfSwapsStrikesEachWeaveOnce",
+	WoTSwapPlacesLevelGeometry::Flags)
+
+bool FWoTSwapPlacesChainStrikeOnceSpec::RunTest(const FString&)
+{
+	using namespace WoTSwapPlacesStrikeOnce;
+	UWorld* World = WoTTest::CreateSpecWorld();
+	if (!TestNotNull(TEXT("spec world"), World)) return false;
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	UWoTZoneIndex* Zones = World->GetSubsystem<UWoTZoneIndex>();
+	const FVector CasterAt(0, 0, 300), TargetAt(600, 0, 300), BystanderAt(0, 600, 300);
+	FCaster Caster = SpawnCaster(World, CasterAt, 0.0f, true);
+	AWoTCharacter* Target = SpawnBody(World, TargetAt, 90.0f);
+	FCaster Bystander;
+	Bystander.Pawn = SpawnBody(World, BystanderAt, 180.0f);
+	if (!TestNotNull(TEXT("zone index"), Zones) || !TestNotNull(TEXT("caster"), Caster.Pawn)
+		|| !TestNotNull(TEXT("target"), Target) || !TestNotNull(TEXT("bystander"), Bystander.Pawn))
+		return false;
+
+	AWoTTestCountingSwapProjectile* First =
+		SpawnWeave(World, Caster, nullptr, FVector(-3000, 3000, 300));
+	AWoTTestCountingSwapProjectile* Second =
+		SpawnWeave(World, Bystander, Target, FVector(3000, 3000, 300));
+	AWoTTestCountingSwapProjectile* Third =
+		SpawnWeave(World, Caster, Target, FVector(3000, -3000, 300));
+	if (!TestNotNull(TEXT("first weave"), First) || !TestNotNull(TEXT("second weave"), Second)
+		|| !TestNotNull(TEXT("third weave"), Third)) return false;
+	// Seeking the target, the second and third weaves pass through the caster
+	// and the bystander without striking them.
+	FlyInto(Second, Caster.Pawn, FVector(10, 0, 0));
+	FlyInto(Third, Bystander.Pawn, FVector(10, 0, 0));
+	if (!TestEqual(TEXT("the seeking weaves pass through the other bodies"),
+		Second->Strikes + Third->Strikes, 0)) return false;
+	const int32 CasterMovesBefore = Zones->UpdateCountForTest(Caster.Pawn);
+	const int32 TargetMovesBefore = Zones->UpdateCountForTest(Target);
+	const int32 BystanderMovesBefore = Zones->UpdateCountForTest(Bystander.Pawn);
+
+	FlyInto(First, Target, FVector(-10, 0, 0));
+
+	ExpectStruckOnce(*this, TEXT("the first weave"), First);
+	ExpectStruckOnce(*this, TEXT("the second weave"), Second);
+	ExpectStruckOnce(*this, TEXT("the third weave"), Third);
+	TestEqual(TEXT("the caster swaps twice"),
+		Zones->UpdateCountForTest(Caster.Pawn) - CasterMovesBefore, 2);
+	TestEqual(TEXT("the target swaps three times"),
+		Zones->UpdateCountForTest(Target) - TargetMovesBefore, 3);
+	TestEqual(TEXT("the bystander swaps once"),
+		Zones->UpdateCountForTest(Bystander.Pawn) - BystanderMovesBefore, 1);
+	// The caster and the target trade places and facings; the bystander and
+	// the target trade, from there; the caster and the target trade again.
+	ExpectAt(*this, TEXT("the caster"), Caster.Pawn, BystanderAt, 180.0f);
+	ExpectAt(*this, TEXT("the target"), Target, TargetAt, 90.0f);
+	ExpectAt(*this, TEXT("the bystander"), Bystander.Pawn, CasterAt, 0.0f);
+	TestTrue(TEXT("no refusal message"), Caster.Controller->CenterMessages.IsEmpty());
 	return !HasAnyErrors();
 }
 

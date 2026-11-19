@@ -60,6 +60,17 @@ public:
 
 	virtual void SetSourceAngreal(AWoTAngrealInventory* Source) override;
 	virtual void Explode(FVector HitLocation, FVector HitNormal) override;
+	// A weave that has struck touches nothing more (see bHasStruck).
+	virtual void ProcessTouch(AActor* Other, FVector HitLocation) override;
+
+	// Set on the server when the weave strikes. A weave strikes once
+	// (AngrealSwapPlacesProjectile.uc:93-131: it swaps, then Super.Explode
+	// destroys it), but it is still alive while its swap runs, and the swap's
+	// moves and the far end's collision coming back on can touch it again,
+	// directly or through another weave whose own swap brings a body back into
+	// it. That touch is ignored: struck once, the weave neither touches nor
+	// swaps again.
+	bool bHasStruck = false;
 
 	// Swap Source (caster) and Dest (target): position, facing, seeker locks and
 	// lasting effects, or nothing at all when either end cannot move.
