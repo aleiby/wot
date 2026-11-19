@@ -237,7 +237,8 @@ Frozen after the match ends.
     target is acquired. Charge and cadence limits still apply.
   - **Aim:** the controller's rotation aims at the target's predicted position for the
     projectile's speed, plus a random error of up to `AimErrorDegrees` that shrinks while
-    the target stays in view.
+    the target stays in view. While a Whirlwind holds the bot, the body keeps the lift's
+    spin and the view turns with the body, as a held player's does.
   - **Defence:** `FindIncomingWeave()` then `SelectDefensiveWeave()`, so a bot holding
     Reflect or a shield can use it against incoming weaves. Heal is excluded from this
     choice; a bot casts Heal only below `HealBelowHealth` (50%).
@@ -275,7 +276,8 @@ Frozen after the match ends.
 - **Stuck:** no path progress for 3 s triggers a new destination; stuck for
   `StuckRespawnSeconds` (20 s) triggers a silent respawn (section 5). Falling is not path
   progress: a body that drops through a gap in a floor's collision would otherwise fall
-  for minutes before reaching KillZ.
+  for minutes before reaching KillZ. A body a Whirlwind holds (its movement disabled) is
+  not stuck: it keeps its goal, and its clocks start again when the lift lets go.
 - **Frozen:** on `OnMatchEnded` (H3) a bot releases any cast, stops moving and thinking,
   and the roster freezes: no adds, no departures, no pending respawns until travel.
 

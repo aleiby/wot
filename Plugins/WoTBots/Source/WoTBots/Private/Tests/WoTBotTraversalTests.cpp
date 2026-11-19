@@ -25,6 +25,9 @@ struct FWoTBotTraversalAccess
 		B->ChooseDestination();
 	}
 	static void Think(AWoTBotController* B) { B->Think(); }
+	// A think whose route is due again now.
+	static void Repath(AWoTBotController* B) { B->NextRepathTime = 0.0f; B->Think(); }
+	static bool WantsMovement(const AWoTBotController* B) { return B->bWantsMovement; }
 	// One jump made for the pool, then a fight took the goal without releasing it.
 	static void LeaveAfterHop(AWoTBotController* B, const AWoTAngrealSpawnPool* P)
 	{
@@ -335,7 +338,31 @@ bool FBotArrivalPadSpec::RunTest(const FString&)
 	AWoTAngrealSpawnPool* Back = Pool(W, FVector(-1000, 0, 30), TEXT("/Script/WoT.WoTAngrealInvFireball"));
 	FWoTBotTraversalAccess::Think(B);
 	TestEqual(TEXT("the pickup back west is sought through the pad"), B->GetSeekingPool(), Back);
-	TestTrue(TEXT("by first stepping out of the pad's reach"), FVector::Dist2D(B->GetDestination(), EastPad) >= 97.0f);
+	// The pad's overlap with the body ends 97 out (80 + 17), which re-arms it. A
+	// walk stops up to its 20-unit acceptance radius short of its point, so even
+	// such a stop must leave the body off the pad.
+	const FVector StepOff = B->GetDestination();
+	TestTrue(TEXT("by first stepping out of the pad's reach"), FVector::Dist2D(StepOff, EastPad) - 20.0f >= 97.0f);
+	// Wherever the walk stops: still on the pad, the body walks on off it (a walk
+	// it wants, so the stuck rule watches it); off the re-armed pad, it heads back
+	// into the pad. The last stop is one a run measured, 1.9 inside the old reach.
+	APawn* Body = B->GetPawn();
+	const FVector Away = (StepOff - EastPad).GetSafeNormal2D();
+	for (const float Stop : { 95.0f, 99.0f, 104.0f, 110.1f })
+	{
+		Body->SetActorLocation(FVector(EastPad.X, EastPad.Y, Body->GetActorLocation().Z) + Away * Stop);
+		B->StopMovement();
+		Body->GetMovementComponent()->StopMovementImmediately();
+		FWoTBotTraversalAccess::Repath(B);
+		const double Out = FVector::Dist2D(B->GetDestination(), EastPad);
+		AddInfo(FString::Printf(TEXT("ARRIVALPAD stop=%.1f destination_out=%.1f wants=%d"), Stop, Out, FWoTBotTraversalAccess::WantsMovement(B)));
+		if (Stop < 97.0f)
+			TestTrue(*FString::Printf(TEXT("stopped %.1f out, still on the pad, the body walks on off it"), Stop),
+				FWoTBotTraversalAccess::WantsMovement(B) && Out - 20.0f >= 97.0f);
+		else
+			TestTrue(*FString::Printf(TEXT("stopped %.1f out, off the re-armed pad, the body heads back into it"), Stop),
+				FWoTBotTraversalAccess::WantsMovement(B) && Out < 30.0f);
+	}
 	TestTrue(TEXT("the pickup back west is collected through the pad it arrived on"), Collected(W, Back, 12.0f));
 	return !HasAnyErrors();
 }

@@ -3,6 +3,7 @@
 #include "WoTBotBehaviourFixture.h"
 #include "AI/WoTCasterComponent.h"
 #include "Engine/DamageEvents.h"
+#include "Testing/WoTSoakEvents.h"
 #include "UObject/UnrealType.h"
 #include "TimerManager.h"
 namespace WoTBotTest
@@ -24,6 +25,7 @@ struct FWoTBotRegressionAccess
 		Item->InitChargeGroup();
 		Bot->CastItem(Item);
 	}
+	static bool WantsMovement(const AWoTBotController* Bot) { return Bot->bWantsMovement; }
 };
 
 namespace
@@ -333,6 +335,73 @@ bool FBotPendingFreezeSpec::RunTest(const FString&)
 		TestEqual(TEXT("pending beam does not hurt victim"), E->Health, 100);
 		TestFalse(TEXT("caster released after cancellation"), Caster->IsCasting());
 	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotWhirlwindSpinSpec, "WoT.Bots.Movement.WhirlwindSpinsBot", Flags)
+bool FBotWhirlwindSpinSpec::RunTest(const FString&)
+{
+	// The bot does not cast, and three seconds without progress would retire a
+	// body held still, so the hold below outlasts the stuck rule.
+	FSettings Settings; Settings.Value->ReactionSeconds = 100; Settings.Value->AimErrorDegrees = 0;
+	Settings.Value->StuckRespawnSeconds = 3;
+	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
+	BuildNav(W);
+	SeedDecisions(0x7051);
+	AWoTBotController* B = Bot(W, FVector(0, 0, 50));
+	const TWeakObjectPtr<AWoTCharacter> Body = CastChecked<AWoTCharacter>(B->GetPawn());
+	AWoTCharacter* E = Enemy(W, FVector(600, 0, 50));
+	int32 StuckEvents = 0;
+	const FDelegateHandle Handle = WoTSoakEvents::Events().AddLambda([&](WoTSoakEvents::EKind Kind, AActor* Subject, AActor*)
+	{
+		if (Subject == B && (Kind == WoTSoakEvents::EKind::Recovery || Kind == WoTSoakEvents::EKind::SilentRespawn)) ++StuckEvents;
+	});
+	ON_SCOPE_EXIT { WoTSoakEvents::Events().Remove(Handle); };
+	WoTTest::TickWorld(W, .5f);
+	if (!TestTrue(TEXT("the bot is under way when the lift begins"), FWoTBotRegressionAccess::WantsMovement(B))) return false;
+	// A player holds a Whirlwind on the bot, through the player's own artifact path.
+	AWoTAngrealInventory* Whirlwind = Give(E, TEXT("/Script/WoT.WoTAngrealInvWhirlwind"));
+	E->InventoryComponent->SelectItem(Whirlwind);
+	E->AuthorityUseAngreal((Body->GetActorLocation() - E->GetActorLocation()).Rotation());
+	const TCHAR* Lift = TEXT("/Script/WoT.WoTWhirlwindLeech");
+	if (!TestTrue(TEXT("the lift holds the bot"), HasEffect(Body.Get(), Lift))) return false;
+	// WhirlwindLeech.uc Tick turns its owner int(RotationPerSecond * DeltaTime) + 1
+	// units a tick (RotationPerSecond 120000); 1/64 s ticks are exact in floats.
+	constexpr float Step = 1.0f / 64.0f;
+	constexpr int32 Frames = 320; // Five seconds.
+	const double Turn = (FMath::TruncToInt(120000.0f * Step) + 1) * 360.0 / 65536.0;
+	double LastBody = Body->GetActorRotation().Yaw, LastView = B->GetControlRotation().Yaw;
+	double BodyTurned = 0, ViewTurned = 0, Apart = 0;
+	int32 Held = 0;
+	for (; Held < Frames; ++Held)
+	{
+		WoTTest::TickWorld(W, Step, Step);
+		if (!Body.IsValid() || B->GetPawn() != Body.Get()) break;
+		const double BodyYaw = Body->GetActorRotation().Yaw, ViewYaw = B->GetControlRotation().Yaw;
+		BodyTurned += FMath::UnwindDegrees(BodyYaw - LastBody);
+		ViewTurned += FMath::UnwindDegrees(ViewYaw - LastView);
+		Apart = FMath::Max(Apart, FMath::Abs(FMath::UnwindDegrees(ViewYaw - BodyYaw)));
+		LastBody = BodyYaw;
+		LastView = ViewYaw;
+	}
+	AddInfo(FString::Printf(TEXT("WHIRLWIND frames=%d body_turned=%.3f view_turned=%.3f expected=%.3f max_apart=%.3f stuck_events=%d"),
+		Held, BodyTurned, ViewTurned, Frames * Turn, Apart, StuckEvents));
+	if (!TestEqual(TEXT("the lifted body is still the bot's"), Held, Frames)) return false;
+	TestTrue(TEXT("the body turns at the lift's rate"), FMath::IsNearlyEqual(BodyTurned, Frames * Turn, .5));
+	// The view follows the body, at most one tick behind it.
+	TestTrue(TEXT("the view turns with the body"), FMath::IsNearlyEqual(ViewTurned, BodyTurned, Turn + .01) && Apart <= Turn + .01);
+	TestEqual(TEXT("a lifted body is not stuck"), StuckEvents, 0);
+	TestTrue(TEXT("the lift still holds the bot"), HasEffect(Body.Get(), Lift));
+	E->AuthorityCeaseUsingAngreal();
+	TestFalse(TEXT("release ends the lift"), HasEffect(Body.Get(), Lift));
+	WoTTest::TickWorld(W, .5f);
+	if (!TestTrue(TEXT("the released body is still the bot's"), Body.IsValid() && B->GetPawn() == Body.Get())) return false;
+	const double View = B->GetControlRotation().Yaw;
+	const double ToCaster = (E->GetActorLocation() - Body->GetPawnViewLocation()).Rotation().Yaw;
+	AddInfo(FString::Printf(TEXT("WHIRLWIND released view=%.3f body=%.3f to_caster=%.3f"), View, Body->GetActorRotation().Yaw, ToCaster));
+	TestTrue(TEXT("released, the bot aims at its target again"), FMath::Abs(FMath::UnwindDegrees(View - ToCaster)) < 2.0);
+	TestTrue(TEXT("and faces where it aims"), FMath::Abs(FMath::UnwindDegrees(Body->GetActorRotation().Yaw - View)) < .01);
+	TestEqual(TEXT("no stuck recovery after release"), StuckEvents, 0);
 	return !HasAnyErrors();
 }
 } // namespace WoTBotTest

@@ -129,6 +129,7 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 						{
 							Reach.Pad = Pad->GetActorLocation();
 							Reach.TouchRadius = Pad->UE1CollisionRadius;
+							Reach.Teleporter = *Pad;
 						}
 					UE_LOG(LogWoTBotLinks, Log, TEXT("Bot teleporter reach %s -> %s (%.0f apart) is routed without a mesh link."),
 						*It->GetName(), *Edge.Other->GetName(), FVector::Dist2D(From.Location, To.Location));

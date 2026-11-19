@@ -76,6 +76,9 @@ private:
 	void SetTarget(AWoTCharacter* NewTarget, bool bVisible);
 	void DamageApplied(AWoTCharacter* Victim, AController* InstigatorController, AActor* Causer, float Amount);
 	void UpdateAim();
+	// Whether a whirlwind holds the body: its effect lifts and spins the body and
+	// disables its movement until it lets go.
+	bool IsHeldByWhirlwind() const;
 	void UpdateStuck();
 	void UpdateClimb();
 	void Hop(const AWoTAngrealSpawnPool* Pool);
@@ -99,7 +102,8 @@ private:
 	// no mesh link carries, and the route's length; null when none. Legs from From
 	// to each entry are measured once and kept in EntryLegs when given.
 	const WoTBotLinks::FDistantTeleport* DistantTeleportRoute(const FVector& From, const FVector& To, float& Length, TArray<float>* EntryLegs = nullptr) const;
-	// Walks to a point on the mesh beyond Reach of the teleporter's pad.
+	// Walks to a point on the mesh far enough beyond Reach of the teleporter's pad
+	// that the walk, wherever it stops, ends off the pad.
 	bool StepOffPad(const WoTBotLinks::FDistantTeleport& Via, float Reach);
 	EWoTBotState State = EWoTBotState::Dead;
 	TWeakObjectPtr<AWoTCharacter> Target;

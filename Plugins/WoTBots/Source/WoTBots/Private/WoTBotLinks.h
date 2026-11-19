@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 
+class AActor;
 class UWorld;
 
 // Off-mesh links for the bot navigation mesh along the map's own path network.
@@ -24,13 +25,16 @@ constexpr float MaxDrop = 500.0f;
 // link carries it. Bots route through it themselves: walk into the entry, and
 // the teleporter sets the body down at the exit. Both ends are on the bot mesh.
 // The entry's pad (its teleporter) fires on a body reaching within TouchRadius
-// of Pad, plus the body's own radius.
+// of Pad, plus the body's own radius. A body it sets down (at its own exit) it
+// sends on again only once that body's overlap with Teleporter has ended
+// (WoTTeleporter.cpp NotifyActorEndOverlap re-arms it).
 struct FDistantTeleport
 {
 	FVector Entry = FVector::ZeroVector;
 	FVector Exit = FVector::ZeroVector;
 	FVector Pad = FVector::ZeroVector;
 	float TouchRadius = 0.0f;
+	TWeakObjectPtr<const AActor> Teleporter;
 };
 
 // Links the bot mesh once it is built. Returns the number of links added, or

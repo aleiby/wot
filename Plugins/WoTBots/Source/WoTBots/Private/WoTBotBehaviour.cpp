@@ -111,7 +111,8 @@ void AWoTBotController::DamageApplied(AWoTCharacter* Victim, AController* Instig
 	// Damage supplies one observation, never a live tracking reference through walls.
 	LastKnownPosition = Attacker->GetActorLocation();
 	LastSensedTime = GetWorld()->GetTimeSeconds();
-	SetControlRotation((LastKnownPosition - Victim->GetPawnViewLocation()).Rotation());
+	// A body a whirlwind holds keeps its view turning with it (UpdateAim).
+	if (!IsHeldByWhirlwind()) SetControlRotation((LastKnownPosition - Victim->GetPawnViewLocation()).Rotation());
 }
 
 void AWoTBotController::Perceive()
@@ -163,8 +164,9 @@ void AWoTBotController::Think()
 		if (!CanAct()) return;
 	}
 	// A body in the air has no path to anywhere: searching from it fails for every
-	// pool. Keep the goal until it lands, still firing at what it sees.
-	if (CastChecked<AWoTCharacter>(GetPawn())->GetCharacterMovement()->IsFalling())
+	// pool. Keep the goal until it lands, still firing at what it sees. A body a
+	// whirlwind holds is in the air too, and cannot walk until it is let go.
+	if (CastChecked<AWoTCharacter>(GetPawn())->GetCharacterMovement()->IsFalling() || IsHeldByWhirlwind())
 	{
 		CastArtifacts();
 		return;
@@ -242,7 +244,7 @@ void AWoTBotController::RememberNearbyPools()
 		// A pickup on a pedestal or ledge beside the route's end: jump for it, as a
 		// player does, landing first between attempts.
 		const AWoTCharacter* Body = CastChecked<AWoTCharacter>(GetPawn());
-		if (Body->GetCharacterMovement()->IsFalling() || Now - HopTime < .3f) return;
+		if (Body->GetCharacterMovement()->IsFalling() || IsHeldByWhirlwind() || Now - HopTime < .3f) return;
 		const FVector Feet = Body->GetActorLocation() - FVector(0, 0, Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 		if (HopCount < WoTBotDecision::MaxHops && WoTBotDecision::PickupReach(Feet, SeekingPool->GetActorLocation(),
 			SeekingPool->GetPickupCollisionRadius()) == WoTBotDecision::EPickupReach::Hop)
@@ -682,8 +684,31 @@ void AWoTBotController::UpdateAim()
 		const FVector Axis = (Right * AimDisk.X + Up * AimDisk.Y).GetSafeNormal();
 		Aim = FQuat(Axis, FMath::DegreesToRadians(GetAimErrorLimit() * AimDisk.Size())).RotateVector(Forward).Rotation();
 	}
+	if (IsHeldByWhirlwind())
+	{
+		// A whirlwind turns the body it holds every tick (WhirlwindLeech.uc Tick),
+		// and turns a held player's view with it (AttachTo sets bForceRotation,
+		// which WOTPlayer.uc UpdateRotation adds to the view): the body is left to
+		// the lift, and the view, and so every cast, turns with the body.
+		Aim.Yaw = Body->GetActorRotation().Yaw;
+		SetControlRotation(Aim);
+		return;
+	}
 	SetControlRotation(Aim);
 	Body->FaceRotation(FRotator(0, Aim.Yaw, 0), 0.0f);
+}
+
+bool AWoTBotController::IsHeldByWhirlwind() const
+{
+	// The game module's whirlwind effect class, found once by its script path (it
+	// is not exported); the effect is attached to the body for as long as it holds it.
+	static UClass* LeechClass = nullptr;
+	if (!LeechClass) LeechClass = FindObject<UClass>(nullptr, TEXT("/Script/WoT.WoTWhirlwindLeech"));
+	const APawn* Body = GetPawn();
+	if (!LeechClass || !Body) return false;
+	for (const UActorComponent* Component : Body->GetComponents())
+		if (IsValid(Component) && Component->IsRegistered() && Component->IsA(LeechClass)) return true;
+	return false;
 }
 
 void AWoTBotController::UpdateControlRotation(float, bool)
@@ -753,12 +778,16 @@ bool AWoTBotController::StepOffPad(const WoTBotLinks::FDistantTeleport& Via, flo
 	if (!Data) return false;
 	FVector Away = (Body->GetActorLocation() - Via.Pad).GetSafeNormal2D();
 	if (Away.IsNearlyZero()) Away = FVector::ForwardVector;
+	// A walk ends anywhere up to its acceptance radius (20, NavigateTo) short of
+	// its point. A point at least Reach + 20 out leaves the body beyond Reach
+	// wherever the walk stops, and lies more than 30 from any spot on the pad, so
+	// the walk stays wanted (and watched by the stuck rule) until the body is off.
 	for (const float Angle : { 0.0f, 45.0f, -45.0f, 90.0f, -90.0f, 135.0f, -135.0f, 180.0f })
 	{
-		const FVector Out = Via.Pad + Away.RotateAngleAxis(Angle, FVector::UpVector) * (Reach + 10.0f);
+		const FVector Out = Via.Pad + Away.RotateAngleAxis(Angle, FVector::UpVector) * (Reach + 30.0f);
 		FNavLocation Point;
 		if (Nav->ProjectPointToNavigation(FVector(Out.X, Out.Y, Body->GetNavAgentLocation().Z), Point, FVector(30, 30, 100), Data)
-			&& FVector::Dist2D(Point.Location, Via.Pad) >= Reach && NavigateTo(Point.Location)) return true;
+			&& FVector::Dist2D(Point.Location, Via.Pad) >= Reach + 20.0f && NavigateTo(Point.Location)) return true;
 	}
 	return false;
 }
@@ -814,17 +843,19 @@ void AWoTBotController::ChooseDestination(bool bForce)
 		const bool bProjected = Data && Nav->ProjectPointToNavigation(SeekingPool->GetActorLocation(), End, PoolExtent, Data);
 		if (NavigateTo(bProjected ? End.Location : SeekingPool->GetActorLocation())) return;
 		// Through a teleporter no mesh link carries: walk into its pad. A pad that
-		// set this body down sends it on only after the body has left the pad's reach
-		// (it re-arms on the end of that overlap, WoTTeleporter.cpp
-		// NotifyActorEndOverlap), so step off first. A body at the entry that was
-		// not taken closes the route.
+		// set this body down sends it on only after the body's overlap with the pad
+		// has ended (that re-arms it, WoTTeleporter.cpp NotifyActorEndOverlap), so
+		// step off first; the overlap itself, not a distance, says when the body is
+		// off. A body at the entry that was not taken closes the route.
 		float Length;
 		if (const WoTBotLinks::FDistantTeleport* Via = bProjected ? DistantTeleportRoute(Body->GetNavAgentLocation(), End.Location, Length) : nullptr)
 		{
 			const float Reach = Via->TouchRadius + Body->GetSimpleCollisionRadius() + 15.0f;
-			const bool bInReach = FVector::Dist2D(Body->GetActorLocation(), Via->Pad) < Reach;
-			if (!bInReach) bArrivedByTeleport = false;
-			if (bInReach && bArrivedByTeleport && FVector::Dist2D(ArrivalLocation, Via->Pad) < Reach)
+			const AActor* Pad = Via->Teleporter.Get();
+			const bool bOnPad = Pad ? Pad->IsOverlappingActor(Body)
+				: FVector::Dist2D(Body->GetActorLocation(), Via->Pad) < Via->TouchRadius + Body->GetSimpleCollisionRadius();
+			if (!bOnPad) bArrivedByTeleport = false;
+			if (bOnPad && bArrivedByTeleport && FVector::Dist2D(ArrivalLocation, Via->Pad) < Reach)
 			{
 				if (StepOffPad(*Via, Reach)) return;
 			}
@@ -925,9 +956,21 @@ void AWoTBotController::Tick(float DeltaSeconds)
 	UpdateAim();
 	UpdateCastCompletion();
 	if (!CanAct()) return;
+	const FVector Here = GetPawn()->GetActorLocation();
+	if (IsHeldByWhirlwind())
+	{
+		// The whirlwind holds the body with its movement disabled (WhirlwindLeech.uc
+		// AttachTo, PHYS_None): it can neither jump nor walk, and makes no progress
+		// it could be missing. The stuck clocks start again when it lets go, and the
+		// route is planned again from wherever the body comes down.
+		ClimbBlockedSince = -1.0f;
+		NextRepathTime = 0.0f;
+		LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
+		ProgressPosition = LastBodyLocation = Here;
+		return;
+	}
 	UpdateClimb();
 	// A teleporter (or a swap) moved the body: its route now starts elsewhere.
-	const FVector Here = GetPawn()->GetActorLocation();
 	if (FVector::DistSquared(Here, LastBodyLocation) > FMath::Square(250.0f))
 	{
 		ArrivalLocation = Here;
