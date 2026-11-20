@@ -43,6 +43,7 @@
 #include "../WoTDecal.h"
 #include "../WoTDecoration.h"
 #include "../WoTExplodingMover.h"
+#include "../WoTEvents.h"
 #include "../WoTFragment.h"
 #include "../WoTGameMode.h"
 #include "../WoTMapLightTable.h"
@@ -1183,6 +1184,14 @@ bool FWoTFellOutTremorRockSpec::RunTest(const FString&)
 		FBuiltMap Built;
 		if (!LoadAndBuild(*this, Map, Built)) return !HasAnyErrors();
 		UWorld& World = *Built.World;
+		// BurningChunk.uc Touch and GenericProjectile.uc:195-202 consume chunks
+		// on shoot targets. This spec isolates floor placement, so exclude those
+		// contacts while retaining all level and mover collision.
+		for (TActorIterator<AWoTTrigger> It(&World); It; ++It)
+		{
+			if (It->IsRetailProjectileTarget())
+				It->Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
+		}
 		int32 Rocks = 0;
 		int32 OffTheFloor = 0;
 		FString FirstOnTheFloor;

@@ -155,6 +155,10 @@ AWoTTrigger::AWoTTrigger()
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	RootComponent = Capsule;
 	Capsule->SetCollisionProfileName(TEXT("Trigger"));
+	// UE 5.8's Trigger profile leaves custom channels at their default response.
+	// Our projectile channel defaults to Block; these are touch volumes, so they
+	// must not displace a launch or produce a wall hit during flight.
+	Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Overlap);
 }
 
 void AWoTTrigger::SetUE1CollisionSize(float Radius, float HalfHeight)
