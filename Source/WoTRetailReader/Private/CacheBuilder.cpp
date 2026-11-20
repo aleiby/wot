@@ -24,7 +24,7 @@ constexpr TCHAR WoTCacheProductionDescriptorRelativePath[] =
 // is validated while a cache is built; it never reaches the cache itself,
 // which records the cache content label below.
 constexpr TCHAR WoTCacheExpectedProductionDescriptorSha256[] =
-	TEXT("83f5340e84d56ea3e83a967bb78c9ed99b5d157412643ef80e5778fb02144702");
+	TEXT("843b69e87185c46de628998d426a799097238192f96d12a82c54f4a3fcec4ab3");
 constexpr TCHAR WoTCacheExpectedImporterSpecSha256[] =
 	TEXT("63a333a7d7cffe985958e5790272ebfe0c844fe64c6920361a79c883817e8044");
 // Domain-separated ComputeRetailContractIdentity of the reviewed compiled
