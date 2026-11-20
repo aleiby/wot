@@ -346,6 +346,7 @@ struct FObserver
 		Event->SetStringField(TEXT("state"), StateNames[int32(B->GetBehaviourState())]);
 		const AWoTCharacter* Body = Cast<AWoTCharacter>(B->GetPawn());
 		if (!Body) return;
+		Event->SetStringField(TEXT("body"), Body->GetName());
 		const float HalfHeight = Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 		const FVector Here = Body->GetActorLocation(), Feet = Here - FVector(0, 0, HalfHeight);
 		const FVector Goal = B->GetDestination();
@@ -404,6 +405,9 @@ struct FObserver
 			{
 				Event->SetStringField(TEXT("blocked_by"), Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("none"));
 				Event->SetStringField(TEXT("blocked_class"), Hit.GetActor() ? Hit.GetActor()->GetClass()->GetName() : TEXT("none"));
+				// Distinguish a body's own ice from another body's shell or map collision.
+				const AActor* BlockedOwner = Hit.GetActor() ? Hit.GetActor()->GetOwner() : nullptr;
+				Event->SetStringField(TEXT("blocked_owner"), BlockedOwner ? BlockedOwner->GetName() : TEXT("none"));
 				Event->SetNumberField(TEXT("blocked_impact_dz"), Hit.ImpactPoint.Z - Feet.Z);
 				Event->SetNumberField(TEXT("blocked_normal_z"), Hit.ImpactNormal.Z);
 				Event->SetNumberField(TEXT("blocked_distance"), Hit.Distance);

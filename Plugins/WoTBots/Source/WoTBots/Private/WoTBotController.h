@@ -109,6 +109,7 @@ private:
 	// Whether a whirlwind holds the body: its effect lifts and spins the body and
 	// disables its movement until it lets go.
 	bool IsHeldByWhirlwind() const;
+	static bool HasMovementHold(const AWoTCharacter* Body);
 	void UpdateStuck();
 	void UpdateClimb();
 	void Hop(const AWoTAngrealSpawnPool* Pool);

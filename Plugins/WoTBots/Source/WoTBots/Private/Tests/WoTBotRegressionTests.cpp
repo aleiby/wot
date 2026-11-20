@@ -4,6 +4,7 @@
 #include "AI/WoTCasterComponent.h"
 #include "Engine/DamageEvents.h"
 #include "Testing/WoTSoakEvents.h"
+#include "Inventory/WoTLeech.h"
 #include "UObject/UnrealType.h"
 #include "TimerManager.h"
 namespace WoTBotTest
@@ -26,6 +27,14 @@ struct FWoTBotRegressionAccess
 		Bot->CastItem(Item);
 	}
 	static bool WantsMovement(const AWoTBotController* Bot) { return Bot->bWantsMovement; }
+	static void BeginBlockedRoute(AWoTBotController* Bot)
+	{
+		Bot->SetActorTickEnabled(false);
+		Bot->GetWorldTimerManager().ClearAllTimersForObject(Bot);
+		Bot->Destination = Bot->GetPawn()->GetActorLocation() + FVector(1000, 0, 0);
+		Bot->bWantsMovement = true;
+	}
+	static void UpdateStuck(AWoTBotController* Bot) { Bot->UpdateStuck(); }
 };
 
 namespace
@@ -45,6 +54,102 @@ bool HasEffect(AActor* Actor, const TCHAR* ClassName)
 		if (IsValid(Component) && Component->IsRegistered() && Component->IsA(Class)) return true;
 	return false;
 }
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FBotMovementHoldRecoverySpec, "WoT.Bots.Movement.HoldRecovery", Flags)
+void FBotMovementHoldRecoverySpec::GetTests(TArray<FString>& Names, TArray<FString>& Commands) const
+{
+	for (const TCHAR* Effect : { TEXT("Ice"), TEXT("Lift") })
+		for (const TCHAR* Phase : { TEXT("HeldBeyondRespawn"), TEXT("ReleasedWhileBlocked") })
+		{
+			const FString Case = FString(Effect) + TEXT(".") + Phase;
+			Names.Add(Case); Commands.Add(Case);
+		}
+}
+bool FBotMovementHoldRecoverySpec::RunTest(const FString& Case)
+{
+	FSettings Settings; Settings.Value->StuckRespawnSeconds = 8;
+	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
+	BuildNav(W);
+	SeedDecisions(0x7051);
+	AWoTBotController* B = Bot(W, FVector(0, 0, 50));
+	AWoTCharacter* Pawn = CastChecked<AWoTCharacter>(B->GetPawn());
+	FWoTBotRegressionAccess::BeginBlockedRoute(B);
+	WoTTest::TickWorld(W, .2f);
+	const FVector Start = Pawn->GetActorLocation();
+	Box(W, Start + FVector(60, 0, 50), FVector(10, 85, 150), false);
+	Box(W, Start + FVector(-60, 0, 50), FVector(10, 85, 150), false);
+	Box(W, Start + FVector(0, 60, 50), FVector(85, 10, 150), false);
+	Box(W, Start + FVector(0, -60, 50), FVector(85, 10, 150), false);
+	const bool bIce = Case.StartsWith(TEXT("Ice"));
+	UClass* EffectClass = FindObject<UClass>(nullptr, bIce
+		? TEXT("/Script/WoT.WoTIceLeech") : TEXT("/Script/WoT.WoTWhirlwindLeech"));
+	if (!TestNotNull(TEXT("real hold class"), EffectClass)) return false;
+	auto* Effect = static_cast<UWoTLeech*>(NewObject<UActorComponent>(Pawn, EffectClass));
+	// Exercise the same virtual attach path as the gameplay effect installer.
+	Effect->AttachTo(Pawn);
+	if (!TestTrue(TEXT("real hold attached"), Effect->IsRegistered())) return false;
+	TestEqual(TEXT("effect disables movement"), int32(Pawn->GetCharacterMovement()->MovementMode), int32(MOVE_None));
+	TWeakObjectPtr<AActor> IceBlock;
+	if (bIce)
+	{
+		const FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(EffectClass, TEXT("IceBlock"));
+		if (!TestNotNull(TEXT("ice collision property"), Property)) return false;
+		IceBlock = Cast<AActor>(Property->GetObjectPropertyValue_InContainer(Effect));
+		if (!TestTrue(TEXT("real ice collision shell exists"), IceBlock.IsValid())) return false;
+	}
+	int32 Recoveries = 0, Respawns = 0;
+	TArray<float> RecoveryTimes;
+	const FDelegateHandle Events = WoTSoakEvents::Events().AddLambda(
+		[&](WoTSoakEvents::EKind Kind, AActor* Subject, AActor*)
+		{
+			if (Subject != B) return;
+			if (Kind == WoTSoakEvents::EKind::Recovery) { ++Recoveries; RecoveryTimes.Add(W->GetTimeSeconds()); }
+			if (Kind == WoTSoakEvents::EKind::SilentRespawn) ++Respawns;
+		});
+	ON_SCOPE_EXIT { WoTSoakEvents::Events().Remove(Events); };
+	const TWeakObjectPtr<AWoTCharacter> Original = Pawn;
+	auto Advance = [&](float Seconds)
+	{
+		for (int32 Step = 0; Step < FMath::RoundToInt(Seconds * 30); ++Step)
+		{
+			if (Original.IsValid()) Pawn->AddMovementInput(FVector::ForwardVector);
+			WoTTest::TickWorld(W, 1.f / 30.f);
+			// Isolate stuck accounting from route selection and the outer lift guard.
+			if (B->GetPawn() == Original.Get() && Original.IsValid()) FWoTBotRegressionAccess::UpdateStuck(B);
+		}
+	};
+	const bool bRelease = Case.EndsWith(TEXT("ReleasedWhileBlocked"));
+	Advance(bRelease ? 4.f : 10.f);
+	TestEqual(TEXT("held body emits no recovery"), Recoveries, 0);
+	TestEqual(TEXT("held body emits no silent respawn"), Respawns, 0);
+	if (!TestTrue(TEXT("controller keeps its held body"), Original.IsValid() && B->GetPawn() == Original.Get())) return false;
+	TestTrue(TEXT("body remains in its real hold"), Effect->IsRegistered());
+	TestTrue(TEXT("held body stays at hold location"), Pawn->GetActorLocation().Equals(Start, 1.f));
+	if (bIce) TestTrue(TEXT("ice still encloses the original body"), IceBlock.IsValid()
+		&& IceBlock->GetAttachParentActor() == Pawn && IceBlock->GetActorLocation().Equals(Start, 1.f));
+	if (!bRelease) return !HasAnyErrors();
+
+	Effect->Unattach();
+	const float ReleasedAt = W->GetTimeSeconds();
+	TestFalse(TEXT("release detaches hold"), Effect->IsRegistered());
+	TestTrue(TEXT("release restores real movement"), Pawn->GetCharacterMovement()->MovementMode != MOVE_None);
+	if (bIce) TestFalse(TEXT("thaw removes ice collision"), IceBlock.IsValid());
+	Advance(2.8f);
+	TestEqual(TEXT("release gets a fresh three second recovery clock"), Recoveries, 0);
+	TestEqual(TEXT("release gets a fresh respawn clock"), Respawns, 0);
+	Advance(.4f);
+	TestEqual(TEXT("blocked body recovers after three seconds"), Recoveries, 1);
+	if (!RecoveryTimes.IsEmpty())
+		TestTrue(TEXT("first recovery is three seconds after release"),
+			RecoveryTimes[0] - ReleasedAt >= 2.95f && RecoveryTimes[0] - ReleasedAt <= 3.1f);
+	TestTrue(TEXT("physical cage prevents useful progress"), Original.IsValid()
+		&& FVector::Dist(Pawn->GetActorLocation(), Start) < 75.f);
+	Advance(4.4f);
+	TestEqual(TEXT("no silent respawn before fresh timeout"), Respawns, 0);
+	Advance(.6f);
+	TestEqual(TEXT("ordinary stuck respawn resumes after release"), Respawns, 1);
+	return !HasAnyErrors();
 }
 
 IMPLEMENT_COMPLEX_AUTOMATION_TEST(FBotHeldPolicySpec, "WoT.Bots.Regression.HeldArtifactPolicy", Flags)

@@ -20,9 +20,7 @@
 #include "TimerManager.h"
 #include "WoTRandom.h"
 
-namespace
-{
-bool HasMovementHold(const AWoTCharacter* Body)
+bool AWoTBotController::HasMovementHold(const AWoTCharacter* Body)
 {
 	// These two attached effects disable live player movement until detached.
 	// Use script classes as in WoTBotBehaviour.cpp; the effect types are not exported.
@@ -34,6 +32,8 @@ bool HasMovementHold(const AWoTCharacter* Body)
 	return false;
 }
 
+namespace
+{
 void DestroyHeldItems(AWoTCharacter* Body)
 {
 	if (!Body || !Body->InventoryComponent) return;
