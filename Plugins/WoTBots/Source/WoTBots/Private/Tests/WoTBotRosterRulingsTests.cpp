@@ -65,8 +65,8 @@ UWorld* RosterWorld(int32 Fill = 2, TFunction<void(UWorld*)> BeforeBots = {})
 }
 AWoTBotController* FirstBot(UWorld* W)
 {
-	for (TActorIterator<AWoTBotController> It(W); It; ++It) return *It;
-	return nullptr;
+	TActorIterator<AWoTBotController> It(W);
+	return It ? *It : nullptr;
 }
 AWoTBotRosterTestViewer* Viewer(UWorld* W, bool Notify = true)
 {
