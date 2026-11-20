@@ -66,6 +66,9 @@ WOT_API bool WoTDecodePlayerHealthDefault(
 // owns: the HUD, input, messages, the camera.
 WOT_API bool WoTIsPlayerBody(const APawn* Pawn);
 
+// True when the human at this machine views and drives this pawn.
+WOT_API bool WoTIsLocalHumanPawn(const APawn* Pawn);
+
 // AngrealInvDisguise CopyDisguisePawnProperties (uc:285-384): the replicated
 // driver that reproduces a mimicked pawn's LIVE look on every client. UE1
 // replicated the raw Mesh/MultiSkins/DrawScale/collision natively; UE5 does not,
