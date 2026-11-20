@@ -1,5 +1,6 @@
 #include "WoTActorRotator.h"
 #include "WoTDecoration.h"
+#include "WoTUE1Collision.h"
 
 #include "Components/SceneComponent.h"
 #include "Math/RotationMatrix.h"
@@ -31,7 +32,7 @@ void SetDrivenRotation(AActor* Actor, const FRotator& Rotation)
 		}
 		return;
 	}
-	Actor->SetActorRotation(Rotation);
+	Actor->SetActorRotation(WoTUE1Collision::BodyRotation(*Actor, Rotation));
 }
 }
 

@@ -21,6 +21,7 @@ struct FWoTBotBehaviourAccess;
 struct FWoTBotDecisionAccess;
 struct FWoTBotTraversalAccess;
 struct FWoTBotRosterAccess;
+struct FWoTBotSeekingAccess;
 }
 #endif
 
@@ -73,6 +74,7 @@ private:
 	friend struct WoTBotTest::FWoTBotDecisionAccess;
 	friend struct WoTBotTest::FWoTBotTraversalAccess;
 	friend struct WoTBotTest::FWoTBotRosterAccess;
+	friend struct WoTBotTest::FWoTBotSeekingAccess;
 #endif
 	void InventoryPulse();
 	void ResetBehaviour(AWoTCharacter* Body);

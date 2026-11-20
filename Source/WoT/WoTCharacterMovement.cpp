@@ -1,4 +1,5 @@
 #include "WoTCharacterMovement.h"
+#include "Testing/WoTSoakEvents.h"
 
 #include "AI/WoTNPCCharacter.h"
 #include "WoTCharacter.h"
@@ -327,6 +328,7 @@ FVector UWoTCharacterMovement::RetailFlyingVelocity(
 
 void UWoTCharacterMovement::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
 {
+	WOT_SOAK_BODY_SCOPE("movement capsule/crouch");
 	// Zone movement-STATE effects on the predicted path (role-agnostic — this hook runs
 	// identically on the authority and in the client's replayed saved moves):
 	//   - ground friction: swap in the zone's ZoneGroundFriction while inside, restore the
@@ -446,6 +448,7 @@ bool UWoTCharacterMovement::StepUp(const FVector& GravDir, const FVector& Delta,
 
 void UWoTCharacterMovement::PhysWalking(float DeltaTime, int32 Iterations)
 {
+	WOT_SOAK_BODY_SCOPE("movement Walking");
 	// CheckSurfaces is literally the first operation in retail physWalking.
 	if (CheckWalkSurfaces(DeltaTime, Iterations))
 	{
@@ -457,6 +460,7 @@ void UWoTCharacterMovement::PhysWalking(float DeltaTime, int32 Iterations)
 
 void UWoTCharacterMovement::PhysFalling(float DeltaTime, int32 Iterations)
 {
+	WOT_SOAK_BODY_SCOPE("movement Falling");
 	// UE1's late-added jump-onto-ladder branch can observe PHYS_Falling from
 	// CheckSurfaces and call Landed before switching to walking
 	// mode. UE5 dispatches falling to a separate Phys*, so
@@ -471,12 +475,14 @@ void UWoTCharacterMovement::PhysFalling(float DeltaTime, int32 Iterations)
 
 void UWoTCharacterMovement::PhysFlying(float DeltaTime, int32 Iterations)
 {
+	WOT_SOAK_BODY_SCOPE("movement Flying");
 	Super::PhysFlying(DeltaTime, Iterations);
 	ApplyZoneEffectsPostPhys(DeltaTime, MOVE_Flying);
 }
 
 void UWoTCharacterMovement::PhysLadder(float DeltaTime, int32 Iterations)
 {
+	WOT_SOAK_BODY_SCOPE("movement Ladder");
 	if (DeltaTime < MIN_TICK_TIME)
 	{
 		return;
@@ -848,6 +854,7 @@ float UWoTCharacterMovement::SwimInZone(const FVector& Delta, FHitResult& Hit)
 
 void UWoTCharacterMovement::PhysSwimming(float DeltaTime, int32 Iterations)
 {
+	WOT_SOAK_BODY_SCOPE("movement Swimming");
 	// Swimming explicitly participates in Legend CheckSurfaces, before even
 	// the head-zone damping.
 	if (CheckWalkSurfaces(DeltaTime, Iterations))

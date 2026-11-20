@@ -1,4 +1,5 @@
 #include "WoTUE1Collision.h"
+#include "Testing/WoTSoakEvents.h"
 
 #include "AI/WoTPathNodeIterator.h"
 #include "WoTLeafMap.h"
@@ -8,9 +9,15 @@
 #include "CollisionQueryParams.h"
 #include "Engine/HitResult.h"
 #include "EngineUtils.h"
+#include "GameFramework/Character.h"
 
 namespace WoTUE1Collision
 {
+	FRotator BodyRotation(const AActor& Actor, const FRotator& Incoming)
+	{
+		return Actor.IsA<ACharacter>() ? FRotator(0, Incoming.Yaw, 0) : Incoming;
+	}
+
 	namespace
 	{
 		// True when no level geometry and no mover, everything the placement
@@ -72,6 +79,7 @@ namespace WoTUE1Collision
 	bool FindSpotLevelOnly(UWorld& World, const FVector& Extent,
 		FVector& InOutLocation, bool bAssumeFit)
 	{
+	WOT_SOAK_BODY_SCOPE("FindSpotLevelOnly");
 		if (Extent.IsZero())
 		{
 			return LevelPointCheckFits(World, InOutLocation, Extent);

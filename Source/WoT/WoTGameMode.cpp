@@ -1,4 +1,5 @@
 #include "WoTGameMode.h"
+#include "Testing/WoTSoakEvents.h"
 #include "WoTFrontEnd.h"
 #include "WoTRandom.h"
 
@@ -1960,6 +1961,7 @@ static APawn* WoTGameMode_SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClas
 	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
 	FWoTStartSpawnResult* OutResult, AController* SpawnController)
 {
+	WOT_SOAK_BODY_SCOPE("spawn/respawn placement");
 	FWoTStartSpawnResult Result;
 	Result.ResolvedLocation = SpawnTransform.GetLocation();
 	ON_SCOPE_EXIT
@@ -1988,6 +1990,10 @@ static APawn* WoTGameMode_SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClas
 	SpawnInfo.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	FTransform RetailSpawn = SpawnTransform;
+	if (PawnClass->IsChildOf(ACharacter::StaticClass()))
+	{
+		RetailSpawn.SetRotation(FRotator(0.0, SpawnTransform.Rotator().Yaw, 0.0).Quaternion());
+	}
 	APawn* Spawned = World.SpawnActor<APawn>(PawnClass, RetailSpawn, SpawnInfo);
 	if (!Spawned)
 	{
@@ -2021,6 +2027,7 @@ static APawn* WoTGameMode_SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClas
 		Spawned->Destroy();
 		return nullptr;
 	}
+	WOT_SOAK_BODY_EVENT(Spawned, "spawn/respawn fitted");
 	return Spawned;
 }
 

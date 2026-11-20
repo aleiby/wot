@@ -1,4 +1,5 @@
 #include "WoTCharacter.h"
+#include "Testing/WoTSoakEvents.h"
 #include "WoTRandom.h"
 #include "Assets/WoTRuntimeAssets.h"
 #include "Assets/WoTRetailIdentity.h"
@@ -344,6 +345,7 @@ void AWoTCharacter::OnJumped_Implementation()
 
 void AWoTCharacter::Landed(const FHitResult& Hit)
 {
+	WOT_SOAK_BODY_EVENT(this, "landing");
 	if (!IsNPCPawn()
 		&& GetEffectivePlayerMovementConstraint()
 			!= EWoTPlayerMovementConstraint::LandingFreeze)
@@ -783,6 +785,7 @@ void AWoTCharacter::ClearCreaturePitchAfterNormalViewUpdate()
 void AWoTCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode,
 	uint8 PreviousCustomMode)
 {
+	WOT_SOAK_BODY_EVENT(this, "movement mode change");
 	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
 	const UCharacterMovementComponent* Move = GetCharacterMovement();
 	const bool bCanDrivePlayerTransition = HasAuthority() || IsLocallyControlled();
@@ -4382,6 +4385,7 @@ void AWoTCharacter::RestoreDisguiseLook()
 
 bool AWoTCharacter::AdjustCapsuleForDisguise(float NewRadius, float NewHalfHeight)
 {
+	WOT_SOAK_BODY_SCOPE("disguise capsule resize");
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
 	if (!Capsule)
 	{
@@ -4390,6 +4394,7 @@ bool AWoTCharacter::AdjustCapsuleForDisguise(float NewRadius, float NewHalfHeigh
 	const float OldHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	// Set collision size before moving Z, or SetLocation might fail (uc:312-314).
 	Capsule->SetCapsuleSize(NewRadius, NewHalfHeight);
+	WOT_SOAK_BODY_EVENT(this, "capsule resized");
 
 	// Move feet-on-ground: shift by the half-height delta (uc:210-211).
 	FVector NewLocation = GetActorLocation();
