@@ -4499,4 +4499,77 @@ bool FWoTFrontEndBotHostOptionLifetimeSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FWoTHostSliderValuesSpec, "WoT.FrontEnd.HostSliderValues",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+void FWoTHostSliderValuesSpec::GetTests(TArray<FString>& Names, TArray<FString>& Commands) const
+{
+	for (const TCHAR* Name : { TEXT("Allowed"), TEXT("Legacy") }) { Names.Add(Name); Commands.Add(Name); }
+}
+bool FWoTHostSliderValuesSpec::RunTest(const FString& Case)
+{
+	FWoTFrontEndTests_WithoutHostExtensions Isolation;
+	const FName Owner(TEXT("SliderValuesSpec"));
+	ON_SCOPE_EXIT { FWoTFrontEndModel::UnregisterHostOptions(Owner); };
+	FWoTHostOptionRow Row;
+	Row.Owner = Owner; Row.URLKey = TEXT("ExampleCount");
+	Row.Label = [] { return FText::FromString(TEXT("Example count")); };
+	Row.Max = [](const FWoTHostRequest& Request) { return Request.MaxPlayers; };
+	const bool Allowed = Case == TEXT("Allowed");
+	if (Allowed)
+	{
+		Row.Values = [](const FWoTHostRequest& Request)
+		{
+			TArray<int32> Values{0};
+			for (int32 N = 2; N <= Request.MaxPlayers; ++N) Values.Add(N);
+			return Values;
+		};
+		Row.ValueText = [](int32 Value, const FWoTHostRequest&) { return FText::FromString(FString::Printf(TEXT("Value %d (detailed explanation)"), Value)); };
+	}
+	FWoTFrontEndModel::RegisterHostOption(MoveTemp(Row));
+	const auto Feedback = MakeShared<FWoTFrontEndPresentationFeedbackRecorder>();
+	const TSharedRef<SWoTFrontEndRoot> Root = SNew(SWoTFrontEndRoot)
+		.PlayerController(nullptr).PresentationAuthorityForTesting(MakeInjectedPresentationAuthority(Feedback));
+	Root->OpenPlayForTesting();
+	TArray<TSharedRef<SWidget>> Rows;
+	CollectWidgetsOfType(Root->HostScrollBoxForTesting().ToSharedRef(), TEXT("SWrapBox"), Rows);
+	TSharedPtr<SWoTRetailSlider> Slider;
+	TArray<TSharedRef<SWidget>> ValueTexts;
+	for (const auto& Wrap : Rows)
+	{
+		TArray<TSharedRef<SWidget>> Texts;
+		CollectWidgetsOfType(Wrap, TEXT("STextBlock"), Texts);
+		if (!Texts.ContainsByPredicate([](const auto& Text)
+			{ return StaticCastSharedRef<STextBlock>(Text)->GetText().ToString() == TEXT("Example count"); })) continue;
+		TArray<TSharedRef<SWidget>> Sliders;
+		CollectWidgetsOfType(Wrap, TEXT("SWoTRetailSlider"), Sliders);
+		if (Sliders.Num() == 1) Slider = StaticCastSharedRef<SWoTRetailSlider>(Sliders[0]);
+		ValueTexts = Texts;
+		break;
+	}
+	if (!TestTrue(TEXT("extension slider exists"), Slider.IsValid())) return false;
+	auto Press = [&](FKey Key) { Slider->OnKeyDown(FGeometry(), MakeFrontEndKeyEvent(Key)); };
+	Press(EKeys::Home); Press(EKeys::Right);
+	TestEqual(TEXT("one step maps through allowed values or legacy unit interval"),
+		Root->ViewModelForTesting().GetHostRequest().ExtraValues.FindRef(TEXT("ExampleCount")), Allowed ? 2 : 1);
+	const FString Expected = Allowed ? TEXT("Value 2 (detailed explanation)") : TEXT("1");
+	TestTrue(TEXT("value text uses callback or legacy number"), ValueTexts.ContainsByPredicate([&](const auto& Text)
+		{ return StaticCastSharedRef<STextBlock>(Text)->GetText().ToString() == Expected; }));
+	Root->SlatePrepass();
+	for (const auto& Text : ValueTexts)
+	{
+		const auto Block = StaticCastSharedRef<STextBlock>(Text);
+		if (Block->GetText().ToString() != Expected) continue;
+		const auto Parent = Block->GetParentWidget();
+		TestTrue(TEXT("value layout reserves enough width for its text"),
+			Parent.IsValid() && Parent->GetDesiredSize().X + .1f >= Block->GetDesiredSize().X);
+	}
+	Press(EKeys::End);
+	const int32 Max = Root->ViewModelForTesting().GetHostRequest().MaxPlayers;
+	TestEqual(TEXT("stop count matches the value domain"), Slider->KnobStopForTesting(), Allowed ? Max : Max + 1);
+	Press(EKeys::Left);
+	TestEqual(TEXT("reverse mapping from final stop"),
+		Root->ViewModelForTesting().GetHostRequest().ExtraValues.FindRef(TEXT("ExampleCount")), Max - 1);
+	return !HasAnyErrors();
+}
+
 #endif // WITH_AUTOMATION_TESTS

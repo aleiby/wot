@@ -22,6 +22,18 @@
 
 namespace
 {
+bool HasMovementHold(const AWoTCharacter* Body)
+{
+	// These two attached effects disable live player movement until detached.
+	// Use script classes as in WoTBotBehaviour.cpp; the effect types are not exported.
+	static UClass* LiftClass = FindObject<UClass>(nullptr, TEXT("/Script/WoT.WoTWhirlwindLeech"));
+	static UClass* IceClass = FindObject<UClass>(nullptr, TEXT("/Script/WoT.WoTIceLeech"));
+	for (const UActorComponent* Component : Body->GetComponents())
+		if (IsValid(Component) && Component->IsRegistered()
+			&& ((LiftClass && Component->IsA(LiftClass)) || (IceClass && Component->IsA(IceClass)))) return true;
+	return false;
+}
+
 void DestroyHeldItems(AWoTCharacter* Body)
 {
 	if (!Body || !Body->InventoryComponent) return;
@@ -90,7 +102,17 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 	Agent.SetPreferredNavData(AWoTBotNavMesh::StaticClass());
 	GetPathFollowingComponent()->UpdateCachedComponents();
 	Body->OnDamageApplied.AddUObject(this, &ThisClass::DamageApplied);
+	ResetBehaviour(Body);
+	SetActorTickEnabled(!bIdle && !bFrozen);
+	if (bIdle) SuspendMovement();
+	InventoryPulse();
+	StartThinking();
+}
+
+void AWoTBotController::ResetBehaviour(AWoTCharacter* Body)
+{
 	State = EWoTBotState::Roam;
+	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);
 	Target.Reset();
 	AimingItem.Reset();
 	CastHold.Clear();
@@ -106,9 +128,11 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 	bArrivedByTeleport = false;
 	LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
 	ProgressPosition = LastBodyLocation = Body->GetActorLocation();
-	SetActorTickEnabled(true);
-	InventoryPulse();
-	if (!bFrozen && !bRetiring)
+}
+
+void AWoTBotController::StartThinking()
+{
+	if (!bFrozen && !bRetiring && !bIdle && GetPawn())
 	{
 		const float Interval = FMath::Max(.01f, GetDefault<UWoTBotSettings>()->ThinkInterval);
 		GetWorldTimerManager().SetTimer(ThinkTimer, this, &ThisClass::Think,
@@ -133,7 +157,7 @@ void AWoTBotController::OnUnPossess()
 
 void AWoTBotController::InventoryPulse()
 {
-	if (bFrozen || bRetiring) return;
+	if (bFrozen || bRetiring || bIdle) return;
 	const AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn());
 	if (!Body || !Body->InventoryComponent) return;
 	const auto* Profile = WoTBotProfiles::Get().Find(Body->GetClass());
@@ -149,11 +173,22 @@ void AWoTBotController::InventoryPulse()
 
 void AWoTBotController::ScheduleRespawn(float Delay)
 {
-	if (!HasAuthority() || bFrozen || bRetiring || bDeparturePending) return;
+	if (!HasAuthority() || bFrozen || bRetiring || bDeparturePending || bIdle) return;
 	GetWorldTimerManager().SetTimer(RespawnTimer, this, &ThisClass::Restart, FMath::Max(.001f, Delay));
 }
 
 void AWoTBotController::Restart()
+{
+	if (!bIdle) SpawnBody();
+}
+
+void AWoTBotController::Start(bool bInitiallyIdle)
+{
+	SetIdle(bInitiallyIdle);
+	SpawnBody(); // The initial body exists even while the server is idle.
+}
+
+void AWoTBotController::SpawnBody()
 {
 	if (!HasAuthority() || bFrozen || bRetiring || bDeparturePending) return;
 	AWoTGameMode* Game = GetWorld()->GetAuthGameMode<AWoTGameMode>();
@@ -187,20 +222,61 @@ void AWoTBotController::SetDeparturePending(bool bPending)
 {
 	if (bDeparturePending == bPending) return;
 	bDeparturePending = bPending;
-	if (bPending)
-	{
-		ReleasePoolGoal();
-		if (Caster.IsValid()) { Caster->Release(); Caster->ResetAdaptation(); }
-		StopMovement();
-		if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn())) Body->GetCharacterMovement()->StopMovementImmediately();
-	}
 	if (bPending) GetWorldTimerManager().ClearTimer(RespawnTimer);
 	else if (!GetPawn() && !GetWorldTimerManager().IsTimerActive(RespawnTimer)) ScheduleRespawn(1.0f);
 }
 
+void AWoTBotController::SetIdle(bool bNewIdle)
+{
+	if (!HasAuthority() || bFrozen || bRetiring || bIdle == bNewIdle) return;
+	bIdle = bNewIdle;
+	if (bIdle)
+	{
+		GetWorldTimerManager().ClearTimer(ThinkTimer);
+		GetWorldTimerManager().ClearTimer(RespawnTimer);
+		SetActorTickEnabled(false);
+		ReleasePoolGoal();
+		CancelCasting();
+		StopMovement();
+		SuspendMovement();
+		State = GetPawn() ? EWoTBotState::Roam : EWoTBotState::Dead;
+	}
+	else if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
+	{
+		ResetBehaviour(Body);
+		PoolVisits.Reset();
+		UncollectablePools.Reset();
+		HopPool.Reset(); HopCount = 0;
+		NextJumpTime = 0;
+		if (Caster.IsValid()) Caster->ResetAdaptation();
+		UCharacterMovementComponent* Movement = Body->GetCharacterMovement();
+		if (IdleMovementMode == MOVE_None && !HasMovementHold(Body)) Movement->SetDefaultMovementMode();
+		else Movement->SetMovementMode(static_cast<EMovementMode>(IdleMovementMode), IdleCustomMovementMode);
+		Movement->SetComponentTickEnabled(bIdleMovementTickEnabled);
+		SetActorTickEnabled(true);
+		InventoryPulse();
+		StartThinking();
+	}
+	else ScheduleRespawn(1.0f);
+}
+
+void AWoTBotController::SuspendMovement()
+{
+	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
+	{
+		UCharacterMovementComponent* Movement = Body->GetCharacterMovement();
+		IdleMovementMode = Movement->MovementMode;
+		IdleCustomMovementMode = Movement->CustomMovementMode;
+		bIdleMovementTickEnabled = Movement->IsComponentTickEnabled();
+		Movement->StopMovementImmediately();
+		Movement->DisableMovement();
+		Movement->SetComponentTickEnabled(false);
+	}
+}
+
 void AWoTBotController::DestroyLivePawn()
 {
-	if (Caster.IsValid()) Caster->Release();
+	CancelCasting();
 	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
 	{
 		// Clear held items first: pawn destruction otherwise drops carried seals.
@@ -222,7 +298,7 @@ void AWoTBotController::DestroyRespawnCorpse()
 
 void AWoTBotController::SilentRespawn()
 {
-	if (!HasAuthority() || bFrozen || bDeparturePending || bRetiring) return;
+	if (!HasAuthority() || bFrozen || bDeparturePending || bRetiring || bIdle) return;
 	const AWoTGameMode* Game = GetWorld()->GetAuthGameMode<AWoTGameMode>();
 	if (!Game || Game->bGameEnded) return;
 	WOT_SOAK_EVENT(SilentRespawn, this, GetPawn());
@@ -275,15 +351,7 @@ void AWoTBotController::OnMatchEnded()
 	ReleasePoolGoal();
 	State = EWoTBotState::Frozen;
 	SetActorTickEnabled(false);
-	if (const AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
-	{
-		// Item-owned delayed activations outlive controller timers. Cancel through
-		// each artifact's own failure path before release can arm or fire a shot.
-		const auto Items = Body->InventoryComponent->Items;
-		for (AWoTInventory* Held : Items)
-			if (AWoTAngrealInventory* Item = Cast<AWoTAngrealInventory>(Held); IsValid(Item)) Item->Failed();
-	}
-	if (Caster.IsValid()) Caster->Release();
+	CancelCasting();
 	StopMovement();
 	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
 	{
@@ -293,6 +361,25 @@ void AWoTBotController::OnMatchEnded()
 	}
 	GetWorldTimerManager().ClearAllTimersForObject(this);
 	if (Roster.IsValid()) Roster->Freeze();
+}
+
+void AWoTBotController::CancelCasting()
+{
+	if (const AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
+	{
+		// Item-owned delayed activations outlive controller timers. Cancel through
+		// each item's silent abort path before release can arm or fire a shot.
+		const auto Items = Body->InventoryComponent->Items;
+		for (AWoTInventory* Held : Items)
+			if (AWoTAngrealInventory* Item = Cast<AWoTAngrealInventory>(Held); IsValid(Item))
+			{
+				Item->AbortCast();
+				Body->InventoryComponent->NotifyCastFailed(Item);
+			}
+	}
+	if (Caster.IsValid()) Caster->Release();
+	CastHold.Clear();
+	AimingItem.Reset();
 }
 
 void AWoTBotController::EndPlay(const EEndPlayReason::Type Reason)

@@ -3,6 +3,7 @@
 #if WITH_AUTOMATION_TESTS
 
 #include "WoTBotController.h"
+#include "WoTBotRosterTestTypes.h"
 #include "WoTBotRoster.h"
 #include "WoTBotSettings.h"
 #include "WoTBotFactionProfile.h"
@@ -88,6 +89,13 @@ namespace
 		if (bNotify) Game->PostLogin(Player);
 		return Player;
 	}
+	void Spectator(UWorld* World)
+	{
+		APlayerController* Player = Human(World, false);
+		Player->PlayerState->SetIsSpectator(true);
+		Player->PlayerState->SetIsOnlyASpectator(true);
+		World->GetAuthGameMode()->PostLogin(Player);
+	}
 	int32 Advertised(UWorld* World)
 	{
 		int32 Count = -1;
@@ -132,7 +140,7 @@ bool FWoTBotGracefulSpec::RunTest(const FString&)
 	for (int32 I = 0; I < 3; ++I) Bots[I]->GetPlayerState<AWoTPlayerState>()->Kills = I * 10;
 	APlayerController* First = Human(World);
 	TestTrue(TEXT("lowest score marked"), Bots[0]->IsDeparturePending());
-	TestTrue(TEXT("live bot stays until death or deadline"), IsValid(Bots[0]));
+	TestTrue(TEXT("live bot initially marked without immediate retirement"), IsValid(Bots[0]));
 	APlayerController* Second = Human(World);
 	TestTrue(TEXT("next lowest marked"), Bots[1]->IsDeparturePending());
 	Second->Destroy();
@@ -163,9 +171,12 @@ bool FWoTBotTimeoutSpec::RunTest(const FString&)
 	Human(World);
 	TestFalse(TEXT("dead bot retires immediately"), IsValid(Bots[1]));
 	TestFalse(TEXT("retired bot's dead body is removed"), RetiredCorpse.IsValid());
-	Human(World);
+	AWoTBotRosterTestViewer* Watcher = World->SpawnActor<AWoTBotRosterTestViewer>();
+	Watcher->Player = NewObject<UPlayer>(World->GetGameInstance());
+	Watcher->ViewLocation = Bots[0]->GetPawn()->GetActorLocation() + FVector(-100, 0, 20);
+	World->GetAuthGameMode()->PostLogin(Watcher);
 	TestTrue(TEXT("remaining live bot marked"), Bots[0]->IsDeparturePending());
-	WoTTest::TickWorld(World, 14.7f);
+	WoTTest::TickWorld(World, 59.7f);
 	TestTrue(TEXT("not before timeout"), IsValid(Bots[0]));
 	WoTTest::TickWorld(World, .5f);
 	TestFalse(TEXT("timeout retires"), IsValid(Bots[0]));
@@ -179,6 +190,7 @@ bool FWoTBotIdentitySpec::RunTest(const FString&)
 {
 	UWorld* World = BotWorld(8);
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	Spectator(World);
 	WoTTest::TickWorld(World, 4.2f);
 	const TArray<AWoTBotController*> Bots = BotList(World);
 	if (!TestEqual(TEXT("eight bots"), Bots.Num(), 8)) return false;
@@ -227,6 +239,7 @@ bool FWoTBotSilentFrozenSpec::RunTest(const FString&)
 {
 	UWorld* World = BotWorld(2);
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	Spectator(World);
 	WoTTest::TickWorld(World, 1.2f);
 	const auto Bots = BotList(World);
 	if (!TestEqual(TEXT("two bots"), Bots.Num(), 2)) return false;
@@ -257,6 +270,7 @@ bool FWoTBotPrioritySummonsSpec::RunTest(const FString&)
 {
 	UWorld* World = BotWorld(1);
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	Spectator(World);
 	WoTTest::TickWorld(World, .7f);
 	const auto Bots = BotList(World);
 	if (!TestEqual(TEXT("one bot"), Bots.Num(), 1)) return false;
@@ -347,6 +361,7 @@ bool FWoTBotBlockedStartSpec::RunTest(const FString&)
 {
 	UWorld* World = BotWorld(1);
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	Spectator(World);
 	WoTTest::TickWorld(World, .7f);
 	const auto Bots = BotList(World);
 	if (!TestEqual(TEXT("one bot"), Bots.Num(), 1)) return false;
@@ -447,7 +462,7 @@ bool FWoTBotPendingFreezeSpec::RunTest(const FString&)
 		WoTTest::TickWorld(World, 1.2f);
 		Human(World);
 		World->GetAuthGameMode<AWoTGameMode>()->EndGame(NAME_None);
-		WoTTest::TickWorld(World, 16.0f);
+		WoTTest::TickWorld(World, 60.5f);
 		TestEqual(TEXT("marked departure timeout cancelled"), BotList(World).Num(), 2);
 	}
 	return !HasAnyErrors();
@@ -458,6 +473,7 @@ bool FWoTBotSilentSealSpec::RunTest(const FString&)
 {
 	UWorld* World = BotWorld(1);
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	Spectator(World);
 	WoTTest::TickWorld(World, .7f);
 	const auto Bots = BotList(World);
 	if (!TestEqual(TEXT("one bot"), Bots.Num(), 1)) return false;

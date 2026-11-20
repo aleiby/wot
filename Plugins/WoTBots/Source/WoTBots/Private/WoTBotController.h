@@ -20,6 +20,7 @@ struct FWoTBotCastCompletionAccess;
 struct FWoTBotBehaviourAccess;
 struct FWoTBotDecisionAccess;
 struct FWoTBotTraversalAccess;
+struct FWoTBotRosterAccess;
 }
 #endif
 
@@ -32,10 +33,14 @@ class AWoTBotController : public AAIController, public IWoTMatchParticipant
 public:
 	AWoTBotController();
 	void InitializeIdentity(UWoTBotRoster* InRoster, UClass* PlayerClass, const FString& Name);
+	void Start(bool bInitiallyIdle);
 	void Restart();
 	void SilentRespawn();
 	void Retire();
 	void SetDeparturePending(bool bPending);
+	void SetIdle(bool bNewIdle);
+	bool IsIdle() const { return bIdle; }
+	virtual bool CanCollectPickups() const override { return !bIdle; }
 	bool IsDeparturePending() const { return bDeparturePending; }
 	bool IsFrozen() const { return bFrozen; }
 	EWoTBotState GetBehaviourState() const { return State; }
@@ -67,8 +72,14 @@ private:
 	friend struct WoTBotTest::FWoTBotBehaviourAccess;
 	friend struct WoTBotTest::FWoTBotDecisionAccess;
 	friend struct WoTBotTest::FWoTBotTraversalAccess;
+	friend struct WoTBotTest::FWoTBotRosterAccess;
 #endif
 	void InventoryPulse();
+	void ResetBehaviour(AWoTCharacter* Body);
+	void StartThinking();
+	void CancelCasting();
+	void SuspendMovement();
+	void SpawnBody();
 	void Think();
 	bool CanAct() const;
 	bool IsHostile(const AWoTCharacter* Candidate) const;
@@ -162,6 +173,10 @@ private:
 	FTimerHandle RespawnTimer;
 	FTimerHandle ThinkTimer;
 	bool bDeparturePending = false;
+	bool bIdle = false;
+	uint8 IdleMovementMode = 0;
+	uint8 IdleCustomMovementMode = 0;
+	bool bIdleMovementTickEnabled = true;
 	bool bFrozen = false;
 	bool bRetiring = false;
 };

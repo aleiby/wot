@@ -1986,8 +1986,20 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 			];
 	};
 	auto SliderWithValue = [this](const TSharedRef<SWidget>& Slider,
-		TFunction<FText()> Value) -> TSharedRef<SWidget>
+		TFunction<FText()> Value, bool bDescriptiveValue = false) -> TSharedRef<SWidget>
 	{
+		if (bDescriptiveValue)
+		{
+			return SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()[Slider]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f)
+				[
+					SNew(STextBlock)
+					.Text_Lambda(MoveTemp(Value))
+					.Font(this, &SWoTFrontEndRoot::LargeBodyFont)
+					.AutoWrapText(true)
+				];
+		}
 		return SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 			[
@@ -2199,6 +2211,12 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
 					if (!Live) return 0.0f;
 					const FWoTHostRequest& Request = ViewModel.GetHostRequest();
+					if (Live->Values)
+					{
+						const TArray<int32> Values = Live->Values(Request);
+						const int32 Index = Values.IndexOfByKey(FWoTFrontEndModel::HostOptionValue(Request, *Live));
+						return Values.Num() > 1 && Index != INDEX_NONE ? float(Index) / (Values.Num() - 1) : 0.0f;
+					}
 					const int32 Max = FMath::Max(Live->Min, Live->Max(Request));
 					return Max > Live->Min
 						? (FWoTFrontEndModel::HostOptionValue(Request, *Live) - Live->Min)
@@ -2207,13 +2225,22 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				.Positions_Lambda([this, URLKey, Owner]()
 				{
 					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
-					return Live ? FMath::Max(1, Live->Max(ViewModel.GetHostRequest()) - Live->Min + 1) : 1;
+					if (!Live) return 1;
+					return Live->Values ? Live->Values(ViewModel.GetHostRequest()).Num()
+						: FMath::Max(1, Live->Max(ViewModel.GetHostRequest()) - Live->Min + 1);
 				})
 				.OnValueChanged_Lambda([this, URLKey, Owner](float Value)
 				{
 					if (!IsPresentationReady()) return;
 					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
 					if (!Live) return;
+					if (Live->Values)
+					{
+						const TArray<int32> Values = Live->Values(ViewModel.GetHostRequest());
+						if (!Values.IsEmpty()) ViewModel.SetHostOption(URLKey,
+							Values[FMath::Clamp(FMath::RoundToInt(Value * (Values.Num() - 1)), 0, Values.Num() - 1)]);
+						return;
+					}
 					const int32 Max = FMath::Max(Live->Min, Live->Max(ViewModel.GetHostRequest()));
 					ViewModel.SetHostOption(URLKey,
 						Live->Min + FMath::RoundToInt(Value * (Max - Live->Min)));
@@ -2221,9 +2248,11 @@ TSharedRef<SWidget> SWoTFrontEndRoot::BuildHostPanel()
 				[this, URLKey, Owner]()
 				{
 					const FWoTHostOptionRow* Live = FWoTFrontEndModel::FindHostOption(Owner, URLKey);
-					return Live ? FText::AsNumber(FWoTFrontEndModel::HostOptionValue(
-						ViewModel.GetHostRequest(), *Live)) : FText::GetEmpty();
-				}))
+					if (!Live) return FText::GetEmpty();
+					const FWoTHostRequest& Request = ViewModel.GetHostRequest();
+					const int32 Value = FWoTFrontEndModel::HostOptionValue(Request, *Live);
+					return Live->ValueText ? Live->ValueText(Value, Request) : FText::AsNumber(Value);
+				}, bool(Row.ValueText)))
 		];
 	}
 	Panel->AddSlot().AutoSize()

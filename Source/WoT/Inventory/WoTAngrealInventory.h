@@ -175,6 +175,8 @@ public:
 	bool HaveEnoughCharges() const;
 	void UseCharge();
 	void AddCharges(int32 NumCharges);
+	// Cancel item-owned cast state without owner feedback or failure bookkeeping.
+	virtual void AbortCast();
 	virtual void Failed();
 	void ResetCharges();
 	void SetCharges();

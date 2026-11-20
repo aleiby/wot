@@ -44,7 +44,7 @@ void UWoTBotRoster::CountFighters(const AWoTBotController* Except, TMap<const AW
 	Counts.Reset();
 	// Every bot controller in the world, including any not added by this roster.
 	for (TActorIterator<AWoTBotController> It(GetWorld()); It; ++It)
-		if (*It != Except && !It->IsDeparturePending() && It->GetBehaviourState() == EWoTBotState::Engage
+		if (*It != Except && It->GetBehaviourState() == EWoTBotState::Engage
 			&& It->GetTarget() && It->GetPawn() && CastChecked<AWoTCharacter>(It->GetPawn())->IsAlive())
 			++Counts.FindOrAdd(It->GetTarget());
 }
@@ -100,8 +100,18 @@ int32 UWoTBotRoster::HumanCount() const
 	if (const AGameStateBase* State = GetWorld()->GetGameState())
 	{
 		for (const APlayerState* Player : State->PlayerArray)
-			if (IsValid(Player) && !Player->IsABot() && !Player->IsInactive() && !ExitingStates.Contains(Player)) ++Count;
+			if (IsValid(Player) && !Player->IsABot() && !Player->IsInactive()
+				&& !Player->IsSpectator() && !Player->IsOnlyASpectator() && !ExitingStates.Contains(Player)) ++Count;
 	}
+	return Count;
+}
+
+int32 UWoTBotRoster::ConnectedHumanCount() const
+{
+	int32 Count = 0;
+	if (const AGameStateBase* State = GetWorld()->GetGameState())
+		for (const APlayerState* Player : State->PlayerArray)
+			if (IsValid(Player) && !Player->IsABot() && !ExitingStates.Contains(Player)) ++Count;
 	return Count;
 }
 
@@ -153,6 +163,8 @@ void UWoTBotRoster::Evaluate()
 	{
 		if (!It->IsValid() || !GetWorld()->GetGameState()->PlayerArray.Contains(It->Get())) It.RemoveCurrent();
 	}
+	const bool bIdle = ConnectedHumanCount() == 0;
+	for (const auto& Bot : Bots) if (Bot.IsValid()) Bot->SetIdle(bIdle);
 	while (GetBotCount() + HumanCount() > 16)
 	{
 		AWoTBotController* Bot = RetirementCandidate(false);
@@ -196,7 +208,9 @@ void UWoTBotRoster::ReconcileDepartures()
 		else
 		{
 			Bot->SetDeparturePending(true);
-			Departures.Add({Bot, GetWorld()->GetTimeSeconds() + FMath::Max(.01f, GetDefault<UWoTBotSettings>()->LeaveTimeoutSeconds)});
+			const double Now = GetWorld()->GetTimeSeconds();
+			Departures.Add({Bot, Now + FMath::Max(.01f, GetDefault<UWoTBotSettings>()->LeaveTimeoutSeconds),
+				IsSeenByHuman(Bot) ? Now : -1e9});
 		}
 	}
 	ArmDepartureTimer();
@@ -205,25 +219,61 @@ void UWoTBotRoster::ReconcileDepartures()
 void UWoTBotRoster::ArmDepartureTimer()
 {
 	FTimerManager& Timers = GetWorld()->GetTimerManager();
-	Timers.ClearTimer(DepartureTimer);
-	if (Departures.IsEmpty() || bFrozen) return;
-	double Earliest = Departures[0].Deadline;
-	for (const FDeparture& Departure : Departures) Earliest = FMath::Min(Earliest, Departure.Deadline);
-	Timers.SetTimer(DepartureTimer, this, &ThisClass::DepartureDue,
-		FMath::Max(.001f, float(Earliest - GetWorld()->GetTimeSeconds())));
+	if (Departures.IsEmpty() || bFrozen) { Timers.ClearTimer(DepartureTimer); return; }
+	if (!Timers.IsTimerActive(DepartureTimer))
+		Timers.SetTimer(DepartureTimer, this, &ThisClass::DepartureDue,
+			FMath::Max(.01f, GetDefault<UWoTBotSettings>()->DepartureVisibilityIntervalSeconds), true);
+}
+
+bool UWoTBotRoster::IsSeenByHuman(const AWoTBotController* Bot) const
+{
+	const APawn* Body = Bot ? Bot->GetPawn() : nullptr;
+	if (!Body) return false;
+	const FVector Centre = Body->GetActorLocation();
+	const FVector Samples[] = {Body->GetPawnViewLocation(), Centre,
+		Centre - FVector(0, 0, Body->GetSimpleCollisionHalfHeight())};
+	const float ConeCos = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(GetDefault<UWoTBotSettings>()->DepartureViewHalfAngleDegrees, 0.0f, 180.0f)));
+	TArray<AActor*> Attachments;
+	Body->GetAttachedActors(Attachments, true, true);
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* Viewer = It->Get();
+		if (!IsValid(Viewer) || !IsValid(Viewer->PlayerState) || Viewer->PlayerState->IsABot()
+			|| ExitingStates.Contains(Viewer->PlayerState)) continue;
+		FVector Eye; FRotator Rotation;
+		Viewer->GetPlayerViewPoint(Eye, Rotation);
+		FCollisionQueryParams Query(SCENE_QUERY_STAT(BotDepartureVisibility), true);
+		Query.AddIgnoredActor(Viewer->GetPawn());
+		Query.AddIgnoredActor(Body);
+		Query.AddIgnoredActors(Attachments);
+		for (const FVector& Sample : Samples)
+		{
+			const FVector Direction = Sample - Eye;
+			if (!Direction.IsNearlyZero() && FVector::DotProduct(Direction.GetSafeNormal(), Rotation.Vector()) < ConeCos) continue;
+			if (!GetWorld()->LineTraceTestByChannel(Eye, Sample, ECC_Visibility, Query)) return true;
+		}
+	}
+	return false;
 }
 
 void UWoTBotRoster::DepartureDue()
 {
 	Evaluate(); // Revalidate human count and cancel newest marks before any departure.
 	if (bFrozen || bTearingDown) return;
-	const auto Pending = Departures;
-	for (const FDeparture& Departure : Pending)
+	const double Now = GetWorld()->GetTimeSeconds();
+	const double Grace = FMath::Max(0.0f, GetDefault<UWoTBotSettings>()->DepartureSeenGraceSeconds);
+	TArray<TWeakObjectPtr<AWoTBotController>> Due;
+	for (FDeparture& Departure : Departures)
 	{
-		if (Departure.Bot.IsValid() && Departure.Bot->IsDeparturePending()
-			&& Departure.Deadline <= GetWorld()->GetTimeSeconds()
-			&& GetBotCount() > GetDesiredBotCount()) Retire(Departure.Bot.Get());
+		if (!Departure.Bot.IsValid() || !Departure.Bot->IsDeparturePending()) continue;
+		const bool bSeen = IsSeenByHuman(Departure.Bot.Get());
+		if (bSeen) Departure.LastSeenTime = Now;
+		if (Departure.Deadline <= Now || (!bSeen && Now - Departure.LastSeenTime >= Grace)) Due.Add(Departure.Bot);
 	}
+	// Retirement calls Logout and mutates the pending list. Collect first.
+	for (const auto& Bot : Due)
+		if (Bot.IsValid() && Bot->IsDeparturePending() && GetBotCount() > GetDesiredBotCount()) Retire(Bot.Get());
 	Evaluate();
 }
 
@@ -290,7 +340,7 @@ void UWoTBotRoster::AddBot()
 				Bot->InitializeIdentity(this, Class, NextName(Class));
 				Bots.Add(Bot);
 				Game->ChangeTeam(Bot, 255);
-				Bot->Restart();
+				Bot->Start(ConnectedHumanCount() == 0);
 			}
 			else if (Bot) Bot->Destroy();
 		}

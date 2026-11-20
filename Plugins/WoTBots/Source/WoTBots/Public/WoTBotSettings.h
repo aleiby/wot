@@ -41,7 +41,16 @@ public:
 	float HealBelowHealth = 0.5f;
 
 	UPROPERTY(Config)
-	float LeaveTimeoutSeconds = 15.0f;
+	float LeaveTimeoutSeconds = 60.0f;
+
+	UPROPERTY(Config)
+	float DepartureViewHalfAngleDegrees = 80.0f;
+
+	UPROPERTY(Config)
+	float DepartureSeenGraceSeconds = 0.5f;
+
+	UPROPERTY(Config)
+	float DepartureVisibilityIntervalSeconds = 0.25f;
 
 	UPROPERTY(Config)
 	float StuckRespawnSeconds = 20.0f;

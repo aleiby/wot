@@ -1956,9 +1956,9 @@ const TCHAR* WoTStartSpawnRejectionName(EWoTStartSpawnRejection Rejection)
 	return TEXT("unknown");
 }
 
-APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+static APawn* WoTGameMode_SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
-	FWoTStartSpawnResult* OutResult)
+	FWoTStartSpawnResult* OutResult, AController* SpawnController)
 {
 	FWoTStartSpawnResult Result;
 	Result.ResolvedLocation = SpawnTransform.GetLocation();
@@ -1982,6 +1982,8 @@ APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 	// placed first and fitted after: FindSpot looks only at the level.
 	FActorSpawnParameters SpawnInfo;
 	SpawnInfo.Instigator = SpawnInstigator;
+	// Overlap collection can run before possession; preserve the intended participant.
+	SpawnInfo.Owner = SpawnController;
 	SpawnInfo.ObjectFlags |= RF_Transient;
 	SpawnInfo.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -2022,6 +2024,14 @@ APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 	return Spawned;
 }
 
+APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
+	FWoTStartSpawnResult* OutResult)
+{
+	return WoTGameMode_SpawnPawnAtRetailStart(World, PawnClass, SpawnTransform,
+		SpawnInstigator, bAssumeFit, OutResult, nullptr);
+}
+
 APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
 	AController* NewPlayer, const FTransform& SpawnTransform)
 {
@@ -2033,9 +2043,9 @@ APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
 			// GameInfo.Login spawns the PlayerPawn (SpawnActor: FindSpot with
 			// bAssumeFit); GameInfo.RestartPlayer moves it (SetLocation ->
 			// FarMoveActor: FindSpot without bAssumeFit).
-			return SpawnPawnAtRetailStart(*World, PawnClass, SpawnTransform,
+			return WoTGameMode_SpawnPawnAtRetailStart(*World, PawnClass, SpawnTransform,
 				GetInstigator(), /*bAssumeFit*/ !bRestartMovesPlayerPawn,
-				&LastStartSpawn);
+				&LastStartSpawn, NewPlayer);
 		}
 	}
 	return Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, SpawnTransform);
