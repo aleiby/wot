@@ -1744,12 +1744,40 @@ def _meshlit_insts_for_mesh(mesh_path, mats, textures):
     return out
 
 
+def _set_trigger_properties(actor, props):
+    trigger_types = {
+        "TT_PlayerProximity": unreal.WoTTriggerType.PLAYER_PROXIMITY,
+        "TT_PawnProximity": unreal.WoTTriggerType.PAWN_PROXIMITY,
+        "TT_ClassProximity": unreal.WoTTriggerType.CLASS_PROXIMITY,
+        "TT_AnyProximity": unreal.WoTTriggerType.ANY_PROXIMITY,
+        "TT_Shoot": unreal.WoTTriggerType.SHOOT,
+    }
+    actor.set_editor_property(
+        "trigger_type", trigger_types[props.get("TriggerType", "TT_PlayerProximity")])
+    actor.set_editor_property("damage_threshold", float(props.get("DamageThreshold", 0.0)))
+    actor.set_editor_property(
+        "initially_active", str(props.get("bInitiallyActive", "True")).lower() == "true")
+    message = str(props.get("Message", ""))
+    if len(message) >= 2 and message[0] == '"' and message[-1] == '"':
+        message = message[1:-1].replace(r'\"', '"')
+    actor.set_editor_property("message", message)
+    actor.set_editor_property("repeat_trigger_time", float(props.get("RepeatTriggerTime", 0.0)))
+
+
 def place_movers(eas, insts, masters, mats=None, textures=None):
     mdir = CONV / "movers" / MAP
     f = mdir / "movers.json"
     if not f.exists():
         return {}
     data = json.loads(f.read_text())
+    # The compact mover conversion omits shoot settings. Read the complete
+    # actor properties so existing conversions also import the authored target.
+    trigger_props = {}
+    tf = CONV / f"{MAP}.t3d.json"
+    if tf.exists():
+        trigger_props = {a["name"]: a.get("props", {})
+                         for a in json.loads(tf.read_text())["actors"]
+                         if a["cls"] in ("Trigger", "DoorTrigger")}
     counts = dict(movers=0, triggers=0, door_triggers=0,
                   stage_triggers=0, portcullis_triggers=0,
                   dispatchers=0, counters=0)
@@ -1954,8 +1982,8 @@ def place_movers(eas, insts, masters, mats=None, textures=None):
         a.set_editor_property("event_name", t["event"])
         a.set_editor_property("trigger_once_only", t["once_only"])
         a.set_editor_property("re_trigger_delay", t["retrigger"])
-        cap = a.get_editor_property("capsule")
-        cap.set_capsule_size(t["radius"], max(t["height"], t["radius"]))
+        _set_trigger_properties(a, trigger_props.get(t["name"], {}))
+        a.set_ue1_collision_size(t["radius"], t["height"])
         counts["triggers"] += 1
     door_directions = {
         "Forward": unreal.WoTDoorDirection.FORWARD,
@@ -1969,9 +1997,9 @@ def place_movers(eas, insts, masters, mats=None, textures=None):
         a.set_editor_property("event_name", t["event"])
         a.set_editor_property("trigger_once_only", t["once_only"])
         a.set_editor_property("re_trigger_delay", t["retrigger"])
+        _set_trigger_properties(a, trigger_props.get(t["name"], {}))
         a.set_editor_property("direction", door_directions[t["direction"]])
-        cap = a.get_editor_property("capsule")
-        cap.set_capsule_size(t["radius"], max(t["height"], t["radius"]))
+        a.set_ue1_collision_size(t["radius"], t["height"])
         counts["door_triggers"] += 1
     for t in data.get("stage_triggers", []):
         a = eas.spawn_actor_from_class(unreal.WoTStageTrigger,

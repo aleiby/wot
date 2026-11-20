@@ -25,6 +25,13 @@
 #include "../WoTBSPPayload.h"
 #include "../WoTCharacter.h"
 #include "../WoTEvents.h"
+#include "../WoTExplodingMover.h"
+#include "Components/CapsuleComponent.h"
+#include "UObject/UnrealType.h"
+#if WITH_EDITOR
+#include "Tests/NetTestHelpers.h"
+#include "Engine/NetConnection.h"
+#endif
 #include "../WoTGameMode.h"
 #include "../WoTMeshLight.h"
 #include "../WoTPlayerController.h"
@@ -587,16 +594,353 @@ bool FWoTProjectileTriggerTouchSpec::RunTest(const FString&)
 		const FString Label = FString::Printf(TEXT("trigger type %d"), int32(Type));
 		const bool bShoot = Type == EWoTTriggerType::Shoot;
 		TestEqual(Label + TEXT(" consumes only a projectile hitting a shoot target"), IsValid(Projectile), !bShoot);
-		const bool bTouchEvent = Type == EWoTTriggerType::AnyProximity || Type == EWoTTriggerType::ClassProximity;
-		// A shot shoot-trigger's own event (its damage threshold) is not ported
-		// yet; this spec covers only the collision response.
-		if (!bShoot)
-			TestEqual(Label + TEXT(" receives its relevant touch"), Sink->TriggerCount, bTouchEvent ? 1 : 0);
-		if (bTouchEvent) TestEqual(Label + TEXT(" preserves the touching actor"), Sink->LastOther.Get(), static_cast<AActor*>(Projectile));
+		const bool bTouchEvent = bShoot || Type == EWoTTriggerType::AnyProximity || Type == EWoTTriggerType::ClassProximity;
+		TestEqual(Label + TEXT(" receives its relevant touch"), Sink->TriggerCount, bTouchEvent ? 1 : 0);
+		if (bTouchEvent) TestTrue(Label + TEXT(" preserves the touching actor"), Sink->LastOther == TWeakObjectPtr<AActor>(Projectile));
 		if (IsValid(Projectile))
 			TestTrue(Label + TEXT(" lets flight continue through the volume"),
 				FVector::Dist(Projectile->GetActorLocation(), FVector(400, 0, 1000)) < 1.0);
 	}
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FWoTShootTriggerRealMapSpec,
+	"WoT.Projectile.ShootTrigger.Arena09", WoTProjectileRealMap::Flags)
+
+void FWoTShootTriggerRealMapSpec::GetTests(TArray<FString>& Names, TArray<FString>& Commands) const
+{
+	for (const TCHAR* Name : {TEXT("DartOpensWall"), TEXT("OnceOnly"), TEXT("BelowThreshold"), TEXT("DamagePath"),
+		TEXT("SweptDart60"), TEXT("SweptDart30"), TEXT("SweptFireball60"), TEXT("SweptFireball30"), TEXT("SweptNearMiss")})
+	{
+		Names.Add(Name);
+		Commands.Add(Name);
+	}
+}
+
+bool FWoTShootTriggerRealMapSpec::RunTest(const FString& Case)
+{
+	using namespace WoTProjectileRealMap;
+	FFixture& Fixture = TheFixture();
+	FBuiltMap Built;
+	if (!Fixture.Load(*this) || !BuildMap(*this, Fixture, TEXT("Arena_09"), Built)) return false;
+	UWorld& World = *Built.World;
+	AWoTTrigger* Target = nullptr;
+	AWoTExplodingMover* Wall = nullptr;
+	for (TActorIterator<AWoTTrigger> It(&World); It; ++It)
+		if (It->TriggerType == EWoTTriggerType::Shoot && It->EventName == TEXT("CaveWall")) Target = *It;
+	for (TActorIterator<AWoTExplodingMover> It(&World); It; ++It)
+		if (It->TagName == TEXT("CaveWall")) Wall = *It;
+	if (!TestNotNull(TEXT("authored shoot target"), Target) || !TestNotNull(TEXT("authored wall"), Wall)) return false;
+	TestTrue(TEXT("authored target is once-only"), Target->bTriggerOnceOnly);
+	TestEqual(TEXT("authored target radius"), Target->UE1CollisionRadius, 48.0f);
+	TestEqual(TEXT("authored target height"), Target->UE1CollisionHalfHeight, 150.0f);
+	const FFloatProperty* Threshold = FindFProperty<FFloatProperty>(Target->GetClass(), TEXT("DamageThreshold"));
+	if (TestNotNull(TEXT("runtime threshold property"), Threshold))
+		TestEqual(TEXT("cached authored threshold projects"), Threshold->GetPropertyValue_InContainer(Target), 10.0f);
+	AWoTTestSoundDispatcherEventSink* Sink = World.SpawnActorDeferred<AWoTTestSoundDispatcherEventSink>(
+		AWoTTestSoundDispatcherEventSink::StaticClass(), FTransform::Identity);
+	Sink->TagName = Target->EventName;
+	Sink->FinishSpawning(FTransform::Identity);
+	AWoTPlayerController* Controller = World.SpawnActor<AWoTPlayerController>(AlwaysSpawn());
+	// Approach the authored cylinder from open space. A locally possessed body
+	// uses the production Fire/launcher path, including eye and launch offsets.
+	const FVector AimPoint = Target->GetActorLocation();
+	const FVector BodyAt = AimPoint + FVector(250, 0, -30);
+	AWoTCharacter* Body = World.SpawnActor<AWoTCharacter>(BodyAt, FRotator(0, 180, 0), AlwaysSpawn());
+	Controller->InitPlayerState();
+	Controller->SetAsLocalPlayerController();
+	Controller->Possess(Body);
+	World.GetAuthGameMode<AWoTGameMode>()->SetPlayerDefaults(Body);
+	Body->GetCharacterMovement()->DisableMovement();
+	Controller->SetControlRotation((AimPoint - (BodyAt + FVector(0, 0, Body->BaseEyeHeight))).Rotation());
+	AWoTProjectileLauncher* Launcher = nullptr;
+	for (AWoTInventory* Item : Body->InventoryComponent->Items)
+		if (Item->IsA<AWoTAngrealInvDart>()) Launcher = Cast<AWoTProjectileLauncher>(Item);
+	if (!TestNotNull(TEXT("player has dart launcher"), Launcher)) return false;
+	Body->InventoryComponent->SelectItem(Launcher);
+	WoTTest::TickWorld(&World, 0.6f);
+	TestTrue(TEXT("local shooter is alive"), Body->IsAlive());
+	TestFalse(TEXT("wall starts closed"), Wall->HasExploded());
+	if (Case == TEXT("DamagePath"))
+	{
+		FWoTDamageEvent Damage;
+		Target->TakeDamage(10, Damage, nullptr, nullptr);
+		TestEqual(TEXT("uninstigated damage fires nothing"), Sink->TriggerCount, 0);
+		Target->TakeDamage(9, Damage, Controller, Body);
+		TestEqual(TEXT("subthreshold damage fires nothing"), Sink->TriggerCount, 0);
+		Target->TakeDamage(10, Damage, Controller, Body);
+		TestEqual(TEXT("instigated threshold damage fires once"), Sink->TriggerCount, 1);
+		TestTrue(TEXT("damage opens wall"), Wall->HasExploded());
+		TestEqual(TEXT("damage dispatch Other is instigator"), Sink->LastOther.Get(), static_cast<AActor*>(Body));
+		TestEqual(TEXT("damage dispatch instigator"), Sink->LastInstigator.Get(), static_cast<APawn*>(Body));
+		Target->TakeDamage(10, Damage, Controller, Body);
+		TestEqual(TEXT("spent target ignores direct damage"), Sink->TriggerCount, 1);
+		return !HasAnyErrors();
+	}
+	if (Case.StartsWith(TEXT("Swept")))
+	{
+		const bool bFireball = Case.Contains(TEXT("Fireball"));
+		const float FrameTime = Case.EndsWith(TEXT("30")) ? 1.0f / 30.0f : 1.0f / 60.0f;
+		if (bFireball)
+		{
+			World.GetAuthGameMode<AWoTGameMode>()->GivePawnAngreal(Body, AWoTAngrealInvFireball::StaticClass(), 25);
+			for (AWoTInventory* Item : Body->InventoryComponent->Items)
+				if (Item->IsA<AWoTAngrealInvFireball>()) Launcher = Cast<AWoTProjectileLauncher>(Item);
+			Body->InventoryComponent->SelectItem(Launcher);
+			WoTTest::TickWorld(&World, 0.6f);
+		}
+		auto Cross = [&](double Offset)
+		{
+			AWoTGenericProjectile* Shot = nullptr;
+			const FDelegateHandle Handle = World.AddOnActorSpawnedHandler(
+				FOnActorSpawned::FDelegate::CreateLambda([&](AActor* Actor)
+				{
+					if (Actor->IsA(Launcher->ProjectileClass)) Shot = Cast<AWoTGenericProjectile>(Actor);
+				}));
+			const int32 Charges = Launcher->CurCharges;
+			Controller->Fire();
+			Controller->CeaseFire();
+			World.RemoveOnActorSpawnedHandler(Handle);
+			if (!TestNotNull(TEXT("local Fire launches crossing shot"), Shot)) return Shot;
+			TestEqual(TEXT("crossing shot spends one charge"), Launcher->CurCharges, Charges - 1);
+			const double HalfStep = Shot->Speed * FrameTime * 0.5;
+			const FVector Start = AimPoint + FVector(Offset, -HalfStep, 0);
+			const FVector End = AimPoint + FVector(Offset, HalfStep, 0);
+			TestTrue(TEXT("both frame endpoints outside combined radius 54"),
+				FVector::DistSquared2D(Start, AimPoint) > 54 * 54
+				&& FVector::DistSquared2D(End, AimPoint) > 54 * 54);
+			// Fix the frame phase after a real inventory launch; movement and all
+			// collision notifications still run through the production component.
+			WoTTest::PlaceWithoutOverlapEvents(Shot, Start);
+			Shot->ProjectileMovement->Velocity = FVector(0, Shot->Speed, 0);
+			WoTTest::TickWorld(&World, 1, FrameTime);
+			AddInfo(FString::Printf(TEXT("Cross offset=%.2f start=%s end=%s actual=%s alive=%d"),
+				Offset, *Start.ToString(), *End.ToString(), *Shot->GetActorLocation().ToString(), IsValid(Shot)));
+			return Shot;
+		};
+		if (Case == TEXT("SweptNearMiss"))
+		{
+			AWoTGenericProjectile* Miss = Cross(54.1);
+			TestTrue(TEXT("outside-radius miss survives"), IsValid(Miss));
+			if (IsValid(Miss))
+			{
+				TestTrue(TEXT("miss passes target center"), Miss->GetActorLocation().Y > AimPoint.Y);
+				Miss->Destroy();
+			}
+			TestEqual(TEXT("outside-radius miss fires nothing"), Sink->TriggerCount, 0);
+			TestFalse(TEXT("outside-radius miss leaves wall closed"), Wall->HasExploded());
+			WoTTest::TickWorld(&World, 1.0f);
+		}
+		// At speed 1000, a 60 Hz fireball needs a shorter chord than the dart.
+		const double Offset = bFireball ? 53.75 : 53.0;
+		AWoTGenericProjectile* Shot = Cross(Offset);
+		TestFalse(TEXT("swept crossing consumes projectile"), IsValid(Shot));
+		TestEqual(TEXT("swept crossing fires CaveWall exactly once"), Sink->TriggerCount, 1);
+		TestTrue(TEXT("swept crossing opens wall"), Wall->HasExploded());
+		const FVector Contact = AimPoint + FVector(Offset, bFireball ? -5.190135 : -10.344080, 0);
+		if (Shot) TestTrue(TEXT("projectile consumed at first cylinder intersection"), Shot->GetActorLocation().Equals(Contact, 0.05));
+		TestFalse(TEXT("swept hit retires once-only target"), Target->IsRetailProjectileTarget());
+		TestEqual(TEXT("swept touch retains shooter"), Sink->LastInstigator.Get(), static_cast<APawn*>(Body));
+		return !HasAnyErrors();
+	}
+	auto Fire = [&](float Damage)
+	{
+		AWoTGenericProjectile* Shot = nullptr;
+		const FDelegateHandle SpawnHandle = World.AddOnActorSpawnedHandler(
+			FOnActorSpawned::FDelegate::CreateLambda([&](AActor* Actor)
+			{
+				if (Actor->IsA<AWoTDartProjectile>())
+				{
+					Shot = Cast<AWoTGenericProjectile>(Actor);
+					Shot->Damage = Damage;
+				}
+			}));
+		const int32 Charges = Launcher->CurCharges;
+		Controller->Fire();
+		Controller->CeaseFire();
+		World.RemoveOnActorSpawnedHandler(SpawnHandle);
+		TestNotNull(TEXT("local Fire launches a dart"), Shot);
+		TestEqual(TEXT("shot spends a charge"), Launcher->CurCharges, Charges - 1);
+		WoTTest::TickWorld(&World, 20, 1.0f / 60.0f);
+		return Shot;
+	};
+	if (Case == TEXT("BelowThreshold"))
+	{
+		AWoTGenericProjectile* Shot = Fire(9);
+		TestFalse(TEXT("weak shot is consumed"), IsValid(Shot));
+		TestEqual(TEXT("weak shot fires no event"), Sink->TriggerCount, 0);
+		TestFalse(TEXT("weak shot leaves wall closed"), Wall->HasExploded());
+		TestTrue(TEXT("weak shot leaves target live"), Target->IsRetailProjectileTarget());
+		WoTTest::TickWorld(&World, 1.0f);
+	}
+	AWoTGenericProjectile* Shot = Fire(10);
+	TestFalse(TEXT("qualifying shot is consumed"), IsValid(Shot));
+	TestEqual(TEXT("qualifying shot dispatches exactly once"), Sink->TriggerCount, 1);
+	TestTrue(TEXT("dart opens CaveWall"), Wall->HasExploded());
+	TestTrue(TEXT("touch dispatch preserves projectile"), Sink->LastOther == TWeakObjectPtr<AActor>(Shot));
+	TestEqual(TEXT("touch dispatch preserves player"), Sink->LastInstigator.Get(), static_cast<APawn*>(Body));
+	TestFalse(TEXT("once-only target retires"), Target->IsRetailProjectileTarget());
+	if (Case == TEXT("OnceOnly"))
+	{
+		WoTTest::TickWorld(&World, 1.0f);
+		Fire(10);
+		TestEqual(TEXT("second hit does not dispatch again"), Sink->TriggerCount, 1);
+		TestEqual(TEXT("spent cylinder has no collision"), Target->Capsule->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	}
+	return !HasAnyErrors();
+}
+
+// Project the real shoot record on both peers. This checks stable actor naming,
+// lifetime property registration and dormant retirement delivery over the wire.
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FWoTShootTriggerLiveNetSpec,
+	"WoT.Net.Projectile.ShootTriggerLiveReplication", WoTProjectileRealMap::Flags)
+
+void FWoTShootTriggerLiveNetSpec::GetTests(TArray<FString>& Names, TArray<FString>& Commands) const
+{
+	for (const TCHAR* Name : {TEXT("Centered"), TEXT("SweptGrazing"), TEXT("SweptDeferred")})
+	{
+		Names.Add(Name);
+		Commands.Add(Name);
+	}
+}
+
+bool FWoTShootTriggerLiveNetSpec::RunTest(const FString& Case)
+{
+#if WITH_EDITOR
+	using namespace WoTProjectileRealMap;
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	FBuiltMap Activation;
+	Activation.World = WoTTest::CreateSpecWorld();
+	const FWoTWorldDescriptor* Descriptor = Fixture.Find(TEXT("Arena_09"));
+	if (!TestNotNull(TEXT("network source map"), Descriptor)) return false;
+	const TArray<uint8>* Bytes = Fixture.Writer.Objects.Find(Descriptor->WorldLogicalId);
+	if (!TestNotNull(TEXT("network source payload"), Bytes)) return false;
+	auto Decoded = FWoTRuntimeRegistry::DecodeObjectBytesForTesting(*Bytes,
+		TEXT("ue1-world-records-le-v6"), TEXT("world"));
+	FWoTRuntimeWorldResource Resource;
+	if (Decoded.IsError() || Resource.LoadObjectForTesting(MoveTemp(Decoded).GetValue()).IsError())
+	{
+		AddError(TEXT("network source payload failed to decode"));
+		return false;
+	}
+	TArray<FWoTRuntimeWorldActor> Records;
+	for (const FWoTRuntimeWorldActor& Record : Resource.Actors())
+		if (Record.Identity.EndsWith(TEXT(".Trigger10"))) Records.Add(Record);
+	if (!TestEqual(TEXT("one authored shoot record"), Records.Num(), 1)) return false;
+	FWoTWorldProjectionSource Source;
+	Source.MapIdentity = Resource.MapIdentity();
+	Source.Records = Records;
+	auto Project = [&](UWorld& World) -> AWoTTrigger*
+	{
+		FWoTWorldProjectionResult Projection;
+		FString Error;
+		if (!FWoTWorldProjector::ProjectDeferred(World, Source, *Fixture.Defaults, Projection, Error))
+		{
+			AddError(Error);
+			return nullptr;
+		}
+		AWoTTrigger* Target = nullptr;
+		for (AActor* Actor : Projection.DeferredActors)
+		{
+			// Match ULevel's startup-actor setup for deferred projected actors.
+			Actor->bNetStartup = true;
+			for (UActorComponent* Component : Actor->GetComponents())
+				if (Component) Component->SetIsNetStartupComponent(true);
+			if (World.IsNetMode(NM_Client)) Actor->ExchangeNetRoles(true);
+			Actor->FinishSpawning(Actor->GetActorTransform(), true);
+			if (!Actor->HasActorBegunPlay()) Actor->DispatchBeginPlay();
+			if (AWoTTrigger* Trigger = Cast<AWoTTrigger>(Actor)) Target = Trigger;
+		}
+		return Target;
+	};
+	UE::Net::FTestWorlds Worlds(TEXT("/Engine/Maps/Entry"), TEXT("/Script/WoT.WoTGameMode"));
+	Worlds.SetDescription(TEXT("projected shoot target retirement"));
+	if (!TestTrue(TEXT("server loads"), Worlds.Server.IsLoaded())
+		|| !TestTrue(TEXT("client connects"), Worlds.CreateAndConnectClient())) return false;
+	UWorld& ServerWorld = *Worlds.Server.GetWorld();
+	UWorld& ClientWorld = *Worlds.Clients[0].GetWorld();
+	AWoTTrigger* Ordinary = ClientWorld.SpawnActor<AWoTTrigger>();
+	TestFalse(TEXT("ordinary projected trigger stays local"), Ordinary->GetIsReplicated());
+	TestEqual(TEXT("ordinary projected trigger stays non-colliding on client"), Ordinary->Capsule->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	AWoTTrigger* ReplicatedOrdinary = ClientWorld.SpawnActorDeferred<AWoTTrigger>(AWoTTrigger::StaticClass(), FTransform::Identity);
+	ReplicatedOrdinary->SetReplicates(true);
+	ReplicatedOrdinary->SetRole(ROLE_SimulatedProxy);
+	ReplicatedOrdinary->FinishSpawning(FTransform::Identity);
+	TestTrue(TEXT("ordinary replicated trigger retains its existing client collision"), ReplicatedOrdinary->Capsule->GetCollisionEnabled() != ECollisionEnabled::NoCollision);
+	AWoTTrigger* ClientTarget = Project(ClientWorld);
+	AWoTTrigger* ServerTarget = Project(ServerWorld);
+	if (!TestNotNull(TEXT("client projects target"), ClientTarget)
+		|| !TestNotNull(TEXT("server projects target"), ServerTarget)) return false;
+	if (!TestTrue(TEXT("target has a replicated client identity"), Worlds.TickUntil([&]()
+		{ return Worlds.IsServerObjectReplicated(ServerTarget) && Worlds.DoesReplicatedObjectExistOnClient(ServerTarget); }, 120))) return false;
+	TestTrue(TEXT("replication binds the locally projected target"), Worlds.FindReplicatedObjectOnClient(ServerTarget) == ClientTarget);
+	TestTrue(TEXT("target channel becomes dormant"), Worlds.TickUntil([&]()
+		{ return ServerWorld.GetNetDriver()->ClientConnections[0]->FindActorChannelRef(ServerTarget) == nullptr; }, 180));
+	auto Sink = [](UWorld& World)
+	{
+		auto* Result = World.SpawnActorDeferred<AWoTTestSoundDispatcherEventSink>(
+			AWoTTestSoundDispatcherEventSink::StaticClass(), FTransform::Identity);
+		Result->TagName = TEXT("CaveWall");
+		Result->FinishSpawning(FTransform::Identity);
+		return Result;
+	};
+	auto* ServerSink = Sink(ServerWorld);
+	auto* ClientSink = Sink(ClientWorld);
+	auto ClientShot = [&]()
+	{
+		const bool bGrazing = Case.StartsWith(TEXT("Swept"));
+		const bool bDeferred = Case == TEXT("SweptDeferred");
+		const FVector Center = ClientTarget->GetActorLocation();
+		const FTransform At(Center + (bDeferred ? FVector(53, -42, 159)
+			: bGrazing ? FVector(-2000.0 / 120.0, 53, 0) : FVector(-250, 0, 0)));
+		auto* Shot = ClientWorld.SpawnActorDeferred<AWoTDartProjectile>(
+			AWoTDartProjectile::StaticClass(), At, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		Shot->SetRole(ROLE_SimulatedProxy);
+		FRepMovement Rep = Shot->GetReplicatedMovement();
+		Rep.LinearVelocity = bDeferred ? FVector(0, 1980, -120) : FVector(2000, 0, 0);
+		Shot->SetReplicatedMovement(Rep);
+		Shot->FinishSpawning(At);
+		if (bGrazing)
+		{
+			WoTTest::TickWorld(&ClientWorld, 1, 1.0f / 60.0f);
+			if (bDeferred)
+			{
+				TestTrue(TEXT("simulated dart first enters capsule above cap"), IsValid(Shot)
+					&& Shot->GetActorLocation().Equals(Center + FVector(53, -9, 157), 0.05));
+				WoTTest::TickWorld(&ClientWorld, 1, 1.0f / 60.0f);
+			}
+			if (ClientTarget->IsRetailProjectileTarget())
+				TestTrue(TEXT("simulated grazing dart stops at first cylinder intersection"),
+					Shot->GetActorLocation().Equals(Center + (bDeferred ? FVector(53, 7.5, 156) : FVector(-10.344080, 53, 0)), 0.05));
+			else WoTTest::TickWorld(&ClientWorld, 19);
+		}
+		else Worlds.TickAll(20);
+		return Shot;
+	};
+	TestFalse(TEXT("client simulated dart stops at live target"), IsValid(ClientShot()));
+	TestEqual(TEXT("client shot dispatches no local event"), ClientSink->TriggerCount, 0);
+	FWoTDamageEvent Damage;
+	AActor* ClientCauser = ClientWorld.SpawnActor<AActor>();
+	ClientCauser->SetInstigator(ClientWorld.SpawnActor<APawn>());
+	ClientTarget->TakeDamage(10, Damage, nullptr, ClientCauser);
+	TestEqual(TEXT("client damage dispatches no local event"), ClientSink->TriggerCount, 0);
+	TestTrue(TEXT("client damage cannot retire target"), ClientTarget->IsRetailProjectileTarget());
+	APlayerController* Controller = Worlds.GetServerPlayerControllerOfClient(0);
+	APawn* Instigator = ServerWorld.SpawnActor<APawn>();
+	Controller->Possess(Instigator);
+	ServerTarget->TakeDamage(10, Damage, Controller, Instigator);
+	TestEqual(TEXT("server hit dispatches once"), ServerSink->TriggerCount, 1);
+	TestTrue(TEXT("dormant retirement reaches client without test forcing updates"), Worlds.TickUntil([&]()
+		{ return !ClientTarget->IsRetailProjectileTarget(); }, 120));
+	TestEqual(TEXT("replicated retirement disables collision"), ClientTarget->Capsule->GetCollisionEnabled(), ECollisionEnabled::NoCollision);
+	AWoTDartProjectile* Through = ClientShot();
+	TestTrue(TEXT("client simulated dart passes spent target"), IsValid(Through));
+	if (IsValid(Through)) TestTrue(TEXT("dart travels beyond retired cylinder"), Case == TEXT("SweptDeferred")
+		? Through->GetActorLocation().Y > ClientTarget->GetActorLocation().Y + 100
+		: Through->GetActorLocation().X > ClientTarget->GetActorLocation().X + 100);
+	TestEqual(TEXT("state replication fires no client event"), ClientSink->TriggerCount, 0);
+#endif
 	return !HasAnyErrors();
 }
 
