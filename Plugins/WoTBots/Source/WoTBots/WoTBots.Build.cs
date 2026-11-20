@@ -19,6 +19,7 @@ public class WoTBots : ModuleRules
 			"WoT",
 			"Json",
 			"NavigationSystem",
+			"Navmesh",
 			"WoTRetailReader",
 			"WoTBootstrapCore",
 			"OnlineSubsystem",

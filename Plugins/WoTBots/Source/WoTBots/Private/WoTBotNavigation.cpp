@@ -2,6 +2,8 @@
 #include "AI/NavigationSystemConfig.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
+#include "EngineUtils.h"
+#include "Projectiles/WoTProjectile.h"
 
 AWoTBotNavMesh::AWoTBotNavMesh()
 {
@@ -27,7 +29,25 @@ void AWoTBotNavMesh::OnNavMeshTilesUpdated(const TArray<FNavTileRef>& ChangedTil
 {
 	Super::OnNavMeshTilesUpdated(ChangedTiles);
 	TileUpdates += ChangedTiles.Num();
+#if WITH_AUTOMATION_TESTS
+	WoTBotNavigation::TilesObserved.Broadcast(this, ChangedTiles);
+#endif
 }
+
+#if WITH_AUTOMATION_TESTS
+WoTBotNavigation::FDirtyAreasObserved WoTBotNavigation::DirtyAreasObserved;
+WoTBotNavigation::FTilesObserved WoTBotNavigation::TilesObserved;
+void UWoTBotNavigationSystem::RebuildDirtyAreas(float DeltaSeconds)
+{
+	// Observe exactly the batch UE 5.8 NavigationDirtyAreasController dispatches.
+	const auto& Controller = DefaultDirtyAreasController;
+	const bool bDispatch = (Controller.DirtyAreasUpdateFreq != 0.f
+		&& Controller.DirtyAreasUpdateTime + DeltaSeconds >= 1.f / Controller.DirtyAreasUpdateFreq)
+		|| !GetWorld()->IsGameWorld();
+	if (bDispatch) WoTBotNavigation::DirtyAreasObserved.Broadcast(GetWorld(), Controller.DirtyAreas);
+	Super::RebuildDirtyAreas(DeltaSeconds);
+}
+#endif
 
 void UWoTBotNavigationSystem::PostInitProperties()
 {
@@ -45,6 +65,34 @@ void UWoTBotNavigationSystem::PostInitProperties()
 		Bot.SetPreferredNavData(AWoTBotNavMesh::StaticClass());
 		SupportedAgents.Add(Bot);
 	}
+}
+
+void UWoTBotNavigationSystem::ApplyProjectileRelevance(AActor* Actor)
+{
+	if (!Actor || !Actor->IsA<AWoTProjectile>()) return;
+	// UE 5.8 PrimitiveComponent::IsNavigationRelevant also accepts vehicle
+	// blocking. Projectiles keep that collision response, but are not surfaces
+	// or route obstacles. Apply before registration to avoid spawn/remove dirties.
+	for (UActorComponent* Component : Actor->GetComponents())
+		if (Component) Component->SetCanEverAffectNavigation(false);
+}
+
+void UWoTBotNavigationSystem::InitializeForWorld(UWorld& World, FNavigationSystemRunMode Mode)
+{
+	World.RemoveOnActorPreSpawnInitialization(ProjectileSpawnHandle);
+	ProjectileSpawnHandle = World.AddOnActorPreSpawnInitialization(
+		FOnActorSpawned::FDelegate::CreateUObject(this, &ThisClass::ApplyProjectileRelevance));
+	// Navigation may be initialized after world projection or gameplay spawns.
+	// Remove existing projectiles before the initial octree/mesh is constructed.
+	for (TActorIterator<AActor> It(&World); It; ++It) ApplyProjectileRelevance(*It);
+	Super::InitializeForWorld(World, Mode);
+}
+
+void UWoTBotNavigationSystem::CleanUp(FNavigationSystem::ECleanupMode Mode)
+{
+	if (UWorld* World = GetWorld()) World->RemoveOnActorPreSpawnInitialization(ProjectileSpawnHandle);
+	ProjectileSpawnHandle.Reset();
+	Super::CleanUp(Mode);
 }
 
 const ANavigationData* UWoTBotNavigationSystem::GetNavDataForProps(const FNavAgentProperties& Props) const
