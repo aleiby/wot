@@ -61,7 +61,7 @@ void UWoTInventoryComponent::BroadcastOnboardingItemsAdded()
 	// the next OnRep after it resolves lands here again, so skipping it loses
 	// nothing.
 	const AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-	if (!CharacterOwner || !CharacterOwner->IsLocallyControlled())
+	if (!CharacterOwner || !WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		return;
 	}
@@ -85,7 +85,7 @@ void UWoTInventoryComponent::BroadcastOnboardingItemsAdded()
 void UWoTInventoryComponent::OnRep_Inventory()
 {
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-		CharacterOwner && CharacterOwner->IsLocallyControlled())
+		CharacterOwner && WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		CharacterOwner->ReconcileHandSet();
 	}
@@ -99,7 +99,7 @@ void UWoTInventoryComponent::OnRep_SelectedItem(AWoTInventory* PreviousSelectedI
 		return;
 	}
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-		CharacterOwner && CharacterOwner->IsLocallyControlled())
+		CharacterOwner && WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		CharacterOwner->NotifyHandSelected();
 	}
@@ -121,7 +121,7 @@ bool UWoTInventoryComponent::AddInventory(AWoTInventory* NewItem)
 		SelectItem(NewItem);
 	}
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-		CharacterOwner && CharacterOwner->IsLocallyControlled())
+		CharacterOwner && WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		CharacterOwner->NotifyItemAdded(GetHandSetItemName(NewItem));
 	}
@@ -157,7 +157,7 @@ bool UWoTInventoryComponent::DeleteInventory(AWoTInventory* Item)
 	Items.Remove(Item);
 	Item->SetOwner(nullptr);
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-		CharacterOwner && CharacterOwner->IsLocallyControlled())
+		CharacterOwner && WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		if (bSelectionChanged)
 		{
@@ -224,7 +224,7 @@ void UWoTInventoryComponent::SelectItem(AWoTInventory* Item)
 	}
 	SelectedItem = Item;
 	if (AWoTCharacter* CharacterOwner = Cast<AWoTCharacter>(GetOwner());
-		CharacterOwner && CharacterOwner->IsLocallyControlled())
+		CharacterOwner && WoTIsLocalHumanPawn(CharacterOwner))
 	{
 		CharacterOwner->NotifyHandSelected();
 	}

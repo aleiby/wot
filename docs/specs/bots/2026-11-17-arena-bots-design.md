@@ -2,11 +2,13 @@
 
 Issue #11. Status: approved by the owner on 2026-11-17 (revision 2, decisions A-E as
 recommended), after two independent adversarial reviews (see "Review record").
+Departure, empty-server idle and host-label behavior updated on 2026-11-19 to
+follow the owner's bot-roster brief.
 
 The original game shipped bot classes (`WoTPawns/WOTBot.uc` and four faction
 subclasses) but never wired bots into any multiplayer game type or menu. This adds
 bots to Arena so a host can practise against them and a public server never looks
-empty. It is new gameplay, not a port item; see the PORT_NOTES entry at the end.
+empty. It is new gameplay in an optional plugin, not a parity feature; no port-notes entry is needed.
 
 ## Owner rulings
 
@@ -16,7 +18,8 @@ empty. It is new gameplay, not a port item; see the PORT_NOTES entry at the end.
    kit, and artifacts collected from the map's pickups. The shipped bot classes only
    supply each faction's artifact preferences.
 4. **Control:** one setting, "Fill with bots to N players" (0 = off), independent of Max
-   Players. Bots = N minus the humans present, never negative.
+   Players. Bots = N minus the playing humans present, never negative. The host menu
+   offers Off, then 2 through Max Players, with text explaining the bot count.
 5. **Server browser:** bots are shown separately from players, e.g. "3/16 + 3 bots".
 6. **Approach:** a player-bodied bot. An AI controller with a real, bot-flagged
    PlayerState possesses a normal player pawn.
@@ -36,7 +39,9 @@ below follows them.
 - **C. Bot ceiling and dedicated servers.** Recommended: participants (humans plus bots)
   never exceed 16, the scoreboard's and Max Players' limit. A listen server therefore has
   at most 15 bots; a dedicated server with no humans can have 16. A dedicated server
-  reads its fill from `DefaultBotFill` in config when the URL has no `?BotFill`.
+  reads its fill from `DefaultBotFill` in config when the URL has no `?BotFill`. With
+  zero connected humans its bots remain on the roster but idle. Any connected human,
+  including a spectator or an inactive-team player, wakes them; match-end freeze wins.
 - **D. Summoning artifacts.** Bots use summoning artifacts they pick up, by an explicit
   rule (section 4). The alternative is that bots ignore them in v1.
 - **E. Inherited summon rules stay.** Two existing player rules carry over unchanged to
@@ -108,7 +113,8 @@ participants that use it, and leaves humans and NPCs unchanged.
 | H7 | Combatant count | Spawn-pool replenishment uses `GetNumPlayers()` | Uses `AWoTGameMode::GetNumCombatants()`, which counts humans plus bot PlayerStates (decision B). Connection capacity still counts humans only. |
 | H8 | Dropped-item AI state | An item's AI victim (`Target`) survives a death drop and a bag pickup; the launcher prefers it over the holder's aim | When an item leaves the inventory of a pawn whose PlayerState `IsABot()` (death drop, bag, toss), it clears its AI victim and restores its class priority. Items leaving human or NPC holders are untouched, so their behaviour is unchanged; a human who loots a bot no longer inherits the bot's target. |
 | H9 | Advertised session settings | No hook | The session subsystem holds an extra advertised integer map, keeps the last value across travel, and republishes on session updates. The browser row shows "+N bots" when the `WOTBOTS` key is above zero. |
-| H10 | Host options | No hook | A host-option section seam, like the Settings sections: a plugin registers a row that writes a URL option. |
+| H10 | Host options | No hook | A plugin registers a row that writes a URL option; optional `Values` and `ValueText` provide sparse values and descriptive labels. |
+| H11 | Participant pickup suspension | Every living player body may collect | `IWoTMatchParticipant::CanCollectPickups` defaults to true. Overlap collection consults the controller, or the intended controller owner before possession; normal kit grants remain unchanged. |
 
 ### 2. Components (in the plugin)
 
@@ -148,7 +154,8 @@ to `WoTAIUtil` as free functions shared by both controllers; NPC behaviour is un
   absent (the URL wins). It is a
   non-personal option, so it survives map rotation like `FragLimit`. Arena only.
 - **Desired bots** = `max(0, min(N, 16) - humans)`. Humans are PlayerStates that are
-  not bots and not inactive. Participants never exceed 16 (decision C).
+  not bots, not inactive and not spectators. Spectators do not consume fill slots.
+  Participants never exceed 16 (decision C).
 - **Evaluation:** on `PostLogin`, `Logout`, match start, and every 2 s.
 - **Adding:** one bot per 0.5 s until the count matches. A new bot joins like a player:
   PlayerState, team assignment (H2), the ordinary join message, then `RestartPlayer`.
@@ -157,14 +164,38 @@ to `WoTAIUtil` as free functions shared by both controllers; NPC behaviour is un
     (preferring a dead one, else the lowest-scoring). The newcomer never misses a
     scoreboard row.
   - Otherwise departures are graceful: a dead bot leaves at once; else the
-    lowest-scoring bot is marked to leave at its next death or after
-    `LeaveTimeoutSeconds` (15 s).
+    lowest-scoring bot is marked. It continues thinking, moving, fighting and
+    collecting normally, but never respawns while marked. It leaves at the first
+    death, unseen visibility tick, or `LeaveTimeoutSeconds` (60 s) safety cap.
+  - **Visibility:** only while marks exist, a 0.25 s timer checks every connected
+    non-bot player controller, local or remote, alive or dead. It uses the server's
+    `GetPlayerViewPoint`, including the server-held spectator view. Any head/eye,
+    body-centre or feet sample inside an 80-degree half-angle cone and unobstructed
+    on `ECC_Visibility` counts as seen. The generous cone accounts for unknown client
+    FOV/aspect and player turns. Traces ignore the viewer's pawn and the
+    bot's body and attachments. A sighting remains valid for 0.5 s. Net relevancy
+    is not used: its default distance test cannot establish visibility here.
+  - **Quiet removal:** an unseen live body and its held items are destroyed without
+    a death, kill announcement, dropped item or corpse. Pending and held casts are
+    cancelled before release so removal cannot fire a primed shot; ordinary retirement then
+    supplies the leave message. The safety cap ensures convergence even when a
+    viewer continuously watches a bot that survives.
   - **Pending departures** are tracked. Each evaluation reconciles them against the
     current excess: if humans leave and the excess shrinks, the newest marks are
     cancelled; each departure revalidates the excess when it fires.
   - A departing bot uses the ordinary leave message. Destroying its controller runs
     `Logout` for its PlayerState. Its live summons are retired first, so their team
     number isn't reused while they fight.
+- **Empty-server idle:** count all connected non-bot PlayerStates, including
+  spectator-only and inactive-team states, separately from the playing-human fill
+  count. Exiting states do not count. At zero, bodies stand still, think timers stop,
+  casts and pending activations are cancelled, pool claims are released, and pickups,
+  stuck recovery and silent respawns are blocked. Dead bots wait to respawn. The
+  roster and advertised bot count stay intact. Initial bodies are already idle before
+  spawning, so their first overlap cannot consume a pickup, while their normal kit is
+  still granted. The first connection wakes bots at
+  once, clears stale targets and plans, restarts thinking, and resumes pending
+  respawns. A listen host counts as a connection. Match-end freeze always wins.
 - **Identity:**
   - **Class:** the four classes are dealt in a shuffled round robin; a bot keeps its
     class until it leaves.
@@ -178,7 +209,8 @@ to `WoTAIUtil` as free functions shared by both controllers; NPC behaviour is un
 
 Each bot thinks on its own staggered timer (`ThinkInterval`, 0.1 s); movement and aim
 update every frame. States: Roam, SeekItem, Engage, plus Dead while respawning and
-Frozen after the match ends.
+Frozen after the match ends. Empty-server idle is an independent suspension flag,
+not a match-end state.
 
 - **Perception:**
   - **Sight:** a candidate enemy is any living `AWoTCharacter` the shared friend/foe
@@ -217,7 +249,8 @@ Frozen after the match ends.
     clearly better: close, attacked, or clearly the stronger side.
   - **Spread:** a bot heading for a pool claims it in the roster, and other bots give a
     claimed pool 0.15 of its value. A claim ends on arrival, when the pool empties, on a
-    goal change, on recovery, death or a pending departure, at retirement and at match end.
+    goal change, on recovery, death or idle, at retirement and at match end. A pending
+    departure keeps its claim while it continues collecting.
   - **Rotation:** a pool the bot collected from, found empty or reached is skipped for 3 s,
     then regains value linearly from 0.08 to 1 over 45 s; the memory survives respawns.
 - **Engage:**
@@ -312,8 +345,16 @@ Frozen after the match ends.
 - **Server browser:** "3/16 + 3 bots" from `WOTBOTS` (H9). Player counts stay
   humans-only, since bots hold no connections. LAN and EOS carry the key the same way;
   older clients ignore it. Steam is dormant.
-- **Host panel:** a "Fill with bots to" slider beside Max Players, 0 to Max Players,
-  default 0 (off), registered through H10. It travels as `?BotFill=N`.
+- **Host panel:** a "Fill with bots to" slider beside Max Players, registered through
+  H10. Values are `[0, 2, 3, ..., MaxPlayers]`, default 0. Localized text is `Off`,
+  `2 (you + 1 bot)`, or `N (you + N-1 bots)`. The generic optional `Values` callback
+  supplies ordered slider stops and supersedes Min/Max; stored values snap to the
+  nearest allowed value, with lower values winning ties (1 becomes Off). Optional
+  `ValueText` supplies the label. With neither callback, existing rows keep their
+  continuous integer bounds and numeric labels. Descriptive labels wrap below the
+  slider; existing numeric rows retain their inline layout. Travel remains plain `?BotFill=N`.
+  Dedicated config or URL value 1 still means one bot on an empty server; only the
+  host screen skips 1.
 
 ### 7. Networking and authority
 
@@ -337,7 +378,9 @@ engine) and items replicate like a human's.
 `DefaultBotFill` 0, `ThinkInterval` 0.1, `SightRange` 4000, `SightConeDegrees` 140,
 `ReactionSeconds` 0.35, `AimErrorDegrees` 4, `TargetMemorySeconds` 4,
 `StrafeRepathSeconds` 1.5, `EngageWhileSeekingRange` 1500, `HealBelowHealth` 0.5,
-`LeaveTimeoutSeconds` 15, `StuckRespawnSeconds` 20, `AddIntervalSeconds` 0.5.
+`LeaveTimeoutSeconds` 60, `DepartureViewHalfAngleDegrees` 80,
+`DepartureSeenGraceSeconds` 0.5, `DepartureVisibilityIntervalSeconds` 0.25,
+`StuckRespawnSeconds` 20, `AddIntervalSeconds` 0.5.
 
 These are starting values to tune in play. There is one skill level in v1. The goal-choice
 constants (section 4) are code constants in `WoTBotDecision.h`, not settings;
@@ -417,14 +460,3 @@ before it was accepted.
 | No config default for dedicated servers; 15-bot claim vs a 16-bot formula | `InitGame` URL parsing | `DefaultBotFill`, decision C |
 | Summon credit after the owner's death and summon frag-limit wins | `ScoreKill`, `Killed` | Inherited player rules, decision E |
 | Non-parity features belong in optional plugins (owner rule, 2026-11-16) | revision 1 put everything in the game module | Section 1, decision A |
-
-## PORT_NOTES entry (added with the code)
-
-### Bots fill Arena matches
-- **Original:** the game shipped bot classes but never added bots to any multiplayer
-  mode or menu.
-- **Port:** a host can set "Fill with bots to N players". Bots play by player rules
-  (player body and health, the starting kit, artifacts from pickups), using each
-  faction's artifact preferences from the shipped bot classes, and leave as humans join.
-  The feature is the optional `WoTBots` plugin; without it, play is unchanged.
-- **Why:** with a small community, an empty server is the onboarding problem (#11).

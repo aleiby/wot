@@ -413,7 +413,7 @@ void AWoTZoneVolume::ReconcileOwnerLocalFOV(AWoTCharacter* Player)
 	if (!IsValid(Player) || Player->IsNPCPawn()) return;
 	TArray<UWoTSmoothRandFOVLeech*> Existing;
 	Player->GetComponents<UWoTSmoothRandFOVLeech>(Existing);
-	if (!Player->IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(Player))
 	{
 		for (UWoTSmoothRandFOVLeech* Leech : Existing)
 		{

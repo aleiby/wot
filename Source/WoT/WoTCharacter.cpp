@@ -127,6 +127,13 @@ bool WoTIsPlayerBody(const APawn* Pawn)
 	return Pawn != nullptr && !Pawn->IsA<AWoTNPCCharacter>();
 }
 
+bool WoTIsLocalHumanPawn(const APawn* Pawn)
+{
+	const APlayerController* PlayerController = WoTIsPlayerBody(Pawn)
+		? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	return PlayerController && PlayerController->IsLocalController();
+}
+
 bool AWoTCharacter::ApplyRetailPlayerHealthDefaults(
 	const FWoTRuntimeClassDefaults& Defaults, FString& OutError)
 {
@@ -2605,7 +2612,10 @@ void AWoTCharacter::PlayPlayerTweenPose(FName SlotName, float CallerTween)
 void AWoTCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!IsLocallyControlled())
+	// NPCs retain their existing view-state lifecycle.
+	const bool bLocalViewDriver = IsNPCPawn()
+		? IsLocallyControlled() : WoTIsLocalHumanPawn(this);
+	if (!bLocalViewDriver)
 	{
 		ClearCreaturePresentationPitch();
 	}
@@ -2615,7 +2625,7 @@ void AWoTCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateStatusIconDurations();
 	}
-	if (IsLocallyControlled())
+	if (bLocalViewDriver)
 	{
 		if (const UWoTPreferencesSubsystem* Preferences = GetGameInstance()
 			? GetGameInstance()->GetSubsystem<UWoTPreferencesSubsystem>() : nullptr)
@@ -3096,7 +3106,7 @@ void AWoTCharacter::ApplyPendingZoneFOV()
 
 void AWoTCharacter::ReconcileOwnerLocalZoneFOV()
 {
-	if (!IsLocallyControlled() || !GetWorld()) return;
+	if (!WoTIsLocalHumanPawn(this) || !GetWorld()) return;
 	if (const UWoTZoneIndex* Zones = GetWorld()->GetSubsystem<UWoTZoneIndex>())
 	{
 		if (AWoTZoneVolume* Region = Zones->GetRegion(this))
@@ -3159,7 +3169,7 @@ void AWoTCharacter::UnPossessed()
 
 void AWoTCharacter::EnsureAngrealHands()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		// Keep the long-standing headless/manual view-model seam: a caller may install an
 		// AngrealHandSet without a local controller. Real simulated proxies install neither.
@@ -3187,7 +3197,7 @@ void AWoTCharacter::EnsureAngrealHands()
 
 void AWoTCharacter::ReconcileHandSet()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -3271,7 +3281,7 @@ void AWoTCharacter::ReconcileHandSet()
 
 void AWoTCharacter::EnsureCitadelEditorHands()
 {
-	if (!IsLocallyControlled() || CitadelEditorHandSet)
+	if (!WoTIsLocalHumanPawn(this) || CitadelEditorHandSet)
 	{
 		return;
 	}
@@ -3306,7 +3316,7 @@ void AWoTCharacter::EnsureCitadelEditorHands()
 
 void AWoTCharacter::ReconcileCitadelEditorHandSet()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -3388,7 +3398,7 @@ void AWoTCharacter::ReconcileCitadelEditorHandSet()
 
 void AWoTCharacter::HandleCitadelEditStateChanged(bool bEditing)
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -4970,7 +4980,7 @@ void AWoTCharacter::DriveHandSelection(bool bNewHand)
 		// WOTPlayer.PerformSelection (WOTPlayer.uc:1013-1023): with a live selection, a
 		// hand change plays WOT.UI.SelectHand, an item change WOT.UI.SelectArtifact —
 		// owner-local ClientPlaySound, checked AFTER the selection RPC like the original.
-		if (IsLocallyControlled() && InventoryComponent
+		if (WoTIsLocalHumanPawn(this) && InventoryComponent
 			&& InventoryComponent->SelectedItem)
 		{
 			USoundBase* SelectSound = WoTSound::LoadBySubPath(FName(bNewHand
@@ -5001,7 +5011,7 @@ void AWoTCharacter::DriveHandSelection(bool bNewHand)
 			}
 		}
 		// WOTPlayer.PerformSelection ends with ClientSelectItemMessage(new selection).
-		if (IsLocallyControlled())
+		if (WoTIsLocalHumanPawn(this))
 		{
 			const UWoTHandInfo* SelectedHand = CurrentHandSet->GetSelectedHand();
 			SendSelectItemHandMessage(SelectedHand
