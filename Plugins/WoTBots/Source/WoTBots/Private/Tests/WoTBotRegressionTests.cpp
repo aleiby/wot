@@ -277,10 +277,9 @@ bool FBotHoldInterruptionSpec::RunTest(const FString& Name)
 	TestTrue(TEXT("held effect established before interruption"), HasEffect(E, TEXT("/Script/WoT.WoTWhirlwindLeech")));
 	if (Name == TEXT("TargetSwitch"))
 	{
-		AWoTCharacter* Other = Enemy(W, FVector(500, 200, 50), 2);
-		FDamageEvent Event;
-		Pawn->TakeDamage(1, Event, Other->GetController(), Other);
-		TestEqual(TEXT("damage switches observed target"), B->GetTarget(), Other);
+		AWoTCharacter* Other = Enemy(W, FVector(200, 100, 50), 2);
+		FWoTBotRegressionAccess::Think(B);
+		TestEqual(TEXT("normal sight switches to the clearly nearer target"), B->GetTarget(), Other);
 	}
 	else if (Name == TEXT("ItemSwitch"))
 	{

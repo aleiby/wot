@@ -66,6 +66,16 @@ struct FObserver
 	TSet<TWeakObjectPtr<AWoTAngrealSpawnPool>> VisitedPools;
 	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, double> ClosestApproach;
 	TArray<double> PairDistances;
+	struct FGoalChange { double Time; FString Pool; EWoTBotState State; };
+	TMap<TWeakObjectPtr<AWoTBotController>, TArray<FGoalChange>> GoalHistory;
+	void RecordGoal(AWoTBotController* B)
+	{
+		auto& History = GoalHistory.FindOrAdd(B);
+		const FString Goal = B->GetSeekingPool() ? B->GetSeekingPool()->GetName() : TEXT("none");
+		if (History.IsEmpty() || History.Last().Pool != Goal || History.Last().State != B->GetBehaviourState())
+			History.Add({Time, Goal, B->GetBehaviourState()});
+		while (History.Num() > 1 && History[1].Time < Time - 5.0) History.RemoveAt(0);
+	}
 	FObserver(UWorld* W, const FObject& R, FLogCapture& L) : World(W), Report(R), Logs(L)
 	{
 		Handle = WoTSoakEvents::Events().AddLambda([this](WoTSoakEvents::EKind Kind, AActor* Subject, AActor* Participant)
@@ -122,6 +132,19 @@ struct FObserver
 	void DescribeStuck(const FObject& Event, AWoTBotController* B)
 	{
 		static const TCHAR* StateNames[] = { TEXT("roam"), TEXT("seek"), TEXT("engage"), TEXT("dead"), TEXT("frozen") };
+		RecordGoal(B);
+		TArray<TSharedPtr<FJsonValue>> HistoryRows;
+		const auto& History = GoalHistory.FindChecked(B);
+		for (const auto& Change : History)
+		{
+			FObject Row = Object();
+			Row->SetNumberField(TEXT("seconds"), Change.Time);
+			Row->SetStringField(TEXT("pool"), Change.Pool);
+			Row->SetStringField(TEXT("state"), StateNames[int32(Change.State)]);
+			HistoryRows.Add(Value(Row));
+		}
+		Event->SetArrayField(TEXT("recent_goals"), HistoryRows);
+		Event->SetNumberField(TEXT("goal_age_seconds"), Time - History.Last().Time);
 		Event->SetStringField(TEXT("state"), StateNames[int32(B->GetBehaviourState())]);
 		const AWoTCharacter* Body = Cast<AWoTCharacter>(B->GetPawn());
 		if (!Body) return;
@@ -422,6 +445,7 @@ struct FObserver
 		TArray<FVector> Living;
 		for (TActorIterator<AWoTBotController> It(World); It; ++It)
 		{
+			RecordGoal(*It);
 			FObject R = Bot(*It);
 			static const TCHAR* States[] = { TEXT("roam_seconds"), TEXT("seek_seconds"), TEXT("engage_seconds"), TEXT("dead_seconds"), TEXT("frozen_seconds") };
 			Increment(R, States[int32(It->GetBehaviourState())], Delta);
@@ -746,7 +770,10 @@ bool FBotSoakSpec::RunTest(const FString&)
 		return !bFailed && !HasAnyErrors();
 	}
 	const double Started = FPlatformTime::Seconds();
-	const FString Directory = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("BotSoak") / FDateTime::UtcNow().ToString(TEXT("%Y%m%d-%H%M%S")));
+	FString Directory;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("WotBotSoakDirectory="), Directory))
+		Directory = FPaths::ProjectSavedDir() / TEXT("BotSoak") / FDateTime::UtcNow().ToString(TEXT("%Y%m%d-%H%M%S"));
+	Directory = FPaths::ConvertRelativePathToFull(Directory);
 	IFileManager::Get().MakeDirectory(*Directory,true);
 	AddInfo(FString::Printf(TEXT("Bot soak reports: %s"), *Directory));
 	const auto Contract = WoTLoadProductionRetailContract();

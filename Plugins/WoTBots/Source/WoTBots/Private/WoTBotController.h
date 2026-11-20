@@ -21,10 +21,24 @@ struct FWoTBotBehaviourAccess;
 struct FWoTBotDecisionAccess;
 struct FWoTBotTraversalAccess;
 struct FWoTBotRosterAccess;
+struct FWoTBotPoolAccess;
 }
 #endif
 
 enum class EWoTBotState : uint8 { Roam, SeekItem, Engage, Dead, Frozen };
+
+struct FWoTBotPoolBelief
+{
+	float LastPerceived = -1e9f;
+	TWeakObjectPtr<UClass> Contents;
+	bool bEmpty = false;
+	uint8 Rarity = 0;
+	float EstimatedRestock = -1;
+	float EmptyRecovery = -1;
+	float Delay = 0;
+	float VisibleSince = -1;
+	uint64 ObservationOrder = 0;
+};
 
 UCLASS()
 class AWoTBotController : public AAIController, public IWoTMatchParticipant
@@ -40,7 +54,7 @@ public:
 	void SetDeparturePending(bool bPending);
 	void SetIdle(bool bNewIdle);
 	bool IsIdle() const { return bIdle; }
-	virtual bool CanCollectPickups() const override { return !bIdle; }
+	virtual bool CanCollectPickups() const override;
 	bool IsDeparturePending() const { return bDeparturePending; }
 	bool IsFrozen() const { return bFrozen; }
 	EWoTBotState GetBehaviourState() const { return State; }
@@ -73,6 +87,7 @@ private:
 	friend struct WoTBotTest::FWoTBotDecisionAccess;
 	friend struct WoTBotTest::FWoTBotTraversalAccess;
 	friend struct WoTBotTest::FWoTBotRosterAccess;
+	friend struct WoTBotTest::FWoTBotPoolAccess;
 #endif
 	void InventoryPulse();
 	void ResetBehaviour(AWoTCharacter* Body);
@@ -86,6 +101,8 @@ private:
 	void Perceive();
 	void SetTarget(AWoTCharacter* NewTarget, bool bVisible);
 	void DamageApplied(AWoTCharacter* Victim, AController* InstigatorController, AActor* Causer, float Amount);
+	UFUNCTION()
+	void BodyMovementUpdated(float DeltaSeconds, FVector OldLocation, FVector OldVelocity);
 	void UpdateAim();
 	// Whether a whirlwind holds the body: its effect lifts and spins the body and
 	// disables its movement until it lets go.
@@ -98,11 +115,35 @@ private:
 	AWoTAngrealSpawnPool* BestPool(float& Score, bool bRoaming = false);
 	void ReleasePoolGoal();
 	void RememberNearbyPools();
+	void InitializePoolPerception();
+	void PoolActorSpawned(AActor* Actor);
+	void PerceivePools();
+	bool CanSeePool(const AWoTAngrealSpawnPool* Pool) const;
+	bool CanSeeStimulus(const AActor* Actor) const;
+	void ObservePool(AWoTAngrealSpawnPool* Pool, bool bVisit);
+	float PoolStockProbability(const AWoTAngrealSpawnPool* Pool) const;
+	float PoolUtility(const AWoTAngrealSpawnPool* Pool, int32 OffensiveKinds) const;
+	float PoolRespawnDelay(const AWoTAngrealSpawnPool* Pool) const;
+	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, FWoTBotPoolBelief> PoolBeliefs;
+	TArray<TWeakObjectPtr<AWoTAngrealSpawnPool>> PerceptionPools;
+	int32 PoolSightCursor = 0;
+	FRandomStream PoolRandom;
+	FDelegateHandle PoolSpawnHandle;
+	uint64 PoolPerceptionOrder = 0;
+	struct FPendingPoolSound
+	{
+		TWeakObjectPtr<AActor> Actor;
+		FVector Listener;
+		float Time;
+		uint64 Order;
+	};
+	TArray<FPendingPoolSound> PendingPoolSounds;
 	void OffensiveSupply(int32& Kinds, int32& Charges) const;
 	float FightScore() const;
 	bool HasLiveHelper() const;
 	AWoTResourceSpawnerInv* ReadySummon() const;
 	void CastArtifacts();
+	AActor* FindVisibleIncomingProjectile() const;
 	AWoTAngrealInventory* SelectArtifact(AActor* Victim, bool bDefensive);
 	void CastItem(AWoTAngrealInventory* Item);
 	void ObserveCastUse();
@@ -121,6 +162,8 @@ private:
 	TWeakObjectPtr<AWoTAngrealSpawnPool> SeekingPool;
 	// Pools collected from, found empty or reached recently (kept across respawns).
 	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> PoolVisits;
+	// Failed movement is independent of what was last heard or seen in a pool.
+	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> RecoveryPools;
 	// Pools with no complete path from this body, retried after a delay.
 	TMap<TWeakObjectPtr<AWoTAngrealSpawnPool>, float> UnreachablePools;
 	// Pools reached but not collected, even by jumping for them (kept across respawns).
@@ -138,13 +181,18 @@ private:
 	float LastSeenTargetHealth = 1.0f;
 	TWeakObjectPtr<AWoTAngrealInventory> AimingItem;
 	FWoTBotCastHold CastHold;
-	TMap<TWeakObjectPtr<AWoTCharacter>, float> RecentAttackers;
+	float LastDamagedTime = -1e9f;
 	FVector LastKnownPosition = FVector::ZeroVector;
 	FVector Destination = FVector::ZeroVector;
 	FVector ProgressPosition = FVector::ZeroVector;
 	FVector2D AimDisk = FVector2D::ZeroVector;
 	float LastSensedTime = -1e9f;
 	float VisibleSince = 0.0f;
+	FVector DamageSearchDirection = FVector::ZeroVector;
+	float DamageSearchUntil = -1.0f;
+	TWeakObjectPtr<AWoTCharacter> DamageSightCandidate;
+	float DamageSightSince = 0.0f;
+	FVector FeltVelocity = FVector::ZeroVector;
 	float NextRepathTime = 0.0f;
 	float LastProgressTime = 0.0f;
 	float LastRecoveryTime = 0.0f;

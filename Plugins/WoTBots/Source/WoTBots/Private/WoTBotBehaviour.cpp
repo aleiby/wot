@@ -17,6 +17,8 @@
 #include "Inventory/WoTProjectileLauncher.h"
 #include "Inventory/WoTResourceSpawnerInv.h"
 #include "Projectiles/WoTMashadarGuide.h"
+#include "Projectiles/WoTAngrealProjectile.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "WoTCharacter.h"
 #include "WoTGameMode.h"
 #include "WoTPlayerState.h"
@@ -90,54 +92,89 @@ void AWoTBotController::SetTarget(AWoTCharacter* NewTarget, bool bVisible)
 		LastKnownPosition = NewTarget->GetActorLocation();
 		LastSensedTime = GetWorld()->GetTimeSeconds();
 		LastCombatProgress = LastSensedTime;
-		LastSeenTargetHealth = float(NewTarget->Health) / FMath::Max(1, NewTarget->MaxHealth);
+		// Opponents do not expose an exact health meter to this player.
+		LastSeenTargetHealth = 1.0f;
 	}
 }
 
+void AWoTBotController::BodyMovementUpdated(float, FVector, FVector)
+{
+	if (GetPawn()) FeltVelocity = GetPawn()->GetVelocity();
+}
+
 void AWoTBotController::DamageApplied(AWoTCharacter* Victim, AController* InstigatorController,
-	AActor* Causer, float Amount)
+	AActor*, float Amount)
 {
 	if (!CanAct() || Amount <= 0.0f) return;
-	if (InstigatorController == this || Victim == GetPawn()) LastCombatProgress = GetWorld()->GetTimeSeconds();
+	if (Victim == GetPawn() || (InstigatorController == this && CanSee(Victim))) LastCombatProgress = GetWorld()->GetTimeSeconds();
 	if (Victim != GetPawn()) return;
-	APawn* InstigatorPawn = nullptr;
-	if (InstigatorController) InstigatorPawn = InstigatorController->GetPawn();
-	else if (Causer) InstigatorPawn = Causer->GetInstigator();
-	AWoTCharacter* Attacker = Cast<AWoTCharacter>(InstigatorPawn);
-	if (!IsHostile(Attacker)) return;
-	RecentAttackers.Add(Attacker, GetWorld()->GetTimeSeconds());
-	SetTarget(Attacker, CanSee(Attacker));
+	LastDamagedTime = GetWorld()->GetTimeSeconds();
+	// Damage has already applied its impulse to our movement. The change since
+	// movement's last update (or last hit) is felt by this body. Movement updates
+	// refresh this baseline even when they occur between hits in the same frame.
+	const auto* Movement = Victim->GetCharacterMovement();
+	const FVector HitDirection = (FeltVelocity - Movement->Velocity).GetSafeNormal2D();
+	FeltVelocity = Movement->Velocity;
+	if (!DamageSightCandidate.IsValid() && bTargetVisible)
+	{ DamageSightCandidate = Target; DamageSightSince = VisibleSince; }
+	// With no directional impulse, keep looking locally rather than inventing a
+	// direction from damage credit. Only subsequent sight can identify an enemy.
+	DamageSearchDirection = HitDirection.IsNearlyZero() ? GetControlRotation().Vector() : HitDirection;
+	DamageSearchUntil = GetWorld()->GetTimeSeconds() + FMath::Max(1.5f, GetDefault<UWoTBotSettings>()->ReactionSeconds + .5f);
+	UpdateAim();
+	// An independently acquired enemy can remain in view through the turn.
+	// Do not interrupt its existing cast or restart continuous sight in that case.
+	if (bTargetVisible && !CanSee(Target.Get())) SetTarget(Target.Get(), false);
 	if (!CanAct()) return;
-	// Damage supplies one observation, never a live tracking reference through walls.
-	LastKnownPosition = Attacker->GetActorLocation();
-	LastSensedTime = GetWorld()->GetTimeSeconds();
-	// A body a whirlwind holds keeps its view turning with it (UpdateAim).
-	if (!IsHeldByWhirlwind()) SetControlRotation((LastKnownPosition - Victim->GetPawnViewLocation()).Rotation());
+	if (!CanSee(DamageSightCandidate.Get())) DamageSightCandidate.Reset();
 }
 
 void AWoTBotController::Perceive()
 {
 	const float Now = GetWorld()->GetTimeSeconds();
+	// Death is a visual observation too, independent of hostility eligibility.
+	if (Target.IsValid() && CanSeeStimulus(Target.Get()) && !Target->IsAlive())
+	{
+		SetTarget(nullptr, false);
+		if (!CanAct()) return;
+	}
 	const float Memory = FMath::Max(0.0f, GetDefault<UWoTBotSettings>()->TargetMemorySeconds);
-	for (auto It = RecentAttackers.CreateIterator(); It; ++It)
-		if (!It.Key().IsValid() || Now - It.Value() > Memory) It.RemoveCurrent();
 	AWoTCharacter* Best = nullptr;
 	float BestScore = TNumericLimits<float>::Max();
-	TMap<const AWoTCharacter*, int32> Fighters;
-	if (Roster.IsValid()) Roster->CountFighters(this, Fighters);
 	for (TActorIterator<AWoTCharacter> It(GetWorld()); It; ++It)
 	{
 		AWoTCharacter* Candidate = *It;
 		if (!CanSee(Candidate)) continue;
 		float Score = FVector::Dist(GetPawn()->GetActorLocation(), Candidate->GetActorLocation());
-		if (RecentAttackers.Contains(Candidate)) Score *= .6f;
 		if (Candidate == Target.Get()) Score *= .8f;
-		// A target two others already fight is a poor choice unless it is attacking us.
-		if (!RecentAttackers.Contains(Candidate) && Fighters.FindRef(Candidate) >= 2) Score *= 4.0f;
 		if (Score < BestScore) { BestScore = Score; Best = Candidate; }
 	}
-	if (Best) SetTarget(Best, true);
-	else if (!Target.IsValid() || !Target->IsAlive() || Now - LastSensedTime >= Memory)
+	float ReactedSince = -1;
+	if (Best && (Now < DamageSearchUntil || DamageSightCandidate.IsValid()))
+	{
+		if (DamageSightCandidate.Get() != Best) { DamageSightCandidate = Best; DamageSightSince = Now; }
+		if (Now - DamageSightSince < GetDefault<UWoTBotSettings>()->ReactionSeconds)
+		{
+			// Waiting to identify a new enemy must not freeze the old observation.
+			// Refresh real sight, or retain only unexpired memory of the old target.
+			const bool bStillVisible = CanSee(Target.Get());
+			SetTarget(bStillVisible || (Target.IsValid() && Now - LastSensedTime < Memory)
+				? Target.Get() : nullptr, bStillVisible);
+			if (!CanAct()) return;
+			return;
+		}
+		ReactedSince = DamageSightSince;
+		DamageSearchUntil = -1;
+		DamageSightCandidate.Reset();
+	}
+	if (!Best) DamageSightCandidate.Reset();
+	if (Best)
+	{
+		SetTarget(Best, true);
+		if (!CanAct()) return;
+		if (ReactedSince >= 0) VisibleSince = ReactedSince;
+	}
+	else if (!Target.IsValid() || Now - LastSensedTime >= Memory)
 		SetTarget(nullptr, false);
 	else SetTarget(Target.Get(), false);
 }
@@ -180,7 +217,7 @@ void AWoTBotController::Think()
 		Pool = BestPool(CollectScore, true);
 		CollectScore *= WoTBotDecision::RoamWeight;
 	}
-	const bool Threat = Target.IsValid() && (RecentAttackers.Contains(Target)
+	const bool Threat = Target.IsValid() && (Now - LastDamagedTime < GetDefault<UWoTBotSettings>()->TargetMemorySeconds
 		|| (bTargetVisible && FVector::DistSquared(GetPawn()->GetActorLocation(), LastKnownPosition)
 			<= FMath::Square(FMath::Min(WoTBotDecision::CloseRange, GetDefault<UWoTBotSettings>()->EngageWhileSeekingRange))));
 	const bool Fight = WoTBotDecision::ChooseFight(CollectScore, FightScore(),
@@ -214,31 +251,30 @@ void AWoTBotController::ReleasePoolGoal()
 
 void AWoTBotController::RememberNearbyPools()
 {
+	PerceivePools();
 	const float Now = GetWorld()->GetTimeSeconds();
 	for (auto It = PoolVisits.CreateIterator(); It; ++It)
 		if (!It.Key().IsValid() || Now - It.Value() >= WoTBotDecision::VisitMemory) It.RemoveCurrent();
-	for (TActorIterator<AWoTAngrealSpawnPool> It(GetWorld()); It; ++It)
-		if ((!It->PickupItem || State == EWoTBotState::Roam)
-			&& FVector::DistSquared(GetPawn()->GetActorLocation(), It->GetActorLocation()) <= FMath::Square(WoTBotDecision::ArrivalRadius))
+	for (auto It = RecoveryPools.CreateIterator(); It; ++It)
+		if (!It.Key().IsValid() || Now - It.Value() >= WoTBotDecision::VisitMemory) It.RemoveCurrent();
+	for (const auto& Weak : PerceptionPools)
+		if (AWoTAngrealSpawnPool* Pool = Weak.Get(); Pool
+			&& FVector::DistSquared(GetPawn()->GetActorLocation(), Pool->GetActorLocation()) <= FMath::Square(WoTBotDecision::ArrivalRadius))
 		{
-			PoolVisits.Add(*It, Now);
-			if (SeekingPool.Get() == *It) ReleasePoolGoal();
+			ObservePool(Pool, true);
+			if (PoolBeliefs.FindChecked(Pool).bEmpty || State == EWoTBotState::Roam)
+			{
+				PoolVisits.Add(Pool, Now);
+				if (SeekingPool.Get() == Pool) ReleasePoolGoal();
+			}
 		}
 	if (!SeekingPool.IsValid()) return;
-	// A stock change observed on our route counts as an empty visit too.
-	const bool bTaken = State == EWoTBotState::SeekItem && !SeekingPool->PickupItem;
 	// A pool placed off the navigation mesh is reached at its projection; an item
 	// still there was not collectable from it, so move on rather than idle.
 	const bool bRouteEnd = !bWantsMovement && !bNavigationUnavailable
 		&& FVector::Dist2D(GetPawn()->GetActorLocation(), Destination) <= 30.0f
 		&& FVector::DistSquared(Destination, SeekingPool->GetActorLocation()) <= FMath::Square(200.0f);
 	const bool bHopping = HopPool.Get() == SeekingPool.Get() && HopCount > 0;
-	if (bTaken)
-	{
-		PoolVisits.Add(SeekingPool, Now);
-		ReleasePoolGoal();
-		return;
-	}
 	if (State == EWoTBotState::SeekItem && (bRouteEnd || bHopping))
 	{
 		// A pickup on a pedestal or ledge beside the route's end: jump for it, as a
@@ -386,9 +422,11 @@ float AWoTBotController::FightScore() const
 	int32 Kinds, Charges;
 	OffensiveSupply(Kinds, Charges);
 	const float Distance = FVector::Dist(Body->GetActorLocation(), LastKnownPosition);
-	return WoTBotDecision::Fight(Distance, bTargetVisible, RecentAttackers.Contains(Target),
+	// Recent pain increases urgency without attributing the hit to this target.
+	return WoTBotDecision::Fight(Distance, bTargetVisible,
+		GetWorld()->GetTimeSeconds() - LastDamagedTime < GetDefault<UWoTBotSettings>()->TargetMemorySeconds,
 		FMath::Clamp(float(Body->Health) / FMath::Max(1, Body->MaxHealth), 0.0f, 1.0f), Charges,
-		LastSeenTargetHealth, Roster.IsValid() ? Roster->FightersFor(Target.Get(), this) : 0,
+		LastSeenTargetHealth, 0,
 		bTargetVisible && Distance <= FMath::Min(WoTBotDecision::CloseRange, GetDefault<UWoTBotSettings>()->EngageWhileSeekingRange));
 }
 
@@ -401,33 +439,30 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 	if (!Data) return nullptr;
 	const float Now = GetWorld()->GetTimeSeconds();
 	const FVector Start = Body->GetNavAgentLocation();
-	const auto* Profile = WoTBotProfiles::Get().Find(Body->GetClass());
 	int32 Kinds, Charges;
 	OffensiveSupply(Kinds, Charges);
 	struct FCandidate
 	{
 		AWoTAngrealSpawnPool* Pool = nullptr;
 		FVector End = FVector::ZeroVector;
-		float Priority = 0, ChargeFraction = 0, Rotation = 1, Bound = 0;
-		bool bMissing = false, bOffensive = false, bClaimed = false;
+		float Utility = 0, Rotation = 1, Bound = 0;
 	};
 	const auto Value = [&](const FCandidate& C, float Length)
 	{
-		return bRoaming ? WoTBotDecision::Roam(Length, C.Rotation, C.bClaimed)
-			: WoTBotDecision::Collect(C.Priority, C.bMissing, C.ChargeFraction, Kinds, C.bOffensive, Length, C.Rotation, C.bClaimed);
+		return bRoaming ? WoTBotDecision::Roam(Length, C.Rotation, false)
+			: C.Utility / (1.0f + Length / 1600.0f) * C.Rotation;
 	};
 	TArray<FCandidate> Candidates;
 	for (TActorIterator<AWoTAngrealSpawnPool> It(GetWorld()); It; ++It)
 	{
 		const float* Visit = PoolVisits.Find(*It);
+		const float* Recovery = RecoveryPools.Find(*It);
 		if (Visit && Now - *Visit < WoTBotDecision::RevisitBlockSeconds) continue;
+		if (Recovery && Now - *Recovery < WoTBotDecision::RevisitBlockSeconds) continue;
 		if (const float* Failed = UnreachablePools.Find(*It); Failed && Now - *Failed < WoTBotDecision::UnreachableRetrySeconds) continue;
-		const AWoTAngrealInventory* Item = Cast<AWoTAngrealInventory>(It->PickupItem);
-		if (!bRoaming && !Item) continue;
-		const AWoTAngrealInventory* Existing = nullptr;
-		if (Item) for (AWoTInventory* Held : Body->InventoryComponent->Items)
-			if (Held->GetClass() == Item->GetClass()) { Existing = Cast<AWoTAngrealInventory>(Held); break; }
-		if (!bRoaming && Existing && Existing->CurCharges >= Existing->MaxCharges) continue;
+		if (PoolStockProbability(*It) <= 0) continue;
+		const float Utility = PoolUtility(*It, Kinds);
+		if (!bRoaming && Utility <= 0 && *It != SeekingPool.Get()) continue;
 		FNavLocation End;
 		if (!Nav->ProjectPointToNavigation(It->GetActorLocation(), End, PoolExtent, Data)) continue;
 		if (!bRoaming)
@@ -440,16 +475,10 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 		FCandidate& C = Candidates.AddDefaulted_GetRef();
 		C.Pool = *It;
 		C.End = End.Location;
-		C.Rotation = WoTBotDecision::Rotation(Visit ? Now - *Visit : WoTBotDecision::VisitMemory);
-		C.bClaimed = Roster.IsValid() && Roster->IsPoolClaimed(*It, this);
-		if (Item && !bRoaming)
-		{
-			const float* Priority = Profile ? Profile->Priorities.Find(Item->GetClass()) : nullptr;
-			C.Priority = Priority ? *Priority : Item->Priority;
-			C.bMissing = !Existing;
-			C.bOffensive = Item->bOffensive;
-			C.ChargeFraction = Existing ? FMath::Clamp(float(Existing->CurCharges) / FMath::Max(1, Existing->MaxCharges), 0.0f, 1.0f) : 0;
-		}
+		C.Rotation = WoTBotDecision::Rotation(FMath::Min(
+			Visit ? Now - *Visit : WoTBotDecision::VisitMemory,
+			Recovery ? Now - *Recovery : WoTBotDecision::VisitMemory));
+		C.Utility = Utility;
 		// Roaming measures "far" in a straight line. A path is never shorter than
 		// that line (less a little start projection slack), so a collection value
 		// at the line's length bounds the value at the path's length from above.
@@ -478,24 +507,25 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 		return false;
 	};
 	const FCandidate* Current = Candidates.FindByPredicate([this](const FCandidate& C) { return C.Pool == SeekingPool.Get(); });
-	if (bRoaming && Current && !Current->bClaimed)
+	if (bRoaming && Current)
 	{
 		// Running the map keeps its pool until arrival records the visit: the pool's
 		// remaining distance shrinks on the way, so re-scoring it would chase ever
-		// farther pools without reaching one. Another bot's claim reopens the choice.
+		// farther pools without reaching one.
 		// The best value on offer stands for running the map against a fight.
 		Score = Candidates[0].Bound;
 		return SeekingPool.Get();
 	}
 	// The current goal's exact value sets the bar a challenger must clear.
 	float CurrentScore = 0;
+	bool bCurrentReachable = false;
 	if (Current)
 	{
 		float Length = 0;
 		if (bRoaming) CurrentScore = Current->Bound;
-		else if (Reach(*Current, Length)) CurrentScore = Value(*Current, Length);
+		else if (Reach(*Current, Length)) { CurrentScore = Value(*Current, Length); bCurrentReachable = true; }
 	}
-	const float Bar = CurrentScore > 0 ? CurrentScore * WoTBotDecision::SwitchRatio + WoTBotDecision::SwitchMargin : 0.0f;
+	const float Bar = bCurrentReachable ? CurrentScore * WoTBotDecision::SwitchRatio + WoTBotDecision::SwitchMargin : 0.0f;
 	AWoTAngrealSpawnPool* Best = nullptr;
 	for (const FCandidate& C : Candidates)
 	{
@@ -508,7 +538,7 @@ AWoTAngrealSpawnPool* AWoTBotController::BestPool(float& Score, bool bRoaming)
 		if (Candidate > Score) { Score = Candidate; Best = C.Pool; }
 	}
 	// Retain a reachable goal unless another pool is clearly worth changing route.
-	if (CurrentScore > 0 && !WoTBotDecision::ClearlyBetter(Score, CurrentScore))
+	if (bCurrentReachable && !WoTBotDecision::ClearlyBetter(Score, CurrentScore))
 	{ Score = CurrentScore; return SeekingPool.Get(); }
 	return Best;
 }
@@ -625,6 +655,32 @@ AWoTAngrealInventory* AWoTBotController::SelectArtifact(AActor* Victim, bool bDe
 	return Selected;
 }
 
+AActor* AWoTBotController::FindVisibleIncomingProjectile() const
+{
+	const auto* Body = CastChecked<AWoTCharacter>(GetPawn());
+	const auto* Capsule = Body->GetCapsuleComponent();
+	const float RadiusSq = FMath::Square(Capsule->GetScaledCapsuleRadius() * Caster->DefensivePerimeterRadiusFactor);
+	const float Height = Capsule->GetScaledCapsuleHalfHeight() * Caster->DefensivePerimeterHeightFactor;
+	AActor* Best = nullptr;
+	float BestDistance = TNumericLimits<float>::Max();
+	for (TActorIterator<AWoTAngrealProjectile> It(GetWorld()); It; ++It)
+	{
+		// Perceive before ranking: a hidden near projectile cannot mask a visible
+		// threat. Predict from observed motion, not a seeker's private destination.
+		const FVector Delta = It->GetActorLocation() - Body->GetActorLocation();
+		if (Delta.SizeSquared2D() > RadiusSq || FMath::Abs(Delta.Z) > Height) continue;
+		if (!CanSeeStimulus(*It)) continue;
+		const FVector Velocity = It->ProjectileMovement ? It->ProjectileMovement->Velocity : It->GetVelocity();
+		const float Distance = Delta.Size(), Speed = Velocity.Size();
+		if (Speed <= 0 || (Delta + Velocity.GetSafeNormal()).Size() >= Distance) continue;
+		const float Arrival = Distance / Speed;
+		if (Arrival < .01f || Arrival > 5.0f || Distance >= BestDistance) continue;
+		Best = *It;
+		BestDistance = Distance;
+	}
+	return Best;
+}
+
 void AWoTBotController::CastArtifacts()
 {
 	if (!CanAct()) return;
@@ -632,7 +688,7 @@ void AWoTBotController::CastArtifacts()
 	if (!Caster.IsValid()) return;
 	if (!Body->CanCastNow()) { Caster->Release(); Caster->ResetAdaptation(); return; }
 	const float Now = GetWorld()->GetTimeSeconds();
-	if (AActor* Incoming = Caster->FindIncomingWeave())
+	if (AActor* Incoming = FindVisibleIncomingProjectile())
 		if (AWoTAngrealInventory* Defence = SelectArtifact(Incoming, true))
 		{ CastItem(Defence); return; }
 	if (Body->Health < Body->MaxHealth * GetDefault<UWoTBotSettings>()->HealBelowHealth
@@ -668,8 +724,10 @@ void AWoTBotController::UpdateAim()
 	FVector AimPoint = bWantsMovement ? FVector(Destination.X, Destination.Y, Body->GetPawnViewLocation().Z)
 		: Body->GetPawnViewLocation() + GetControlRotation().Vector() * 100;
 	if (Target.IsValid()) AimPoint = LastKnownPosition;
+	const bool bDamageSearch = GetWorld()->GetTimeSeconds() < DamageSearchUntil || DamageSightCandidate.IsValid();
+	if (bDamageSearch) AimPoint = Body->GetPawnViewLocation() + DamageSearchDirection * 100;
 	FRotator Aim = (AimPoint - Body->GetPawnViewLocation()).Rotation();
-	if (bTargetVisible && Target.IsValid())
+	if (!bDamageSearch && bTargetVisible && Target.IsValid())
 	{
 		Aim = (Target->GetActorLocation() - Body->GetPawnViewLocation()).Rotation();
 		if (AWoTProjectileLauncher* Launcher = Cast<AWoTProjectileLauncher>(AimingItem.Get());
@@ -827,7 +885,7 @@ void AWoTBotController::ChooseDestination(bool bForce)
 	if (bForce && SeekingPool.IsValid())
 	{
 		// Recovery abandons this route too; don't immediately reclaim the same corner.
-		PoolVisits.Add(SeekingPool, Now);
+		RecoveryPools.Add(SeekingPool, Now);
 		ReleasePoolGoal();
 	}
 	if (!bForce && Now < NextRepathTime) return;

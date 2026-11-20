@@ -93,7 +93,8 @@ struct FMapSet
 };
 // Shared materialization path: collision BSP plus projected actors, zones, movers,
 // spawn pools and navigation bounds from the authenticated world records.
-inline bool Materialize(UWorld* W, FMapSet& Maps, const FWoTWorldDescriptor& Descriptor, FString& Error)
+inline bool Materialize(UWorld* W, FMapSet& Maps, const FWoTWorldDescriptor& Descriptor, FString& Error,
+ UWoTMapLightTable** OutTable = nullptr)
 {
  TArray<FWoTBSPPayloadData> Parts;
  for (const auto& Part : Descriptor.BSPParts)
@@ -130,6 +131,7 @@ inline bool Materialize(UWorld* W, FMapSet& Maps, const FWoTWorldDescriptor& Des
  Source.bBSPRootOutside = Resource.BSPRootOutside();
  FWoTWorldProjectionResult Projected;
  if (!FWoTWorldProjector::ProjectDeferred(*W, Source, Maps.Defaults, Projected, Error)) return false;
+ if (OutTable) *OutTable = Projected.MapLightTable;
  for (AActor* Actor : Projected.DeferredActors) if (IsValid(Actor)) Actor->FinishSpawning(Actor->GetActorTransform());
  return true;
 }
