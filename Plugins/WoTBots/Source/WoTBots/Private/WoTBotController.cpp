@@ -83,6 +83,7 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 	}
 	Component->bBuildLoadout = false;
 	Caster = Component;
+	InitializePoolPerception();
 	if (const auto* Profile = WoTBotProfiles::Get().Find(Body->GetClass()))
 	{
 		Component->MinOffensiveUsageInterval = Profile->MinOffensiveUsageInterval;
@@ -102,6 +103,7 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 	Agent.SetPreferredNavData(AWoTBotNavMesh::StaticClass());
 	GetPathFollowingComponent()->UpdateCachedComponents();
 	Body->OnDamageApplied.AddUObject(this, &ThisClass::DamageApplied);
+	Body->OnCharacterMovementUpdated.AddDynamic(this, &ThisClass::BodyMovementUpdated);
 	ResetBehaviour(Body);
 	SetActorTickEnabled(!bIdle && !bFrozen);
 	if (bIdle) SuspendMovement();
@@ -111,6 +113,8 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 
 void AWoTBotController::ResetBehaviour(AWoTCharacter* Body)
 {
+	PendingPoolSounds.Reset();
+	for (auto& Pair : PoolBeliefs) Pair.Value.VisibleSince = -1;
 	State = EWoTBotState::Roam;
 	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);
 	Target.Reset();
@@ -119,7 +123,10 @@ void AWoTBotController::ResetBehaviour(AWoTCharacter* Body)
 	ReleasePoolGoal();
 	UnreachablePools.Reset(); // Reachability depends on where this body starts.
 	LastCombatProgress = GetWorld()->GetTimeSeconds();
-	RecentAttackers.Reset();
+	LastDamagedTime = -1e9f;
+	DamageSearchUntil = -1;
+	DamageSightCandidate.Reset();
+	FeltVelocity = Body->GetVelocity();
 	bTargetVisible = bWantsMovement = false;
 	bNavigationUnavailable = false;
 	LastOffensiveCastTime = LastDefensiveCastTime = -1e9f;
@@ -145,7 +152,11 @@ void AWoTBotController::OnUnPossess()
 	ReleasePoolGoal();
 	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);
 	CastHold.Clear();
-	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn())) Body->OnDamageApplied.RemoveAll(this);
+	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
+	{
+		Body->OnDamageApplied.RemoveAll(this);
+		Body->OnCharacterMovementUpdated.RemoveDynamic(this, &ThisClass::BodyMovementUpdated);
+	}
 	if (Caster.IsValid()) Caster->Release();
 	StopMovement();
 	GetWorldTimerManager().ClearTimer(ThinkTimer);
@@ -385,6 +396,8 @@ void AWoTBotController::CancelCasting()
 
 void AWoTBotController::EndPlay(const EEndPlayReason::Type Reason)
 {
+	if (GetWorld() && PoolSpawnHandle.IsValid()) GetWorld()->RemoveOnActorSpawnedHandler(PoolSpawnHandle);
+	PendingPoolSounds.Reset();
 	ReleasePoolGoal();
 	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);
 	GetWorldTimerManager().ClearAllTimersForObject(this);

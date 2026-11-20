@@ -82,13 +82,14 @@ bool FBotDecisionClaimsSpec::RunTest(const FString&)
 	FWoTBotDecisionAccess::Think(A);
 	TestTrue(TEXT("selected route claims pool"), R->IsPoolClaimed(Near, B));
 	TestFalse(TEXT("own claim is excluded"), R->IsPoolClaimed(Near, A));
-	TestEqual(TEXT("second bot prefers unclaimed route"), FWoTBotDecisionAccess::Best(B), Far);
+	TestEqual(TEXT("second bot cannot read a private route claim"), FWoTBotDecisionAccess::Best(B), Near);
 	FWoTBotDecisionAccess::Goal(A, Far);
 	TestFalse(TEXT("changing goal clears former claim"), R->IsPoolClaimed(Near, B));
 	TestTrue(TEXT("new goal claimed"), R->IsPoolClaimed(Far, B));
 	Far->PickupItem->Destroy(); Far->PickupItem = nullptr;
+	A->GetPawn()->SetActorLocation(Far->GetActorLocation()+FVector(0,0,60));
 	FWoTBotDecisionAccess::Remember(A);
-	TestFalse(TEXT("empty goal releases claim"), R->IsPoolClaimed(Far, B));
+	TestFalse(TEXT("empty arrival releases claim"), R->IsPoolClaimed(Far, B));
 	FWoTBotDecisionAccess::Goal(A, Near);
 	A->SetDeparturePending(true);
 	TestTrue(TEXT("pending retirement keeps its collection claim"), R->IsPoolClaimed(Near, B));
@@ -122,9 +123,12 @@ bool FBotDecisionRouteSpec::RunTest(const FString&)
 	TestTrue(TEXT("distant wounded enemy does not interrupt route"), B->GetBehaviourState() == EWoTBotState::SeekItem);
 	TestTrue(TEXT("route destination retained"), B->GetDestination().Equals(Destination));
 	E->SetActorLocation(FVector(300,0,50));
+	// This case isolates goal choice; perception specs cover reaction latency.
+	Settings.Value->ReactionSeconds = 0;
+	E->SetCanBeDamaged(false);
 	FDamageEvent Damage; CastChecked<AWoTCharacter>(B->GetPawn())->TakeDamage(1,Damage,E->GetController(),E);
 	FWoTBotDecisionAccess::Think(B);
-	TestTrue(TEXT("close attacker with clear advantage causes engagement"), B->GetBehaviourState() == EWoTBotState::Engage);
+	TestTrue(TEXT("close perceived threat with clear advantage causes engagement"), B->GetBehaviourState() == EWoTBotState::Engage);
 	TestFalse(TEXT("diversion releases collection claim"), W->GetSubsystem<UWoTBotRoster>()->IsPoolClaimed(P,nullptr));
 	E->Destroy();
 	FWoTBotDecisionAccess::Think(B);
@@ -145,7 +149,7 @@ bool FBotDecisionCrowdingSpec::RunTest(const FString&)
 	FWoTBotDecisionAccess::Engage(A,E); FWoTBotDecisionAccess::Engage(B,E);
 	TestEqual(TEXT("roster counts two other fighters"), W->GetSubsystem<UWoTBotRoster>()->FightersFor(E,C), 2);
 	FWoTBotDecisionAccess::Think(C);
-	TestEqual(TEXT("perception prefers uncrowded visible enemy"), C->GetTarget(), Other);
+	TestEqual(TEXT("perception cannot read other fighters' private intentions"), C->GetTarget(), E);
 	FDamageEvent Damage; CastChecked<AWoTCharacter>(C->GetPawn())->TakeDamage(1,Damage,E->GetController(),E);
 	FWoTBotDecisionAccess::Think(C);
 	TestEqual(TEXT("attacker bypasses crowd penalty"), C->GetTarget(), E);
@@ -167,7 +171,7 @@ bool FBotDecisionDisengageSpec::RunTest(const FString&)
 	Box(W,FVector(400,0,100),FVector(30,300,150));
 	FWoTBotDecisionAccess::Stale(B);
 	FDamageEvent Damage; E->TakeDamage(1,Damage,B,E);
-	TestEqual(TEXT("own dealt damage refreshes progress"), FWoTBotDecisionAccess::Progress(B), float(W->GetTimeSeconds()));
+	TestTrue(TEXT("hidden dealt damage cannot refresh progress"), W->GetTimeSeconds() - FWoTBotDecisionAccess::Progress(B) > 3);
 	FWoTBotDecisionAccess::Stale(B);
 	CastChecked<AWoTCharacter>(B->GetPawn())->TakeDamage(1,Damage,E->GetController(),E);
 	TestEqual(TEXT("taken damage refreshes progress"), FWoTBotDecisionAccess::Progress(B), float(W->GetTimeSeconds()));
@@ -205,7 +209,7 @@ bool FBotDecisionRotationSpec::RunTest(const FString&)
 	B->GetPawn()->SetActorLocation(Near->GetActorLocation() + FVector(0,0,20));
 	FWoTBotDecisionAccess::Remember(B);
 	TestFalse(TEXT("arrival releases claim"), W->GetSubsystem<UWoTBotRoster>()->IsPoolClaimed(Near,nullptr));
-	TestNull(TEXT("recently empty pools are not collection goals"), FWoTBotDecisionAccess::Best(B));
+	TestEqual(TEXT("unseen far stock remains eligible from map knowledge"), FWoTBotDecisionAccess::Best(B), Far);
 	return !HasAnyErrors();
 }
 
@@ -225,7 +229,7 @@ bool FBotDecisionRoamCommitSpec::RunTest(const FString&)
 	TestEqual(TEXT("the goal is kept until arrival"), FWoTBotDecisionAccess::Best(B, true), Ahead);
 	AWoTBotController* Other = Bot(W, FVector(0, 600, 50));
 	W->GetSubsystem<UWoTBotRoster>()->ClaimPool(Other, Ahead);
-	TestEqual(TEXT("another bot's claim reopens the choice"), FWoTBotDecisionAccess::Best(B, true), Behind);
+	TestEqual(TEXT("another bot's private claim cannot reopen the choice"), FWoTBotDecisionAccess::Best(B, true), Ahead);
 	return !HasAnyErrors();
 }
 

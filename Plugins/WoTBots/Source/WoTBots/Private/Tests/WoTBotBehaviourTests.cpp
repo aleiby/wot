@@ -57,21 +57,23 @@ bool FBotSightSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotDamageMemorySpec, "WoT.Bots.Perception.DamageRevealAndMemoryExpiry", Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotDamageMemorySpec, "WoT.Bots.Perception.VisibleDamageAndMemoryExpiry", Flags)
 bool FBotDamageMemorySpec::RunTest(const FString&)
 {
-	FSettings Settings; Settings.Value->ReactionSeconds = 100; Settings.Value->TargetMemorySeconds = .5f;
+	FSettings Settings; Settings.Value->ReactionSeconds = .1f; Settings.Value->TargetMemorySeconds = .5f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	AWoTBotController* B = Bot(W, FVector(0, 0, 50));
-	AWoTCharacter* E = Enemy(W, FVector(-800, 0, 50));
-	Box(W, FVector(-400, 0, 100), FVector(30, 300, 150));
+	AWoTCharacter* E = Enemy(W, FVector(800, 0, 50));
 	AWoTCharacter* Pawn = CastChecked<AWoTCharacter>(B->GetPawn());
 	FDamageEvent Event;
 	Pawn->TakeDamage(5, Event, E->GetController(), E);
-	TestEqual(TEXT("damage immediately identifies instigator"), B->GetTarget(), E);
-	TestTrue(TEXT("turns toward attack"), FVector::DotProduct(B->GetControlRotation().Vector(), FVector(-1, 0, 0)) > .9f);
+	TestNull(TEXT("damage alone supplies no instigator identity"), B->GetTarget());
+	WoTTest::TickWorld(W,.35f);
+	TestEqual(TEXT("normal sight identifies enemy after reaction"), B->GetTarget(), E);
+	TestTrue(TEXT("turns toward visible attack"), FVector::DotProduct(B->GetControlRotation().Vector(), FVector(1, 0, 0)) > .9f);
 	const FVector Known = B->GetLastKnownPosition();
-	E->SetActorLocation(FVector(-1200, 600, 50));
+	Box(W, FVector(400, 0, 100), FVector(30, 600, 150));
+	E->SetActorLocation(FVector(1200, 600, 50));
 	WoTTest::TickWorld(W, .25f);
 	TestTrue(TEXT("memory keeps observed position without tracking through wall"), B->GetLastKnownPosition().Equals(Known));
 	TestEqual(TEXT("memory still live"), B->GetTarget(), E);
@@ -80,7 +82,7 @@ bool FBotDamageMemorySpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotHysteresisSpec, "WoT.Bots.Perception.HysteresisAndRecentAttacker", Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotHysteresisSpec, "WoT.Bots.Perception.HysteresisWithoutDamageIdentity", Flags)
 bool FBotHysteresisSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 100;
@@ -97,7 +99,7 @@ bool FBotHysteresisSpec::RunTest(const FString&)
 	FDamageEvent Event;
 	CastChecked<AWoTCharacter>(B->GetPawn())->TakeDamage(1, Event, Second->GetController(), Second);
 	WoTTest::TickWorld(W, .2f);
-	TestEqual(TEXT("recent attacker wins"), B->GetTarget(), Second);
+	TestEqual(TEXT("damage credit cannot override the normally perceived target"), B->GetTarget(), First);
 	return !HasAnyErrors();
 }
 
