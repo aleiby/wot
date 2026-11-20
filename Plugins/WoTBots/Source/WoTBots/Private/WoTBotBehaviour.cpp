@@ -35,7 +35,7 @@ static const FVector PoolExtent(80, 80, 160);
 bool AWoTBotController::CanAct() const
 {
 	const AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn());
-	return HasAuthority() && !bFrozen && !bRetiring && !bDeparturePending && Body && Body->IsAlive();
+	return HasAuthority() && !bFrozen && !bRetiring && !bIdle && Body && Body->IsAlive();
 }
 
 bool AWoTBotController::IsHostile(const AWoTCharacter* Candidate) const

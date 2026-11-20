@@ -91,7 +91,7 @@ bool FBotDecisionClaimsSpec::RunTest(const FString&)
 	TestFalse(TEXT("empty goal releases claim"), R->IsPoolClaimed(Far, B));
 	FWoTBotDecisionAccess::Goal(A, Near);
 	A->SetDeparturePending(true);
-	TestFalse(TEXT("pending retirement releases claim"), R->IsPoolClaimed(Near, B));
+	TestTrue(TEXT("pending retirement keeps its collection claim"), R->IsPoolClaimed(Near, B));
 	A->SetDeparturePending(false);
 	FWoTBotDecisionAccess::Goal(A, Near);
 	FDamageEvent Damage;

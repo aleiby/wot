@@ -72,6 +72,10 @@ struct FWoTHostOptionRow
 	int32 Min = 0;
 	TFunction<int32(const FWoTHostRequest&)> Max;
 	int32 DefaultValue = 0;
+	// Optional ordered slider values, superseding Min/Max. Empty lists use DefaultValue and accept no slider input.
+	TFunction<TArray<int32>(const FWoTHostRequest&)> Values;
+	// Optional presentation; URLs always carry the integer value.
+	TFunction<FText(int32 Value, const FWoTHostRequest&)> ValueText;
 };
 
 // The return URL is withheld while an OSS session destroy is outstanding. The

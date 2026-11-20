@@ -33,7 +33,7 @@ public:
 
 	virtual void CastArtifact() override;     // Cast()
 	virtual void UnCastArtifact() override;   // UnCast()
-	virtual void Failed() override;
+	virtual void AbortCast() override;
 	virtual void Reset() override;
 	virtual void Tick(float DeltaTime) override;
 

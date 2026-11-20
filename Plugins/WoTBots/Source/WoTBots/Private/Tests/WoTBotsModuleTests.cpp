@@ -60,6 +60,20 @@ bool FWoTBotsHostModuleLifecycleSpec::RunTest(const FString&)
 	Request.ExtraValues.Reset();
 	TestTrue(TEXT("host defaults off independently of the dedicated-server setting"),
 		FWoTFrontEndModel::BuildHostTravelURL(Request, ClassChoice).Contains(TEXT("?BotFill=0")));
+	Request.MaxPlayers = 5;
+	TestTrue(TEXT("host row supplies allowed values"), bool(Row->Values));
+	TestTrue(TEXT("host row supplies value labels"), bool(Row->ValueText));
+	if (Row->Values) TestTrue(TEXT("host values skip one"), Row->Values(Request) == TArray<int32>({0, 2, 3, 4, 5}));
+	if (Row->ValueText)
+	{
+		TestEqual(TEXT("off label"), Row->ValueText(0, Request).ToString(), FString(TEXT("Off")));
+		TestEqual(TEXT("singular label"), Row->ValueText(2, Request).ToString(), FString(TEXT("2 (you + 1 bot)")));
+		TestEqual(TEXT("plural label"), Row->ValueText(5, Request).ToString(), FString(TEXT("5 (you + 4 bots)")));
+	}
+	Request.ExtraValues.Add(TEXT("BotFill"), 1);
+	TestEqual(TEXT("stored one snaps down to off"), FWoTFrontEndModel::HostOptionValue(Request, *Row), 0);
+	TestTrue(TEXT("snapped value travels as plain number"),
+		FWoTFrontEndModel::BuildHostTravelURL(Request, ClassChoice).Contains(TEXT("?BotFill=0")));
 	Module.ShutdownModule();
 	WoTTest::FSpecWorldOptions Options; Options.bStartPlay = false;
 	UWorld* World = WoTTest::CreateSpecWorld(Options);

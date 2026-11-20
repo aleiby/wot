@@ -1,4 +1,5 @@
 #include "WoTInventory.h"
+#include "../WoTMatchParticipant.h"
 #include "Testing/WoTSoakEvents.h"
 #include "../AI/WoTPathNodeIterator.h"
 #include "../WoTRetailText.h"
@@ -394,6 +395,9 @@ bool AWoTInventory::ValidTouch(AActor* Other)
 			return false;   // dead pawns don't pick up
 		}
 	}
+	const AController* Collector = P->GetController() ? P->GetController() : Cast<AController>(P->GetOwner());
+	if (const IWoTMatchParticipant* Participant = Cast<IWoTMatchParticipant>(Collector))
+		if (!Participant->CanCollectPickups()) return false;
 	AWoTGameMode* Game = GetWorld()->GetAuthGameMode<AWoTGameMode>();
 	if (Game && !Game->PickupQuery(P, this))
 	{

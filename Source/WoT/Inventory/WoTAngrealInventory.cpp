@@ -364,8 +364,14 @@ void AWoTAngrealInventory::AddCharges(int32 NumCharges)
 	CurCharges = FMath::Min(CurCharges + NumCharges, MaxCharges);
 }
 
+void AWoTAngrealInventory::AbortCast()
+{
+}
+
 void AWoTAngrealInventory::Failed()
 {
+	AbortCast();
+
 	// AngrealInventory.uc:386 — typed 'FailedMessage' lands in the hand-message slot.
 	ClientMessageToOwner(Title + TEXT(" ") + FailMessage + TEXT("."),
 		FName(TEXT("FailedMessage")));

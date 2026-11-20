@@ -305,8 +305,9 @@ bool FBotHoldInterruptionSpec::RunTest(const FString& Name)
 		Pawn->TakeDamage(1000, Event, E->GetController(), E);
 		TestNull(TEXT("death disposes pawn"), B->GetPawn());
 	}
-	TestFalse(TEXT("interruption releases held cast"), Caster->IsCasting());
-	TestFalse(TEXT("interruption removes held effect"), HasEffect(E, TEXT("/Script/WoT.WoTWhirlwindLeech")));
+	TestEqual(TEXT("departure keeps casting; other interruptions release"), Caster->IsCasting(), Name == TEXT("Departure"));
+	TestEqual(TEXT("departure keeps held effect; other interruptions remove it"),
+		HasEffect(E, TEXT("/Script/WoT.WoTWhirlwindLeech")), Name == TEXT("Departure"));
 	return !HasAnyErrors();
 }
 
