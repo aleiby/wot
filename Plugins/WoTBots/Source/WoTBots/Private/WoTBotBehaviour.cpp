@@ -993,9 +993,18 @@ void AWoTBotController::ChooseDestination(bool bForce)
 void AWoTBotController::UpdateStuck()
 {
 	const float Now = GetWorld()->GetTimeSeconds();
+	const AWoTCharacter* Body = CastChecked<AWoTCharacter>(GetPawn());
+	if (HasMovementHold(Body))
+	{
+		// An attached movement hold is not failed navigation. Start both stuck
+		// clocks from the held position when the effect releases the body.
+		LastProgressTime = LastRecoveryTime = Now;
+		ProgressPosition = Body->GetActorLocation();
+		return;
+	}
 	// A body falling through a gap in a floor's collision can fall until KillZ,
 	// minutes away; that fall is not path progress, so the stuck rule ends it.
-	const bool bFalling = CastChecked<AWoTCharacter>(GetPawn())->GetCharacterMovement()->IsFalling();
+	const bool bFalling = Body->GetCharacterMovement()->IsFalling();
 	if (!bFalling && !bNavigationUnavailable && (!bWantsMovement || FVector::Dist2D(GetPawn()->GetActorLocation(), Destination) <= 30.0f))
 	{
 		bWantsMovement = false;
