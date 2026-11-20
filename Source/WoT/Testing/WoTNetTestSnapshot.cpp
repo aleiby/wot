@@ -141,7 +141,7 @@ TSharedPtr<FJsonObject> WoTNetTest::BuildSnapshot(UWorld* World)
 		// On a LISTEN server every player's pawn has a controller, so `ctrl`
 		// cannot name the host's own pawn; `local` can (a client's own pawn is
 		// both). The two-instance seal-match harness keys on it.
-		J->SetBoolField(TEXT("local"), P->IsLocallyControlled());
+		J->SetBoolField(TEXT("local"), WoTIsLocalHumanPawn(P));
 		if (const UGameInstance* GameInstance = World->GetGameInstance())
 		{
 			for (int32 LocalIndex = 0; LocalIndex < GameInstance->GetNumLocalPlayers(); ++LocalIndex)
@@ -318,7 +318,7 @@ TSharedPtr<FJsonObject> WoTNetTest::BuildSnapshot(UWorld* World)
 			// (DT_WoTAngrealHands in dev, WOTPlayer.AngrealHandOrder in guarded
 			// builds). Always reported for a local pawn - zero when the hand set
 			// is absent - so the sweep can never mistake a missing set for a pass.
-			if (C->IsLocallyControlled())
+			if (WoTIsLocalHumanPawn(C))
 			{
 				// hand_plan_classes: planned cells (the shipped order has 42);
 				// hand_classes: cells the pawn currently holds (GetClassName is

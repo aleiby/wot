@@ -3,6 +3,7 @@
 
 #include "WoTAngrealInvWhirlwind.h"
 #include "../WoTAmbientSound.h"
+#include "../WoTCharacter.h"
 #include "../WoTSound.h"
 
 #include "Components/CapsuleComponent.h"
@@ -164,12 +165,12 @@ void AWoTAngrealInvLevitate::ReconcileLevitatingLoop()
 {
 	ACharacter* Char = Cast<ACharacter>(GetOwner());
 	const ENetMode Mode = GetNetMode();
-	// AngrealInvLevitate.uc:126 routes LoopLT through the owner. Standalone
-	// retains its original local behavior; network play presents it only on
-	// the locally controlled owner's machine, including a listen-server host.
+	// Player-body loops belong to the local human; NPC owners retain their
+	// existing standalone and network sound behavior.
 	const bool bShouldPlay = bLevitating && IsValid(Char)
 		&& Mode != NM_DedicatedServer
-		&& (Mode == NM_Standalone || Char->IsLocallyControlled());
+		&& (WoTIsPlayerBody(Char) ? WoTIsLocalHumanPawn(Char)
+			: (Mode == NM_Standalone || Char->IsLocallyControlled()));
 	if (bShouldPlay && !LevitateLoop)
 	{
 		if (USoundBase* Loop = WoTSound::Resolve(ActivateSound, true))
