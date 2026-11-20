@@ -1,4 +1,5 @@
 #include "WoTMover.h"
+#include "Testing/WoTSoakEvents.h"
 
 #include "Inventory/WoTSeal.h"
 #include "Inventory/WoTInventory.h"
@@ -171,6 +172,7 @@ bool AWoTMover::ApplyKeyframeLerp(int32 FromKey, int32 ToKey, float Alpha, bool 
 bool AWoTMover::ApplyMoverPose(const FVector& TargetLocation,
 	const FRotator& TargetRotation, bool bSweep)
 {
+	WOT_SOAK_BODY_SCOPE("mover carry/push");
 	if (!HasAuthority())
 	{
 		// A proxy moves the brush visually only. While the server's mover stands

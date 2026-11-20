@@ -5,6 +5,9 @@
 #include "WoTBotNavProbe.h"
 #include "WoTBotSoakServer.h"
 #include "Testing/WoTSoakEvents.h"
+#include "WoTRainCyd.h"
+#include "WoTMover.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "EngineUtils.h"
 #include "GameFramework/PhysicsVolume.h"
 #include "GameFramework/PlayerStart.h"
@@ -51,6 +54,20 @@ FObject NewReport(const FString& Map, int32 Fill, double Seconds)
 
 struct FObserver
 {
+	struct FBodyHistory
+	{
+		TArray<TSharedPtr<FJsonValue>> Rows;
+		FDelegateHandle TransformHandle;
+		FVector LastLocation = FVector::ZeroVector;
+		float HalfHeight = 0, Radius = 0;
+		bool bInside = false, bFloor = false, bPenetrating = false;
+		TSharedPtr<FJsonObject> ActiveEvent;
+	};
+	TMap<TWeakObjectPtr<AWoTCharacter>, FBodyHistory> BodyHistories;
+	TArray<TSharedPtr<FJsonValue>> FloorEvents;
+	TArray<TSharedPtr<FJsonValue>> SwapEvents;
+	TSet<FString> ObservedSwaps;
+	FDelegateHandle SpawnHandle, BodyHandle;
 	UWorld* World;
 	FObject Report;
 	FLogCapture& Logs;
@@ -68,6 +85,54 @@ struct FObserver
 	TArray<double> PairDistances;
 	FObserver(UWorld* W, const FObject& R, FLogCapture& L) : World(W), Report(R), Logs(L)
 	{
+		Report->SetNumberField(TEXT("inside_floor_count"), 0);
+		Report->SetNumberField(TEXT("geometry_penetration_count"), 0);
+		Report->SetObjectField(TEXT("swap_targets_by_class"), Object());
+		Report->SetObjectField(TEXT("non_pawn_swap_targets_by_class"), Object());
+		SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* A)
+		{
+			if (AWoTCharacter* Body = Cast<AWoTCharacter>(A)) Remember(Body, TEXT("spawn"));
+		}));
+		BodyHandle = WoTSoakEvents::BodyEvents().AddLambda([this](AActor* A, const TCHAR* Source)
+		{
+			if (A && A->GetWorld() == World)
+			{
+				// Existing swap scopes name the actual far end, including lost-lock
+				// impacts. Count once even when a failed placement rolls back.
+				if (FCString::Strcmp(Source, TEXT("swap source placed or rolled back")) == 0)
+				{
+					const FString Scope = WoTSoakEvents::BodySource();
+					FString Prefix, TargetAndRotation, TargetName, Rotation;
+					if (Scope.Split(TEXT("target="), &Prefix, &TargetAndRotation,
+						ESearchCase::CaseSensitive, ESearchDir::FromEnd)
+						&& TargetAndRotation.Split(TEXT(" rotation="), &TargetName, &Rotation))
+					{
+						const FString Key = FString::Printf(TEXT("%.6f:%s:%s"), World->GetTimeSeconds(), *A->GetName(), *TargetName);
+						if (!ObservedSwaps.Contains(Key))
+						{
+							ObservedSwaps.Add(Key);
+							for (TActorIterator<AActor> It(World); It; ++It)
+								if (It->GetName() == TargetName)
+								{
+									const FString Class = It->GetClass()->GetName();
+									Increment(Report->GetObjectField(TEXT("swap_targets_by_class")).ToSharedRef(), *Class);
+									if (!It->IsA<APawn>()) Increment(Report->GetObjectField(TEXT("non_pawn_swap_targets_by_class")).ToSharedRef(), *Class);
+									FObject Row = Object();
+									Row->SetNumberField(TEXT("seconds"), Time);
+									Row->SetStringField(TEXT("source"), A->GetName());
+									Row->SetStringField(TEXT("target"), TargetName);
+									Row->SetStringField(TEXT("target_class"), Class);
+									Row->SetBoolField(TEXT("target_is_pawn"), It->IsA<APawn>());
+									SwapEvents.Add(Value(Row));
+									Report->SetArrayField(TEXT("swap_events"), SwapEvents);
+									break;
+								}
+						}
+					}
+				}
+				if (AWoTCharacter* Body = Cast<AWoTCharacter>(A)) Remember(Body, Source);
+			}
+		});
 		Handle = WoTSoakEvents::Events().AddLambda([this](WoTSoakEvents::EKind Kind, AActor* Subject, AActor* Participant)
 		{
 			if (!Subject || Subject->GetWorld() != World) return;
@@ -100,7 +165,140 @@ struct FObserver
 			}
 		});
 	}
-	~FObserver() { WoTSoakEvents::Events().Remove(Handle); }
+	~FObserver()
+	{
+		WoTSoakEvents::Events().Remove(Handle);
+		WoTSoakEvents::BodyEvents().Remove(BodyHandle);
+		World->RemoveOnActorSpawnedHandler(SpawnHandle);
+		for (const auto& Pair : BodyHistories)
+			if (Pair.Key.IsValid()) Pair.Key->GetCapsuleComponent()->TransformUpdated.Remove(Pair.Value.TransformHandle);
+	}
+	static FVector CollisionAxis(UCapsuleComponent* Capsule)
+	{
+		const UBodySetup* Setup = Capsule->GetBodySetup();
+		const FQuat Local = Setup && Setup->AggGeom.SphylElems.Num() == 1
+			? Setup->AggGeom.SphylElems[0].Rotation.Quaternion() : FQuat::Identity;
+		return Capsule->GetComponentQuat().RotateVector(Local.GetAxisZ());
+	}
+	void Remember(AWoTCharacter* Body, const TCHAR* Event)
+	{
+		UCapsuleComponent* Capsule = Body->GetCapsuleComponent();
+		if (!Capsule) return;
+		FBodyHistory& History = BodyHistories.FindOrAdd(Body);
+		if (!History.TransformHandle.IsValid())
+		{
+			History.LastLocation = Body->GetActorLocation();
+			History.TransformHandle = Capsule->TransformUpdated.AddLambda(
+				[this, Body](USceneComponent*, EUpdateTransformFlags, ETeleportType)
+				{ Remember(Body, TEXT("transform")); });
+		}
+		FObject Row = Object();
+		Row->SetNumberField(TEXT("seconds"), Time);
+		Row->SetStringField(TEXT("event"), Event);
+		FString Source = WoTSoakEvents::BodySource();
+		if (Source.IsEmpty() && Cast<UPrimitiveComponent>(Body->GetMovementBaseObject()) && Cast<UPrimitiveComponent>(Body->GetMovementBaseObject())->GetOwner()->IsA<AWoTMover>())
+			Source = TEXT("movement on mover base");
+		Row->SetStringField(TEXT("source"), Source.IsEmpty() ? TEXT("movement/unscoped") : Source);
+		Row->SetStringField(TEXT("from"), History.LastLocation.ToString());
+		Row->SetStringField(TEXT("position"), Body->GetActorLocation().ToString());
+		Row->SetStringField(TEXT("velocity"), Body->GetVelocity().ToString());
+		Row->SetStringField(TEXT("movement"), Body->GetCharacterMovement()->GetMovementName());
+		Row->SetBoolField(TEXT("crouched"), Body->bIsCrouched);
+		Row->SetStringField(TEXT("rotation"), Body->GetActorRotation().ToString());
+		Row->SetStringField(TEXT("capsule_up"), CollisionAxis(Capsule).ToString());
+		Row->SetNumberField(TEXT("capsule_vertical_extent"), Capsule->GetScaledCapsuleRadius() + (Capsule->GetScaledCapsuleHalfHeight() - Capsule->GetScaledCapsuleRadius()) * FMath::Abs(CollisionAxis(Capsule).Z));
+		Row->SetNumberField(TEXT("half_height"), Capsule->GetScaledCapsuleHalfHeight());
+		Row->SetNumberField(TEXT("radius"), Capsule->GetScaledCapsuleRadius());
+		Row->SetBoolField(TEXT("collision"), Capsule->IsQueryCollisionEnabled());
+		if (const UPrimitiveComponent* Base = Cast<UPrimitiveComponent>(Body->GetMovementBaseObject()))
+		{
+			Row->SetStringField(TEXT("base"), Base->GetPathName());
+			Row->SetStringField(TEXT("base_position"), Base->GetComponentLocation().ToString());
+		}
+		History.LastLocation = Body->GetActorLocation();
+		History.HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+		History.Radius = Capsule->GetScaledCapsuleRadius();
+		History.Rows.RemoveAll([this](const auto& Old) { return Old->AsObject()->GetNumberField(TEXT("seconds")) < Time - 2.0; });
+		History.Rows.Add(Value(Row));
+	}
+	void ProbeBodies(double Delta)
+	{
+		for (TActorIterator<AWoTCharacter> It(World); It; ++It)
+		{
+			AWoTCharacter* Body = *It;
+			if (!Body->IsAlive()) continue;
+			Remember(Body, TEXT("tick"));
+			FBodyHistory& History = BodyHistories.FindChecked(Body);
+			UCapsuleComponent* Capsule = Body->GetCapsuleComponent();
+			const FVector Here = Body->GetActorLocation();
+			const FVector Feet = Here - FVector(0, 0, Capsule->GetScaledCapsuleHalfHeight());
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(WoTSoakBodyGeometry), false, Body);
+			FCollisionObjectQueryParams Objects;
+			Objects.AddObjectTypesToQuery(ECC_WorldStatic);
+			Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+			TArray<FHitResult> Floors, Contacts;
+			World->LineTraceMultiByObjectType(Floors, Here, Feet - FVector(0, 0, 2), Objects, Params);
+			World->SweepMultiByObjectType(Contacts, Here, Here, FQuat::FindBetweenNormals(FVector::UpVector, CollisionAxis(Capsule)), Objects,
+				Capsule->GetCollisionShape(), Params);
+			bool bFloor = false, bPenetrating = false;
+			TArray<TSharedPtr<FJsonValue>> Geometry;
+			const auto RecordHit = [&](const FHitResult& Hit, const TCHAR* Kind)
+			{
+				FObject Row = Object(); Row->SetStringField(TEXT("kind"), Kind);
+				Row->SetStringField(TEXT("actor"), Hit.GetActor()->GetName());
+				Row->SetStringField(TEXT("component"), Hit.GetComponent() ? Hit.GetComponent()->GetName() : TEXT("none"));
+				Row->SetStringField(TEXT("point"), Hit.ImpactPoint.ToString());
+				Row->SetStringField(TEXT("normal"), Hit.ImpactNormal.ToString());
+				Row->SetNumberField(TEXT("floor_above_feet"), Hit.ImpactPoint.Z - Feet.Z);
+				const double Extent = Capsule->GetScaledCapsuleRadius() + (Capsule->GetScaledCapsuleHalfHeight() - Capsule->GetScaledCapsuleRadius()) * FMath::Abs(CollisionAxis(Capsule).Z);
+				Row->SetNumberField(TEXT("rotated_bottom_clearance"), Here.Z - Extent - Hit.ImpactPoint.Z);
+				Row->SetNumberField(TEXT("penetration_depth"), Hit.PenetrationDepth);
+				Geometry.Add(Value(Row));
+			};
+			for (const FHitResult& Hit : Floors)
+				if (WoTRainCydIsVisBlockingActor(Hit.GetActor()))
+				{
+					RecordHit(Hit, TEXT("floor_ray"));
+					bFloor |= Body->GetCharacterMovement()->IsWalkable(Hit) && Hit.ImpactPoint.Z > Feet.Z + UE_KINDA_SMALL_NUMBER;
+				}
+			for (const FHitResult& Hit : Contacts)
+				if (Hit.bStartPenetrating && Hit.PenetrationDepth > UE_KINDA_SMALL_NUMBER
+					&& WoTRainCydIsVisBlockingActor(Hit.GetActor()))
+				{ RecordHit(Hit, TEXT("capsule_penetration")); bPenetrating = true; }
+			const bool bInside = bFloor || bPenetrating;
+			Increment(Report, TEXT("living_body_seconds"), Delta);
+			if (bFloor && !History.bFloor) Increment(Report, TEXT("inside_floor_count"));
+			if (bPenetrating && !History.bPenetrating) Increment(Report, TEXT("geometry_penetration_count"));
+			if (bInside && !History.bInside)
+			{
+				FObject Event = Object();
+				Event->SetStringField(TEXT("body"), Body->GetName());
+				Event->SetStringField(TEXT("controller"), GetNameSafe(Body->GetController()));
+				Event->SetNumberField(TEXT("first_seconds"), Time);
+				Event->SetNumberField(TEXT("last_seconds"), Time);
+				Event->SetBoolField(TEXT("inside_floor"), bFloor);
+				Event->SetBoolField(TEXT("penetrating"), bPenetrating);
+				Event->SetStringField(TEXT("position"), Here.ToString());
+				Event->SetStringField(TEXT("feet"), Feet.ToString());
+				Event->SetStringField(TEXT("movement"), Body->GetCharacterMovement()->GetMovementName());
+				Event->SetArrayField(TEXT("history"), History.Rows);
+				Event->SetArrayField(TEXT("geometry"), Geometry);
+				FloorEvents.Add(Value(Event)); History.ActiveEvent = Event;
+				UE_LOG(LogTemp, Warning, TEXT("BOT_SOAK_BODY_INSIDE map=%s seconds=%.3f body=%s floor=%d penetration=%d position=%s"),
+					*Report->GetStringField(TEXT("map")), Time, *Body->GetName(), bFloor, bPenetrating, *Here.ToString());
+			}
+			if (bInside && History.ActiveEvent)
+			{
+				History.ActiveEvent->SetNumberField(TEXT("last_seconds"), Time);
+				History.ActiveEvent->SetObjectField(TEXT("last_state"), History.Rows.Last()->AsObject());
+				History.ActiveEvent->SetArrayField(TEXT("last_geometry"), Geometry);
+				History.ActiveEvent->SetBoolField(TEXT("inside_floor"), History.ActiveEvent->GetBoolField(TEXT("inside_floor")) || bFloor);
+				History.ActiveEvent->SetBoolField(TEXT("penetrating"), History.ActiveEvent->GetBoolField(TEXT("penetrating")) || bPenetrating);
+			}
+			History.bInside = bInside; History.bFloor = bFloor; History.bPenetrating = bPenetrating;
+		}
+		for (auto It = BodyHistories.CreateIterator(); It; ++It) if (!It.Key().IsValid()) It.RemoveCurrent();
+	}
 	static const ANavigationData* BotNavigation(UWorld* W, UNavigationSystemV1*& Nav)
 	{
 		Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(W);
@@ -419,6 +617,7 @@ struct FObserver
 	{
 		const double Delta = Time - LastSampleTime;
 		LastSampleTime = Time;
+		ProbeBodies(Delta);
 		TArray<FVector> Living;
 		for (TActorIterator<AWoTBotController> It(World); It; ++It)
 		{
@@ -516,6 +715,7 @@ struct FObserver
 	void Snapshot()
 	{
 		Report->SetNumberField(TEXT("simulated_seconds"), Time);
+		Report->SetArrayField(TEXT("body_geometry_events"), FloorEvents);
 		int32 Kills = 0, Deaths = 0, Unvisited = 0;
 		TArray<TSharedPtr<FJsonValue>> BotRows, PoolRows;
 		for (const auto& P : Bots) { BotRows.Add(Value(P.Value)); Kills += int32(Number(P.Value,TEXT("kills"))); Deaths += int32(Number(P.Value,TEXT("deaths"))); }
@@ -809,6 +1009,31 @@ bool FBotSoakSpec::RunTest(const FString&)
 	}
 	for (const auto& R : Reports) if (R->GetStringField(TEXT("result")) != TEXT("PASS")) AddError(FString::Printf(TEXT("Soak failed on %s; evidence: %s"),*R->GetStringField(TEXT("map")),*Directory));
 	AddInfo(FString::Printf(TEXT("Bot soak finished in %.2f seconds; %s"),FPlatformTime::Seconds()-Started,*(Directory/TEXT("report.md"))));
+	return !HasAnyErrors();
+}
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotNestedSwapCounterSpec,
+	"WoT.Bots.Soak.NestedSwapTargetCounting", WoTBotTest::Flags)
+bool FBotNestedSwapCounterSpec::RunTest(const FString&)
+{
+	UWorld* W = WoTTest::CreateSpecWorld();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
+	AWoTCharacter* Source = W->SpawnActor<AWoTCharacter>();
+	APawn* OuterTarget = W->SpawnActor<APawn>();
+	AActor* InnerTarget = W->SpawnActor<AActor>();
+	FObject Report = NewReport(TEXT("observer fixture"), 0, 0);
+	FLogCapture Logs;
+	FObserver Observer(W, Report, Logs);
+	{
+		WoTSoakEvents::FBodyScope Outer(*FString::Printf(TEXT("target=%s rotation=outer"), *OuterTarget->GetName()));
+		WoTSoakEvents::FBodyScope Inner(*FString::Printf(TEXT("target=%s rotation=inner"), *InnerTarget->GetName()));
+		WoTSoakEvents::BodyEvents().Broadcast(Source, TEXT("swap source placed or rolled back"));
+		// The rollback callback is a second observation of the same attempt.
+		WoTSoakEvents::BodyEvents().Broadcast(Source, TEXT("swap source placed or rolled back"));
+	}
+	const auto Counts = Report->GetObjectField(TEXT("non_pawn_swap_targets_by_class")).ToSharedRef();
+	TestEqual(TEXT("nested attempt counts its actual non-pawn far end once"), Number(Counts, TEXT("Actor")), 1.0);
+	if (TestEqual(TEXT("rollback does not duplicate the attempt"), Observer.SwapEvents.Num(), 1))
+		TestEqual(TEXT("record names the inner target"), Observer.SwapEvents[0]->AsObject()->GetStringField(TEXT("target")), InnerTarget->GetName());
 	return !HasAnyErrors();
 }
 } // namespace WoTBotSoak

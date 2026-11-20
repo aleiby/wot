@@ -110,7 +110,7 @@ void AWoTJumper::LaunchPending()
 	Pending.Reset();
 	if (!IsValid(Pawn) || !HasAuthority()) return;
 
-	Pawn->SetActorRotation(GetActorRotation());
+	Pawn->SetActorRotation(WoTUE1Collision::BodyRotation(*Pawn, GetActorRotation()));
 	float GroundSpeed = 0.0f;
 	float VerticalSpeed = JumpZ;
 	if (ACharacter* Character = Cast<ACharacter>(Pawn))

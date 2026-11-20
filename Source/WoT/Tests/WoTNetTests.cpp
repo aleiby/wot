@@ -32,6 +32,9 @@
 #include "../Projectiles/WoTFireworksProjectile.h"
 #include "../Projectiles/WoTIceProjectile.h"
 #include "../Projectiles/WoTSeekerProjectile.h"
+#include "../Projectiles/WoTSwapPlacesProjectile.h"
+#include "../Payload/WoTPayloadActivation.h"
+#include "../WoTPlayerStart.h"
 #include "../Inventory/WoTLeech.h"
 #include "../Inventory/WoTDecreaseHealthLeech.h"
 #include "../Inventory/WoTIceLeech.h"
@@ -91,6 +94,11 @@
 #include "Common/TcpSocketBuilder.h"
 #include "HAL/PlatformProcess.h"
 #include "Async/Async.h"
+#include "AIController.h"
+#include "Misc/ScopeExit.h"
+#if WITH_EDITOR
+#include "Tests/NetTestHelpers.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWoTNetWarningCaptureSpec, Log, All);
 
@@ -3372,5 +3380,87 @@ bool FWoTNetSessionSpec::RunTest(const FString&)
 	WoTTest::DestroySpecWorld(World);
 	return true;
 }
+
+#if WITH_EDITOR
+IMPLEMENT_COMPLEX_AUTOMATION_TEST(FWoTNetSwapOwnerRotationSpec,
+	"WoT.Net.SwapOwnerRotation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+void FWoTNetSwapOwnerRotationSpec::GetTests(TArray<FString>& Names,
+	TArray<FString>& Commands) const
+{
+	Names.Add(TEXT("Source")); Commands.Add(TEXT("Source"));
+	Names.Add(TEXT("Destination")); Commands.Add(TEXT("Destination"));
+}
+
+bool FWoTNetSwapOwnerRotationSpec::RunTest(const FString& Parameters)
+{
+	bool bOwnsActivation = false;
+	if (!IsWoTPayloadBootstrapActive())
+	{
+		bOwnsActivation = !PublishWoTPayloadBootstrapActivationForTesting().IsError()
+			&& !PublishWoTBootstrapWorldReadyForTesting().IsError();
+	}
+	ON_SCOPE_EXIT { if (bOwnsActivation) ResetWoTPayloadActivationForTesting(); };
+	UE::Net::FTestWorlds Worlds(TEXT("/Engine/Maps/Entry"),
+		TEXT("/Script/WoT.WoTGameMode"));
+	Worlds.SetDescription(TEXT("swap rotation reaches its remote owning player"));
+	if (!TestTrue(TEXT("server loads"), Worlds.Server.IsLoaded())) return false;
+	UWorld* ServerWorld = Worlds.Server.GetWorld();
+	ServerWorld->SpawnActor<AWoTPlayerStart>(
+		FVector(0, 0, 500), FRotator::ZeroRotator, AlwaysSpawnParams());
+	if (!TestTrue(TEXT("remote player connects"), Worlds.CreateAndConnectClient())) return false;
+	APlayerController* ServerPC = Worlds.GetServerPlayerControllerOfClient(0);
+	APlayerController* ClientPC = Worlds.Clients[0].GetWorld()->GetFirstPlayerController();
+	AWoTCharacter* Player = ServerPC ? Cast<AWoTCharacter>(ServerPC->GetPawn()) : nullptr;
+	AWoTCharacter* ClientPlayer = ClientPC ? Cast<AWoTCharacter>(ClientPC->GetPawn()) : nullptr;
+	if (!TestNotNull(TEXT("authority pawn"), Player)
+		|| !TestNotNull(TEXT("owning client pawn"), ClientPlayer)) return false;
+	TestFalse(TEXT("server controller is remote"), ServerPC->IsLocalController());
+	TestTrue(TEXT("client controller owns the view"), ClientPC->IsLocalController());
+	TestEqual(TEXT("client pawn is autonomous"), ClientPlayer->GetLocalRole(), ROLE_AutonomousProxy);
+
+	AWoTCharacter* Other = ServerWorld->SpawnActor<AWoTCharacter>(
+		FVector(1000, 0, 500), FRotator::ZeroRotator, AlwaysSpawnParams());
+	AAIController* AI = ServerWorld->SpawnActor<AAIController>();
+	if (!TestNotNull(TEXT("other pawn"), Other) || !TestNotNull(TEXT("AI controller"), AI)) return false;
+	AI->Possess(Other);
+	// Keep the view at RPC delivery observable, before the next input update
+	// clamps camera roll. Network dispatch still runs in the real client world.
+	ClientPC->SetActorTickEnabled(false);
+	Player->GetCharacterMovement()->DisableMovement();
+	ClientPlayer->GetCharacterMovement()->DisableMovement();
+	Other->GetCharacterMovement()->DisableMovement();
+	Player->SetActorLocation(FVector(0, 0, 500));
+	const FRotator PlayerRotation(-12, 25, -9);
+	const FRotator OtherRotation(24, 135, 17);
+	Player->SetActorRotation(PlayerRotation);
+	Other->SetActorRotation(OtherRotation);
+	ServerPC->SetControlRotation(PlayerRotation);
+	ClientPC->SetControlRotation(PlayerRotation);
+	AI->SetControlRotation(OtherRotation);
+	const FVector PlayerBefore = Player->GetActorLocation();
+	const FVector OtherBefore = Other->GetActorLocation();
+	AWoTSwapPlacesProjectile* Swap = ServerWorld->SpawnActor<AWoTSwapPlacesProjectile>(
+		FVector(0, 0, 1000), FRotator::ZeroRotator, AlwaysSpawnParams());
+	if (!TestNotNull(TEXT("swap projectile"), Swap)) return false;
+	const bool bRemoteSource = Parameters == TEXT("Source");
+	Swap->PerformSwap(bRemoteSource ? Player : Other, bRemoteSource ? Other : Player);
+	TestTrue(TEXT("player takes the other pawn's position"), Player->GetActorLocation().Equals(OtherBefore, 0.1));
+	TestTrue(TEXT("other pawn takes the player's position"), Other->GetActorLocation().Equals(PlayerBefore, 0.1));
+	TestTrue(TEXT("authority retains full incoming player view"), ServerPC->GetControlRotation().Equals(OtherRotation, 0.01));
+	TestTrue(TEXT("AI retains full incoming view without a player RPC"), AI->GetControlRotation().Equals(PlayerRotation, 0.01));
+	TestTrue(TEXT("player body takes only yaw"), Player->GetActorRotation().Equals(FRotator(0, 135, 0), 0.01));
+	TestTrue(TEXT("other body takes only yaw"), Other->GetActorRotation().Equals(FRotator(0, 25, 0), 0.01));
+	const bool bReceived = Worlds.TickUntil([&]()
+	{
+		return ClientPC->GetControlRotation().Equals(OtherRotation, 0.01);
+	}, 120);
+	TestTrue(FString::Printf(TEXT("remote owner receives full swap rotation: expected %s, got %s"),
+		*OtherRotation.ToString(), *ClientPC->GetControlRotation().ToString()), bReceived);
+	TestTrue(TEXT("owning client's body stays upright"), ClientPlayer->GetActorRotation().Equals(FRotator(0, 135, 0), 0.01));
+	return !HasAnyErrors();
+}
+#endif
 
 #endif // WITH_AUTOMATION_TESTS

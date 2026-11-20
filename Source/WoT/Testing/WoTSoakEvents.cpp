@@ -9,6 +9,21 @@
 #include "WoTCarcass.h"
 #include "WoTDecal.h"
 #include "WoTWorldFX.h"
+namespace
+{
+thread_local TArray<FString> BodySources;
+}
+WoTSoakEvents::FBodyScope::FBodyScope(const TCHAR* Source) : bActive(BodyEvents().IsBound())
+{
+	if (bActive) BodySources.Add(Source);
+}
+WoTSoakEvents::FBodyScope::~FBodyScope() { if (bActive) BodySources.Pop(); }
+FString WoTSoakEvents::BodySource() { return FString::Join(BodySources, TEXT(" > ")); }
+WoTSoakEvents::FBodyEvent& WoTSoakEvents::BodyEvents()
+{
+	static FBodyEvent Event;
+	return Event;
+}
 FVector WoTSoakEvents::SimulationVelocity(const AActor* Actor)
 {
 	if (const auto* A = Cast<AWoTInventory>(Actor)) return A->GetFallingVelocity();

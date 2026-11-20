@@ -16,6 +16,7 @@
 #include "Inventory/WoTInventoryComponent.h"
 #include "Inventory/WoTProjectileLauncher.h"
 #include "Inventory/WoTResourceSpawnerInv.h"
+#include "Projectiles/WoTGenericProjectile.h"
 #include "Projectiles/WoTMashadarGuide.h"
 #include "WoTCharacter.h"
 #include "WoTGameMode.h"
@@ -551,6 +552,22 @@ void AWoTBotController::CastItem(AWoTAngrealInventory* Item)
 	AimingItem = Item;
 	ObservedUses = Item->CastUseCount;
 	UpdateAim();
+	if (AWoTProjectileLauncher* Launcher = Cast<AWoTProjectileLauncher>(Item);
+		Launcher && Launcher->ProjectileClass)
+	{
+		const AWoTGenericProjectile* Projectile = Launcher->ProjectileClass.GetDefaultObject();
+		if (Projectile->bUsesDestination)
+		{
+			// Defensive selection uses the incoming shot to score the artifact.
+			// Acquire its destination from the updated view using the authored cone.
+			// Bot seeking casts only lock pawns, including when player acquisition
+			// offers a special shootable projectile as its best candidate.
+			APawn* DestinationPawn = Cast<APawn>(Launcher->FindBestTarget(
+				Launcher->GetTrajectorySource(), GetPawn()->GetViewRotation(), Projectile->MaxTargetAngle));
+			Launcher->SetVictim(DestinationPawn);
+			if (Projectile->bRequiresDestination && !DestinationPawn) return;
+		}
+	}
 	CastHold.Begin(Item, GetWorld()->GetTimeSeconds());
 	Caster->BeginCast(Item);
 	ObserveCastUse();
@@ -772,6 +789,8 @@ const WoTBotLinks::FDistantTeleport* AWoTBotController::DistantTeleportRoute(con
 
 bool AWoTBotController::StepOffPad(const WoTBotLinks::FDistantTeleport& Via, float Reach)
 {
+	WOT_SOAK_BODY_SCOPE("bot pad step-off request");
+	WOT_SOAK_BODY_EVENT(GetPawn(), "pad step-off request");
 	const APawn* Body = GetPawn();
 	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	const ANavigationData* Data = Nav ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
@@ -822,6 +841,7 @@ bool AWoTBotController::NavigateTo(const FVector& Point)
 
 void AWoTBotController::ChooseDestination(bool bForce)
 {
+	WOT_SOAK_BODY_SCOPE("bot route/off-mesh rescue request");
 	if (!CanAct()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (bForce && SeekingPool.IsValid())
@@ -894,6 +914,7 @@ void AWoTBotController::ChooseDestination(bool bForce)
 	// (another floor, an island); then one reachable from the body itself.
 	if (Nav->GetRandomReachablePointInRadius(Bias, bForce ? 600.0f : 1600.0f, Point, Data) && NavigateTo(Point.Location)) return;
 	if (Nav->GetRandomReachablePointInRadius(Body->GetActorLocation(), 1600.0f, Point, Data) && NavigateTo(Point.Location)) return;
+	WOT_SOAK_BODY_EVENT(Body, "off-mesh rescue request");
 	// Off the mesh altogether (on a sill or ledge a jump or a blast left it on):
 	// head straight for the nearest mesh, stepping or dropping back onto the floor.
 	// Mesh straight below (a beam or a high wall top) leaves no walk to make: the
