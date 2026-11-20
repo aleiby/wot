@@ -250,8 +250,12 @@ bool FWoTLocalHumanLookSpec::RunTest(const FString&)
 	if (!TestFalse(TEXT("look fixture preferences parse"), EarlyUI.IsError())) return false;
 	if (!TestFalse(TEXT("look fixture preferences publish"),
 		EarlyUIAuthority.PublishOnce(MoveTemp(EarlyUI).GetValue()).IsError())) return false;
-	const FWoTEarlyUINativeProjectionSink ProjectionSink{
-		[](uint16, uint16, EWoTWindowMode) { return FWoTBootstrapStatus::Success(); }};
+	// The sink holds a TFunctionRef: name the callable so it outlives the sink.
+	const auto ApplyProjection = [](uint16, uint16, EWoTWindowMode)
+	{
+		return FWoTBootstrapStatus::Success();
+	};
+	const FWoTEarlyUINativeProjectionSink ProjectionSink{ApplyProjection};
 	FString Error;
 	if (!TestTrue(TEXT("look fixture projection applies"),
 		WoTGuardedStartup_ApplyEarlyUINativeProjectionAtWindowConfiguration(ProjectionSink, &Error))) return false;
