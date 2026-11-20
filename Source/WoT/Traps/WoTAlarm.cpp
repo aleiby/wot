@@ -142,15 +142,10 @@ void AWoTAlarm::Touch(AActor* Other)
 	{
 		return;
 	}
-	APawn* P = Cast<APawn>(Other);
-	if (!P)
+	if (!WoTIsPlayerBody(Cast<APawn>(Other)))
 	{
-		return;
-	}
-	if (P->IsA<AWoTNPCCharacter>())
-	{
-		// NPC overlap does not ring the gong; the source permits only player touch here
-		// (Alarm.uc:79-81). Captains use ActivateAlarm when they arrive.
+		// Non-pawns and NPCs do not ring the gong; the source permits only player
+		// touch here (Alarm.uc:76-81). Captains use ActivateAlarm when they arrive.
 		return;
 	}
 	ActivateAlarm(Other);

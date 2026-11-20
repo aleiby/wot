@@ -413,7 +413,7 @@ void AWoTZoneVolume::ReconcileOwnerLocalFOV(AWoTCharacter* Player)
 	if (!IsValid(Player) || Player->IsNPCPawn()) return;
 	TArray<UWoTSmoothRandFOVLeech*> Existing;
 	Player->GetComponents<UWoTSmoothRandFOVLeech>(Existing);
-	if (!Player->IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(Player))
 	{
 		for (UWoTSmoothRandFOVLeech* Leech : Existing)
 		{
@@ -796,8 +796,11 @@ void AWoTZoneVolume::Tick(float DeltaTime)
 							if (C->Health > 0 && C->Health < 100)
 							{
 								UWorld* World = GetWorld();
+								// The player body plays the heal sound
+								// (WOTPlayer.uc:3091-3105) whoever drives it;
+								// an NPC heals silently (WOTPawn.uc:505-517).
 								if (!HealSoundPath.IsNone() && IsValid(World)
-									&& IsValid(Cast<APlayerController>(Pawn->GetController())))
+									&& WoTIsPlayerBody(C))
 								{
 									// WOTPlayer.uc PainTimer: the player's SLOT_Interact.
 									WoTSound::PlayReplicatedFrom(*C, HealSoundPath,

@@ -44,7 +44,7 @@ void UWoTSmoothRandFOVLeech::TickComponent(float DeltaTime, ELevelTick TickType,
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	APawn* Host = Cast<APawn>(GetOwner());
-	if (Host && Host->IsLocallyControlled())
+	if (Host && WoTIsLocalHumanPawn(Host))
 	{
 		CurrentFOV += (bGrowing ? 1.0f : -1.0f) * FOVRate * DeltaTime;
 		if ((bGrowing && CurrentFOV >= NextFOV) || (!bGrowing && CurrentFOV <= NextFOV))

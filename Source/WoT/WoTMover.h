@@ -120,6 +120,8 @@ public:
 		EWoTMoverGlideType::GlideByTime;
 	UPROPERTY(EditAnywhere, Category = "WoT") float MoveTime = 1.0f;
 	UPROPERTY(EditAnywhere, Category = "WoT") float StayOpenTime = 4.0f;
+	// TriggerPound waits open for OtherTime, then closed for StayOpenTime.
+	UPROPERTY(EditAnywhere, Category = "WoT") float OtherTime = 0.0f;
 	UPROPERTY(EditAnywhere, Category = "WoT") float DelayTime = 0.0f;
 	UPROPERTY(EditAnywhere, Category = "WoT") EWoTMoverState InitialState =
 		EWoTMoverState::BumpOpenTimed;
@@ -210,6 +212,7 @@ public:
 	                       FVector HitLocation, FVector HitNormal,
 	                       FVector NormalImpulse, const FHitResult& Hit) override;
 	virtual void WoTTrigger(AActor* Other, APawn* EventInstigator) override;
+	virtual void WoTUnTrigger(AActor* Other, APawn* EventInstigator) override;
 	virtual void MakeGroupReturn();
 	virtual void MakeGroupStop();
 	// Mover.EncroachingOn returns true when the attempted move must abort.
@@ -308,6 +311,11 @@ protected:
 
 private:
 	void StartOpen(APawn* EventInstigator);
+	void StartControlledOpen(APawn* EventInstigator);
+	// Count events, not unique actors: several triggers can share an instigator.
+	int32 NumTriggerEvents = 0;
+	TWeakObjectPtr<AActor> PoundTrigger;
+	bool bPoundWaitingClosed = false;
 	void FinishUnlock();
 	void ResolveGroupAndSlaves();
 	void AttachSlave(AWoTMover* Slave);

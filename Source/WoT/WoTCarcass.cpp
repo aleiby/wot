@@ -589,20 +589,17 @@ void AWoTCarcass::LandThump()
 
 void AWoTCarcass::ThrowOthers()
 {
-	// WOTCarcass.uc:212-237, ported verbatim. Every human player gets a distance-
-	// scaled view shake; walking players within 1500uu also take an AddVelocity kick
-	// whose vertical component is 7000000 / ((0.4*dist + 350) * playerMass).
+	// WOTCarcass.uc:212-237, ported verbatim. The original walks every pawn and
+	// throws each player body (PlayerPawn(Thrown), :222-223), whoever drives it;
+	// NPC bodies are left alone. Every player body gets a distance-scaled view
+	// shake (it reaches the person viewing through the body, when there is one);
+	// walking player bodies within 1500uu also take an AddVelocity kick whose
+	// vertical component is 7000000 / ((0.4*dist + 350) * playerMass).
 	const FVector Here = GetActorLocation();
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator();
-	     It; ++It)
+	for (TActorIterator<AWoTCharacter> It(GetWorld()); It; ++It)
 	{
-		AWoTPlayerController* PC = Cast<AWoTPlayerController>(It->Get());
-		if (!PC)
-		{
-			continue;
-		}
-		AWoTCharacter* Player = Cast<AWoTCharacter>(PC->GetPawn());
-		if (!Player)
+		AWoTCharacter* Player = *It;
+		if (!IsValid(Player) || !WoTIsPlayerBody(Player))
 		{
 			continue;
 		}
@@ -610,8 +607,11 @@ void AWoTCarcass::ThrowOthers()
 		// shake = FMax(500, 1500 - dist); ShakeView( FMax(0, 0.35 - dist/20000),
 		// shake, 0.015 * shake ) — (time, roll, vert).
 		const float Shake = FMath::Max(500.0f, 1500.0f - Dist);
-		PC->ClientShakeView(FMath::Max(0.0f, 0.35f - Dist / 20000.0f), Shake,
-		                    0.015f * Shake);
+		if (AWoTPlayerController* PC = Cast<AWoTPlayerController>(Player->GetController()))
+		{
+			PC->ClientShakeView(FMath::Max(0.0f, 0.35f - Dist / 20000.0f), Shake,
+			                    0.015f * Shake);
+		}
 
 		const UCharacterMovementComponent* Move = Player->GetCharacterMovement();
 		const bool bWalking = Move && (Move->MovementMode == MOVE_Walking ||

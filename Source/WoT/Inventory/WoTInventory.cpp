@@ -1,4 +1,5 @@
 #include "WoTInventory.h"
+#include "../WoTMatchParticipant.h"
 #include "Testing/WoTSoakEvents.h"
 #include "../AI/WoTPathNodeIterator.h"
 #include "../WoTRetailText.h"
@@ -376,12 +377,13 @@ bool AWoTInventory::TryPickupBy(AActor* Other)
 bool AWoTInventory::ValidTouch(AActor* Other)
 {
 	// Engine.Inventory.ValidTouch: a LIVING PLAYER pawn
-	// only — bIsPlayer && Health > 0. The port's established bIsPlayer identity
-	// is "not AWoTNPCCharacter"; unlike IsPlayerControlled(), this preserves the
-	// unpossessed plain-character fixtures while rejecting NPC inventory carriers.
+	// only — bIsPlayer && Health > 0. bIsPlayer is the body's (WoTIsPlayerBody:
+	// any pawn but an NPC, whoever drives it); unlike IsPlayerControlled(), this
+	// preserves the unpossessed plain-character fixtures and AI-driven player
+	// bodies while rejecting NPC inventory carriers.
 	// The Health gate is now live (a corpse can no longer consume a pickup).
 	APawn* P = Cast<APawn>(Other);
-	if (!P || P->IsA<AWoTNPCCharacter>()
+	if (!WoTIsPlayerBody(P)
 		|| !P->FindComponentByClass<UWoTInventoryComponent>())
 	{
 		return false;
@@ -393,6 +395,9 @@ bool AWoTInventory::ValidTouch(AActor* Other)
 			return false;   // dead pawns don't pick up
 		}
 	}
+	const AController* Collector = P->GetController() ? P->GetController() : Cast<AController>(P->GetOwner());
+	if (const IWoTMatchParticipant* Participant = Cast<IWoTMatchParticipant>(Collector))
+		if (!Participant->CanCollectPickups()) return false;
 	AWoTGameMode* Game = GetWorld()->GetAuthGameMode<AWoTGameMode>();
 	if (Game && !Game->PickupQuery(P, this))
 	{

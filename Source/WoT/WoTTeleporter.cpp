@@ -42,9 +42,29 @@ void AWoTTeleporter::SetUE1CollisionSize(float Radius, float HalfHeight)
 {
 	UE1CollisionRadius = FMath::Max(0.0f, Radius);
 	UE1CollisionHalfHeight = FMath::Max(0.0f, HalfHeight);
+	bUE1CollisionSized = true;
 	Collision->SetCapsuleSize(UE1CollisionRadius,
 		WoTUE1Collision::ContainingCapsuleHalfHeight(
 			UE1CollisionRadius, UE1CollisionHalfHeight), false);
+}
+
+void AWoTTeleporter::PostLoad()
+{
+	Super::PostLoad();
+	if (bUE1CollisionSized || !Collision
+		|| HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		return;
+	}
+	// A map imported before the exact cylinder existed kept the authored
+	// CollisionRadius/CollisionHeight on the capsule only (import_map.py), so
+	// the touch test ran against the 18/40 class default: Arena_06's 80/80
+	// pads only fired within 18 uu of their centre, which the player never
+	// reached. UE's capsule keeps HalfHeight >= Radius, so a pad authored
+	// wider than tall reads back its radius as its height until the map is
+	// restamped (Tools/import/import_teleporter_fx.py).
+	SetUE1CollisionSize(Collision->GetUnscaledCapsuleRadius(),
+		Collision->GetUnscaledCapsuleHalfHeight());
 }
 
 bool AWoTTeleporter::IsWithinUE1Cylinder(const AActor* Other) const

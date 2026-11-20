@@ -87,6 +87,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "WoT") bool bTriggerOnceOnly = false;
 	UPROPERTY(EditAnywhere, Category = "WoT") float ReTriggerDelay = 0.0f;
 	UPROPERTY(EditAnywhere, Category = "WoT") float RepeatTriggerTime = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "WoT") float DamageThreshold = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "WoT") bool bInitiallyActive = true;
+	UPROPERTY(EditAnywhere, Category = "WoT") FString Message;
 	// Engine.Trigger's first enum value and retail class default.
 	UPROPERTY(EditAnywhere, Category = "WoT")
 	EWoTTriggerType TriggerType = EWoTTriggerType::PlayerProximity;
@@ -96,14 +99,18 @@ public:
 	TObjectPtr<class UCapsuleComponent> Capsule;
 	UPROPERTY(VisibleAnywhere, Category = "WoT") float UE1CollisionRadius = 40.0f;
 	UPROPERTY(VisibleAnywhere, Category = "WoT") float UE1CollisionHalfHeight = 40.0f;
+	UFUNCTION(BlueprintCallable, Category = "WoT")
 	void SetUE1CollisionSize(float Radius, float HalfHeight);
 
 	virtual void BeginPlay() override;
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void WoTTrigger(AActor* Other, APawn* EventInstigator) override;
 	virtual FName GetUE1Tag() const override { return TagName; }
 	virtual bool IsRetailProjectileTarget() const override
 	{
-		return TriggerType == EWoTTriggerType::Shoot;
+		return TriggerType == EWoTTriggerType::Shoot && !bSpent;
 	}
 
 	// Public so the authority-gate spec can invoke it directly (a headless overlap event is
@@ -129,11 +136,16 @@ protected:
 	void UE1UnTouch(AActor* Other);
 	void ScheduleRepeat();
 	void OnRepeatTimer();
+	bool AcceptHit(AActor* Other, APawn* EventInstigator, class AWoTProjectile* Projectile = nullptr);
+	UFUNCTION() void OnRep_Spent();
 	float LastFireTime = -1e9f;
-	bool bSpent = false;
+	UPROPERTY(ReplicatedUsing = OnRep_Spent) bool bSpent = false;
+	TSet<TWeakObjectPtr<AWoTProjectile>> AcceptedProjectiles;
+	uint64 AcceptedProjectileFrame = MAX_uint64;
 	bool bTriggerEnabled = true;
 	FTimerHandle RepeatTimerHandle;
 	TSet<TWeakObjectPtr<AActor>> ActiveUE1Overlaps;
+	TMap<TWeakObjectPtr<AActor>, FVector> PendingShootLocations;
 	WoTUE1Collision::FTouchTracker UE1Touches;
 };
 

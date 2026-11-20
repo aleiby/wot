@@ -1101,8 +1101,14 @@ namespace
 	// take precedence; the strip is a fallback only. Longest first so "_Mod"
 	// never half-matches as "_M". Suffixes CHAIN (Battle2_02 pond portals:
 	// s_rainwater_T_2S), so callers peel one layer per call until a hit.
+	// The BSP split also appends the unlit, fake-backdrop and special-lit
+	// flags (Tools/convert/bsp2obj.py, presentation_census.py flag_suffix:
+	// _M _T _Mod _2S _U _Sky _SL, in that order): Arena_06's fountain portal
+	// is ScottT__S_ForFountain001_Mod_2S_U, Arena_08's pond
+	// JHPFireEng__SLWater02_T_2S_SL.
 	const TCHAR* WoTFractal_TypeSuffixes[] = {
-		TEXT("_Mod"), TEXT("_2S"), TEXT("_M"), TEXT("_T")};
+		TEXT("_Mod"), TEXT("_Sky"), TEXT("_2S"), TEXT("_SL"),
+		TEXT("_M"), TEXT("_T"), TEXT("_U")};
 
 	FString WoTFractal_StripTypeSuffix(const FString& Name)
 	{

@@ -1842,6 +1842,7 @@ bool ConfigureMoverProperties(AWoTMover& Mover,
 	};
 	if (!ReadFloat(D,A,TEXT("MoveTime"),Mover.MoveTime)) return Invalid(TEXT("MoveTime"));
 	if (!ReadFloat(D,A,TEXT("StayOpenTime"),Mover.StayOpenTime)) return Invalid(TEXT("StayOpenTime"));
+	if (!ReadFloat(D,A,TEXT("OtherTime"),Mover.OtherTime)) return Invalid(TEXT("OtherTime"));
 	if (!ReadFloat(D,A,TEXT("DelayTime"),Mover.DelayTime)) return Invalid(TEXT("DelayTime"));
 	if (!ReadByte(D,A,TEXT("KeyNum"),SerializedKeyNum)) return Invalid(TEXT("KeyNum"));
 	if (!ReadByte(D,A,TEXT("BumpType"),SerializedBumpType)
@@ -2022,6 +2023,9 @@ bool ConfigureTrigger(AWoTTrigger& Trigger,
 	if (!ReadName(D,A,TEXT("Tag"),Trigger.TagName)
 		|| !ReadName(D,A,TEXT("Event"),Trigger.EventName)
 		|| !ReadBool(D,A,TEXT("bTriggerOnceOnly"),Trigger.bTriggerOnceOnly)
+		|| !ReadBool(D,A,TEXT("bInitiallyActive"),Trigger.bInitiallyActive)
+		|| !ReadFloat(D,A,TEXT("DamageThreshold"),Trigger.DamageThreshold)
+		|| !ReadString(D,A,TEXT("Message"),Trigger.Message)
 		|| !ReadFloat(D,A,TEXT("ReTriggerDelay"),Trigger.ReTriggerDelay)
 		|| !ReadFloat(D,A,TEXT("RepeatTriggerTime"),Trigger.RepeatTriggerTime)
 		|| !ReadBool(D,A,TEXT("bCollideActors"),bCollideActors)
@@ -2067,6 +2071,11 @@ bool ProjectTrigger(UWorld& World, const FWoTRuntimeClassDefaults& D,
 	Trigger->SetReplicates(false);
 	if (!ConfigureTrigger(*Trigger,D,A,Error))
 	{ Trigger->Destroy(); return false; }
+	if (Trigger->TriggerType == EWoTTriggerType::Shoot)
+	{
+		Trigger->SetReplicates(true);
+		Trigger->SetNetAddressable();
+	}
 	if (AWoTDoorTrigger* Door = Cast<AWoTDoorTrigger>(Trigger))
 	{
 		uint8 Direction = 0;

@@ -45,6 +45,7 @@ private:
 	{
 		TWeakObjectPtr<AWoTBotController> Bot;
 		double Deadline = 0;
+		double LastSeenTime = -1e9;
 	};
 	void PostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
 	void Logout(AGameModeBase* GameMode, AController* Exiting);
@@ -54,9 +55,11 @@ private:
 	void ReconcileDepartures();
 	void DepartureDue();
 	void ArmDepartureTimer();
+	bool IsSeenByHuman(const AWoTBotController* Bot) const;
 	void QueueCount();
 	void PublishCount();
 	int32 HumanCount() const;
+	int32 ConnectedHumanCount() const;
 	AWoTBotController* RetirementCandidate(bool bUnmarkedOnly) const;
 	UClass* DealClass();
 	FString NextName(UClass* PlayerClass) const;

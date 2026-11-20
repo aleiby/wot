@@ -38,7 +38,7 @@ public:
 	virtual void CastArtifact() override;    // Cast(): begin charging
 	virtual void UnCastArtifact() override;  // UnCast(): release / fire
 	virtual void Reset() override;
-	virtual void Failed() override;
+	virtual void AbortCast() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(

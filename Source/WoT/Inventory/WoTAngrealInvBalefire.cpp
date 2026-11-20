@@ -339,7 +339,7 @@ void AWoTAngrealInvBalefire::Reset()
 	ReconcileCastingPresentation();
 }
 
-void AWoTAngrealInvBalefire::Failed()
+void AWoTAngrealInvBalefire::AbortCast()
 {
 	if (UWorld* W = GetWorld())
 	{
@@ -347,8 +347,7 @@ void AWoTAngrealInvBalefire::Failed()
 	}
 	bCasting = false;
 	ReconcileCastingPresentation();
-	// ReconcileCastingPresentation released the gather effect above.
-	Super::Failed();
+	Super::AbortCast();
 }
 
 void AWoTAngrealInvBalefire::OnRep_Casting()

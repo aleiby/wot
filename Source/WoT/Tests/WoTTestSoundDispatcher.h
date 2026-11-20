@@ -17,6 +17,7 @@ class AWoTTestSoundDispatcherEventSink : public AActor, public IWoTTriggerable
 public:
 	UPROPERTY() FName TagName;
 	int32 TriggerCount = 0;
+	int32 UnTriggerCount = 0;
 	int32 OrderToken = 0;
 	int32 ObservedBudgetEditCount = INDEX_NONE;
 	TWeakObjectPtr<AActor> LastOther;
@@ -48,4 +49,5 @@ public:
 		}
 	}
 	virtual FName GetUE1Tag() const override { return TagName; }
+	virtual void WoTUnTrigger(AActor*, APawn*) override { ++UnTriggerCount; }
 };
