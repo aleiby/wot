@@ -2,6 +2,7 @@
 #if WITH_AUTOMATION_TESTS && !WOT_GUARDED_BOOTSTRAP
 #include "WoTBotMapFixture.h"
 #include "WoTBotSoakReport.h"
+#include "WoTBotNavProbe.h"
 #include "WoTBotSoakServer.h"
 #include "Testing/WoTSoakEvents.h"
 #include "EngineUtils.h"
@@ -579,6 +580,8 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 	if (!W) { Error = TEXT("Could not create world"); return false; }
 	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); CollectGarbage(RF_NoFlags); };
 	FSoakServer Server(W);
+	FNavProbe NavProbe(W);
+	ON_SCOPE_EXIT { NavProbe.Snapshot(Report, Output); };
 	if (W->GetNetMode() != NM_DedicatedServer) { Error = TEXT("Worker requires dedicated server gameplay semantics"); return false; }
 	Report->SetStringField(TEXT("net_mode"), TEXT("dedicated_server"));
 	WoTRandom::Seed(int32(Number(Report,TEXT("seed"))));
@@ -655,6 +658,26 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 	Report->SetBoolField(TEXT("completed"), true);
 	return true;
 }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotArenaNavChurnSpec, "WoT.Bots.Navigation.Churn.ArenaMatch", Flags)
+bool FBotArenaNavChurnSpec::RunTest(const FString&)
+{
+	const FString Directory = FPaths::ProjectSavedDir() / TEXT("BotSoak/NavChurnSpec");
+	IFileManager::Get().MakeDirectory(*Directory, true);
+	FObject R = NewReport(TEXT("Arena_01"), 8, 60);
+	FString Error;
+	if (!RunMap(R, Directory / TEXT("Arena_01.json"), Error)) { AddError(Error); return false; }
+	TestEqual(TEXT("eight bots in the real map match"), R->GetArrayField(TEXT("bots")).Num(), 8);
+	TestEqual(TEXT("complete sixty second match sample"), Number(R,TEXT("simulated_seconds")), 60.0);
+	const double Rate = (Number(R,TEXT("navigation_tile_updates"))
+		- Number(R,TEXT("navigation_tile_updates_first_checkpoint"))) / 30.0;
+	AddInfo(FString::Printf(TEXT("NAV_CHURN map=Arena_01 steady_tiles_per_second=%.3f"), Rate));
+	// Baseline: 55.56 updates/s, exclusively projectile sources on this map.
+	// Allow 30 late setup updates over the steady 30-second window, rather than
+	// depending on exact asynchronous build completion ordering.
+	TestTrue(TEXT("steady match stays below one tile update per second"), Rate < 1.0);
+	return !HasAnyErrors();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotSoakPolicySpec, "WoT.Bots.SoakDiagnostics.FailurePolicy", Flags)
