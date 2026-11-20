@@ -5,6 +5,7 @@
 #include "WoTSoundChannels.h"
 #include "WoTSoundTable.h"
 #include "WoTZoneVolume.h"
+#include "WoTZoneReverbSubsystem.h"
 #include "WoTDynamicLightSubsystem.h"
 #include "Payload/WoTPayloadActivation.h"
 
@@ -117,7 +118,19 @@ void UWoTAmbientSoundComponent::Play(float StartTime)
 {
 	if (bChannelVoiceChange)
 	{
+		// The loop feeds the room reverb like every effects voice. A send added
+		// to a stopped component waits for its next Play; a playing one is
+		// restarted by Play, so its send goes on the new voice afterwards.
+		const bool bRestart = IsPlaying();
+		if (!bRestart)
+		{
+			UWoTZoneReverbSubsystem::AddSend(GetWorld(), *this);
+		}
 		Super::Play(StartTime);
+		if (bRestart)
+		{
+			UWoTZoneReverbSubsystem::AddSend(GetWorld(), *this);
+		}
 		return;
 	}
 	bWantsToPlay = true;

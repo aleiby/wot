@@ -185,6 +185,8 @@ public:
 	bool SharingConfirmedForTesting() const { return bSharingConfirmed; }
 	TSharedPtr<SCheckBox> SharingCheckBoxForTesting() const
 		{ return SharingCheckBox; }
+	TSharedPtr<SCheckBox> RoomReverbCheckBoxForTesting() const
+		{ return RoomReverbCheckBox; }
 	bool IsSharingHintVisibleForTesting() const { return IsSharingHintVisible(); }
 	TSharedPtr<STextBlock> SharingHintForTesting() const { return SharingHint; }
 	/** The game instance's sharing subsystem, for a screen built outside one. */
@@ -295,6 +297,8 @@ private:
 	TSharedPtr<SCheckBox> SteamKeyboardCheckBox;
 	bool bSteamKeyboardConfirmed = false;
 	bool bSteamKeyboardDraft = false;
+	/** Room reverb (FWoTGameSettings::bRoomReverb), on the Hardware page. */
+	TSharedPtr<SCheckBox> RoomReverbCheckBox;
 	TSharedPtr<SCheckBox> SharingCheckBox;
 	TSharedPtr<STextBlock> SharingHint;
 #if WITH_AUTOMATION_TESTS

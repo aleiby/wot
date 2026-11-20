@@ -279,6 +279,9 @@ USoundAttenuation* LinearAttenuation(float RadiusUU, float Volume)
 	S.NonSpatializedRadiusStart = CentringRadiusFraction * static_cast<float>(Key);
 	S.NonSpatializedRadiusEnd = FMath::Min(0.01f, S.NonSpatializedRadiusStart);
 	S.NonSpatializedRadiusMode = ENonSpatializedRadiusSpeakerMapMode::Direct2D;
+	// The engine's own reverb never adds to the room reverb, which every
+	// voice reaches through its own send (UWoTZoneReverbSubsystem).
+	S.bEnableReverbSend = false;
 	if (bClamp)
 	{
 		// The original's voice gain: Clamp(Volume * (1 - d/R), 0, 1) of full

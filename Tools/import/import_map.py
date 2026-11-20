@@ -127,6 +127,7 @@ from mesh_texture_variants import (  # noqa: E402
 )
 from bsp_payload import write_stripped_carrier  # noqa: E402
 from bsp_payload import split_bsp_glb_parts  # noqa: E402
+from zones import zone_reverb_rows  # noqa: E402
 
 RAW_ARGS = sys.argv[1:]
 POSITIONALS = importer_positionals(RAW_ARGS)
@@ -3118,6 +3119,18 @@ def make_light_table():
         zone_max_counts[zone] = int(row.get("max_light_count", 6))
     asset.set_editor_property("zone_min_light_counts", zone_min_counts)
     asset.set_editor_property("zone_max_light_counts", zone_max_counts)
+    # Room reverb per compiled zone (empty from an export that predates it:
+    # the runtime then keeps every zone dry).
+    reverb_records = []
+    for row in zone_reverb_rows(ambient_rows):
+        record = unreal.WoTZoneReverbRecord()
+        record.set_editor_property("reverb_zone", row["reverb_zone"])
+        record.set_editor_property("master_gain", row["master_gain"])
+        record.set_editor_property("cutoff_hz", row["cutoff_hz"])
+        record.set_editor_property("delay", row["delay"])
+        record.set_editor_property("gain", row["gain"])
+        reverb_records.append(record)
+    asset.set_editor_property("zone_reverbs", reverb_records)
 
     leaf_bsp = export_data.get("leaf_bsp", {})
     leaf_nodes = leaf_bsp.get("nodes", [])

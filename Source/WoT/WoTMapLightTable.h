@@ -79,6 +79,32 @@ struct FWoTZoneAmbient
 	bool bDefault = false;
 };
 
+// One compiled zone's reverb, as its zone actor (the level's LevelInfo for
+// zone 0, or for a zone with none) carries it: the authored values, else the
+// retail ZoneInfo class defaults. Raw bytes; WoTZoneReverb::MakeSettings
+// applies the original's limits. A default record is no reverb.
+USTRUCT(BlueprintType)
+struct FWoTZoneReverbRecord
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	bool bReverbZone = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	uint8 MasterGain = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	int32 CutoffHz = 0;
+
+	// Six Delay/Gain byte pairs (ZoneInfo Delay[6], Gain[6]).
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	TArray<uint8> Delay;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	TArray<uint8> Gain;
+};
+
 UCLASS()
 class UWoTMapLightTable : public UDataAsset
 {
@@ -125,6 +151,11 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
 	TArray<int32> ZoneMaxLightCounts;
+
+	// Zone-number-indexed room reverb (UWoTZoneReverbSubsystem). Empty on
+	// tables imported before the reverb fields existed: every zone is dry.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "WoT")
+	TArray<FWoTZoneReverbRecord> ZoneReverbs;
 
 	// Per-node [back, front] compiled leaf indices, parallel to ZoneBspPlanes.
 	// INDEX_NONE makes point lookup fake-lit (no permeating run). LineCheck does

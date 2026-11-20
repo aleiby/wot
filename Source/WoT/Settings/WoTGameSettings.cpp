@@ -1,5 +1,6 @@
 #include "WoTGameSettings.h"
 #include "WoTDisplayRampSubsystem.h"
+#include "../WoTZoneReverb.h"
 
 #include "AudioDevice.h"
 #include "Sound/SoundSubmix.h"
@@ -463,6 +464,7 @@ bool FWoTGameSettings::operator==(const FWoTGameSettings& Other) const
 		&& bVSync == Other.bVSync && GraphicsQuality == Other.GraphicsQuality
 		&& FrameRateLimit == Other.FrameRateLimit
 		&& MasterVolume == Other.MasterVolume
+		&& bRoomReverb == Other.bRoomReverb
 		&& bAlwaysMouseLook == Other.bAlwaysMouseLook
 		&& bAutoSlopeLook == Other.bAutoSlopeLook
 		&& bPlayerIDEnabled == Other.bPlayerIDEnabled
@@ -543,16 +545,16 @@ void FWoTGameSettings::ApplyToInput(UPlayerInput& Input) const
 FString FWoTGameSettingsCodec::Serialize(const FWoTGameSettings& Settings)
 {
 	FString Text = FString::Printf(
-		TEXT("GameSettingsVersion=11\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
+		TEXT("GameSettingsVersion=12\nGameMouseSensitivity=%.9g\nGameBrightness=%.9g\nGameInvertMouseY=%d\n")
 		TEXT("GameWidth=%u\nGameHeight=%u\nGameWindowMode=%s\nGameVSync=%d\n")
-		TEXT("GameGraphicsQuality=%u\nGameFrameRateLimit=%u\nGameMasterVolume=%.9g\n")
+		TEXT("GameGraphicsQuality=%u\nGameFrameRateLimit=%u\nGameMasterVolume=%.9g\nGameRoomReverb=%d\n")
 		TEXT("GameAlwaysMouseLook=%d\nGameAutoSlopeLook=%d\nGamePlayerID=%d\n")
 		TEXT("GameLookSpring=%d\nGameCrosshair=%u\nGameViewBob=%.9g\nGameJoystick=%d\nGameGoreDetail=%u\n")
 		TEXT("GameControllerLookSensitivity=%.9g\nGameControllerInvertY=%d\nGameControllerDeadZone=%.9g\n"),
 		Settings.MouseSensitivity, Settings.Brightness, Settings.bInvertMouseY ? 1 : 0,
 		Settings.Width, Settings.Height, ModeName(Settings.WindowMode),
 		Settings.bVSync ? 1 : 0, static_cast<uint32>(Settings.GraphicsQuality),
-		Settings.FrameRateLimit, Settings.MasterVolume,
+		Settings.FrameRateLimit, Settings.MasterVolume, Settings.bRoomReverb ? 1 : 0,
 		Settings.bAlwaysMouseLook ? 1 : 0, Settings.bAutoSlopeLook ? 1 : 0,
 		Settings.bPlayerIDEnabled ? 1 : 0, Settings.bLookSpring ? 1 : 0,
 		Settings.Crosshair, Settings.ViewBob,
@@ -618,7 +620,7 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 					&& SettingsVersion != 5 && SettingsVersion != 6
 					&& SettingsVersion != 7 && SettingsVersion != 8
 					&& SettingsVersion != 9 && SettingsVersion != 10
-					&& SettingsVersion != 11))
+					&& SettingsVersion != 11 && SettingsVersion != 12))
 			{
 				OutError = TEXT("Unsupported game settings version.");
 				return false;
@@ -673,10 +675,12 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 			if (Key == TEXT("GameCrosshair")) { Candidate.Crosshair = static_cast<uint8>(Number); }
 			else { Candidate.GoreDetailLevel = static_cast<uint8>(Number); }
 		}
-		else if (Key == TEXT("GameInvertMouseY") || Key == TEXT("GameVSync"))
+		else if (Key == TEXT("GameInvertMouseY") || Key == TEXT("GameVSync")
+			|| Key == TEXT("GameRoomReverb"))
 		{
 			if (Value != TEXT("0") && Value != TEXT("1")) { OutError = TEXT("Invalid game setting flag."); return false; }
 			if (Key == TEXT("GameInvertMouseY")) { Candidate.bInvertMouseY = Value == TEXT("1"); }
+			else if (Key == TEXT("GameRoomReverb")) { Candidate.bRoomReverb = Value == TEXT("1"); }
 			else { Candidate.bVSync = Value == TEXT("1"); }
 		}
 		else if (Key == TEXT("GameWidth") || Key == TEXT("GameHeight")
@@ -718,8 +722,11 @@ bool FWoTGameSettingsCodec::Parse(TConstArrayView<uint8> Bytes,
 	}
 	if (bHasGameRecord)
 	{
-		const bool bCompleteCurrent = (SettingsVersion == 10 || SettingsVersion == 11)
-			&& Seen.Num() == BindingCount + 22;
+		// Version 12 added the room reverb record; 10 and 11 files fill it on.
+		const bool bCompleteCurrent = (SettingsVersion == 12
+				&& Seen.Num() == BindingCount + 23)
+			|| ((SettingsVersion == 10 || SettingsVersion == 11)
+				&& Seen.Num() == BindingCount + 22);
 		const bool bCompleteVersion9 = SettingsVersion == 9
 			&& Seen.Num() == BindingCount + 19;
 		const bool bCompleteVersion8 = SettingsVersion == 8
@@ -1069,6 +1076,9 @@ void FWoTGameSettingsAdapter::ApplyAudio(const FWoTGameSettings& Settings)
 	// UEngine::LoadMap resets the device's TransientPrimaryVolume to 1 on every
 	// travel (UnrealEngine.cpp, "Stop all audio"), as do camera audio fades.
 	GWoTAppliedMasterVolume = Settings.MasterVolume;
+	// Room reverb takes effect on every listener's next frame: off is no
+	// reverb in any zone.
+	WoTZoneReverb::SetRoomReverbEnabled(Settings.bRoomReverb);
 	if (!GWoTMasterVolumeDeviceCreatedHandle.IsValid())
 	{
 		// A device created later (device swap, new world device) inherits it.

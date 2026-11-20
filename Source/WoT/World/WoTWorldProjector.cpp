@@ -259,6 +259,14 @@ bool ReadByte(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
 	return P == nullptr || WoTRuntimeWorldPropertyByte(*P, Value);
 }
 
+// One element of a static byte array (Name[Slot]).
+bool ReadByteAt(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
+	const TCHAR* Name, uint32 Slot, uint8& Value)
+{
+	const FWoTRuntimeWorldProperty* P = Prop(D, A, Name, Slot);
+	return P == nullptr || WoTRuntimeWorldPropertyByte(*P, Value);
+}
+
 bool ReadInt(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
 	const TCHAR* Name, int32& Value)
 {
@@ -4237,6 +4245,27 @@ bool FillLightTable(UWorld& World, const FWoTWorldProjectionSource& Source,
 		}
 		Table->ZoneMinLightCounts.Add(MinCount);
 		Table->ZoneMaxLightCounts.Add(MaxCount);
+		// The zone's room reverb: the same actor's ZoneInfo reverb properties,
+		// each the authored value or else its class default (the engine's
+		// zero for a property neither carries). A malformed value leaves the
+		// zone dry.
+		FWoTZoneReverbRecord& Reverb=Table->ZoneReverbs.AddDefaulted_GetRef();
+		if (AmbientActor != nullptr)
+		{
+			FWoTZoneReverbRecord Read;
+			Read.Delay.SetNumZeroed(6);
+			Read.Gain.SetNumZeroed(6);
+			bool bValid=ReadBool(D,*AmbientActor,TEXT("bReverbZone"),Read.bReverbZone)
+				&& ReadByte(D,*AmbientActor,TEXT("MasterGain"),Read.MasterGain)
+				&& ReadInt(D,*AmbientActor,TEXT("CutoffHz"),Read.CutoffHz);
+			for (uint32 Slot=0; bValid && Slot<6; ++Slot)
+			{
+				bValid=ReadByteAt(D,*AmbientActor,TEXT("Delay"),Slot,Read.Delay[Slot])
+					&& ReadByteAt(D,*AmbientActor,TEXT("Gain"),Slot,Read.Gain[Slot]);
+			}
+			if (bValid) Reverb=MoveTemp(Read);
+			else Reject(*AmbientActor,TEXT("zone reverb properties are malformed"));
+		}
 		FWoTZoneAmbient& Ambient=Table->ZoneAmbients.AddDefaulted_GetRef();
 		Ambient.Zone=I; Ambient.Color=UE1FGetHSV(H,S,B); Ambient.bDefault=I==0;
 		FVector Lo,Hi;

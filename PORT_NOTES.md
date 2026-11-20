@@ -1002,6 +1002,16 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Port:** Its sounds always play in the default slot, and sound tables are not supported. A warning is logged once if a table is used.
 - **Why:** No multiplayer map chooses another slot or uses a sound table.
 
+### Room reverb on processors without SSE
+- **Original:** The room reverb that reverb zones select had a second, fixed-point version, used only on processors without SSE (Pentium II and K6 era machines). Every processor with SSE, which is every machine that runs the game today, used the floating-point version.
+- **Port:** Only the floating-point version is reproduced. The exact sound of the fixed-point version is not.
+- **Why:** It is the reverb every current machine plays.
+
+### Room reverb sample rate and speakers
+- **Original:** The room reverb ran on the stereo mix at the original's 44.1 kHz output rate.
+- **Port:** The reverb runs at the audio device's rate, usually 48 kHz. Its echo times and treble damping are worked out for that rate, so they match the original's up to rounding to a whole sample. On an output with more than two channels, the reverb takes the sounds folded down to stereo and plays from the front left and right speakers.
+- **Why:** UE5 mixes at the device's rate and channel layout.
+
 ## Install & updates
 
 ### Built from the player's own copy of the game

@@ -534,6 +534,12 @@ void SWoTSettingsScreen::FocusSaveAfterStrip(bool bAlways)
 
 SWoTSettingsScreen::~SWoTSettingsScreen()
 {
+	if (Page == EWoTSettingsPage::Hardware
+		&& (!FMath::IsNearlyEqual(Draft.MasterVolume, Confirmed.MasterVolume)
+			|| Draft.bRoomReverb != Confirmed.bRoomReverb))
+	{
+		FWoTGameSettingsAdapter::ApplyAudio(Confirmed);
+	}
 	const bool bBrightnessPreviewLive =
 		!FMath::IsNearlyEqual(Draft.Brightness, Confirmed.Brightness);
 	// A screen torn down mid-preview never leaves the display unconfirmed.
@@ -1175,6 +1181,26 @@ void SWoTSettingsScreen::BuildHardwareBody()
 		]
 	];
 	NavigationRows.Add({VolumeSlider});
+	// The original's reverb switch: heard at once, kept by Save.
+	Rows->AddSlot().Padding(0.0f, 0.0f, 0.0f, 8.0f)
+	[
+		SAssignNew(RoomReverbCheckBox, SCheckBox)
+		.Style(&BodyCheckBoxStyle)
+		.IsChecked_Lambda([this]()
+		{
+			return Draft.bRoomReverb ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+		})
+		.OnCheckStateChanged_Lambda([this](ECheckBoxState State)
+		{
+			Draft.bRoomReverb = State == ECheckBoxState::Checked;
+			// Audible preview; Back restores the confirmed setting.
+			FWoTGameSettingsAdapter::ApplyAudio(Draft);
+		})
+		[
+			BuildLabel(Literal(TEXT("Room reverb")))
+		]
+	];
+	NavigationRows.Add({RoomReverbCheckBox});
 	// NETWORK: LAN installer sharing. The sharer only ever sends (it never
 	// listens), so the switch is on by default.
 	Rows->AddSlot().Padding(0.0f, 6.0f, 0.0f, 0.0f)
@@ -1555,7 +1581,8 @@ void SWoTSettingsScreen::LeaveDiscardingDraft()
 		FWoTGameSettingsAdapter::ApplyBrightness(Confirmed.Brightness);
 	}
 	if (Page == EWoTSettingsPage::Hardware
-		&& !FMath::IsNearlyEqual(Draft.MasterVolume, Confirmed.MasterVolume))
+		&& (!FMath::IsNearlyEqual(Draft.MasterVolume, Confirmed.MasterVolume)
+			|| Draft.bRoomReverb != Confirmed.bRoomReverb))
 	{
 		FWoTGameSettingsAdapter::ApplyAudio(Confirmed);
 	}
