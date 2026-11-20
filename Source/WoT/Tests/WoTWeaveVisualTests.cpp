@@ -26,8 +26,13 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Misc/ScopeExit.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
@@ -653,6 +658,65 @@ bool FWoTTeleporterEffectsSpec::RunTest(const FString&)
 		Dest->LastExitEffectSound, FName(TEXT("AmbientA/Portal5")));
 	WoTTest::DestroySpecWorld(World);
 	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTTeleporterRefusedArrivalSpec,
+	"WoT.Teleporter.RefusedArrivalRearmsEntry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FWoTTeleporterRefusedArrivalSpec::RunTest(const FString&)
+{
+	UWorld* World = WoTTest::CreateSpecWorld();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(World); };
+	auto BoxAt = [World](const FVector& Location, const FVector& Extent)
+	{
+		AActor* Actor = World->SpawnActor<AStaticMeshActor>(Location, FRotator::ZeroRotator, AlwaysSpawn());
+		UBoxComponent* Box = NewObject<UBoxComponent>(Actor);
+		Box->SetupAttachment(Actor->GetRootComponent());
+		Box->SetBoxExtent(Extent);
+		Box->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Box->SetCollisionObjectType(ECC_WorldStatic);
+		Box->SetCollisionResponseToAllChannels(ECR_Block);
+		Box->RegisterComponent();
+		return Actor;
+	};
+	BoxAt(FVector(0, 0, -50), FVector(5000, 5000, 50));
+	AWoTTeleporter* Dest = World->SpawnActor<AWoTTeleporter>(
+		FVector(1000, 0, 46), FRotator::ZeroRotator, AlwaysSpawn());
+	AWoTTeleporter* Exit = World->SpawnActor<AWoTTeleporter>(
+		FVector(2000, 0, 46), FRotator::ZeroRotator, AlwaysSpawn());
+	AWoTCharacter* Pawn = World->SpawnActor<AWoTCharacter>(
+		FVector(500, 0, 50), FRotator::ZeroRotator, AlwaysSpawn());
+	APlayerController* PC = World->SpawnActor<APlayerController>();
+	if (!TestNotNull(TEXT("destination pad"), Dest) || !TestNotNull(TEXT("exit pad"), Exit)
+		|| !TestNotNull(TEXT("walking pawn"), Pawn) || !TestNotNull(TEXT("controller"), PC)) return false;
+	Dest->URL = TEXT("AfterRefusal");
+	Exit->TeleTag = TEXT("AfterRefusal");
+	PC->SetAsLocalPlayerController();
+	PC->Possess(Pawn);
+	PC->SetControlRotation(FRotator::ZeroRotator);
+	WoTTest::TickWorld(World, 30);
+	if (!TestTrue(TEXT("pawn stands on the floor"), Pawn->GetCharacterMovement()->IsMovingOnGround())) return false;
+	const FVector Before = Pawn->GetActorLocation();
+	AActor* Blocker = BoxAt(Dest->GetActorLocation(), FVector(200, 200, 200));
+	TestTrue(TEXT("refused pawn arrival retains the existing true return"), Dest->Accept(Pawn));
+	if (!TestTrue(TEXT("blocked destination refuses the move"), Pawn->GetActorLocation().Equals(Before, 0.01))) return false;
+	Blocker->Destroy();
+
+	// No synthetic end-overlap: this pawn has never entered the destination.
+	// Its first real walk into that pad must not be mistaken for an arrival.
+	bool bTeleported = false;
+	for (int32 Frame = 0; Frame < 180 && !bTeleported; ++Frame)
+	{
+		const FVector Previous = Pawn->GetActorLocation();
+		Pawn->AddMovementInput(FVector::ForwardVector);
+		WoTTest::TickWorld(World, 1);
+		bTeleported = Pawn->GetActorLocation().X - Previous.X > 500.0
+			&& FVector::Dist2D(Pawn->GetActorLocation(), Exit->GetActorLocation()) < 50.0;
+		if (!bTeleported && Pawn->GetActorLocation().X > 1100.0) break;
+	}
+	TestTrue(FString::Printf(TEXT("first walking entry after refusal teleports (at %s)"),
+		*Pawn->GetActorLocation().ToString()), bTeleported);
+	return !HasAnyErrors();
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTAppearEffectProducerSpec,

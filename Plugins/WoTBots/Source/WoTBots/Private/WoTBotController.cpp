@@ -309,6 +309,7 @@ void AWoTBotController::DestroyRespawnCorpse()
 
 void AWoTBotController::SilentRespawn()
 {
+	WOT_SOAK_BODY_SCOPE("bot silent respawn");
 	if (!HasAuthority() || bFrozen || bDeparturePending || bRetiring || bIdle) return;
 	const AWoTGameMode* Game = GetWorld()->GetAuthGameMode<AWoTGameMode>();
 	if (!Game || Game->bGameEnded) return;

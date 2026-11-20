@@ -12,6 +12,10 @@
 // capsule as their broad phase, then apply this exact authored-cylinder test.
 namespace WoTUE1Collision
 {
+	// Character movement requires an upright body; views and non-characters
+	// retain their complete rotation.
+	WOT_API FRotator BodyRotation(const AActor& Actor, const FRotator& Incoming);
+
 	// UE1 FindSpot's bCheckActors=0 path adjusts only against the level. UE5's
 	// FindTeleportSpot also tests pawns through the moving actor's component
 	// responses, so suppress just that channel for the duration of the native

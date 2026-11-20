@@ -80,7 +80,7 @@ public:
 protected:
 	void PresentEffect(bool bExit);
 	// Accept's move of Incoming to Destination (Teleporter.Accept's SetLocation):
-	// here it is placed there unswept. True when it moved.
+	// fit to level geometry before placing it. True when it moved.
 	virtual bool MoveIncoming(AActor& Incoming, const FVector& Destination);
 	// The pawn Accept() just placed on us — its arrival begin-overlap must not
 	// bounce it straight back (retail's Disable('Touch') window; UE1 also only

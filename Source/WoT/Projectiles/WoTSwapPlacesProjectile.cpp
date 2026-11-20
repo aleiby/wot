@@ -1,4 +1,5 @@
 #include "WoTSwapPlacesProjectile.h"
+#include "Testing/WoTSoakEvents.h"
 #include "../WoTMeshFX.h"
 #include "../WoTAppearEffect.h"
 #include "../WoTPlayerColorFX.h"
@@ -265,6 +266,7 @@ void AWoTSwapPlacesProjectile::RedirectSeeker(AWoTSeekingProjectile* Seeker,
 
 void AWoTSwapPlacesProjectile::PerformSwap(APawn* Source, AActor* Dest)
 {
+	WOT_SOAK_BODY_SCOPE("Swap Places");
 	// Don't swap with yourself; both ends must exist.
 	if (!IsValid(Source) || !IsValid(Dest) || Source == Dest)
 	{
@@ -283,6 +285,9 @@ void AWoTSwapPlacesProjectile::PerformSwap(APawn* Source, AActor* Dest)
 	const FVector DstLoc = bLevel ? WhereLevelInfoStands(*W, *Dest) : Dest->GetActorLocation();
 	const FRotator SrcRot = Source->GetActorRotation();
 	const FRotator DstRot = Dest->GetActorRotation();
+#if WITH_AUTOMATION_TESTS
+	WoTSoakEvents::FBodyScope SwapTarget(*FString::Printf(TEXT("target=%s rotation=%s"), *Dest->GetName(), *DstRot.ToString()));
+#endif
 	// Both ends' sizes are read now: an actor that stops colliding reports none.
 	float SourceRadius = 0.0f, SourceHeight = 0.0f;
 	float DestRadius = LevelInfoCollisionSize, DestHeight = LevelInfoCollisionSize;
@@ -356,6 +361,7 @@ void AWoTSwapPlacesProjectile::PerformSwap(APawn* Source, AActor* Dest)
 		ReportFitFailure(TEXT("SourceFailMessage"));
 		return;
 	}
+	WOT_SOAK_BODY_EVENT(Source, "swap source placed or rolled back");
 	UWoTZoneIndex::RefreshAfterRelocation(Source);
 	// A far end that collides with the world has to fit the level where the
 	// caster stood (uc:178), which may nudge it out of a wall the caster stood
@@ -370,29 +376,40 @@ void AWoTSwapPlacesProjectile::PerformSwap(APawn* Source, AActor* Dest)
 		if (Source->SetActorLocation(SrcLoc, false, nullptr,
 			ETeleportType::TeleportPhysics))
 		{
+			WOT_SOAK_BODY_EVENT(Source, "swap source placed or rolled back");
 			UWoTZoneIndex::RefreshAfterRelocation(Source);
 		}
 		ReportFitFailure(TEXT("DestinationFailMessage"));
 		return;
 	}
 
-	// Swap facing (actor + control/view rotation).
-	Source->SetActorRotation(DstRot);
+	// The original cylinder never tilted. UE character collision turns with
+	// its body, so transfer only body yaw while keeping the full scripted view.
+	Source->SetActorRotation(WoTUE1Collision::BodyRotation(*Source, DstRot));
 	if (AController* C = Source->GetController())
 	{
 		C->SetControlRotation(DstRot);
+		if (APlayerController* PC = Cast<APlayerController>(C))
+		{
+			PC->ClientSetRotation(DstRot, false);
+		}
 	}
-	Dest->SetActorRotation(SrcRot);
+	Dest->SetActorRotation(WoTUE1Collision::BodyRotation(*Dest, SrcRot));
 	if (APawn* DestPawn = Cast<APawn>(Dest))
 	{
 		if (AController* C = DestPawn->GetController())
 		{
 			C->SetControlRotation(SrcRot);
+			if (APlayerController* PC = Cast<APlayerController>(C))
+			{
+				PC->ClientSetRotation(SrcRot, false);
+			}
 		}
 	}
 	// uc:208-210: the far end collides again. Its zones are taken now: with its
 	// collision off it reports no size, and its feet would be read at its middle.
 	DestCollision.Restore();
+	WOT_SOAK_BODY_EVENT(Dest, "swap destination placed");
 	UWoTZoneIndex::RefreshAfterRelocation(Dest);
 	ShowClientsWhereItStands(*Dest);
 

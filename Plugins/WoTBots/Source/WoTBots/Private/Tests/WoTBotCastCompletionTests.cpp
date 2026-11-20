@@ -6,6 +6,7 @@
 #include "Inventory/WoTAngrealInvHeal.h"
 #include "Inventory/WoTResourceSpawnerInv.h"
 #include "Projectiles/WoTAngrealProjectile.h"
+#include "Projectiles/WoTSeekingProjectile.h"
 #include "Projectiles/WoTMashadarGuide.h"
 #include "WoTZoneVolume.h"
 #include "Engine/DamageEvents.h"
@@ -184,11 +185,15 @@ bool FBotCatalogCompletionSpec::RunTest(const FString& Name)
 			Caster->IsCasting() ? TEXT("STILL_HELD") : Name == TEXT("Balefire") ? TEXT("full-prime release") : TEXT("used; ended before budget"),
 			Item->CastUseCount, UsesAtStart));
 		if (Caster->IsCasting()) break;
-		if (Name == TEXT("EarthTremor"))
+		if (Name == TEXT("EarthTremor") || Name == TEXT("SwapPlaces"))
 		{
 			// Completion owns input lifetime, not downstream ground-chunk physics.
 			// Prove the real launch and flight, then dispose it before the cooldown
 			// wait can enter the shared point-chunk bounce defect (fix3 report).
+			// A completed swap also relocates this fixture's stationary enemy out
+			// of view while its perception timer is disabled. Its full arrival is
+			// covered by the real-map selection spec; keep this two-cycle fixture
+			// focused on release and reuse with an uninterrupted visible target.
 			WoTTest::TickWorld(W, .05f);
 			int32 Projectiles = 0;
 			for (TActorIterator<AWoTAngrealProjectile> It(W); It; ++It)
@@ -200,6 +205,9 @@ bool FBotCatalogCompletionSpec::RunTest(const FString& Name)
 					TestTrue(TEXT("launched projectile travels with finite velocity"),
 						!It->ProjectileMovement->Velocity.ContainsNaN() && It->ProjectileMovement->Velocity.Size() > 100
 						&& It->GetActorLocation().X > Pawn->GetActorLocation().X + 5);
+					if (Name == TEXT("SwapPlaces"))
+						TestEqual(TEXT("completed swap cast seeks the visible pawn"),
+							CastChecked<AWoTSeekingProjectile>(*It)->Destination.Get(), static_cast<AActor*>(E));
 					It->Destroy();
 				}
 			TestEqual(TEXT("each completed cast really launches one projectile"), Projectiles, 1);

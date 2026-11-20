@@ -107,14 +107,14 @@ struct FLogCapture : FOutputDevice
 
 inline FString SummaryHeader()
 {
-	return TEXT("| Map | Result | Kills | Deaths | Ensures/errors | Invalid/runaway | Recoveries/respawns | Unvisited pools | Tick avg/p95/max ms | Frag end/restart request |\n|---|---|---:|---:|---|---|---|---:|---|---|\n");
+	return TEXT("| Map | Result | Kills | Deaths | Ensures/errors | Invalid/runaway | Recoveries/respawns | Upright feet/shape warnings | Unvisited pools | Tick avg/p95/max ms | Frag end/restart request |\n|---|---|---:|---:|---|---|---|---|---:|---|---|\n");
 }
 inline FString SummaryRow(const FObject& M)
 {
-	return FString::Printf(TEXT("| %s | %s | %.0f | %.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f | %.2f/%.2f/%.2f | %s/%s |\n"),
+	return FString::Printf(TEXT("| %s | %s | %.0f | %.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f | %.2f/%.2f/%.2f | %s/%s |\n"),
 		*M->GetStringField(TEXT("map")), *M->GetStringField(TEXT("result")), Number(M,TEXT("kills")), Number(M,TEXT("deaths")),
 		Number(M,TEXT("ensures")), Number(M,TEXT("errors")), Number(M,TEXT("non_finite")), Number(M,TEXT("runaway")),
-		Number(M,TEXT("recoveries")), Number(M,TEXT("silent_respawns")), Number(M,TEXT("unvisited_pools")),
+		Number(M,TEXT("recoveries")), Number(M,TEXT("silent_respawns")), Number(M,TEXT("inside_floor_count")), Number(M,TEXT("geometry_penetration_count")), Number(M,TEXT("unvisited_pools")),
 		Number(M,TEXT("tick_avg_ms")), Number(M,TEXT("tick_p95_ms")), Number(M,TEXT("tick_max_ms")),
 		M->GetBoolField(TEXT("frag_limit_end")) ? TEXT("yes") : TEXT("no"),
 		M->GetBoolField(TEXT("restart_requested")) ? TEXT("yes") : TEXT("no"));
@@ -125,6 +125,7 @@ inline FString Markdown(const TArray<FObject>& Maps, double WallSeconds)
 	Text += TEXT("Each map runs in its own headless process with the ordinary Arena rules and roster. Seeds are per map. Recast internals can still depend on engine scheduling. Tick timings measure World::Tick only; monitoring and loading are excluded. Slow ticks exceed 33.33 ms.\n\n");
 	Text += TEXT("A socketless test driver selects dedicated-server gameplay semantics. Network transport ticks are disabled; this is a gameplay soak, not a network throughput measurement. Synchronous event and log capture overhead is included in tick timing. An actor can appear once in each anomaly category if a runaway velocity later becomes non-finite.\n\n");
 	Text += TEXT("H4 records the natural frag-limit end and unattended restart request. Existing automation suppresses ServerTravel: completed reload is **not tested**. No forced score or shortened frag limit is used.\n\n");
+	Text += TEXT("Body floor warnings count independent entries of the movement component's expected upright feet below a walkable floor. Shape warnings count actual rotated collision penetration. These differ when a relocation tilts a body; history includes its collision axis and vertical extent, and geometry records actual rotated-bottom clearance. Each combined episode retains first history and latest geometry/state.\n\n");
 	Text += SummaryHeader();
 	for (const FObject& M : Maps) Text += SummaryRow(M);
 	Text += TEXT("\nVisits mean a living bot within 120 units; unvisited in the original table means never collected. Pickups include loose items and bags. Rates and state shares use observed controller seconds (including dead/frozen). Falling is the share of those seconds a living body spent falling, in any state. Clustering samples once per simulated second, over living bodies that are not falling: any three with all pair distances <= 600. Pair distances cover every such pair in those samples; the mean is sensitive to a few bodies far from the rest, the median is not.\n\n");
@@ -145,7 +146,7 @@ inline FString Markdown(const TArray<FObject>& Maps, double WallSeconds)
 			*M->GetStringField(TEXT("map")), Number(M,TEXT("seed")), Number(M,TEXT("requested_seconds")), Number(M,TEXT("simulated_seconds")), Number(M,TEXT("fill")));
 		Text += TEXT("Minimal reproduction: set WOT_BOT_SOAK=1 and WOT_REFERENCE_ROOT, run WoT.Bots.Soak.AllArenaMaps with ");
 		Text += FString::Printf(TEXT("`-WotBotSoakMap=%s -WotBotSoakOutput=<report.json>` using the same fill and seconds. The map seed is deterministic. Raw worker log is adjacent to the report.\n\n"), *M->GetStringField(TEXT("map")));
-		Text += TEXT("Warnings include recoveries, silent respawns, unvisited pools and slow ticks; these do not independently fail the map. Full per-bot, per-pool, grouped log and first-event evidence follows.\n\n```json\n");
+		Text += TEXT("Warnings include body floor/geometry penetration episodes, recoveries, silent respawns, unvisited pools and slow ticks; these do not independently fail the map. Full per-bot, per-pool, grouped log and first-event evidence follows.\n\n```json\n");
 		Text += Encode(M) + TEXT("\n```\n");
 	}
 	return Text;

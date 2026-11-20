@@ -21,6 +21,7 @@
 #include "../Payload/WoTRuntimeRegistry.h"
 #include "../Payload/WoTRuntimeWorldResource.h"
 #include "../Projectiles/WoTSwapPlacesProjectile.h"
+#include "../Projectiles/WoTDartProjectile.h"
 #include "../WoTActorRotator.h"
 #include "../World/WoTRuntimeBSPRenderer.h"
 #include "../World/WoTRuntimeClassDefaults.h"
@@ -52,6 +53,8 @@
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerStart.h"
+#include "GameFramework/PlayerInput.h"
+#include "GameFramework/DefaultPawn.h"
 #include "GameFramework/WorldSettings.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ScopeExit.h"
@@ -73,7 +76,7 @@ constexpr EAutomationTestFlags Flags =
 constexpr float Step = 1.0f / 30.0f;
 
 // Maps whose level geometry these specs build; the rest keep only their records.
-const TCHAR* const LevelMaps[] = {TEXT("Arena_01"), TEXT("Arena_09")};
+const TCHAR* const LevelMaps[] = {TEXT("Arena_01"), TEXT("Arena_08"), TEXT("Arena_09")};
 
 FActorSpawnParameters AlwaysSpawn()
 {
@@ -689,6 +692,123 @@ AWoTCharacter* FlyingBody(UWorld& World, const FVector& At, float Yaw)
 	return Body;
 }
 #endif
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSwapRolledDartFloorSpec,
+	"WoT.Movement.RealMap.SwapWithSpinningProjectileKeepsCollisionUpright",
+	WoTRelocationRealMap::Flags)
+bool FWoTSwapRolledDartFloorSpec::RunTest(const FString&)
+{
+	using namespace WoTRelocationRealMap;
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	FBuiltMap Built;
+	if (!BuildMap(*this, Fixture, TEXT("Arena_08"), Built)) return false;
+	UWorld& World = *Built.World;
+	AWoTPlayerController* PC = World.SpawnActor<AWoTPlayerController>(AlwaysSpawn());
+	AWoTCharacter* Body = World.SpawnActor<AWoTCharacter>(
+		FVector(-582.290, -135.506, -350), FRotator::ZeroRotator, AlwaysSpawn());
+	if (!TestNotNull(TEXT("human controller"), PC) || !TestNotNull(TEXT("human body"), Body)) return false;
+	PC->SetAsLocalPlayerController(); PC->Possess(Body);
+	Body->GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+	WoTTest::TickWorld(&World, 1.0f, Step);
+	if (!TestTrue(TEXT("human stands on the real level before the swap"), Body->GetCharacterMovement()->IsMovingOnGround())) return false;
+
+	// The Arena_08 soak's dart at 305.4667s. Its real Tick spins it through
+	// 20000 rotation units in three movement ticks (109.863281 degrees), as
+	// exports/script/Angreal/AngrealDartProjectile.uc:43-49 prescribes.
+	const FRotator Launch(2.240397, 47.143607, 0);
+	const FVector Meeting(-628.462, -189.840, -411.425);
+	AWoTDartProjectile* Dart = World.SpawnActor<AWoTDartProjectile>(
+		Meeting - Launch.Vector() * 200.0, Launch, AlwaysSpawn());
+	WoTTest::TickWorld(&World, 3, Step);
+	if (!TestTrue(TEXT("the real dart survives its approach"), IsValid(Dart))) return false;
+	const FRotator Transferred = Dart->GetActorRotation();
+	TestEqual(TEXT("the authored spin reaches the measured roll"), Transferred.Roll, 109.86328125, 0.01);
+	if (!CastSwapOnto(*this, World, *Body, *Dart)) return false;
+	TestTrue(TEXT("swap keeps the body yaw-only"), Body->GetActorRotation().Equals(FRotator(0, Transferred.Yaw, 0), 0.01));
+	TestTrue(TEXT("swap preserves the complete scripted view rotation"), PC->GetControlRotation().Equals(Transferred, 0.01));
+	TestTrue(TEXT("the capsule axis is upright immediately after the swap"),
+		Body->GetCapsuleComponent()->GetUpVector().Equals(FVector::UpVector, 0.001));
+	PC->PlayerInput = NewObject<UPlayerInput>(PC);
+	for (int32 Tick = 0; Tick < 60; ++Tick)
+	{
+		// Exercise the normal human facing path as well as real movement; this
+		// fixture has no input device to schedule PlayerTick on its own.
+		PC->PlayerTick(Step);
+		if (Tick == 0)
+			TestTrue(TEXT("the real view tick starts leveling the transferred roll"),
+				FMath::Abs(PC->GetControlRotation().Roll) < FMath::Abs(Transferred.Roll));
+		if (Tick < 10) Body->AddMovementInput(FVector(1, 1, 0).GetSafeNormal());
+		World.Tick(LEVELTICK_All, Step); ++GFrameCounter;
+	}
+	TestEqual(TEXT("the real view tick levels the roll"), PC->GetControlRotation().Roll, 0.0, 0.01);
+	FHitResult Floor;
+	const FVector Here = Body->GetActorLocation();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(WoTSwappedBodyFloor), false, Body);
+	const bool bFloor = World.LineTraceSingleByChannel(Floor, Here, Here - FVector(0, 0, 150), ECC_Visibility, Params);
+	TestTrue(TEXT("the moved human remains above a walkable floor"), bFloor && Body->GetCharacterMovement()->IsWalkable(Floor));
+	AddInfo(FString::Printf(TEXT("after spinning-projectile swap: %s rotation=%s floor=%.6f movement=%s"),
+		*Here.ToString(), *Body->GetActorRotation().ToString(), Floor.ImpactPoint.Z, *Body->GetCharacterMovement()->GetMovementName()));
+	TestTrue(TEXT("the complete upright body clears the floor"), Here.Z - Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() >= Floor.ImpactPoint.Z - UE_KINDA_SMALL_NUMBER);
+	TestTrue(TEXT("the human lands instead of remaining Falling"), Body->GetCharacterMovement()->IsMovingOnGround());
+	FHitResult BodyHit;
+	FCollisionObjectQueryParams Pawns(ECC_Pawn);
+	FCollisionQueryParams BodyQuery(SCENE_QUERY_STAT(WoTSwappedBodyShape), false);
+	TestTrue(TEXT("world queries see the rotated body's actual collision"), World.LineTraceSingleByObjectType(
+		BodyHit, Here + FVector(0, 0, 100), Here, Pawns, BodyQuery) && BodyHit.GetActor() == Body);
+	TestEqual(TEXT("the collision top stays a full half-height above its centre"),
+		BodyHit.ImpactPoint.Z - Here.Z, 46.0, 0.01);
+	for (int32 Tick = 0; Tick < 6; ++Tick)
+	{
+		Body->AddMovementInput(FVector(1, 0, 0));
+		World.Tick(LEVELTICK_All, Step); ++GFrameCounter;
+	}
+	TestTrue(TEXT("the landed human walks across the real floor"),
+		Body->GetCharacterMovement()->IsMovingOnGround()
+		&& FVector::Dist2D(Here, Body->GetActorLocation()) > 1.0);
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSwapDestinationBodyRotationSpec,
+	"WoT.Movement.RealMap.SwapDestinationBodyYawOnly", WoTRelocationRealMap::Flags)
+bool FWoTSwapDestinationBodyRotationSpec::RunTest(const FString&)
+{
+	using namespace WoTRelocationRealMap;
+	FFixture& Fixture = TheFixture();
+	if (!Fixture.Load(*this)) return false;
+	FBuiltMap Built;
+	if (!BuildMap(*this, Fixture, TEXT("Arena_08"), Built)) return false;
+	UWorld& World = *Built.World;
+	const FRotator Incoming(20, 45, 70);
+	ADefaultPawn* Source = World.SpawnActor<ADefaultPawn>(
+		FVector(-582.290, -135.506, -350), Incoming, AlwaysSpawn());
+	AWoTCharacter* Body = World.SpawnActor<AWoTCharacter>(
+		FVector(-628.462, -189.840, -411.425), FRotator(0, -30, 0), AlwaysSpawn());
+	AWoTPlayerController* PC = World.SpawnActor<AWoTPlayerController>(AlwaysSpawn());
+	if (!TestNotNull(TEXT("non-character caster"), Source)
+		|| !TestNotNull(TEXT("destination body"), Body)
+		|| !TestNotNull(TEXT("human controller"), PC)) return false;
+	PC->SetAsLocalPlayerController(); PC->Possess(Body);
+	const FVector Before = Body->GetActorLocation();
+	if (!CastSwapOnto(*this, World, *Source, *Body)) return false;
+	TestFalse(TEXT("the destination actually relocates"), Body->GetActorLocation().Equals(Before, 1.0));
+	TestTrue(TEXT("the destination character takes only incoming yaw"),
+		Body->GetActorRotation().Equals(FRotator(0, 45, 0), 0.01));
+	TestTrue(TEXT("the destination view takes the full incoming rotation"),
+		PC->GetControlRotation().Equals(Incoming, 0.01));
+
+	Source->SetActorRotation(Incoming);
+	AWoTDartProjectile* Dart = World.SpawnActor<AWoTDartProjectile>(
+		FVector(-700, -250, -350), FRotator(-10, 80, 40), AlwaysSpawn());
+	if (!TestNotNull(TEXT("non-character destination"), Dart)) return false;
+	const FRotator DartBefore = Dart->GetActorRotation();
+	if (!CastSwapOnto(*this, World, *Source, *Dart)) return false;
+	TestTrue(TEXT("a non-character destination retains the full incoming rotation"),
+		Dart->GetActorRotation().Equals(Incoming, 0.01));
+	TestTrue(TEXT("a non-character source retains the full incoming rotation"),
+		Source->GetActorRotation().Equals(DartBefore, 0.01));
+	return !HasAnyErrors();
 }
 
 // A body standing on Arena_09's floor (top at -7914) and looking about 42

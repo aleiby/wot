@@ -4,6 +4,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ## Gameplay
 
+### Character rotation during relocation
+- **Original:** Collision cylinders never turned with an actor's rotation.
+- **Port:** Swap Places, jumpers, rotators and the citadel edit restore give character bodies only the incoming yaw. The view keeps the full rotation.
+- **Why:** Copying another actor's pitch or roll onto a character would tilt its collision capsule and prevent reliable landing.
+
 ### Bots fill Arena matches
 - **Original:** The game shipped bot classes but never added bots to any multiplayer mode or menu.
 - **Port:** a host can set "Fill with bots to N players". Bots play by player rules (player body and health, the starting kit, artifacts from pickups), using each faction's artifact preferences from the shipped bot classes, and leave as humans join. The feature is the optional `WoTBots` plugin; without it, play is unchanged.
