@@ -39,6 +39,9 @@ void AWoTBotController::InitializePoolPerception()
 	if (PoolSpawnHandle.IsValid()) return;
 	// Independent portable stream, seeded only from the game's random source.
 	PoolRandom.Initialize(int32(WoTRandom::GetUnsignedInt()));
+	WardRandom.Initialize(PoolRandom.GetInitialSeed() ^ 0x57415244);
+	static UClass* WardClass = FindObject<UClass>(nullptr, TEXT("/Script/WoT.WoTExpWardProjectile"));
+	if (WardClass) for (TActorIterator<AActor> It(GetWorld(), WardClass); It; ++It) PerceptionWards.Add(*It);
 	for (TActorIterator<AWoTAngrealSpawnPool> It(GetWorld()); It; ++It) PerceptionPools.Add(*It);
 	PoolSpawnHandle = GetWorld()->AddOnActorSpawnedHandler(
 		FOnActorSpawned::FDelegate::CreateUObject(this, &ThisClass::PoolActorSpawned));
@@ -46,6 +49,8 @@ void AWoTBotController::InitializePoolPerception()
 
 void AWoTBotController::PoolActorSpawned(AActor* Actor)
 {
+	static UClass* WardClass = FindObject<UClass>(nullptr, TEXT("/Script/WoT.WoTExpWardProjectile"));
+	if (WardClass && Actor->IsA(WardClass)) PerceptionWards.AddUnique(Actor);
 	if (auto* Pool = Cast<AWoTAngrealSpawnPool>(Actor)) PerceptionPools.AddUnique(Pool);
 	// The sound marker is a port type without a DLL class export. Resolve its
 	// reflected class, as other optional port types are resolved by this plugin.

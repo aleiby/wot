@@ -114,6 +114,9 @@ void AWoTBotController::OnPossess(APawn* InPawn)
 void AWoTBotController::ResetBehaviour(AWoTCharacter* Body)
 {
 	PendingPoolSounds.Reset();
+	AimingWard.Reset(); BlockingWard.Reset(); bWardWaiting = false;
+	WardWaitSince = NextWardLeave = 0; WardDetourUntil = -1;
+	for (auto& Pair : WardBeliefs) Pair.Value.VisibleSince = -1;
 	for (auto& Pair : PoolBeliefs) Pair.Value.VisibleSince = -1;
 	State = EWoTBotState::Roam;
 	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);

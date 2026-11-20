@@ -2,6 +2,8 @@
 #if WITH_AUTOMATION_TESTS && !WOT_GUARDED_BOOTSTRAP
 #include "WoTBotMapFixture.h"
 #include "WoTBotSoakReport.h"
+#include "WoTBotWardObserver.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WoTBotNavProbe.h"
 #include "WoTBotSoakServer.h"
 #include "Testing/WoTSoakEvents.h"
@@ -67,6 +69,7 @@ struct FObserver
 	TArray<TSharedPtr<FJsonValue>> FloorEvents;
 	TArray<TSharedPtr<FJsonValue>> SwapEvents;
 	TSet<FString> ObservedSwaps;
+	TStrongObjectPtr<UWoTBotWardObserver> Wards{NewObject<UWoTBotWardObserver>()};
 	FDelegateHandle SpawnHandle, BodyHandle;
 	UWorld* World;
 	FObject Report;
@@ -101,6 +104,7 @@ struct FObserver
 		Report->SetObjectField(TEXT("non_pawn_swap_targets_by_class"), Object());
 		SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* A)
 		{
+			Wards->Watch(A);
 			if (AWoTCharacter* Body = Cast<AWoTCharacter>(A)) Remember(Body, TEXT("spawn"));
 		}));
 		BodyHandle = WoTSoakEvents::BodyEvents().AddLambda([this](AActor* A, const TCHAR* Source)
@@ -750,10 +754,14 @@ struct FObserver
 		}
 		Report->SetArrayField(TEXT("bots"), BotRows); Report->SetArrayField(TEXT("pools"), PoolRows);
 		Report->SetArrayField(TEXT("actor_anomalies"), Anomalies); Report->SetArrayField(TEXT("recovery_events"), Recoveries);
+		Report->SetNumberField(TEXT("wards_placed"), Wards->Placed);
+		Report->SetNumberField(TEXT("bots_killed_by_wards"), Wards->BotDeaths);
+		Report->SetNumberField(TEXT("wards_shot_by_bots"), Wards->ShotByBots);
 		Report->SetNumberField(TEXT("kills"), Kills); Report->SetNumberField(TEXT("deaths"), Deaths);
 		Report->SetNumberField(TEXT("unvisited_pools"), Unvisited);
 		double Pickups = 0;
 		for (const auto& P : Bots) Pickups += Number(P.Value, TEXT("pickups"));
+		Report->SetNumberField(TEXT("pickups"), Pickups);
 		Report->SetNumberField(TEXT("pickups_per_bot_minute"), Pickups * 60 / FMath::Max(1.0, Number(Report, TEXT("bot_seconds"))));
 		Report->SetNumberField(TEXT("unique_pools_visited"), VisitedPools.Num());
 		if (const UWoTBotRoster* Roster = World->GetSubsystem<UWoTBotRoster>()) Report->SetNumberField(TEXT("navigation_links"), Roster->GetLinkCount());
