@@ -520,7 +520,7 @@ void FWoTFrontEndModel::UpdateSealGoal(FWoTHostRequest& Request,
 
 bool FWoTFrontEndModel::RegisterHostOption(FWoTHostOptionRow Row)
 {
-	if (Row.Owner.IsNone() || Row.URLKey.IsEmpty() || !Row.Label || !Row.Max)
+	if (Row.Owner.IsNone() || Row.URLKey.IsEmpty() || !Row.Label || (!Row.Max && !Row.Values))
 	{
 		return false;
 	}
@@ -582,6 +582,20 @@ int32 FWoTFrontEndModel::HostOptionValue(const FWoTHostRequest& Request,
 	const FWoTHostOptionRow& Row)
 {
 	const int32* Value = Request.ExtraValues.Find(Row.URLKey);
+	if (Row.Values)
+	{
+		const int32 Stored = Value ? *Value : Row.DefaultValue;
+		const TArray<int32> Values = Row.Values(Request);
+		if (Values.IsEmpty()) return Row.DefaultValue;
+		int32 Nearest = Values[0];
+		for (int32 Candidate : Values)
+		{
+			const int64 Distance = FMath::Abs(int64(Stored) - Candidate);
+			const int64 BestDistance = FMath::Abs(int64(Stored) - Nearest);
+			if (Distance < BestDistance || (Distance == BestDistance && Candidate < Nearest)) Nearest = Candidate;
+		}
+		return Nearest;
+	}
 	return FMath::Clamp(Value ? *Value : Row.DefaultValue,
 		Row.Min, FMath::Max(Row.Min, Row.Max(Request)));
 }

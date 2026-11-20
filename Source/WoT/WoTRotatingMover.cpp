@@ -56,7 +56,7 @@ void AWoTRotatingMover::WoTTrigger(AActor* Other, APawn* EventInstigator)
 	SetActorTickEnabled(true);
 }
 
-void AWoTRotatingMover::WoTUnTrigger(AActor*, APawn*)
+void AWoTRotatingMover::WoTUnTrigger(AActor* Other, APawn* EventInstigator)
 {
 	if (IsMoverFSMInert())
 	{
@@ -64,7 +64,8 @@ void AWoTRotatingMover::WoTUnTrigger(AActor*, APawn*)
 	}
 	if (InitialState != EWoTMoverState::None)
 	{
-		return;   // base Mover states define no UnTrigger handler
+		Super::WoTUnTrigger(Other, EventInstigator);
+		return;
 	}
 	if (!HasAuthority() || !bRotating)
 	{

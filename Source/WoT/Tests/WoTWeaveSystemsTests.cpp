@@ -216,6 +216,9 @@ bool FWoTLevitateLoopSoundsSpec::RunTest(const FString&)
 	{
 		WoTTest::DestroySpecWorld(World); return false;
 	}
+	AWoTPlayerController* LocalPlayer = World->SpawnActor<AWoTPlayerController>(P);
+	LocalPlayer->SetAsLocalPlayerController();
+	LocalPlayer->Possess(Caster);
 	AWoTAngrealInvLevitate* Inv = World->SpawnActor<AWoTAngrealInvLevitate>(
 		AWoTAngrealInvLevitate::StaticClass(), FVector(0, 0, 300), FRotator::ZeroRotator, P);
 	if (!TestNotNull(TEXT("levitate inventory spawned"), Inv))

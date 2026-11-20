@@ -366,16 +366,18 @@ bool AWoTMover::EncroachingOn(AActor* Other)
 		}
 		return true;
 	case EWoTMoverEncroachType::CrushWhenEncroach:
-		if (AWoTCharacter* Character = Cast<AWoTCharacter>(Other))
+		// The crush calls the victim's KilledBy, which only the player body
+		// overrides (WOTPlayer.uc:1605-1608, Health - GibSometimesFinalHealth
+		// 'Suicided' damage); an NPC's is a no-op, and a dying player's body
+		// ignores it. The override belongs to the body, so a living AI-driven
+		// player body is crushed like a person's.
+		if (AWoTCharacter* Character = Cast<AWoTCharacter>(Other);
+			WoTIsPlayerBody(Character) && Character->IsAlive())
 		{
-			AController* VictimController = Character->GetController();
-			if (IsValid(VictimController) && VictimController->IsPlayerController())
-			{
-				FWoTDamageEvent Suicided;
-				Suicided.WoTDamageType = TEXT("Suicided");
-				Character->TakeDamage(static_cast<float>(Character->Health + 30),
-					Suicided, EventInstigator, this);
-			}
+			FWoTDamageEvent Suicided;
+			Suicided.WoTDamageType = TEXT("Suicided");
+			Character->TakeDamage(static_cast<float>(Character->Health + 30),
+				Suicided, EventInstigator, this);
 		}
 		return false;
 	case EWoTMoverEncroachType::IgnoreWhenEncroach:
@@ -514,6 +516,8 @@ float AWoTMover::CurrentMoverAlpha() const
 		return FMath::Lerp(PhaseStartAlpha, 0.0f,
 			FMath::Clamp(PhaseTime /
 				FMath::Max(CloseDuration(), UE_SMALL_NUMBER), 0.0f, 1.0f));
+	case EWoTMoverPhase::Delaying:
+		return PhaseStartAlpha;
 	case EWoTMoverPhase::Stopped:
 		return StoppedAlpha;
 	default:
@@ -533,6 +537,8 @@ void AWoTMover::ReversePhase()
 		PhaseStartAlpha = 1.0f;
 		SetPhaseAuthority(EWoTMoverPhase::Closing,
 			CloseDuration() * (1.0f - CurrentAlpha));
+		GetWorld()->GetSubsystem<UWoTEventSubsystem>()->FireUnEvent(
+			EventName, this, Inst.Get());
 	}
 	else if (Phase == EWoTMoverPhase::Closing)
 	{
@@ -625,6 +631,9 @@ void AWoTMover::StartClose()
 	}
 	PhaseStartAlpha = CurrentMoverAlpha();
 	SetPhaseAuthority(EWoTMoverPhase::Closing);
+	// Event targets release when closing starts, including a cancelled delay.
+	GetWorld()->GetSubsystem<UWoTEventSubsystem>()->FireUnEvent(
+		EventName, this, Inst.Get());
 }
 
 void AWoTMover::SetPhaseAuthority(EWoTMoverPhase NewPhase, float StartOffset)
@@ -742,11 +751,14 @@ void AWoTMover::NotifyHit(UPrimitiveComponent*, AActor* Other,
 			PawnMass = Movement->Mass;
 		}
 	}
+	// The engine Mover's player-bump test reads the bumper's bIsPlayer: a player
+	// body, whoever drives it. A lift or door with the mover defaults (bump-open,
+	// player bump) therefore starts for an AI-driven player body, never for an NPC.
 	const bool bAcceptedBump = BumpType == EWoTMoverBumpType::AnyBump
 		? IsValid(Other)
 		: BumpType == EWoTMoverBumpType::PawnBump
 			? P != nullptr && PawnMass >= 10.0f
-			: P != nullptr && P->IsPlayerControlled();
+			: WoTIsPlayerBody(P);
 	if (bAcceptedBump && (InitialState == EWoTMoverState::BumpOpenTimed ||
 		InitialState == EWoTMoverState::BumpButton))
 	{
@@ -914,14 +926,73 @@ void AWoTMover::WoTTrigger(AActor* Other, APawn* EventInstigator)
 			StartClose();
 		}
 		break;
-	case EWoTMoverState::TriggerOpenTimed:
 	case EWoTMoverState::TriggerControl:
 	case EWoTMoverState::TriggerPound:
+		if (!bSpent)
+		{
+			++NumTriggerEvents;
+			PoundTrigger = Other;
+			bPoundWaitingClosed = false;
+			StartControlledOpen(EventInstigator);
+		}
+		break;
+	case EWoTMoverState::TriggerOpenTimed:
 	case EWoTMoverState::StandOpenTimed:
 		StartOpen(EventInstigator);
 		break;
 	default:
 		break;
+	}
+}
+
+// WoTEvents.cpp routes each relevant touch/release to this pair of handlers.
+// Control holds open until the last release. Pound repeats while asserted,
+// then closes and stops on the last release. Toggle and OpenTimed ignore it.
+// The shipped GradualMover.uc also cancels pounding on release; its separate
+// per-key state remains in WoTGradualMover.cpp.
+void AWoTMover::WoTUnTrigger(AActor* Other, APawn* EventInstigator)
+{
+	if (!HasAuthority() || bFSMInert || bSpent)
+	{
+		return;
+	}
+	if (InitialState != EWoTMoverState::TriggerControl &&
+		InitialState != EWoTMoverState::TriggerPound)
+	{
+		return;
+	}
+	NumTriggerEvents = FMath::Max(0, NumTriggerEvents - 1);
+	if (NumTriggerEvents != 0)
+	{
+		return;
+	}
+	PoundTrigger.Reset();
+	bPoundWaitingClosed = false;
+	Inst = InitialState == EWoTMoverState::TriggerPound ? nullptr : EventInstigator;
+	// Reverse an unfinished opening from its current interpolation time. A
+	// release during DelayTime cancels that opening and goes straight to close.
+	if (Phase == EWoTMoverPhase::Opening)
+	{
+		ReversePhase();
+	}
+	else if (Phase != EWoTMoverPhase::Closing)
+	{
+		StartClose();
+	}
+}
+
+void AWoTMover::StartControlledOpen(APawn* EventInstigator)
+{
+	Inst = EventInstigator;
+	if (Phase == EWoTMoverPhase::Closing && DelayTime <= 0.0f)
+	{
+		ReversePhase();
+	}
+	else if (Phase != EWoTMoverPhase::Opening)
+	{
+		PhaseStartAlpha = CurrentMoverAlpha();
+		SetPhaseAuthority(DelayTime > 0.0f ? EWoTMoverPhase::Delaying
+			: EWoTMoverPhase::Opening);
 	}
 }
 
@@ -939,6 +1010,19 @@ void AWoTMover::Tick(float DeltaTime)
 	}
 	if (Phase == EWoTMoverPhase::Closed || Phase == EWoTMoverPhase::Stopped)
 	{
+		if (Phase == EWoTMoverPhase::Closed && bPoundWaitingClosed)
+		{
+			PhaseTime += DeltaTime;
+			if (PhaseTime >= StayOpenTime)
+			{
+				bPoundWaitingClosed = false;
+				bSpent = bTriggerOnceOnly;
+				if (!bSpent && PoundTrigger.IsValid())
+				{
+					StartControlledOpen(Inst.Get());
+				}
+			}
+		}
 		return;
 	}
 	PhaseTime += DeltaTime;
@@ -947,7 +1031,6 @@ void AWoTMover::Tick(float DeltaTime)
 	case EWoTMoverPhase::Delaying:
 		if (PhaseTime >= DelayTime)
 		{
-			PhaseStartAlpha = RestingAlpha;
 			SetPhaseAuthority(EWoTMoverPhase::Opening);
 		}
 		break;
@@ -967,12 +1050,16 @@ void AWoTMover::Tick(float DeltaTime)
 			RestingAlpha = 1.0f;
 			PhaseStartAlpha = 1.0f;
 			SetPhaseAuthority(EWoTMoverPhase::Open);
-			// UE1 FinishedOpening fires the mover's own Event
-			GetWorld()->GetSubsystem<UWoTEventSubsystem>()->FireEvent(
-				EventName, this, Inst.Get());
-			// UE1 Mover: every timed/button state goes dormant on bTriggerOnceOnly, but the
-			// TriggerToggle state has NO once-only handling — a toggle mover toggles forever.
-			if (bTriggerOnceOnly && InitialState != EWoTMoverState::TriggerToggle)
+			// Pound omits FinishedOpening: it cycles without firing the open event.
+			if (InitialState != EWoTMoverState::TriggerPound)
+			{
+				GetWorld()->GetSubsystem<UWoTEventSubsystem>()->FireEvent(
+					EventName, this, Inst.Get());
+			}
+			// Control and timed/button states stop open when once-only. Pound
+			// stops after its closed dwell; Toggle keeps accepting triggers.
+			if (bTriggerOnceOnly && InitialState != EWoTMoverState::TriggerToggle
+				&& InitialState != EWoTMoverState::TriggerPound)
 			{
 				bSpent = true;
 			}
@@ -980,11 +1067,13 @@ void AWoTMover::Tick(float DeltaTime)
 		break;
 	}
 	case EWoTMoverPhase::Open:
-		if (InitialState == EWoTMoverState::TriggerToggle || bSpent)
+		if (InitialState == EWoTMoverState::TriggerToggle ||
+			InitialState == EWoTMoverState::TriggerControl || bSpent)
 		{
-			break;   // stays until re-triggered / forever
+			break;   // toggle waits for a trigger; control waits for the last release
 		}
-		if (PhaseTime >= StayOpenTime)
+		if (PhaseTime >= (InitialState == EWoTMoverState::TriggerPound
+			? OtherTime : StayOpenTime))
 		{
 			StartClose();
 		}
@@ -1004,6 +1093,7 @@ void AWoTMover::Tick(float DeltaTime)
 			RestingAlpha = 0.0f;
 			PhaseStartAlpha = 0.0f;
 			SetPhaseAuthority(EWoTMoverPhase::Closed);
+			bPoundWaitingClosed = InitialState == EWoTMoverState::TriggerPound;
 		}
 		break;
 	}
@@ -1042,6 +1132,8 @@ void AWoTMover::SimulateClientInterp(float DeltaTime)
 		ApplyAlpha(1.0f, false);
 		break;
 	case EWoTMoverPhase::Delaying:
+		ApplyAlpha(CurrentMoverAlpha(), false);
+		break;
 	case EWoTMoverPhase::Closed:
 		ApplyKeyframeLerp(RestingKeyNum, RestingKeyNum, 0.0f, false);
 		break;

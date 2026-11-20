@@ -93,7 +93,7 @@ void AWoTAssertMover::WoTTrigger(AActor* Other, APawn* EventInstigator)
 	StartOpeningLeg();
 }
 
-void AWoTAssertMover::WoTUnTrigger(AActor*, APawn* EventInstigator)
+void AWoTAssertMover::WoTUnTrigger(AActor* Other, APawn* EventInstigator)
 {
 	if (IsMoverFSMInert())
 	{
@@ -101,8 +101,8 @@ void AWoTAssertMover::WoTUnTrigger(AActor*, APawn* EventInstigator)
 	}
 	if (InitialState != EWoTMoverState::None)
 	{
-		// Base Mover states define no UnTrigger handler (Mover TriggerOpenTimed
-		// runs open → dwell → close regardless) — ignore it, like retail.
+		// An authored base state owns the release as well as the trigger.
+		Super::WoTUnTrigger(Other, EventInstigator);
 		return;
 	}
 	// The UnTrigger probe only lands while opening below the top key: the top-key

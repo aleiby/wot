@@ -630,6 +630,11 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 		Observer.DumpNavigation(FPaths::GetPath(Output) / (TEXT("NavDump-") + FPaths::GetCleanFilename(Output)));
 	W->InitializeActorsForPlay(URL);
 	W->BeginPlay();
+	// A connected spectator keeps this unattended gameplay measurement active without taking a fill slot.
+	APlayerState* ObserverState = W->SpawnActor<APlayerState>(Game->PlayerStateClass);
+	ObserverState->SetIsSpectator(true);
+	ObserverState->SetIsOnlyASpectator(true);
+	W->GetSubsystem<UWoTBotRoster>()->Evaluate();
 	Observer.Sample();
 	const int32 Steps = FMath::CeilToInt(Number(Report,TEXT("requested_seconds")) * 30.0);
 	for (int32 Index = 0; Index < Steps; ++Index)
