@@ -55,8 +55,8 @@ static AWoTAngrealSpawnPool* KnowledgePool(UWorld* W)
 	return P;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPendingReactionTargetReviewSpec, "WoT.Bots.ReviewFix2.PendingDamageReactionRefreshesCurrentTarget", Flags)
-bool FPendingReactionTargetReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPendingReactionTargetSpec, "WoT.Bots.DamageReaction.PendingReactionRefreshesCurrentTarget", Flags)
+bool FPendingReactionTargetSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = .6f; Settings.Value->TargetMemorySeconds = .2f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -91,8 +91,8 @@ bool FPendingReactionTargetReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCollectionRotationReviewSpec, "WoT.Bots.ReviewFix2.RefillPreservesCollectionRotation", Flags)
-bool FCollectionRotationReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCollectionRotationSpec, "WoT.Bots.PoolKnowledge.RefillPreservesCollectionRotation", Flags)
+bool FCollectionRotationSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 0;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -114,8 +114,8 @@ bool FCollectionRotationReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageTurnReviewSpec, "WoT.Bots.ReviewFix.DamageTurnsFromOwnImpulse", Flags)
-bool FDamageTurnReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageTurnSpec, "WoT.Bots.DamageReaction.TurnsFromOwnImpulse", Flags)
+bool FDamageTurnSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = .3f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -134,8 +134,8 @@ bool FDamageTurnReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageSearchReviewSpec, "WoT.Bots.ReviewFix.DamageSearchPersistsAndExpires", Flags)
-bool FDamageSearchReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageSearchSpec, "WoT.Bots.DamageReaction.SearchPersistsAndExpires", Flags)
+bool FDamageSearchSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,50)); auto* Body = CastChecked<AWoTCharacter>(B->GetPawn());
@@ -150,8 +150,8 @@ bool FDamageSearchReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageCreditReviewSpec, "WoT.Bots.ReviewFix.DamageDirectionIndependentOfVisibleCredit", Flags)
-bool FDamageCreditReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageCreditSpec, "WoT.Bots.DamageReaction.DirectionIndependentOfVisibleCredit", Flags)
+bool FDamageCreditSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,50)); auto* Body = CastChecked<AWoTCharacter>(B->GetPawn());
@@ -166,8 +166,8 @@ bool FDamageCreditReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageContinuousSightReviewSpec, "WoT.Bots.ReviewFix.DamagePreservesAlreadyVisibleTarget", Flags)
-bool FDamageContinuousSightReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageContinuousSightSpec, "WoT.Bots.DamageReaction.PreservesAlreadyVisibleTarget", Flags)
+bool FDamageContinuousSightSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,50)); auto* Body = CastChecked<AWoTCharacter>(B->GetPawn());
@@ -181,8 +181,8 @@ bool FDamageContinuousSightReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageNoCueReviewSpec, "WoT.Bots.ReviewFix.NoImpulseCannotIdentifyCreditedAttacker", Flags)
-bool FDamageNoCueReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageNoCueSpec, "WoT.Bots.DamageReaction.NoImpulseCannotIdentifyCreditedAttacker", Flags)
+bool FDamageNoCueSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = .3f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -197,8 +197,8 @@ bool FDamageNoCueReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageMovementReviewSpec, "WoT.Bots.ReviewFix.DamageCueAfterMovementUpdate", Flags)
-bool FDamageMovementReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageMovementSpec, "WoT.Bots.DamageReaction.CueAfterMovementUpdate", Flags)
+bool FDamageMovementSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,200)); auto* Body = CastChecked<AWoTCharacter>(B->GetPawn());
@@ -214,8 +214,8 @@ bool FDamageMovementReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageLateSightReviewSpec, "WoT.Bots.ReviewFix.SearchExpiryPreservesPendingReaction", Flags)
-bool FDamageLateSightReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageLateSightSpec, "WoT.Bots.DamageReaction.SearchExpiryPreservesPendingReaction", Flags)
+bool FDamageLateSightSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = .3f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -230,8 +230,8 @@ bool FDamageLateSightReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageRepeatedReviewSpec, "WoT.Bots.ReviewFix.RepeatedHitsDoNotRestartContinuousSight", Flags)
-bool FDamageRepeatedReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDamageRepeatedSpec, "WoT.Bots.DamageReaction.RepeatedHitsDoNotRestartContinuousSight", Flags)
+bool FDamageRepeatedSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = .3f;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -247,8 +247,8 @@ bool FDamageRepeatedReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoolFreshReviewSpec, "WoT.Bots.ReviewFix.ExactContentsStayFresh", Flags)
-bool FPoolFreshReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoolFreshSpec, "WoT.Bots.PoolKnowledge.ExactContentsStayFresh", Flags)
+bool FPoolFreshSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 0;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -266,8 +266,8 @@ bool FPoolFreshReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoolZeroGoalReviewSpec, "WoT.Bots.ReviewFix.ZeroGoalStillUsesSwitchMargin", Flags)
-bool FPoolZeroGoalReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPoolZeroGoalSpec, "WoT.Bots.PoolKnowledge.ZeroGoalStillUsesSwitchMargin", Flags)
+bool FPoolZeroGoalSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 0;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -287,8 +287,8 @@ bool FPoolZeroGoalReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisibleDeathReviewSpec, "WoT.Bots.ReviewFix.WitnessedDeathClearsTarget", Flags)
-bool FVisibleDeathReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FVisibleDeathSpec, "WoT.Bots.Perception.WitnessedDeathClearsTarget", Flags)
+bool FVisibleDeathSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,50)); auto* E = Enemy(W,FVector(800,0,50));
@@ -298,8 +298,8 @@ bool FVisibleDeathReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecoverySoundReviewSpec, "WoT.Bots.ReviewFix.RefillPreservesFailedRouteAvoidance", Flags)
-bool FRecoverySoundReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecoverySoundSpec, "WoT.Bots.PoolKnowledge.RefillPreservesFailedRouteAvoidance", Flags)
+bool FRecoverySoundSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 0;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -314,8 +314,8 @@ bool FRecoverySoundReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecoveryRotationReviewSpec, "WoT.Bots.ReviewFix.RefillPreservesRecoveryRotation", Flags)
-bool FRecoveryRotationReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecoveryRotationSpec, "WoT.Bots.PoolKnowledge.RefillPreservesRecoveryRotation", Flags)
+bool FRecoveryRotationSpec::RunTest(const FString&)
 {
 	FSettings Settings; Settings.Value->ReactionSeconds = 0;
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
@@ -330,8 +330,8 @@ bool FRecoveryRotationReviewSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectileMaskReviewSpec, "WoT.Bots.ReviewFix.HiddenProjectileCannotMaskVisibleThreat", Flags)
-bool FProjectileMaskReviewSpec::RunTest(const FString&)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectileMaskSpec, "WoT.Bots.FairPlay.HiddenProjectileCannotMaskVisibleThreat", Flags)
+bool FProjectileMaskSpec::RunTest(const FString&)
 {
 	UWorld* W = World(); ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
 	auto* B = QuietBot(W,FVector(0,0,50)); auto* E = Enemy(W,FVector(-800,0,50));
@@ -592,8 +592,8 @@ bool FPoolMapDelaySpec::RunTest(const FString&)
 		B = W->SpawnActor<AWoTBotController>();
 		B->InitializeIdentity(nullptr,W->GetAuthGameMode()->DefaultPawnClass,TEXT("Timing observer"));
 	}
-	AWoTAngrealSpawnPool* P = nullptr;
-	for (TActorIterator<AWoTAngrealSpawnPool> It(W); It; ++It) { P = *It; break; }
+	TActorIterator<AWoTAngrealSpawnPool> It(W);
+	AWoTAngrealSpawnPool* P = It ? *It : nullptr;
 	if (!TestNotNull(TEXT("real projected pool"),P)) return false;
 	P->RespawnTime = 30;
 	const float Expected = AWoTAngrealSpawnPool::ComputeRespawnDelay(P->RespawnTime,Table->IdealPlayerCount,
