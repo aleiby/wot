@@ -974,18 +974,51 @@ void AWoTBotController::ChooseDestination(bool bForce)
 	if (Nav->GetRandomReachablePointInRadius(Body->GetActorLocation(), 1600.0f, Point, Data) && NavigateTo(Point.Location)) return;
 	WOT_SOAK_BODY_EVENT(Body, "off-mesh rescue request");
 	// Off the mesh altogether (on a sill or ledge a jump or a blast left it on):
-	// head straight for the nearest mesh, stepping or dropping back onto the floor.
-	// Mesh straight below (a beam or a high wall top) leaves no walk to make: the
-	// body stays unplaced, so the stuck rule replaces it.
-	FNavLocation Nearest;
-	if (Nav->ProjectPointToNavigation(Body->GetNavAgentLocation(), Nearest, FVector(400, 400, 800), Data)
-		&& FVector::Dist2D(Body->GetActorLocation(), Nearest.Location) > 30.0f
-		&& MoveToLocation(Nearest.Location, 20.0f, false, false, false, false, nullptr, true) != EPathFollowingRequestResult::Failed)
+	// a projection below the feet is a landing, not a direction off the edge.
+	// Find a clear horizontal departure and a walkable landing within a safe
+	// drop. The ordinary movement component still performs the walk and fall.
+	const AWoTCharacter* PlayerBody = CastChecked<AWoTCharacter>(Body);
+	const UCapsuleComponent* Capsule = PlayerBody->GetCapsuleComponent();
+	const FVector Here = Body->GetActorLocation();
+	const FVector Feet = Body->GetNavAgentLocation();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float StepHeight = PlayerBody->GetCharacterMovement()->MaxStepHeight;
+	const FCollisionShape Shape = Capsule->GetCollisionShape();
+	const ECollisionChannel Channel = Capsule->GetCollisionObjectType();
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(BotLedgeEscape), false, Body);
+	const auto TryLanding = [&](const FNavLocation& Landing)
 	{
-		Destination = Nearest.Location;
+		const FVector Delta = Landing.Location - Feet;
+		if (Delta.Size2D() <= Capsule->GetScaledCapsuleRadius() + 30.0f
+			|| Delta.Z > StepHeight || Delta.Z < -WoTBotLinks::MaxDrop) return false;
+		const FVector OverLanding(Landing.Location.X, Landing.Location.Y, Here.Z);
+		FHitResult Hit;
+		if (GetWorld()->SweepSingleByChannel(Hit, Here, OverLanding, FQuat::Identity, Channel, Shape, Params)) return false;
+		const FVector LandingCenter = Landing.Location + FVector(0, 0, HalfHeight);
+		if (!GetWorld()->SweepSingleByChannel(Hit, OverLanding, LandingCenter - FVector(0, 0, StepHeight),
+			FQuat::Identity, Channel, Shape, Params) || Hit.bStartPenetrating
+			|| !PlayerBody->GetCharacterMovement()->IsWalkable(Hit)
+			|| FMath::Abs(Hit.Location.Z - LandingCenter.Z) > StepHeight) return false;
+		if (MoveToLocation(Landing.Location, 5.0f, false, false, false, false, nullptr, true) == EPathFollowingRequestResult::Failed) return false;
+		Destination = Landing.Location;
 		bWantsMovement = true;
 		bNavigationUnavailable = false;
-		return;
+		return true;
+	};
+	FNavLocation Nearest;
+	const bool bNearest = Nav->ProjectPointToNavigation(Feet, Nearest, FVector(400, 400, WoTBotLinks::MaxDrop), Data);
+	if (bNearest && TryLanding(Nearest)) return;
+	const FVector TowardMesh = bNearest ? (Nearest.Location - Feet).GetSafeNormal2D() : FVector::ZeroVector;
+	const FVector FirstDirection = TowardMesh.IsNearlyZero() ? FVector::ForwardVector : TowardMesh;
+	for (const float Distance : { 100.0f, 200.0f, 400.0f })
+	{
+		for (int32 Side = 0; Side < 8; ++Side)
+		{
+			const FVector Probe = Feet + FirstDirection.RotateAngleAxis(Side * 45.0f, FVector::UpVector) * Distance;
+			FNavLocation Landing;
+			if (Nav->ProjectPointToNavigation(Probe, Landing, FVector(40, 40, WoTBotLinks::MaxDrop), Data)
+				&& TryLanding(Landing)) return;
+		}
 	}
 	bNavigationUnavailable = true;
 }
