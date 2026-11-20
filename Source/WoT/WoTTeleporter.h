@@ -61,8 +61,12 @@ public:
 	float UE1CollisionRadius = 18.0f;
 	UPROPERTY(VisibleAnywhere, Category = "WoT|Teleporter")
 	float UE1CollisionHalfHeight = 40.0f;
+	// Authors the retail CollisionRadius/CollisionHeight: the exact touch
+	// cylinder plus its containing capsule. Callable from the editor import.
+	UFUNCTION(BlueprintCallable, Category = "WoT|Teleporter")
 	void SetUE1CollisionSize(float Radius, float HalfHeight);
 
+	virtual void PostLoad() override;
 	virtual void BeginPlay() override;
 	virtual void NotifyActorBeginOverlap(AActor* Other) override;
 	virtual void NotifyActorEndOverlap(AActor* Other) override;
@@ -91,4 +95,10 @@ protected:
 	// again on the frame it meets the cylinder (UE1 Touch).
 	bool AdmitUE1Touch(AActor* Other);
 	WoTUE1Collision::FTouchTracker UE1Touches;
+
+private:
+	// Set by SetUE1CollisionSize. A saved teleporter without it predates the
+	// exact cylinder: the editor import stored the authored size on the
+	// capsule alone, and PostLoad adopts it from there.
+	UPROPERTY() bool bUE1CollisionSized = false;
 };
