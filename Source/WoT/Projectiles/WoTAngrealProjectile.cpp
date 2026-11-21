@@ -1,6 +1,7 @@
 #include "WoTAngrealProjectile.h"
 
 #include "../WoTCarcass.h"
+#include "../WoTEvents.h"
 #include "../WoTCollisionBlocker.h"
 #include "../WoTSound.h"
 #include "../WoTSoundTable.h"
@@ -96,7 +97,7 @@ bool AWoTAngrealProjectile::IsTouchTarget(const AActor* Other)
 }
 
 void AWoTAngrealProjectile::OnProjectileOverlap(
-	UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool,
+	UPrimitiveComponent*, AActor* Other, UPrimitiveComponent*, int32, bool bFromSweep,
 	const FHitResult& Hit)
 {
 	// AngrealProjectile.Touch: filter, then hand to ProcessTouch. The trace
@@ -104,6 +105,15 @@ void AWoTAngrealProjectile::OnProjectileOverlap(
 	if (Other && Other != this && (Other != GetOwner() || !SkipsOwnerTouch())
 		&& IsTouchTarget(Other))
 	{
+		if (AWoTTrigger* Trigger = Cast<AWoTTrigger>(Other);
+			Trigger && Trigger->TriggerType == EWoTTriggerType::Shoot)
+		{
+			// Resolve the target's touch before this projectile can damage or
+			// destroy itself. The target also finishes the consuming impact, so a
+			// once-only touch cannot let this shot escape after disabling collision.
+			Trigger->OnOverlap(nullptr, this, nullptr, 0, bFromSweep, Hit);
+			return;
+		}
 		ProcessTouch(Other, Hit.ImpactPoint.IsZero()
 		                        ? GetActorLocation() : FVector(Hit.ImpactPoint));
 	}

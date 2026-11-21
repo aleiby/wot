@@ -48,6 +48,7 @@ from texture_sampling import (
     load_texture,
 )
 from hud_texture_manifest import REGISTRY_ONLY_ASSET_PATHS
+from import_teleporter_fx import teleporter_collision
 from stripped_texture_import import (
     import_stripped_texture,
     importer_positionals,
@@ -63,6 +64,8 @@ from mesh_material_types import (
     actor_style_suffix,
     effective_material_type_suffix,
     material_type_suffix,
+    procedural_skin_identity,
+    procedural_skin_slug,
     slot_zero_skin_reference,
     split_slot_name,
 )
@@ -124,6 +127,7 @@ from mesh_texture_variants import (  # noqa: E402
 )
 from bsp_payload import write_stripped_carrier  # noqa: E402
 from bsp_payload import split_bsp_glb_parts  # noqa: E402
+from zones import zone_reverb_rows  # noqa: E402
 
 RAW_ARGS = sys.argv[1:]
 POSITIONALS = importer_positionals(RAW_ARGS)
@@ -1744,12 +1748,40 @@ def _meshlit_insts_for_mesh(mesh_path, mats, textures):
     return out
 
 
+def _set_trigger_properties(actor, props):
+    trigger_types = {
+        "TT_PlayerProximity": unreal.WoTTriggerType.PLAYER_PROXIMITY,
+        "TT_PawnProximity": unreal.WoTTriggerType.PAWN_PROXIMITY,
+        "TT_ClassProximity": unreal.WoTTriggerType.CLASS_PROXIMITY,
+        "TT_AnyProximity": unreal.WoTTriggerType.ANY_PROXIMITY,
+        "TT_Shoot": unreal.WoTTriggerType.SHOOT,
+    }
+    actor.set_editor_property(
+        "trigger_type", trigger_types[props.get("TriggerType", "TT_PlayerProximity")])
+    actor.set_editor_property("damage_threshold", float(props.get("DamageThreshold", 0.0)))
+    actor.set_editor_property(
+        "initially_active", str(props.get("bInitiallyActive", "True")).lower() == "true")
+    message = str(props.get("Message", ""))
+    if len(message) >= 2 and message[0] == '"' and message[-1] == '"':
+        message = message[1:-1].replace(r'\"', '"')
+    actor.set_editor_property("message", message)
+    actor.set_editor_property("repeat_trigger_time", float(props.get("RepeatTriggerTime", 0.0)))
+
+
 def place_movers(eas, insts, masters, mats=None, textures=None):
     mdir = CONV / "movers" / MAP
     f = mdir / "movers.json"
     if not f.exists():
         return {}
     data = json.loads(f.read_text())
+    # The compact mover conversion omits shoot settings. Read the complete
+    # actor properties so existing conversions also import the authored target.
+    trigger_props = {}
+    tf = CONV / f"{MAP}.t3d.json"
+    if tf.exists():
+        trigger_props = {a["name"]: a.get("props", {})
+                         for a in json.loads(tf.read_text())["actors"]
+                         if a["cls"] in ("Trigger", "DoorTrigger")}
     counts = dict(movers=0, triggers=0, door_triggers=0,
                   stage_triggers=0, portcullis_triggers=0,
                   dispatchers=0, counters=0)
@@ -1954,8 +1986,8 @@ def place_movers(eas, insts, masters, mats=None, textures=None):
         a.set_editor_property("event_name", t["event"])
         a.set_editor_property("trigger_once_only", t["once_only"])
         a.set_editor_property("re_trigger_delay", t["retrigger"])
-        cap = a.get_editor_property("capsule")
-        cap.set_capsule_size(t["radius"], max(t["height"], t["radius"]))
+        _set_trigger_properties(a, trigger_props.get(t["name"], {}))
+        a.set_ue1_collision_size(t["radius"], t["height"])
         counts["triggers"] += 1
     door_directions = {
         "Forward": unreal.WoTDoorDirection.FORWARD,
@@ -1969,9 +2001,9 @@ def place_movers(eas, insts, masters, mats=None, textures=None):
         a.set_editor_property("event_name", t["event"])
         a.set_editor_property("trigger_once_only", t["once_only"])
         a.set_editor_property("re_trigger_delay", t["retrigger"])
+        _set_trigger_properties(a, trigger_props.get(t["name"], {}))
         a.set_editor_property("direction", door_directions[t["direction"]])
-        cap = a.get_editor_property("capsule")
-        cap.set_capsule_size(t["radius"], max(t["height"], t["radius"]))
+        a.set_ue1_collision_size(t["radius"], t["height"])
         counts["door_triggers"] += 1
     for t in data.get("stage_triggers", []):
         a = eas.spawn_actor_from_class(unreal.WoTStageTrigger,
@@ -3087,6 +3119,18 @@ def make_light_table():
         zone_max_counts[zone] = int(row.get("max_light_count", 6))
     asset.set_editor_property("zone_min_light_counts", zone_min_counts)
     asset.set_editor_property("zone_max_light_counts", zone_max_counts)
+    # Room reverb per compiled zone (empty from an export that predates it:
+    # the runtime then keeps every zone dry).
+    reverb_records = []
+    for row in zone_reverb_rows(ambient_rows):
+        record = unreal.WoTZoneReverbRecord()
+        record.set_editor_property("reverb_zone", row["reverb_zone"])
+        record.set_editor_property("master_gain", row["master_gain"])
+        record.set_editor_property("cutoff_hz", row["cutoff_hz"])
+        record.set_editor_property("delay", row["delay"])
+        record.set_editor_property("gain", row["gain"])
+        reverb_records.append(record)
+    asset.set_editor_property("zone_reverbs", reverb_records)
 
     leaf_bsp = export_data.get("leaf_bsp", {})
     leaf_nodes = leaf_bsp.get("nodes", [])
@@ -3561,6 +3605,7 @@ def place_decorations(eas):
             act.set_actor_scale3d(unreal.Vector(scale, scale, scale))
         act.get_editor_property("mesh").set_skeletal_mesh_asset(mesh)
         _ml_skin_override(act, a)
+        _ml_collision_off(act, a)
         if GAMMA_SPACE:
             _ml_bake(act, a)
         n += 1
@@ -3578,6 +3623,25 @@ def _ml_material_root_name(material):
             return current.get_name()
         current = parent
     return ""
+
+
+def decoration_collides(a):
+    """Effective retail bCollideActors of a placed decoration: the instance's
+    own value, else its shipped class chain's; None when neither authors it."""
+    value = a.get("props", {}).get("bCollideActors")
+    if value is None:
+        value = _ml_class_prop(a["cls"], "bCollideActors", None)
+    return None if value is None else _ml_bool(value)
+
+
+def _ml_collision_off(act, a):
+    """A decoration whose retail bCollideActors is off neither touches nor
+    blocks, whatever its cylinder (Arena_06's teleporter shimmer quads author
+    it on the instance). Everything else keeps the class-default cylinder."""
+    if decoration_collides(a) is not False:
+        return False
+    act.set_ue1_collision(False, False, False, 22.0, 22.0)
+    return True
 
 
 def _ml_skin_override(act, a):
@@ -3602,7 +3666,18 @@ def _ml_skin_override(act, a):
     texture = None
     texture_info = None
     pkg = name = None
-    if skin_reference is not None:
+    stem = None
+    procedural = procedural_skin_identity(skin_reference)
+    if procedural is not None:
+        # A Fire/Wet/IceTexture skin (Arena_06's teleporter shimmer quads,
+        # WetTexture'ScottT.S_Tele_effect') has no still asset. Name the
+        # instance by its fractal identity and bind the neutral pre-activation
+        # texture; the fractal subsystem swaps in the live simulation at
+        # BeginPlay. Skipping it left the class skin (JTwoTriangles0) showing.
+        pkg, name = procedural
+        stem = procedural_skin_slug(pkg, name)
+        texture = _import_neutral()
+    elif skin_reference is not None:
         sm = _ML_SKIN_RE.match(skin_reference)
         if not sm:
             unreal.log(f"SKIN-SKIP {a['name']}: malformed {skin_reference}")
@@ -3632,11 +3707,12 @@ def _ml_skin_override(act, a):
     if texture is None:
         unreal.log(f"SKIN-SKIP {a['name']}: slot-0 texture unavailable")
         return
+    stem = stem or name
 
     if style_suffix == "_T":
         master = make_meshlit_translucent_master() if GAMMA_SPACE \
             else make_mesh_translucent_master()
-        mic_path = f"/Game/WoT/Materials/Instances/MI_MeshT_{name}"
+        mic_path = f"/Game/WoT/Materials/Instances/MI_MeshT_{stem}"
     else:
         if GAMMA_SPACE:
             ml = make_meshlit_masters()
@@ -3655,7 +3731,7 @@ def _ml_skin_override(act, a):
         # Typed overrides need distinct MIC assets so a shared Skin= texture
         # cannot be reparented back and forth by actors with different slot-0
         # types. The ordinary opaque path keeps its historic asset name.
-        mic_path = f"/Game/WoT/Materials/Instances/MI_Skin_{name}{type_suffix}"
+        mic_path = f"/Game/WoT/Materials/Instances/MI_Skin_{stem}{type_suffix}"
     if not EAL.does_asset_exist(mic_path):
         mic = ATT.create_asset(mic_path.rsplit("/", 1)[1],
                                "/Game/WoT/Materials/Instances",
@@ -4185,6 +4261,56 @@ def place_spawnpools(eas):
     return placed
 
 
+def _set_zone_trigger_velocity(act, actor):
+    """Project trigger velocity config from T3D and inherited script defaults."""
+    props = actor.get("props", {})
+    cls = actor["cls"]
+
+    def value(key, default):
+        return props.get(key, _ml_class_prop(cls, key, default))
+
+    # Struct assignments can override a single component at any inheritance
+    # level; preserve the remaining components from the base class.
+    chain, current, seen = [], cls, set()
+    while current and current.lower() not in seen:
+        seen.add(current.lower())
+        parent, lines = _sprayer_uc(current)
+        chain.append({key.strip(): value.strip() for key, value in
+                      (line.split("=", 1) for line in lines)})
+        current = parent
+    chain.reverse()
+    chain.append(props)
+    vectors = {}
+    for key in ("MaxZoneVelocity2", "MinZoneVelocity2"):
+        components = dict(X=0.0, Y=0.0, Z=0.0)
+        for fields in chain:
+            for axis, number in re.findall(
+                    r"([XYZ])\s*=\s*([-+0-9.eE]+)", str(fields.get(key, ""))):
+                components[axis] = float(number)
+        vectors[key] = tuple(components[axis] for axis in "XYZ")
+
+    enabled = _ml_bool(value("bTrigZoneVelo2", "False"))
+    initially_on = _ml_bool(value("bTrigZoneVelo2InitiallyOn", "False"))
+    transition = float(value("TransitionTime2", 0.0))
+    maximum, minimum = vectors["MaxZoneVelocity2"], vectors["MinZoneVelocity2"]
+    act.set_editor_property("trig_zone_velo2", enabled)
+    act.set_editor_property("trig_zone_velo2_initially_on", initially_on)
+    act.set_editor_property("max_zone_velocity2", unreal.Vector(*maximum))
+    act.set_editor_property("min_zone_velocity2", unreal.Vector(*minimum))
+    act.set_editor_property("transition_time2", transition)
+    act.set_editor_property("trigger_duration", float(value("TriggerDuration", 0.0)))
+    act.set_editor_property("initial_state", unreal.Name(value("InitialState", "None")))
+    act.set_editor_property("tag_name", unreal.Name(value("Tag", cls)))
+    if enabled:
+        # An "on" zone applies the steady average of the shipped per-tick
+        # cycle, as AWoTZoneVolume::SteadyTriggeredVelocity does (PORT_NOTES).
+        fraction = 1.0 / transition if transition > 1.0 else 1.0
+        steady = tuple(hi - (hi - lo) * 0.5 * fraction
+                       for hi, lo in zip(maximum, minimum))
+        act.set_editor_property("zone_velocity", unreal.Vector(
+            *(steady if initially_on else minimum)))
+
+
 def place_zones(eas):
     """Place gameplay zone volumes (water/pain/heal/gravity/current/friction) as
     AWoTZoneVolume actors, extracted from the compiled BSP by Tools/convert/
@@ -4195,6 +4321,13 @@ def place_zones(eas):
         return 0
     placed = 0
     gameplay_zones, _, _ = _zone_export_sections()
+    # The compact zones export contains only the folded startup velocity.
+    # Read complete properties so existing conversions retain trigger wiring.
+    actors = {}
+    tf = CONV / f"{MAP}.t3d.json"
+    if tf.exists():
+        actors = {actor["name"]: actor
+                  for actor in json.loads(tf.read_text())["actors"]}
     for z in gameplay_zones:
         lo, hi = z["aabb"]
         center = [(lo[i] + hi[i]) / 2.0 for i in range(3)]
@@ -4240,6 +4373,8 @@ def place_zones(eas):
         vel = z.get("velocity") or []
         if any(vel):
             act.set_editor_property("zone_velocity", unreal.Vector(*vel))
+        if z["actor"] in actors:
+            _set_zone_trigger_velocity(act, actors[z["actor"]])
         grav = z.get("gravity") or []
         if any(grav):
             act.set_editor_property("override_gravity", True)
@@ -4473,9 +4608,10 @@ def place_battle_actors(eas):
                     ("ExitEffectSound", "exit_effect_sound_path")):
                 if p.get(source):
                     act.set_editor_property(dest, sound_subpath(p[source]) or "")
-            cap = act.get_component_by_class(unreal.CapsuleComponent)
-            cap.set_capsule_size(float(p.get("CollisionRadius", 18.0)),
-                                 float(p.get("CollisionHeight", 40.0)), False)
+            # The exact UE1 touch cylinder plus its containing capsule; the
+            # capsule alone clamps HalfHeight >= Radius and is not the touch.
+            radius, height = teleporter_collision(p)
+            act.set_ue1_collision_size(radius, height)
             act.set_actor_label(a["name"])
         else:
             continue

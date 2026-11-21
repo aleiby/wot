@@ -52,12 +52,15 @@ struct FWoTWeaveSlot
 // continuous-cast presentation are live. UseMeteor and NPC-RespawnLeech remain
 // outside this component's implemented policy surface (PORT_NOTES).
 UCLASS(ClassGroup = (WoT))
-class UWoTCasterComponent : public UActorComponent
+class WOT_API UWoTCasterComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
 public:
 	UWoTCasterComponent();
+
+	UPROPERTY(EditDefaultsOnly, Category = "WoT")
+	bool bBuildLoadout = true;
 
 	// The loadout (per-creature data in slice 5; tests configure directly).
 	UPROPERTY(EditDefaultsOnly, Category = "WoT")
@@ -102,7 +105,9 @@ public:
 	// Highest-effective-priority offensive weave for this victim, honoring
 	// the usage interval; on success the weave's charge group is initialized
 	// and it becomes the pending cast item.
-	AWoTAngrealInventory* SelectOffensiveWeave(AActor* Victim);
+	using FItemFilter = TFunctionRef<bool(const AWoTAngrealInventory*)>;
+	AWoTAngrealInventory* SelectOffensiveWeave(AActor* Victim,
+		FItemFilter Filter = [](const AWoTAngrealInventory*) { return true; });
 
 	// The nearest incoming AngrealProjectile inside the perimeter that survives the
 	// rejection ladder (the native DefensiveDetector's RejectOffender) AND the seeker gate
@@ -114,7 +119,8 @@ public:
 	// defensive usage interval (SelectDefensiveAngreal, AngrealWeaponAdapter.uc:282).
 	// The victim is the incoming projectile itself, so GetEffectivePriority routes to
 	// GetDefensivePriority (element-counter test). On success inits the charge group.
-	AWoTAngrealInventory* SelectDefensiveWeave(AActor* Offender);
+	AWoTAngrealInventory* SelectDefensiveWeave(AActor* Offender,
+		FItemFilter Filter = [](const AWoTAngrealInventory*) { return true; });
 
 	// Press the button: select the weave in the inventory and UseAngreal —
 	// the UseSpecificAngreal flow (AngrealUser.uc:214).
@@ -122,6 +128,7 @@ public:
 
 	// Release the button.
 	void Release();
+	void ResetAdaptation();
 
 	bool IsCasting() const { return ActiveWeave != nullptr; }
 	// AngrealWeaponAdapter.IsCasting: only zero-interval automatic items own the

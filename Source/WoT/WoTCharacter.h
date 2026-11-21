@@ -56,6 +56,19 @@ class FWoTRuntimeClassDefaults;
 WOT_API bool WoTDecodePlayerHealthDefault(
 	const FWoTRuntimeClassDefaults& Defaults, int32& OutHealth, FString& OutError);
 
+// The original's player test (Pawn.bIsPlayer, or a WOTPlayer cast) is a property
+// of the player's BODY, not of whoever drives it: a player body counts whether a
+// person, an AI (a bot) or nobody (a dead or unpossessed body) controls it. Only
+// NPC bodies (AWoTNPCCharacter) are not players. World objects that react to
+// players only (proximity triggers, player-bump movers, the seal altar, ...) ask
+// this. Whether a person controls the pawn is a different question
+// (IsPlayerControlled, a PlayerController cast) that belongs to things a person
+// owns: the HUD, input, messages, the camera.
+WOT_API bool WoTIsPlayerBody(const APawn* Pawn);
+
+// True when the human at this machine views and drives this pawn.
+WOT_API bool WoTIsLocalHumanPawn(const APawn* Pawn);
+
 // AngrealInvDisguise CopyDisguisePawnProperties (uc:285-384): the replicated
 // driver that reproduces a mimicked pawn's LIVE look on every client. UE1
 // replicated the raw Mesh/MultiSkins/DrawScale/collision natively; UE5 does not,
@@ -190,7 +203,7 @@ enum class EWoTPlayerMovementConstraint : uint8
 // inventory component's cast gate (WOTPlayer's replication block routed
 // ServerUseAngreal/CeaseUsingAngreal the same way).
 UCLASS()
-class AWoTCharacter : public ACharacter
+class WOT_API AWoTCharacter : public ACharacter
 {
 	GENERATED_BODY()
 
@@ -320,6 +333,9 @@ public:
 	void DecrementSeekerCount();
 
 	bool IsAlive() const { return Health > 0 && !bDead; }
+	// Authority notification after the ordinary damage chain has completed.
+	DECLARE_MULTICAST_DELEGATE_FourParams(FDamageApplied, AWoTCharacter*, AController*, AActor*, float);
+	FDamageApplied OnDamageApplied;
 
 	// Pawn.UnderWaterTime — seconds of breath once the head submerges. Base
 	// Engine.Pawn leaves it UNSET (0 = never drowns); WOTPlayer authors 30
@@ -970,6 +986,9 @@ public:
 	// carries client data, so it is checked for NaN/Inf; the rest are parameterless.
 	UFUNCTION(Server, Reliable, WithValidation) void ServerUseAngreal(FRotator AimRotation);
 	UFUNCTION(Server, Reliable, WithValidation) void ServerCeaseUsingAngreal();
+	bool CanCastNow() const;
+	bool AuthorityUseAngreal(FRotator AimRotation);
+	void AuthorityCeaseUsingAngreal();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerNextInventory();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerPrevInventory();
 	UFUNCTION(Server, Reliable, WithValidation) void ServerSelectAngreal(FName ClassName);

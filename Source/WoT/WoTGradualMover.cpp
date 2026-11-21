@@ -133,9 +133,14 @@ void AWoTGradualMover::WoTTrigger(AActor* Other, APawn* EventInstigator)
 	}
 }
 
-void AWoTGradualMover::WoTUnTrigger(AActor*, APawn* EventInstigator)
+void AWoTGradualMover::WoTUnTrigger(AActor* Other, APawn* EventInstigator)
 {
-	if (IsMoverFSMInert() || !IsGradualState() ||
+	if (!IsGradualState())
+	{
+		Super::WoTUnTrigger(Other, EventInstigator);
+		return;
+	}
+	if (IsMoverFSMInert() ||
 		!IsGradualMode(EWoTMoverState::GradualTriggerPound) || !HasAuthority())
 	{
 		return;

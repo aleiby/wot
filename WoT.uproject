@@ -69,6 +69,10 @@
 				"Game",
 				"Editor"
 			]
+		},
+		{
+			"Name": "WoTBots",
+			"Enabled": true
 		}
 	]
 }

@@ -16,7 +16,7 @@
 // unported ones (PORT_NOTES).
 //
 UCLASS()
-class AWoTAngrealSpawnPool : public AWoTInventory
+class WOT_API AWoTAngrealSpawnPool : public AWoTInventory
 {
 	GENERATED_BODY()
 

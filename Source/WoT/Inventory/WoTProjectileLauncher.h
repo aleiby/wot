@@ -15,7 +15,7 @@ class AWoTGenericProjectile;
 // DynamicLoadObject decoupling collapses into a direct TSubclassOf (all
 // classes live in one C++ module now).
 UCLASS(Abstract)
-class AWoTProjectileLauncher : public AWoTAngrealInventory
+class WOT_API AWoTProjectileLauncher : public AWoTAngrealInventory
 {
 	GENERATED_BODY()
 
@@ -33,7 +33,7 @@ public:
 
 	virtual void CastArtifact() override;     // Cast()
 	virtual void UnCastArtifact() override;   // UnCast()
-	virtual void Failed() override;
+	virtual void AbortCast() override;
 	virtual void Reset() override;
 	virtual void Tick(float DeltaTime) override;
 

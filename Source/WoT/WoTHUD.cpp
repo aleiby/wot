@@ -1597,6 +1597,7 @@ FWoTScoreboardSnapshot AWoTHUD::GatherArenaScoreboard() const
 		// The login/morph seam does maintain retail PlayerType for the faction head layer.
 		Player.PlayerType = WoTState->PlayerType;
 		Player.bHighlight = WoTState == LocalState;
+		Player.bIsBot = WoTState->IsABot();
 		Player.Team = WoTState->Team;
 		if (Snapshot.Players.Num() >= FWoTArenaScoreboard::MaxPlayers)
 		{

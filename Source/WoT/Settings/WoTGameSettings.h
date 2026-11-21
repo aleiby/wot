@@ -55,6 +55,9 @@ struct FWoTGameSettings
 	EWoTGraphicsQuality GraphicsQuality = EWoTGraphicsQuality::Epic;
 	uint16 FrameRateLimit = 0;
 	float MasterVolume = RetailMasterVolume;
+	// "Room reverb" (version 12): the zones' room reverb (WoTZoneReverb.h). The
+	// original's audio options had the same switch, on by default.
+	bool bRoomReverb = true;
 	// Retail menuOptions options 6-10 / PlayerPawn ViewBob default.
 	// PlayerPawn defaultproperties and shipped User.ini both enable this option.
 	bool bAlwaysMouseLook = true;

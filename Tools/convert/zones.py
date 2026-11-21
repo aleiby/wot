@@ -29,6 +29,13 @@ NULL-terminated permeating run as indices into the deduplicated
 participate in retail threshold/visible-count selection. Parallel ``light_anim``
 rows are ``[LightType, LightPeriod, LightPhase, LightEffect]``.
 
+Every ``ambient_zones`` row also carries the zone's room reverb: the zone
+actor's ZoneInfo ``bReverbZone``, ``MasterGain``, ``CutoffHz``, ``Delay[6]``
+and ``Gain[6]`` (the set WOTPlayer.uc LogReverb reads from the player's zone),
+each the authored value or else the actor class's default, resolved through
+the retail script packages beside the map (``<root>/System``). Raw values; the
+runtime applies the original's limits (WoTZoneReverb::MakeSettings).
+
 ``friction_nodes`` is the sparse ``[node_index, Texture.Friction]`` channel.
 Only nodes whose BSP surface resolves through the package-qualified texture
 manifest identity to a non-default value are present; runtime lookup defaults
@@ -48,7 +55,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from ue1pkg import Package, PayloadReader          # noqa: E402
+from ue1pkg import (Package, PayloadReader, _ScriptResolver,  # noqa: E402
+                    _decode_instance_tag, read_property_tags)
 from lightmaps import (class_defaults, decode_model_full, resolve_light,
                        world_light_radius)  # noqa: E402
 
@@ -173,6 +181,82 @@ def _read_ambient(pkg, export, cls):
     result["MaxLightCount"] = int(float(
         props.get("MaxLightCount", defaults.get("MaxLightCount", 6))))
     return result
+
+
+# ZoneInfo's room-reverb properties and their element counts.
+REVERB_PROPERTIES = (("bReverbZone", 1), ("MasterGain", 1), ("CutoffHz", 1),
+                     ("Delay", 6), ("Gain", 6))
+
+
+def _no_reverb():
+    """A zone with no zone actor at all: no reverb."""
+    return dict(reverb_zone=False, master_gain=0, cutoff_hz=0,
+                delay=[0] * 6, gain=[0] * 6)
+
+
+def reverb_resolver(wot_path):
+    """Script reflection over the retail packages beside the map."""
+    core = Path(wot_path).parent.parent / "System" / "Core.u"
+    if not core.is_file():
+        raise FileNotFoundError(
+            f"zone reverb needs the retail System packages beside the map; "
+            f"missing {core}")
+    return _ScriptResolver(core)
+
+
+def read_reverb(pkg, export, resolver):
+    """One zone actor's reverb: each property as the actor authors it, else
+    its class default (the engine's zero for one neither sets)."""
+    class_ref = resolver.resolve(pkg, export["cls"])
+    if class_ref is None:
+        raise ValueError(f"{pkg.name}.{export['name']}: cannot resolve its class")
+    properties = {}
+    values = {}
+    for name, count in REVERB_PROPERTIES:
+        prop = resolver.find_property(class_ref, name)
+        if prop is None:
+            raise ValueError(f"{pkg.name}.{export['name']}: no {name} property")
+        properties[name.casefold()] = (name, prop)
+        values[name] = [resolver.default_value(class_ref, prop, index)
+                        for index in range(count)]
+    for tag in read_property_tags(PayloadReader(pkg, export)):
+        entry = properties.get(tag["name"].casefold())
+        if entry is None:
+            continue
+        name, prop = entry
+        index = tag["array_index"]
+        if not 0 <= index < len(values[name]):
+            raise ValueError(
+                f"{pkg.name}.{export['name']}: {name}[{index}] out of range")
+        values[name][index] = _decode_instance_tag(
+            resolver, pkg, export, class_ref, tag, prop)
+    return dict(reverb_zone=bool(values["bReverbZone"][0]),
+                master_gain=int(values["MasterGain"][0]),
+                cutoff_hz=int(values["CutoffHz"][0]),
+                delay=[int(value) for value in values["Delay"]],
+                gain=[int(value) for value in values["Gain"]])
+
+
+def zone_reverb_rows(ambient_rows):
+    """Zone-number-indexed reverb rows for the map's light table
+    (UWoTMapLightTable.ZoneReverbs). A zone without an ambient row is dry; an
+    export from before the reverb fields gives no rows at all (every zone
+    dry at runtime)."""
+    if not ambient_rows or any("reverb_zone" not in row for row in ambient_rows):
+        return []
+    rows = [_no_reverb() for _ in
+            range(max(int(row["zone"]) for row in ambient_rows) + 1)]
+    for row in ambient_rows:
+        delay = [int(value) for value in row["delay"]]
+        gain = [int(value) for value in row["gain"]]
+        if len(delay) != 6 or len(gain) != 6:
+            raise ValueError(
+                f"zone {row['zone']}: reverb needs six delay/gain pairs")
+        rows[int(row["zone"])] = dict(
+            reverb_zone=bool(row["reverb_zone"]),
+            master_gain=int(row["master_gain"]),
+            cutoff_hz=int(row["cutoff_hz"]), delay=delay, gain=gain)
+    return rows
 
 
 def _leaf_marker(zone):
@@ -356,6 +440,8 @@ def extract(wot_path, texture_manifest_root=None):
     check_walk_surfaces = bool(level_props.get("bCheckWalkSurfaces", True))
     ideal_player_count = _c_atoi(level_props.get("IdealPlayerCount"))
     level_ambient = _read_ambient(pkg, level, level_class)
+    resolver = reverb_resolver(wot_path)
+    level_reverb = read_reverb(pkg, level, resolver) if level else _no_reverb()
     ambient_zones = []
     for z in range(max(nz, 1)):
         export = None
@@ -370,13 +456,16 @@ def extract(wot_path, texture_manifest_root=None):
             export, actor_name, actor_class = level, level_name, level_class
         ambient = (_read_ambient(pkg, export, actor_class)
                    if export else level_ambient)
+        reverb = (read_reverb(pkg, export, resolver)
+                  if export else level_reverb)
         ambient_zones.append(dict(
             zone=z, actor_class=actor_class, actor=actor_name,
             ambient_brightness=ambient["AmbientBrightness"],
             ambient_hue=ambient["AmbientHue"],
             ambient_saturation=ambient["AmbientSaturation"],
             min_light_count=ambient["MinLightCount"],
-            max_light_count=ambient["MaxLightCount"]))
+            max_light_count=ambient["MaxLightCount"],
+            **reverb))
 
     zone_bsp = []
     for node_index, plane in enumerate(bsp["node_planes"]):

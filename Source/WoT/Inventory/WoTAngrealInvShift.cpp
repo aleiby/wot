@@ -1,4 +1,5 @@
 #include "WoTAngrealInvShift.h"
+#include "Testing/WoTSoakEvents.h"
 
 #include "../WoTAppearEffect.h"
 #include "../WoTCharacter.h"
@@ -35,6 +36,7 @@ AWoTAngrealInvShift::AWoTAngrealInvShift()
 
 void AWoTAngrealInvShift::CastArtifact()
 {
+	WOT_SOAK_BODY_SCOPE("Shift");
 	AWoTCharacter* OwnerPawn = Cast<AWoTCharacter>(GetOwner());
 	if (!OwnerPawn)
 	{
@@ -66,6 +68,7 @@ void AWoTAngrealInvShift::CastArtifact()
 		Failed();
 		return;
 	}
+	WOT_SOAK_BODY_EVENT(OwnerPawn, "Shift placed");
 	UWoTZoneIndex::RefreshAfterRelocation(OwnerPawn);
 	const FVector Arrived = OwnerPawn->GetActorLocation();
 

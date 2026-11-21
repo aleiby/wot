@@ -98,6 +98,27 @@ class ZoneExportFreshnessTests(unittest.TestCase):
             self.assertFalse(bootstrap._zone_export_has_walk_surfaces(
                 output, root / "tex"))
 
+    def test_ambient_rows_without_room_reverb_are_stale(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "Map.zones.json"
+            manifest = root / "tex" / "Pkg" / "_manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({"textures": {}}), encoding="utf-8")
+            row = {"zone": 0, "ambient_brightness": 0}
+            for rows, fresh in (([row], False),
+                                ([dict(row, reverb_zone=False)], True)):
+                output.write_text(json.dumps({
+                    "check_walk_surfaces": True,
+                    "ideal_player_count": 4,
+                    "friction_nodes": [],
+                    "ambient_zones": rows,
+                }), encoding="utf-8")
+                os.utime(manifest, ns=(1_000_000_000, 1_000_000_000))
+                os.utime(output, ns=(2_000_000_000, 2_000_000_000))
+                self.assertEqual(bootstrap._zone_export_has_walk_surfaces(
+                    output, root / "tex"), fresh)
+
 
 class InstallerVerificationTests(unittest.TestCase):
     def test_sha256_is_an_independent_required_installer_pin(self):

@@ -32,7 +32,7 @@ namespace WoTTest
 		bool bActivatePayload = true;
 	};
 
-	// Exported for the optional plugins' specs (the WoTVR plugin's WoT.VR.*),
+	// Exported for the optional plugins' specs (WoTVR's WoT.VR.*, WoTBots' WoT.Bots.*),
 	// which run in the same real spec worlds.
 	WOT_API UWorld* CreateSpecWorld(const FSpecWorldOptions& Options = FSpecWorldOptions());
 	WOT_API UWorld* CreateSpecWorld(TSubclassOf<AGameModeBase> GameModeClass);

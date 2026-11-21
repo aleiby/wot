@@ -167,7 +167,7 @@ struct FWoTHUDReadout
 // The native art HUD. It draws health + crosshair and retains the debug text
 // readout behind wot.HUDDebug; the other HUD surfaces build on this same AHUD.
 UCLASS()
-class AWoTHUD : public AHUD
+class WOT_API AWoTHUD : public AHUD
 {
 	GENERATED_BODY()
 

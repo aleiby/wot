@@ -259,6 +259,14 @@ bool ReadByte(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
 	return P == nullptr || WoTRuntimeWorldPropertyByte(*P, Value);
 }
 
+// One element of a static byte array (Name[Slot]).
+bool ReadByteAt(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
+	const TCHAR* Name, uint32 Slot, uint8& Value)
+{
+	const FWoTRuntimeWorldProperty* P = Prop(D, A, Name, Slot);
+	return P == nullptr || WoTRuntimeWorldPropertyByte(*P, Value);
+}
+
 bool ReadInt(const FWoTRuntimeClassDefaults& D, const FWoTRuntimeWorldActor& A,
 	const TCHAR* Name, int32& Value)
 {
@@ -1116,7 +1124,18 @@ bool ProjectDecoration(UWorld& World, const FWoTWorldProjectionSource& Source,
 		bBlockPlayers, CollisionRadius, CollisionHeight);
 	Decoration->ConfigureRuntimePhysics(
 		Physics, RotationRate, bFixedRotationDir);
-	Decoration->ConfigureRuntimeReplication();
+	// How the original sends this decoration to clients: Actor.RemoteRole and
+	// Actor.bNetTemporary, the class's own (Fish.uc:65, SeaweedA.uc:24-25) or
+	// the map's. A decoration nothing overrides keeps Actor's ROLE_DumbProxy.
+	uint8 RemoteRole = AWoTDecoration::UE1RoleDumbProxy;
+	bool bNetTemporary = false;
+	if (!ReadByte(D, A, TEXT("RemoteRole"), RemoteRole)
+		|| !ReadBool(D, A, TEXT("bNetTemporary"), bNetTemporary))
+	{
+		Error = TEXT("a decoration network role is malformed");
+		Decoration->Destroy(); return false;
+	}
+	Decoration->ConfigureRuntimeReplication(RemoteRole, bNetTemporary);
 	FName RenderIteratorClass;
 	float VisibilityRadius = 0.0f;
 	float VisibilityHeight = 0.0f;
@@ -1823,6 +1842,7 @@ bool ConfigureMoverProperties(AWoTMover& Mover,
 	};
 	if (!ReadFloat(D,A,TEXT("MoveTime"),Mover.MoveTime)) return Invalid(TEXT("MoveTime"));
 	if (!ReadFloat(D,A,TEXT("StayOpenTime"),Mover.StayOpenTime)) return Invalid(TEXT("StayOpenTime"));
+	if (!ReadFloat(D,A,TEXT("OtherTime"),Mover.OtherTime)) return Invalid(TEXT("OtherTime"));
 	if (!ReadFloat(D,A,TEXT("DelayTime"),Mover.DelayTime)) return Invalid(TEXT("DelayTime"));
 	if (!ReadByte(D,A,TEXT("KeyNum"),SerializedKeyNum)) return Invalid(TEXT("KeyNum"));
 	if (!ReadByte(D,A,TEXT("BumpType"),SerializedBumpType)
@@ -2003,6 +2023,9 @@ bool ConfigureTrigger(AWoTTrigger& Trigger,
 	if (!ReadName(D,A,TEXT("Tag"),Trigger.TagName)
 		|| !ReadName(D,A,TEXT("Event"),Trigger.EventName)
 		|| !ReadBool(D,A,TEXT("bTriggerOnceOnly"),Trigger.bTriggerOnceOnly)
+		|| !ReadBool(D,A,TEXT("bInitiallyActive"),Trigger.bInitiallyActive)
+		|| !ReadFloat(D,A,TEXT("DamageThreshold"),Trigger.DamageThreshold)
+		|| !ReadString(D,A,TEXT("Message"),Trigger.Message)
 		|| !ReadFloat(D,A,TEXT("ReTriggerDelay"),Trigger.ReTriggerDelay)
 		|| !ReadFloat(D,A,TEXT("RepeatTriggerTime"),Trigger.RepeatTriggerTime)
 		|| !ReadBool(D,A,TEXT("bCollideActors"),bCollideActors)
@@ -2048,6 +2071,11 @@ bool ProjectTrigger(UWorld& World, const FWoTRuntimeClassDefaults& D,
 	Trigger->SetReplicates(false);
 	if (!ConfigureTrigger(*Trigger,D,A,Error))
 	{ Trigger->Destroy(); return false; }
+	if (Trigger->TriggerType == EWoTTriggerType::Shoot)
+	{
+		Trigger->SetReplicates(true);
+		Trigger->SetNetAddressable();
+	}
 	if (AWoTDoorTrigger* Door = Cast<AWoTDoorTrigger>(Trigger))
 	{
 		uint8 Direction = 0;
@@ -3455,17 +3483,23 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 	// fire/lava WOTZoneInfo instances set that flag but retain ViewFlash=(0,0,0).
 	if (bWaterZone) ViewFlash = FVector(-0.078f);
 	bool TrigVelocity=false, TrigInitiallyOn=false;
+	FVector MaxVelocity = FVector::ZeroVector, MinVelocity = FVector::ZeroVector;
+	float TransitionTime = 0.0f, TriggerDuration = 0.0f;
+	FName InitialState, Tag;
 	if (!ReadBool(D,A,TEXT("bTrigZoneVelo2"),TrigVelocity)
-		|| !ReadBool(D,A,TEXT("bTrigZoneVelo2InitiallyOn"),TrigInitiallyOn))
-	{ Error = TEXT("a zone trigger velocity flag is malformed"); return false; }
-	if (TrigVelocity)
-	{
-		FVector SelectedVelocity = FVector::ZeroVector;
-		if (!ReadVector(D,A, TrigInitiallyOn
-			? TEXT("MaxZoneVelocity2") : TEXT("MinZoneVelocity2"), SelectedVelocity))
-		{ Error = TEXT("a zone trigger velocity is malformed"); return false; }
-		Velocity = SelectedVelocity;
-	}
+		|| !ReadBool(D,A,TEXT("bTrigZoneVelo2InitiallyOn"),TrigInitiallyOn)
+		|| !ReadVector(D,A,TEXT("MaxZoneVelocity2"),MaxVelocity)
+		|| !ReadVector(D,A,TEXT("MinZoneVelocity2"),MinVelocity)
+		|| !ReadFloat(D,A,TEXT("TransitionTime2"),TransitionTime)
+		|| !ReadFloat(D,A,TEXT("TriggerDuration"),TriggerDuration)
+		|| !ReadName(D,A,TEXT("InitialState"),InitialState)
+		|| !ReadName(D,A,TEXT("Tag"),Tag))
+	{ Error = TEXT("a zone trigger velocity property is malformed"); return false; }
+	// WOTZoneInfo.uc:78-92 replaces ZoneVelocity with the triggered current; an
+	// "on" zone applies the steady average of the shipped per-tick cycle.
+	if (TrigVelocity) Velocity = TrigInitiallyOn
+		? AWoTZoneVolume::SteadyTriggeredVelocity(MaxVelocity, MinVelocity, TransitionTime)
+		: MinVelocity;
 	const FWoTRuntimeWorldProperty* AuthoredGravity =
 		WoTRuntimeWorldFindProperty(A, TEXT("ZoneGravity"));
 	if (AuthoredGravity && AuthoredGravity->Type != EWoTRuntimeWorldPropertyType::Struct)
@@ -3474,7 +3508,7 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 		[](float Value){ return Value > 0.0f; });
 	const bool Effect = Water || Pit || Pain || Heal || Fog || FOV || Leech
 		|| !ZonePlayerEvent.IsNone()
-		|| Destructive || bTimer || !Velocity.IsNearlyZero()
+		|| Destructive || bTimer || TrigVelocity || !Velocity.IsNearlyZero()
 		|| !Gravity.Equals(FVector(0,0,-950)) || !FMath::IsNearlyEqual(GroundFriction,8)
 		|| !FMath::IsNearlyEqual(FluidFriction,1.2f) || !ViewFog.IsNearlyZero()
 		|| !ViewFlash.IsNearlyZero();
@@ -3484,7 +3518,13 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 	AWoTZoneVolume* Volume = SpawnDeferred<AWoTZoneVolume>(World, RecordIndex, ZoneRule,
 		FTransform((Min + Max) * .5));
 	if (!Volume) { Error = TEXT("a zone projection could not be allocated"); return false; }
-	Volume->SetReplicates(false); Volume->Collision->SetBoxExtent(((Max-Min)*.5).ComponentMax(FVector(1)), false);
+	Volume->SetReplicates(TrigVelocity);
+	if (TrigVelocity) Volume->SetNetAddressable();
+	Volume->Collision->SetBoxExtent(((Max-Min)*.5).ComponentMax(FVector(1)), false);
+	Volume->bTrigZoneVelo2=TrigVelocity; Volume->bTrigZoneVelo2InitiallyOn=TrigInitiallyOn;
+	Volume->MaxZoneVelocity2=MaxVelocity; Volume->MinZoneVelocity2=MinVelocity;
+	Volume->TransitionTime2=TransitionTime; Volume->TriggerDuration=TriggerDuration;
+	Volume->InitialState=InitialState; Volume->TagName=Tag;
 	Volume->bWaterZone=Water; Volume->bPitZone=Pit; Volume->bPainZone=Pain; Volume->bHealZone=Heal; Volume->bFogZone=Fog;
 	Volume->ProjectedZoneIndex=ZoneIndex;
 	Volume->bFOVZone=FOV; Volume->ZoneFOV=ZoneFOV; Volume->bLeechZone=Leech;
@@ -4217,6 +4257,27 @@ bool FillLightTable(UWorld& World, const FWoTWorldProjectionSource& Source,
 		}
 		Table->ZoneMinLightCounts.Add(MinCount);
 		Table->ZoneMaxLightCounts.Add(MaxCount);
+		// The zone's room reverb: the same actor's ZoneInfo reverb properties,
+		// each the authored value or else its class default (the engine's
+		// zero for a property neither carries). A malformed value leaves the
+		// zone dry.
+		FWoTZoneReverbRecord& Reverb=Table->ZoneReverbs.AddDefaulted_GetRef();
+		if (AmbientActor != nullptr)
+		{
+			FWoTZoneReverbRecord Read;
+			Read.Delay.SetNumZeroed(6);
+			Read.Gain.SetNumZeroed(6);
+			bool bValid=ReadBool(D,*AmbientActor,TEXT("bReverbZone"),Read.bReverbZone)
+				&& ReadByte(D,*AmbientActor,TEXT("MasterGain"),Read.MasterGain)
+				&& ReadInt(D,*AmbientActor,TEXT("CutoffHz"),Read.CutoffHz);
+			for (uint32 Slot=0; bValid && Slot<6; ++Slot)
+			{
+				bValid=ReadByteAt(D,*AmbientActor,TEXT("Delay"),Slot,Read.Delay[Slot])
+					&& ReadByteAt(D,*AmbientActor,TEXT("Gain"),Slot,Read.Gain[Slot]);
+			}
+			if (bValid) Reverb=MoveTemp(Read);
+			else Reject(*AmbientActor,TEXT("zone reverb properties are malformed"));
+		}
 		FWoTZoneAmbient& Ambient=Table->ZoneAmbients.AddDefaulted_GetRef();
 		Ambient.Zone=I; Ambient.Color=UE1FGetHSV(H,S,B); Ambient.bDefault=I==0;
 		FVector Lo,Hi;
@@ -4429,6 +4490,11 @@ void ReadLevelTitle(const FWoTWorldProjectionSource& Source,
 		return;
 	}
 }
+}
+
+UClass* WoTResolveNativePickupClass(FStringView RetailClassIdentity)
+{
+	return ResolveNativePickupClass(RetailClassIdentity);
 }
 
 #if WITH_AUTOMATION_TESTS

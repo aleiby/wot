@@ -31,6 +31,18 @@
 
 namespace
 {
+	const FName WoTSession_BotCountSetting(TEXT("WOTBOTS"));
+
+	void WoTSessionPopulatePopulation(const FOnlineSession& Session,
+		FWoTSessionListEntry& Entry)
+	{
+		Entry.MaxPlayers = Session.SessionSettings.NumPublicConnections;
+		Entry.CurrentPlayers = FMath::Clamp(
+			Entry.MaxPlayers - Session.NumOpenPublicConnections, 0, Entry.MaxPlayers);
+		Session.SessionSettings.Get(WoTSession_BotCountSetting, Entry.BotCount);
+		Entry.BotCount = FMath::Max(0, Entry.BotCount);
+	}
+
 	const FName WoTSession_ServerNameSetting(TEXT("WOT_SERVER_NAME"));
 	// The host's WoT network version (WoTNetVersion::Current, hex). The browser
 	// flags a row whose host differs: the engine handshake would refuse it.
@@ -319,7 +331,9 @@ bool UWoTSessionSubsystem::ActivateForAuthorizedWorld()
 {
 	if (bAuthorizedForWorld)
 	{
-		return IsWoTBootstrapWorldReady();
+		const bool bReady = IsWoTBootstrapWorldReady();
+		if (bReady) FlushAdvertisedInts();
+		return bReady;
 	}
 	if (!IsWoTBootstrapWorldReady())
 	{
@@ -332,6 +346,7 @@ bool UWoTSessionSubsystem::ActivateForAdoptedWorldAuthority()
 {
 	if (bAuthorizedForWorld)
 	{
+		FlushAdvertisedInts();
 		return true;
 	}
 	return FinishAuthorizedWorldActivation(/*bRequireCurrentGate*/ false);
@@ -466,6 +481,7 @@ bool UWoTSessionSubsystem::FinishAuthorizedWorldActivation(
 		    FOnSessionUserInviteAcceptedDelegate::CreateUObject(
 		        this, &UWoTSessionSubsystem::OnInviteAccepted));
 	}
+	FlushAdvertisedInts();
 	return true;
 }
 
@@ -625,6 +641,7 @@ void UWoTSessionSubsystem::Deinitialize()
 	UnregisterWoTBootstrapWorldReadinessListener(WorldReadinessHandle);
 	const IOnlineSessionPtr PendingHostCreateSessions = HostCreateSessions;
 	DeactivateForUnauthorizedWorld();
+	ClearAdvertisedUpdate();
 	if (PendingHostCreateSessions.IsValid() && HostCreateHandle.IsValid())
 	{
 		PendingHostCreateSessions->ClearOnCreateSessionCompleteDelegate_Handle(
@@ -685,6 +702,7 @@ void UWoTSessionSubsystem::Deinitialize()
 	ClientTravelHookForTesting = nullptr;
 	ServerTravelHookForTesting = nullptr;
 	CreateSessionDispatchHookForTesting = nullptr;
+	UpdateSessionDispatchHookForTesting = nullptr;
 	ClientTravelControllerForTesting.Reset();
 #endif
 	Super::Deinitialize();
@@ -1772,9 +1790,7 @@ void UWoTSessionSubsystem::CompleteFind(bool bOk, uint64 ExpectedGeneration)
 			Entry.ServerName = Raw.Session.OwningUserName;
 		}
 		Raw.Session.SessionSettings.Get(SETTING_MAPNAME, Entry.MapName);
-		Entry.MaxPlayers = Raw.Session.SessionSettings.NumPublicConnections;
-		Entry.CurrentPlayers = FMath::Clamp(
-			Entry.MaxPlayers - Raw.Session.NumOpenPublicConnections, 0, Entry.MaxPlayers);
+		WoTSessionPopulatePopulation(Raw.Session, Entry);
 		Entry.bInternet = bSearchInternet;
 		Entry.PingMs = bSearchInternet ? WoTUnknownPingMs : Raw.PingInMs;
 		WoTSessionPopulateVersionFields(
@@ -2822,6 +2838,102 @@ void UWoTSessionSubsystem::SetInternetState(EWoTInternetState State,
 	InternetStatusEvent.Broadcast();
 }
 
+FString FWoTSessionListEntry::PlayerCountText() const
+{
+	const FString Humans = FString::Printf(TEXT("%d/%d"), CurrentPlayers, MaxPlayers);
+	if (BotCount <= 0)
+	{
+		return Humans;
+	}
+	return Humans + (BotCount == 1
+		? FString(TEXT(" + 1 bot")) : FString::Printf(TEXT(" + %d bots"), BotCount));
+}
+
+void UWoTSessionSubsystem::SetAdvertisedInt(FName Key, int32 Value)
+{
+	if (Key.IsNone()) return;
+	const int32* Previous = AdvertisedInts.Find(Key);
+	if (Previous && *Previous == Value) return;
+	AdvertisedInts.Add(Key, Value);
+	++AdvertisedIntsGeneration;
+	FlushAdvertisedInts();
+}
+
+void UWoTSessionSubsystem::ClearAdvertisedUpdate()
+{
+	if (AdvertisedUpdateSessions.IsValid() && AdvertisedUpdateHandle.IsValid())
+	{
+		AdvertisedUpdateSessions->ClearOnUpdateSessionCompleteDelegate_Handle(AdvertisedUpdateHandle);
+	}
+	AdvertisedUpdateHandle.Reset();
+	AdvertisedUpdateSessions.Reset();
+	ActiveAdvertisedUpdateSerial = 0;
+}
+
+void UWoTSessionSubsystem::FlushAdvertisedInts()
+{
+	if (AdvertisedIntsGeneration == PublishedAdvertisedIntsGeneration
+		|| ActiveAdvertisedUpdateSerial != 0)
+	{
+		return;
+	}
+	const IOnlineSessionPtr Provider = SessionsHoldingGameSession();
+	FNamedOnlineSession* Session = Provider.IsValid()
+		? Provider->GetNamedSession(NAME_GameSession) : nullptr;
+	if (!Session) return;
+	FOnlineSessionSettings Settings = Session->SessionSettings;
+	for (const TPair<FName, int32>& Setting : AdvertisedInts)
+	{
+		Settings.Set(Setting.Key, Setting.Value,
+			EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	}
+	const uint64 Generation = AdvertisedIntsGeneration;
+	const uint64 OperationSerial = ++NextAdvertisedUpdateSerial;
+	ActiveAdvertisedUpdateSerial = OperationSerial;
+	AdvertisedUpdateSessions = Provider;
+	AdvertisedUpdateHandle = Provider->AddOnUpdateSessionCompleteDelegate_Handle(
+		FOnUpdateSessionCompleteDelegate::CreateWeakLambda(this,
+			[this, Provider, OperationSerial, Generation](FName SessionName, bool bOk)
+			{
+				OnAdvertisedUpdateComplete(Provider, OperationSerial, Generation, SessionName, bOk);
+			}));
+	TFunction<bool()> Dispatch = [Provider, Settings = MoveTemp(Settings)]() mutable
+	{
+		return Provider->UpdateSession(NAME_GameSession, Settings, true);
+	};
+	bool bAccepted;
+#if WITH_AUTOMATION_TESTS
+	if (UpdateSessionDispatchHookForTesting)
+	{
+		bAccepted = UpdateSessionDispatchHookForTesting(MoveTemp(Dispatch));
+	}
+	else
+#endif
+	{
+		bAccepted = Dispatch();
+	}
+	if (!bAccepted && ActiveAdvertisedUpdateSerial == OperationSerial)
+	{
+		ClearAdvertisedUpdate();
+	}
+}
+
+void UWoTSessionSubsystem::OnAdvertisedUpdateComplete(IOnlineSessionPtr ExactProvider,
+	uint64 OperationSerial, uint64 Generation, FName SessionName, bool bOk)
+{
+	if (SessionName != NAME_GameSession || ActiveAdvertisedUpdateSerial != OperationSerial
+		|| AdvertisedUpdateSessions != ExactProvider)
+	{
+		return;
+	}
+	ClearAdvertisedUpdate();
+	if (bOk) PublishedAdvertisedIntsGeneration = Generation;
+	if (AdvertisedIntsGeneration != Generation)
+	{
+		FlushAdvertisedInts();
+	}
+}
+
 FOnlineSessionSettings UWoTSessionSubsystem::BuildSessionSettings(
 	const FWoTHostRequest& Request) const
 {
@@ -2887,6 +2999,11 @@ FOnlineSessionSettings UWoTSessionSubsystem::BuildSessionSettings(
 		FString::Printf(TEXT("%llu"),
 			static_cast<unsigned long long>(RunningReleaseSequence())),
 		EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	for (const TPair<FName, int32>& Setting : AdvertisedInts)
+	{
+		Settings.Set(Setting.Key, Setting.Value,
+			EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	}
 	return Settings;
 }
 
@@ -2963,6 +3080,7 @@ FWoTSessionListEntry UWoTSessionSubsystem::InjectSearchResultForTesting(
 	Entry.SearchGeneration = SearchGeneration;
 	Entry.ResultIndex = 0;
 	Entry.bInternet = bInternet;
+	WoTSessionPopulatePopulation(Result.Session, Entry);
 	Result.Session.SessionSettings.Get(WoTSession_ServerNameSetting, Entry.ServerName);
 	WoTSessionPopulateVersionFields(Result.Session.SessionSettings,
 		LocalNetVersionString(), Entry);

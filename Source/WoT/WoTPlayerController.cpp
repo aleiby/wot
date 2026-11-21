@@ -14,6 +14,7 @@
 #include "WoTBattleInfo.h"
 #include "WoTBudgetInfo.h"
 #include "WoTCharacter.h"
+#include "WoTUE1Collision.h"
 #include "WoTCollisionBlocker.h"
 #include "WoTCitadelResources.h"
 #include "WoTHUD.h"
@@ -871,7 +872,8 @@ void AWoTPlayerController::RestoreCitadelEditStart()
 			{
 				UWoTZoneIndex::RefreshAfterRelocation(ViewerPawn);
 			}
-			ViewerPawn->SetActorRotation(EditStartRot);
+			ViewerPawn->SetActorRotation(
+				WoTUE1Collision::BodyRotation(*ViewerPawn, EditStartRot));
 		}
 		else if (USceneComponent* Root = GetRootComponent())
 		{
@@ -896,7 +898,8 @@ void AWoTPlayerController::ClientRestoreCitadelEditTransform_Implementation(
 		{
 			UWoTZoneIndex::RefreshAfterRelocation(ViewerPawn);
 		}
-		ViewerPawn->SetActorRotation(SavedRotation);
+		ViewerPawn->SetActorRotation(
+			WoTUE1Collision::BodyRotation(*ViewerPawn, SavedRotation));
 	}
 	else if (USceneComponent* Root = GetRootComponent())
 	{

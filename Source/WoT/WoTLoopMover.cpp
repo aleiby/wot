@@ -73,7 +73,7 @@ void AWoTLoopMover::WoTTrigger(AActor* Other, APawn* EventInstigator)
 	StartNextLeg();
 }
 
-void AWoTLoopMover::WoTUnTrigger(AActor*, APawn* EventInstigator)
+void AWoTLoopMover::WoTUnTrigger(AActor* Other, APawn* EventInstigator)
 {
 	if (IsMoverFSMInert())
 	{
@@ -81,7 +81,8 @@ void AWoTLoopMover::WoTUnTrigger(AActor*, APawn* EventInstigator)
 	}
 	if (InitialState != EWoTMoverState::None)
 	{
-		return;   // base Mover states define no UnTrigger handler
+		Super::WoTUnTrigger(Other, EventInstigator);
+		return;
 	}
 	if (!HasAuthority() || LoopPhase != EWoTLoopMoverPhase::Moving)
 	{

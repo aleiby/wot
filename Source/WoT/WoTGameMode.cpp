@@ -1,4 +1,5 @@
 #include "WoTGameMode.h"
+#include "Testing/WoTSoakEvents.h"
 #include "WoTFrontEnd.h"
 #include "WoTRandom.h"
 
@@ -12,6 +13,7 @@
 #include "WoTPlayerController.h"
 #include "WoTPlayerStart.h"
 #include "WoTPlayerState.h"
+#include "WoTMatchParticipant.h"
 #include "WoTPreferencesSubsystem.h"
 #include "WoTPasswordToken.h"
 #include "WoTUE1Collision.h"
@@ -796,6 +798,23 @@ bool AWoTGameMode::ShouldRespawn(AWoTInventory* Item) const
 	return Item && Item->RespawnTime != 0.0f;
 }
 
+int32 AWoTGameMode::GetNumCombatants() const
+{
+	// The engine exposes this read-only count through a non-const method.
+	int32 Count = const_cast<AWoTGameMode*>(this)->GetNumPlayers();
+	if (GameState)
+	{
+		for (const APlayerState* State : GameState->PlayerArray)
+		{
+			if (State && State->IsABot())
+			{
+				++Count;
+			}
+		}
+	}
+	return Count;
+}
+
 void AWoTGameMode::PlayerKilled(AController* Killer, AWoTCharacter* Victim, FName /*DamageType*/)
 {
 	if (!Victim || !HasAuthority())
@@ -839,14 +858,20 @@ void AWoTGameMode::PlayerKilled(AController* Killer, AWoTCharacter* Victim, FNam
 		return;
 	}
 
-	// Free the victim's controller from the corpse and arm WOTPlayer.Dying's Fire gate.
-	// ONLY player controllers respawn: a dead NPC keeps its AI controller (its brain
-	// diverts to Dying) and the carcass-swap path destroys pawn + controller after
-	// DestroyDelaySecs — routing an AWoTNPCController through UnPossess+RestartPlayer
-	// would conjure a default pawn at a PlayerStart (the Slice 4 recon latent bug).
+	// Human controllers retain their fire-driven respawn. A bot participant owns its
+	// respawn timing through the interface. Ordinary NPCs keep their controller for
+	// the dying state and corpse disposal; never route them through a player start.
 	AWoTPlayerController* PlayerController = Cast<AWoTPlayerController>(VictimController);
 	if (!PlayerController)
 	{
+		if (IsWoTBotParticipant(VictimController))
+		{
+			if (IWoTMatchParticipant* Participant = Cast<IWoTMatchParticipant>(VictimController))
+			{
+				VictimController->UnPossess();
+				Participant->OnParticipantPawnDied(Victim, RespawnDelay);
+			}
+		}
 		return;
 	}
 	// The onboarding aids' one fact about this death, sent to the victim alone and
@@ -1070,16 +1095,17 @@ bool AWoTGameMode::ChangeTeam(AController* Controller, int32 /*RequestedTeam*/)
 	while (bCollision)
 	{
 		bCollision = false;
-		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator();
-		     It; ++It)
+		if (!GameState)
 		{
-			AController* Other = It->Get();
-			if (Other == Controller)
+			break;
+		}
+		for (const APlayerState* Other : GameState->PlayerArray)
+		{
+			if (Other == PS)
 			{
 				continue;
 			}
-			const AWoTPlayerState* OtherPS =
-				Other ? Other->GetPlayerState<AWoTPlayerState>() : nullptr;
+			const AWoTPlayerState* OtherPS = Cast<AWoTPlayerState>(Other);
 			if (OtherPS && OtherPS->Team == Team)
 			{
 				++Team;
@@ -1153,6 +1179,19 @@ void AWoTGameMode::RecordClientLifecycle(APlayerController* Player,
 
 void AWoTGameMode::EndGame(FName /*Reason*/)
 {
+	const bool bFirstEnd = !bGameEnded;
+	if (bFirstEnd)
+	{
+		MatchEndedTime = GetWorld()->GetTimeSeconds();
+		for (TActorIterator<AController> It(GetWorld()); It; ++It)
+		{
+			if (IsWoTBotParticipant(*It))
+			{
+				bUnattendedParticipantMatch = true;
+				break;
+			}
+		}
+	}
 	// giCombatBase.EndGame — flag the match as decided and drive the clock to -1 so the
 	// 1 Hz Timer counts through the GameRestartDelay window and forces the restart.
 	bGameEnded = true;
@@ -1183,6 +1222,16 @@ void AWoTGameMode::EndGame(FName /*Reason*/)
 			PC->NotifyMatchEnded();
 		}
 	}
+	if (bFirstEnd)
+	{
+		for (TActorIterator<AController> It(GetWorld()); It; ++It)
+		{
+			if (IWoTMatchParticipant* Participant = Cast<IWoTMatchParticipant>(*It))
+			{
+				Participant->OnMatchEnded();
+			}
+		}
+	}
 }
 
 void AWoTGameMode::SeedMatchClock()
@@ -1203,6 +1252,13 @@ void AWoTGameMode::Timer()
 	// for the rules here). Only the TimeLimit clock is polled; FragLimit ends via Killed.
 	if (TimeLimit <= 0)
 	{
+		if (bGameEnded && bUnattendedParticipantMatch && !bUnattendedRestartRequested
+			&& GetWorld()->GetNumPlayerControllers() == 0
+			&& GetWorld()->GetTimeSeconds() - MatchEndedTime >= GameRestartDelay)
+		{
+			bUnattendedRestartRequested = true;
+			RestartGame();
+		}
 		return;
 	}
 	AWoTGameState* GS = GetGameState<AWoTGameState>();
@@ -1901,10 +1957,11 @@ const TCHAR* WoTStartSpawnRejectionName(EWoTStartSpawnRejection Rejection)
 	return TEXT("unknown");
 }
 
-APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+static APawn* WoTGameMode_SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
-	FWoTStartSpawnResult* OutResult)
+	FWoTStartSpawnResult* OutResult, AController* SpawnController)
 {
+	WOT_SOAK_BODY_SCOPE("spawn/respawn placement");
 	FWoTStartSpawnResult Result;
 	Result.ResolvedLocation = SpawnTransform.GetLocation();
 	ON_SCOPE_EXIT
@@ -1927,10 +1984,16 @@ APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 	// placed first and fitted after: FindSpot looks only at the level.
 	FActorSpawnParameters SpawnInfo;
 	SpawnInfo.Instigator = SpawnInstigator;
+	// Overlap collection can run before possession; preserve the intended participant.
+	SpawnInfo.Owner = SpawnController;
 	SpawnInfo.ObjectFlags |= RF_Transient;
 	SpawnInfo.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	FTransform RetailSpawn = SpawnTransform;
+	if (PawnClass->IsChildOf(ACharacter::StaticClass()))
+	{
+		RetailSpawn.SetRotation(FRotator(0.0, SpawnTransform.Rotator().Yaw, 0.0).Quaternion());
+	}
 	APawn* Spawned = World.SpawnActor<APawn>(PawnClass, RetailSpawn, SpawnInfo);
 	if (!Spawned)
 	{
@@ -1964,7 +2027,16 @@ APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
 		Spawned->Destroy();
 		return nullptr;
 	}
+	WOT_SOAK_BODY_EVENT(Spawned, "spawn/respawn fitted");
 	return Spawned;
+}
+
+APawn* AWoTGameMode::SpawnPawnAtRetailStart(UWorld& World, UClass* PawnClass,
+	const FTransform& SpawnTransform, APawn* SpawnInstigator, bool bAssumeFit,
+	FWoTStartSpawnResult* OutResult)
+{
+	return WoTGameMode_SpawnPawnAtRetailStart(World, PawnClass, SpawnTransform,
+		SpawnInstigator, bAssumeFit, OutResult, nullptr);
 }
 
 APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
@@ -1978,9 +2050,9 @@ APawn* AWoTGameMode::SpawnDefaultPawnAtTransform_Implementation(
 			// GameInfo.Login spawns the PlayerPawn (SpawnActor: FindSpot with
 			// bAssumeFit); GameInfo.RestartPlayer moves it (SetLocation ->
 			// FarMoveActor: FindSpot without bAssumeFit).
-			return SpawnPawnAtRetailStart(*World, PawnClass, SpawnTransform,
+			return WoTGameMode_SpawnPawnAtRetailStart(*World, PawnClass, SpawnTransform,
 				GetInstigator(), /*bAssumeFit*/ !bRestartMovesPlayerPawn,
-				&LastStartSpawn);
+				&LastStartSpawn, NewPlayer);
 		}
 	}
 	return Super::SpawnDefaultPawnAtTransform_Implementation(NewPlayer, SpawnTransform);

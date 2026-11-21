@@ -1,14 +1,19 @@
 #include "WoTEvents.h"
 
+#include "WoTCharacter.h"
+#include "WoTPlayerController.h"
+#include "Projectiles/WoTAngrealProjectile.h"
 #include "WoTStageTrigger.h"
 #include "WoTUE1Collision.h"
 #include "Payload/WoTPayloadActivation.h"
 
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
+#include "Engine/ScopedMovementUpdate.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "TimerManager.h"
+#include "Net/UnrealNetwork.h"
 
 void UWoTEventSubsystem::RegisterTag(FName Tag, AActor* Actor)
 {
@@ -154,6 +159,10 @@ AWoTTrigger::AWoTTrigger()
 	Capsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("Capsule"));
 	RootComponent = Capsule;
 	Capsule->SetCollisionProfileName(TEXT("Trigger"));
+	// UE 5.8's Trigger profile leaves custom channels at their default response.
+	// Our projectile channel defaults to Block; these are touch volumes, so they
+	// must not displace a launch or produce a wall hit during flight.
+	Capsule->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Overlap);
 }
 
 void AWoTTrigger::SetUE1CollisionSize(float Radius, float HalfHeight)
@@ -171,88 +180,267 @@ void AWoTTrigger::SetUE1CollisionSize(float Radius, float HalfHeight)
 void AWoTTrigger::BeginPlay()
 {
 	Super::BeginPlay();
-	// Projected UE1 triggers are local materialization products rather than
-	// replicated actors.  On a network client AActor otherwise leaves a
-	// non-replicated, locally spawned actor at ROLE_Authority, which would make
-	// HasAuthority() an unsafe event-chain gate.  UE1's non-simulated triggers
-	// instead end at ROLE_None on clients and stay inert there.
-	if (!GetIsReplicated() && GetNetMode() == NM_Client)
+	const bool bShoot = TriggerType == EWoTTriggerType::Shoot;
+	if (bShoot)
 	{
-		SetRole(ROLE_None);
-		Capsule->SetGenerateOverlapEvents(false);
-		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		return;
+		// Only shoot targets need a channel. Their transform is authored on both
+		// peers; a dormant, always-relevant actor carries just retirement changes.
+		SetReplicates(true);
+		SetReplicateMovement(false);
+		bAlwaysRelevant = true;
+		SetNetDormancy(DORM_DormantAll);
+		LastFireTime = 0.0f;
+		OnRep_Spent();
+	}
+	if (GetNetMode() == NM_Client)
+	{
+		// Projected actors exist locally before their replication channel opens.
+		// Set their role now so local materialization cannot dispatch events.
+		if (bShoot) SetRole(ROLE_SimulatedProxy);
+		else if (!GetIsReplicated())
+		{
+			SetRole(ROLE_None);
+			Capsule->SetGenerateOverlapEvents(false);
+			Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			return;
+		}
 	}
 	if (!IsWoTBootstrapWorldReady())
 	{
 		return;
 	}
-	GetWorld()->GetSubsystem<UWoTEventSubsystem>()->RegisterTag(TagName, this);
+	if (HasAuthority() || !bShoot) GetWorld()->GetSubsystem<UWoTEventSubsystem>()->RegisterTag(TagName, this);
 	Capsule->OnComponentBeginOverlap.AddDynamic(this, &AWoTTrigger::OnOverlap);
 	Capsule->OnComponentEndOverlap.AddDynamic(this, &AWoTTrigger::OnEndOverlap);
 }
 
-void AWoTTrigger::OnOverlap(UPrimitiveComponent*, AActor* Other,
-                            UPrimitiveComponent*, int32, bool, const FHitResult&)
+void AWoTTrigger::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-	// Server-only (N4): the Trigger replicates as a simulated proxy, so each client detects its
-	// own pawn overlaps — without this gate every client would fire the event chain locally and
-	// flip its own bSpent/LastFireTime. Shipped .uc Touch/Trigger are non-simulated; effects reach
-	// clients via the replicated actors driven.
-	if (!IsWoTBootstrapWorldReady()
-		|| !HasAuthority() || !bTriggerEnabled)
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AWoTTrigger, bSpent);
+}
+
+void AWoTTrigger::OnRep_Spent()
+{
+	if (TriggerType == EWoTTriggerType::Shoot && bSpent)
 	{
-		return;
+		Capsule->SetGenerateOverlapEvents(false);
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
-	if (!IsRelevantOverlap(Other) || bSpent)
+}
+
+bool AWoTTrigger::AcceptHit(AActor* Other, APawn* EventInstigator, AWoTProjectile* Projectile)
+{
+	if (!IsWoTBootstrapWorldReady() || !HasAuthority() || !bInitiallyActive
+		|| !bTriggerEnabled || bSpent) return false;
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastFireTime < ReTriggerDelay) return false;
+	if (Projectile)
+	{
+		if (AcceptedProjectileFrame != GFrameCounter)
+		{
+			AcceptedProjectiles.Reset();
+			AcceptedProjectileFrame = GFrameCounter;
+		}
+		if (AcceptedProjectiles.Contains(Projectile)) return false;
+		// One original shoot-target Touch represents one shot. The port delivers
+		// the touch before ProcessTouch -> direct damage -> Explode -> splash
+		// (WoTAngrealProjectile.cpp, WoTGenericProjectile.cpp). Deduplicate that
+		// synchronous impact by projectile, so zero delay still accepts distinct
+		// simultaneous shots. A later frame or a new contact starts a new hit;
+		// surviving projectiles must be able to leave and touch again.
+		AcceptedProjectiles.Add(Projectile);
+	}
+	LastFireTime = Now;
+	if (bTriggerOnceOnly)
+	{
+		// Flush before changing a dormant property so existing clients and late
+		// joiners receive the same spent target. No movement stream or tick.
+		if (GetIsReplicated()) FlushNetDormancy();
+		bSpent = true;
+	}
+	FireTargetEvent(Other, EventInstigator);
+	if (!Message.IsEmpty() && EventInstigator)
+	{
+		if (AWoTPlayerController* PC = Cast<AWoTPlayerController>(EventInstigator->GetController()))
+			PC->ClientTypedMessage(Message, NAME_None);
+		else if (APlayerController* Player = Cast<APlayerController>(EventInstigator->GetController()))
+			Player->ClientMessage(Message);
+	}
+	// Retire before another hit can be accepted, but release existing touches
+	// only after their event and message, preserving trigger/untrigger order.
+	if (bSpent) OnRep_Spent();
+	return true;
+}
+
+float AWoTTrigger::TakeDamage(float DamageAmount, const FDamageEvent&,
+	AController* EventInstigator, AActor* DamageCauser)
+{
+	if (TriggerType != EWoTTriggerType::Shoot || DamageAmount < DamageThreshold) return 0.0f;
+	APawn* Pawn = EventInstigator ? EventInstigator->GetPawn() : nullptr;
+	// The projectile damage entry point receives a pawn, which need not have
+	// a controller. Retain that instigator when adapting to AActor::TakeDamage.
+	if (!Pawn && DamageCauser) Pawn = DamageCauser->GetInstigator();
+	return Pawn && AcceptHit(Pawn, Pawn, Cast<AWoTProjectile>(DamageCauser)) ? DamageAmount : 0.0f;
+}
+
+namespace
+{
+bool ShootTargetSweepContact(const AWoTTrigger& Target, const AActor& Projectile,
+	const FVector& Start, FVector& Contact)
+{
+	float ProjectileRadius = 0.0f;
+	float ProjectileHalfHeight = 0.0f;
+	Projectile.GetSimpleCollisionCylinder(ProjectileRadius, ProjectileHalfHeight);
+	const double Radius = Target.UE1CollisionRadius + FMath::Max(0.0f, ProjectileRadius);
+	const double HalfHeight = Target.UE1CollisionHalfHeight + FMath::Max(0.0f, ProjectileHalfHeight);
+	const FVector Offset = Start - Target.GetActorLocation();
+	// TraceEnd is the requested destination and can lie beyond a blocking hit.
+	// Only the segment actually travelled may activate a target.
+	const FVector Delta = Projectile.GetActorLocation() - Start;
+	double Enter = 0.0;
+	double Leave = 1.0;
+	const double A = Delta.SizeSquared2D();
+	const double C = Offset.SizeSquared2D() - Radius * Radius;
+	if (A <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		if (C > 0.0) return false;
+	}
+	else
+	{
+		const double B = Offset.X * Delta.X + Offset.Y * Delta.Y;
+		const double Discriminant = B * B - A * C;
+		if (Discriminant < 0.0) return false;
+		const double Root = FMath::Sqrt(Discriminant);
+		Enter = FMath::Max(Enter, (-B - Root) / A);
+		Leave = FMath::Min(Leave, (-B + Root) / A);
+	}
+	// Intersect the radial interval with the flat-cap slab, including vertical
+	// and stationary segments without dividing by a zero direction component.
+	if (FMath::Abs(Delta.Z) <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		if (FMath::Abs(Offset.Z) > HalfHeight) return false;
+	}
+	else
+	{
+		const double First = (-HalfHeight - Offset.Z) / Delta.Z;
+		const double Last = (HalfHeight - Offset.Z) / Delta.Z;
+		Enter = FMath::Max(Enter, FMath::Min(First, Last));
+		Leave = FMath::Min(Leave, FMath::Max(First, Last));
+	}
+	if (Enter > Leave) return false;
+	Contact = Start + Delta * Enter;
+	return true;
+}
+}
+
+void AWoTTrigger::OnOverlap(UPrimitiveComponent*, AActor* Other,
+                            UPrimitiveComponent*, int32, bool bFromSweep, const FHitResult& Sweep)
+{
+	const bool bShoot = TriggerType == EWoTTriggerType::Shoot;
+	if (!IsWoTBootstrapWorldReady() || !IsValid(Other) || bSpent
+		|| (bShoot ? !Other->IsA<AWoTProjectile>()
+			: (!HasAuthority() || !bTriggerEnabled || !IsRelevantOverlap(Other))))
 	{
 		return;
 	}
 	const auto Inside = [this](const AActor* Candidate)
-		{ return IsWithinUE1Cylinder(Candidate); };
+		{
+			if (IsWithinUE1Cylinder(Candidate)) return true;
+			if (FVector* Previous = PendingShootLocations.Find(Candidate))
+			{
+				FVector Point;
+				if (ShootTargetSweepContact(*this, *Candidate, *Previous, Point)) return true;
+				*Previous = Candidate->GetActorLocation();
+			}
+			return false;
+		};
 	const auto Enter = [this](AActor* Candidate)
-		{ OnOverlap(Capsule, Candidate, nullptr, 0, false, FHitResult()); };
-	if (!IsWithinUE1Cylinder(Other))
+		{
+			FHitResult DeferredSweep;
+			const FVector* Previous = PendingShootLocations.Find(Candidate);
+			if (Previous) DeferredSweep.TraceStart = *Previous;
+			OnOverlap(Capsule, Candidate, nullptr, 0, Previous != nullptr, DeferredSweep);
+		};
+	FVector Contact = Other->GetActorLocation();
+	const bool bSweptContact = bShoot && bFromSweep
+		&& ShootTargetSweepContact(*this, *Other, Sweep.TraceStart, Contact);
+	if (!bSweptContact && !IsWithinUE1Cylinder(Other))
 	{
 		// In the containing capsule but not yet the flat cylinder: Touch fires
 		// on the frame the cylinders meet.
+		// Keep a previous sample only for these projectile/capsule contacts. The
+		// existing deferred poll can then catch a crossing between later endpoints
+		// without adding traces or ticking idle targets or unrelated projectiles.
+		if (bShoot) PendingShootLocations.Add(Other, Other->GetActorLocation());
 		UE1Touches.DeferOutside(*this, Capsule, Other, Inside, Enter);
+		return;
+	}
+	if (bShoot)
+	{
+		if (ActiveUE1Overlaps.Contains(Other)) return;
+		PendingShootLocations.Remove(Other);
+		ActiveUE1Overlaps.Add(Other);
+		AcceptedProjectiles.Remove(Cast<AWoTProjectile>(Other));
+		// UE has already moved to the step endpoint before notifying overlaps.
+		// Rewind this impact to its first cylinder contact so damage, splash and
+		// simulated teardown share that location. Defer overlap updates until the
+		// existing exactly-once impact finishes, avoiding a nested touch on rewind.
+		FScopedMovementUpdate ImpactMove(Other->GetRootComponent(), EScopedUpdate::DeferredUpdates);
+		if (bSweptContact) Other->SetActorLocation(Contact, false);
+		UE1Touches.WatchInside(*this, Capsule, Other, Inside, Enter,
+			[this](AActor* Toucher) { UE1UnTouch(Toucher); });
+		if (IsRelevantOverlap(Other)
+			&& AcceptHit(Other, Other->GetInstigator(), Cast<AWoTProjectile>(Other)) && !bSpent)
+			ScheduleRepeat();
+		// Both component notification orders come here. Finish the impact even
+		// if accepting this touch just disabled the target's collision. Weak or
+		// inactive hits still stop here; clients run only simulated teardown.
+		if (AWoTAngrealProjectile* Projectile = Cast<AWoTAngrealProjectile>(Other); IsValid(Projectile))
+			Projectile->ProcessTouch(this, Projectile->GetActorLocation());
 		return;
 	}
 	ActiveUE1Overlaps.Add(Other);
 	UE1Touches.WatchInside(*this, Capsule, Other, Inside, Enter,
 		[this](AActor* Toucher) { UE1UnTouch(Toucher); });
-	const float Now = GetWorld()->GetTimeSeconds();
-	if (Now - LastFireTime < ReTriggerDelay)
-	{
-		return;
-	}
-	LastFireTime = Now;
-	bSpent = bTriggerOnceOnly;
 	APawn* EventInstigator = Cast<APawn>(Other);
 	if (!EventInstigator && Other)
 	{
 		EventInstigator = Other->GetInstigator();
 	}
-	FireTargetEvent(Other, EventInstigator);
-	if (!bSpent) ScheduleRepeat();
+	if (AcceptHit(Other, EventInstigator) && !bSpent) ScheduleRepeat();
 }
 
 void AWoTTrigger::OnEndOverlap(UPrimitiveComponent*, AActor* Other,
                                UPrimitiveComponent*, int32)
 {
+	// A crossing can end outside the capsule before its deferred poll runs.
+	// Resolve that final segment before discarding the pending contact.
+	if (IsValid(Other))
+	{
+		if (const FVector* Previous = PendingShootLocations.Find(Other))
+		{
+			FHitResult DeferredSweep;
+			DeferredSweep.TraceStart = *Previous;
+			OnOverlap(Capsule, Other, nullptr, 0, true, DeferredSweep);
+		}
+	}
+	PendingShootLocations.Remove(Other);
 	UE1Touches.Forget(Other);
 	UE1UnTouch(Other);
 }
 
 void AWoTTrigger::UE1UnTouch(AActor* Other)
 {
+	const bool bWasTouching = ActiveUE1Overlaps.Remove(Other) > 0;
 	if (!IsWoTBootstrapWorldReady()
 		|| !HasAuthority() || !bTriggerEnabled)
 	{
 		return;
 	}
-	if (ActiveUE1Overlaps.Remove(Other) > 0 && IsRelevantOverlap(Other))
+	// Release an accepted touch even after possession or collision changes.
+	// Pawn teardown can clear possession before it ends the overlap.
+	if (bWasTouching && (TriggerType != EWoTTriggerType::Shoot || IsRelevantOverlap(Other)))
 	{
 		APawn* P = Cast<APawn>(Other);
 		if (!P && Other)
@@ -265,11 +453,15 @@ void AWoTTrigger::UE1UnTouch(AActor* Other)
 
 bool AWoTTrigger::IsRelevantOverlap(AActor* Other) const
 {
+	if (!bInitiallyActive) return false;
 	const APawn* Pawn = Cast<APawn>(Other);
 	switch (TriggerType)
 	{
 	case EWoTTriggerType::PlayerProximity:
-		return Pawn && Pawn->IsPlayerControlled();
+		// The engine Trigger's player-proximity test reads the toucher's bIsPlayer
+		// (as ElevatorTrigger.uc:38 spells it out): a player body, whoever drives
+		// it, so an AI-driven player body fires the trigger and an NPC does not.
+		return WoTIsPlayerBody(Pawn);
 	case EWoTTriggerType::PawnProximity:
 		return Pawn != nullptr;
 	case EWoTTriggerType::ClassProximity:
@@ -277,7 +469,8 @@ bool AWoTTrigger::IsRelevantOverlap(AActor* Other) const
 	case EWoTTriggerType::AnyProximity:
 		return IsValid(Other);
 	case EWoTTriggerType::Shoot:
-		// Shoot triggers enter through damage/projectile handling, not overlaps.
+		if (const AWoTProjectile* Projectile = Cast<AWoTProjectile>(Other))
+			return Projectile->Damage >= DamageThreshold;
 		return false;
 	default:
 		return false;
@@ -324,13 +517,9 @@ void AWoTTrigger::OnRepeatTimer()
 	{
 		if (!IsRelevantOverlap(Other) || !IsWithinUE1Cylinder(Other)) continue;
 		bKeepTiming = true;
-		const float Now = GetWorld()->GetTimeSeconds();
-		if (Now - LastFireTime < ReTriggerDelay) continue;
-		LastFireTime = Now;
-		bSpent = bTriggerOnceOnly;
 		APawn* EventInstigator = Cast<APawn>(Other);
 		if (!EventInstigator && Other) EventInstigator = Other->GetInstigator();
-		FireTargetEvent(Other, EventInstigator);
+		AcceptHit(Other, EventInstigator);
 		if (bSpent) break;
 	}
 	if (bKeepTiming && !bSpent) ScheduleRepeat();

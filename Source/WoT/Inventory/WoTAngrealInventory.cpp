@@ -1,4 +1,5 @@
 #include "WoTAngrealInventory.h"
+#include "Testing/WoTSoakEvents.h"
 #include "../WoTRandom.h"
 
 #include "../WoTBattleGameMode.h"
@@ -255,6 +256,26 @@ void AWoTAngrealInventory::Reset()
 	ChargesUsedInGroup = 0;
 }
 
+void AWoTAngrealInventory::SetBotPriorityOverride(float NewPriority)
+{
+	if (!bHasBotPriorityOverride)
+	{
+		SavedBotPriority = Priority;
+		bHasBotPriorityOverride = true;
+	}
+	Priority = NewPriority;
+}
+
+void AWoTAngrealInventory::ClearBotAIState()
+{
+	Target = nullptr;
+	if (bHasBotPriorityOverride)
+	{
+		Priority = SavedBotPriority;
+		bHasBotPriorityOverride = false;
+	}
+}
+
 bool AWoTAngrealInventory::HaveEnoughCharges() const
 {
 	return (CurCharges - ChargeCost) >= 0;
@@ -309,6 +330,7 @@ void AWoTAngrealInventory::UseCharge()
 	// A use happened — the caster's volley-tick signal, independent of ChargeCost (a
 	// 0-cost launcher spends no charge but still fired one projectile).
 	++CastUseCount;
+	WOT_SOAK_EVENT(Cast, this, GetOwner());
 
 	// Audio feedback that charges are being consumed (Owner.PlaySound, uc:336-338;
 	// no shipped class or map authors UseChargeSound — retail-dead, kept for parity).
@@ -342,8 +364,14 @@ void AWoTAngrealInventory::AddCharges(int32 NumCharges)
 	CurCharges = FMath::Min(CurCharges + NumCharges, MaxCharges);
 }
 
+void AWoTAngrealInventory::AbortCast()
+{
+}
+
 void AWoTAngrealInventory::Failed()
 {
+	AbortCast();
+
 	// AngrealInventory.uc:386 — typed 'FailedMessage' lands in the hand-message slot.
 	ClientMessageToOwner(Title + TEXT(" ") + FailMessage + TEXT("."),
 		FName(TEXT("FailedMessage")));
@@ -417,6 +445,7 @@ bool AWoTAngrealInventory::HandlePickupQuery(AWoTInventory* Item)
 			// Item.PlaySound(Item.PickupSound): the item's server PlaySound.
 			WoTSound::PlayReplicatedAssetFrom(*Item, Item->PickupSound);
 		}
+		WOT_SOAK_EVENT(Pickup, Item, GetOwner());
 		Item->SetRespawn();
 		if (Angreal->bPuzzleRespawn)
 		{

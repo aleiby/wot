@@ -43,12 +43,12 @@ void AWoTProjectileLauncher::UnCastArtifact()
 	}
 }
 
-void AWoTProjectileLauncher::Failed()
+void AWoTProjectileLauncher::AbortCast()
 {
 	// A failure removes the cooldown, permitting another attempt next tick
 	// (ProjectileLauncher.uc:122).
 	NextCastTime = GetWorld()->GetTimeSeconds();
-	Super::Failed();
+	Super::AbortCast();
 }
 
 void AWoTProjectileLauncher::Reset()

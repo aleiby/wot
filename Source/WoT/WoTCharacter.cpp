@@ -1,5 +1,6 @@
 #include "WoTCharacter.h"
 #include "WoTLocalPlayerHooks.h"
+#include "Testing/WoTSoakEvents.h"
 #include "WoTRandom.h"
 #include "Assets/WoTRuntimeAssets.h"
 #include "Assets/WoTRetailIdentity.h"
@@ -121,6 +122,18 @@ bool WoTDecodePlayerHealthDefault(const FWoTRuntimeClassDefaults& Defaults,
 		return false;
 	}
 	return true;
+}
+
+bool WoTIsPlayerBody(const APawn* Pawn)
+{
+	return Pawn != nullptr && !Pawn->IsA<AWoTNPCCharacter>();
+}
+
+bool WoTIsLocalHumanPawn(const APawn* Pawn)
+{
+	const APlayerController* PlayerController = WoTIsPlayerBody(Pawn)
+		? Cast<APlayerController>(Pawn->GetController()) : nullptr;
+	return PlayerController && PlayerController->IsLocalController();
 }
 
 bool AWoTCharacter::ApplyRetailPlayerHealthDefaults(
@@ -333,6 +346,7 @@ void AWoTCharacter::OnJumped_Implementation()
 
 void AWoTCharacter::Landed(const FHitResult& Hit)
 {
+	WOT_SOAK_BODY_EVENT(this, "landing");
 	if (!IsNPCPawn()
 		&& GetEffectivePlayerMovementConstraint()
 			!= EWoTPlayerMovementConstraint::LandingFreeze)
@@ -772,6 +786,7 @@ void AWoTCharacter::ClearCreaturePitchAfterNormalViewUpdate()
 void AWoTCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode,
 	uint8 PreviousCustomMode)
 {
+	WOT_SOAK_BODY_EVENT(this, "movement mode change");
 	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
 	const UCharacterMovementComponent* Move = GetCharacterMovement();
 	const bool bCanDrivePlayerTransition = HasAuthority() || IsLocallyControlled();
@@ -1227,6 +1242,7 @@ int32 AWoTCharacter::ApplyDamageChain(int32 Damage, FName WoTDamageType,
 		SpawnCarcassNow(/*bGibbed*/ true);
 	}
 
+	if (HasAuthority() && Actual > 0) OnDamageApplied.Broadcast(this, EventInstigator, DamageCauser, Actual);
 	return Actual;
 }
 
@@ -1398,13 +1414,10 @@ bool AWoTCharacter::IsCastingBlocked() const
 void AWoTCharacter::NotifyChargeUsed(AWoTAngrealInventory* Ang)
 {
 	// AngrealUser.ChargeUsed runs before the inherited reflector fan-out. Keep
-	// the NPC adapter callback synchronous with the real inventory expenditure.
-	if (IsNPCPawn())
+	// the caster callback synchronous with the real inventory expenditure.
+	if (UWoTCasterComponent* Caster = FindComponentByClass<UWoTCasterComponent>())
 	{
-		if (UWoTCasterComponent* Caster = FindComponentByClass<UWoTCasterComponent>())
-		{
-			Caster->NotifyChargeUsed(Ang);
-		}
+		Caster->NotifyChargeUsed(Ang);
 	}
 	TArray<UWoTReflector*> Reflectors;
 	GetOrderedReflectors(Reflectors);
@@ -2607,7 +2620,10 @@ void AWoTCharacter::PlayPlayerTweenPose(FName SlotName, float CallerTween)
 void AWoTCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (!IsLocallyControlled())
+	// NPCs retain their existing view-state lifecycle.
+	const bool bLocalViewDriver = IsNPCPawn()
+		? IsLocallyControlled() : WoTIsLocalHumanPawn(this);
+	if (!bLocalViewDriver)
 	{
 		ClearCreaturePresentationPitch();
 	}
@@ -2617,7 +2633,7 @@ void AWoTCharacter::Tick(float DeltaSeconds)
 	{
 		UpdateStatusIconDurations();
 	}
-	if (IsLocallyControlled())
+	if (bLocalViewDriver)
 	{
 		if (const UWoTPreferencesSubsystem* Preferences = GetGameInstance()
 			? GetGameInstance()->GetSubsystem<UWoTPreferencesSubsystem>() : nullptr)
@@ -3102,7 +3118,7 @@ void AWoTCharacter::ApplyPendingZoneFOV()
 
 void AWoTCharacter::ReconcileOwnerLocalZoneFOV()
 {
-	if (!IsLocallyControlled() || !GetWorld()) return;
+	if (!WoTIsLocalHumanPawn(this) || !GetWorld()) return;
 	if (const UWoTZoneIndex* Zones = GetWorld()->GetSubsystem<UWoTZoneIndex>())
 	{
 		if (AWoTZoneVolume* Region = Zones->GetRegion(this))
@@ -3165,7 +3181,7 @@ void AWoTCharacter::UnPossessed()
 
 void AWoTCharacter::EnsureAngrealHands()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		// Keep the long-standing headless/manual view-model seam: a caller may install an
 		// AngrealHandSet without a local controller. Real simulated proxies install neither.
@@ -3193,7 +3209,7 @@ void AWoTCharacter::EnsureAngrealHands()
 
 void AWoTCharacter::ReconcileHandSet()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -3277,7 +3293,7 @@ void AWoTCharacter::ReconcileHandSet()
 
 void AWoTCharacter::EnsureCitadelEditorHands()
 {
-	if (!IsLocallyControlled() || CitadelEditorHandSet)
+	if (!WoTIsLocalHumanPawn(this) || CitadelEditorHandSet)
 	{
 		return;
 	}
@@ -3312,7 +3328,7 @@ void AWoTCharacter::EnsureCitadelEditorHands()
 
 void AWoTCharacter::ReconcileCitadelEditorHandSet()
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -3394,7 +3410,7 @@ void AWoTCharacter::ReconcileCitadelEditorHandSet()
 
 void AWoTCharacter::HandleCitadelEditStateChanged(bool bEditing)
 {
-	if (!IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(this))
 	{
 		return;
 	}
@@ -4378,6 +4394,7 @@ void AWoTCharacter::RestoreDisguiseLook()
 
 bool AWoTCharacter::AdjustCapsuleForDisguise(float NewRadius, float NewHalfHeight)
 {
+	WOT_SOAK_BODY_SCOPE("disguise capsule resize");
 	UCapsuleComponent* Capsule = GetCapsuleComponent();
 	if (!Capsule)
 	{
@@ -4386,6 +4403,7 @@ bool AWoTCharacter::AdjustCapsuleForDisguise(float NewRadius, float NewHalfHeigh
 	const float OldHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 	// Set collision size before moving Z, or SetLocation might fail (uc:312-314).
 	Capsule->SetCapsuleSize(NewRadius, NewHalfHeight);
+	WOT_SOAK_BODY_EVENT(this, "capsule resized");
 
 	// Move feet-on-ground: shift by the half-height delta (uc:210-211).
 	FVector NewLocation = GetActorLocation();
@@ -4999,7 +5017,7 @@ void AWoTCharacter::DriveHandSelection(bool bNewHand)
 		// WOTPlayer.PerformSelection (WOTPlayer.uc:1013-1023): with a live selection, a
 		// hand change plays WOT.UI.SelectHand, an item change WOT.UI.SelectArtifact —
 		// owner-local ClientPlaySound, checked AFTER the selection RPC like the original.
-		if (IsLocallyControlled() && InventoryComponent
+		if (WoTIsLocalHumanPawn(this) && InventoryComponent
 			&& InventoryComponent->SelectedItem)
 		{
 			USoundBase* SelectSound = WoTSound::LoadBySubPath(FName(bNewHand
@@ -5030,7 +5048,7 @@ void AWoTCharacter::DriveHandSelection(bool bNewHand)
 			}
 		}
 		// WOTPlayer.PerformSelection ends with ClientSelectItemMessage(new selection).
-		if (IsLocallyControlled())
+		if (WoTIsLocalHumanPawn(this))
 		{
 			const UWoTHandInfo* SelectedHand = CurrentHandSet->GetSelectedHand();
 			SendSelectItemHandMessage(SelectedHand
@@ -5092,20 +5110,28 @@ bool AWoTCharacter::ServerDropSeals_Validate() { return true; }
 
 void AWoTCharacter::ServerUseAngreal_Implementation(FRotator AimRotation)
 {
-	// Never trust only the autonomous proxy's predicted gate: reject a forged or
-	// late cast RPC throughout the authoritative PlayerLanded interval too.
+	AuthorityUseAngreal(AimRotation);
+}
+
+bool AWoTCharacter::CanCastNow() const
+{
 	if (IsHardLanding())
 	{
-		return;
+		return false;
 	}
-	// Authority guard: a decided match casts nothing, even if a stale/modified client still
-	// sends the cast RPC (the well-behaved client re-routes it to a restart in UseAngreal).
 	if (const AWoTPlayerController* WPC = Cast<AWoTPlayerController>(GetController()))
 	{
-		if (WPC->IsMatchEnded())
-		{
-			return;
-		}
+		return !WPC->IsMatchEnded();
+	}
+	const AWoTGameMode* Game = GetWorld() ? GetWorld()->GetAuthGameMode<AWoTGameMode>() : nullptr;
+	return !Game || !Game->bGameEnded;
+}
+
+bool AWoTCharacter::AuthorityUseAngreal(FRotator AimRotation)
+{
+	if (!CanCastNow())
+	{
+		return false;
 	}
 	const bool bSelectedSeal = InventoryComponent
 		&& Cast<AWoTSeal>(InventoryComponent->SelectedItem) != nullptr;
@@ -5133,10 +5159,15 @@ void AWoTCharacter::ServerUseAngreal_Implementation(FRotator AimRotation)
 			DrivenLocomotionAnim = FName(TEXT("Wait"));
 		}
 	}
-	InventoryComponent->UseAngreal();
+	return InventoryComponent->UseAngreal();
 }
 
 void AWoTCharacter::ServerCeaseUsingAngreal_Implementation()
+{
+	AuthorityCeaseUsingAngreal();
+}
+
+void AWoTCharacter::AuthorityCeaseUsingAngreal()
 {
 	bPlayerAnimFireHeld = false;
 	DrivenLocomotionAnim = NAME_None;

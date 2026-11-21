@@ -26,6 +26,8 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/UObjectGlobals.h"
+#include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -303,13 +305,116 @@ void AWoTZoneVolume::BeginPlay()
 	{
 		Index->Zones.Add(this);
 	}
+	if (bTrigZoneVelo2)
+	{
+		if (GetNetMode() == NM_Client)
+		{
+			// A client's own copy of the map zone follows the server. A copy made
+			// after its world began play never passed the level's network role
+			// exchange, so it still claims authority here.
+			if (GetLocalRole() == ROLE_Authority) SetRole(ROLE_SimulatedProxy);
+		}
+		else if (HasAuthority())
+		{
+			// Only the on/off state replicates (TriggeredCurrent); every machine
+			// derives the same ZoneVelocity from it and its own authored settings.
+			SetReplicates(true);
+			SetReplicateMovement(false);
+			bAlwaysRelevant = true;
+			GetWorld()->GetSubsystem<UWoTEventSubsystem>()->RegisterTag(TagName, this);
+		}
+		// WOTZoneInfo.uc:78-92 PreBeginPlay starts in the authored state. A client
+		// that already received the server's state keeps it.
+		if (TriggeredCurrent == EWoTTriggeredCurrent::Unset)
+		{
+			TriggeredCurrent = bTrigZoneVelo2InitiallyOn
+				? EWoTTriggeredCurrent::On : EWoTTriggeredCurrent::Off;
+		}
+		ApplyTriggeredCurrent();
+	}
 	SetActorTickEnabled(true);
+}
+
+void AWoTZoneVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AWoTZoneVolume, TriggeredCurrent);
+}
+
+FVector AWoTZoneVolume::SteadyTriggeredVelocity(const FVector& Max, const FVector& Min,
+	float TransitionTime)
+{
+	// WOTZoneInfo.uc:104-128 adds VeloPerSec2 = (Max - Min) / TransitionTime2
+	// once per server tick, without DeltaTime, and an "on" zone already at Max
+	// takes the unguarded else branch one step back toward Min. So an "on" zone
+	// repeats Max, Max - Step, where Step is VeloPerSec2 clamped to the whole
+	// range (Util.uc:958 VectorAproxEqual detects the overshoot). Bodies moved
+	// with that cycle's average. A step spans the range when TransitionTime2 is
+	// at most 1 (every shipped triggered zone: Arena_11's .5), giving
+	// (Max + Min) / 2. A longer transition gives Max - (Max - Min) / (2 *
+	// TransitionTime2). A non-positive time is outside the authored contract
+	// (WOTZoneInfo.uc:56 "greater than zero") and counts as spanning.
+	const double StepFraction = TransitionTime > 1.0f ? 1.0 / TransitionTime : 1.0;
+	return Max - (Max - Min) * (0.5 * StepFraction);
+}
+
+void AWoTZoneVolume::ApplyTriggeredCurrent()
+{
+	ZoneVelocity = TriggeredCurrent == EWoTTriggeredCurrent::On
+		? SteadyTriggeredVelocity(MaxZoneVelocity2, MinZoneVelocity2, TransitionTime2)
+		: MinZoneVelocity2;
+}
+
+void AWoTZoneVolume::OnRep_TriggeredCurrent()
+{
+	if (bTrigZoneVelo2) ApplyTriggeredCurrent();
+}
+
+void AWoTZoneVolume::SetTriggeredCurrent(bool bOn)
+{
+	// The original switched within one server tick of the trigger (the shipped
+	// step spans the whole range); the steady current switches at once.
+	TriggeredCurrent = bOn ? EWoTTriggeredCurrent::On : EWoTTriggeredCurrent::Off;
+	ApplyTriggeredCurrent();
+	ForceNetUpdate();
+}
+
+void AWoTZoneVolume::RestoreTriggeredCurrent()
+{
+	if (HasAuthority() && bTrigZoneVelo2 && IsWoTBootstrapWorldReady())
+		SetTriggeredCurrent(bTrigZoneVelo2InitiallyOn);
+}
+
+void AWoTZoneVolume::WoTTrigger(AActor*, APawn*)
+{
+	if (!HasAuthority() || !bTrigZoneVelo2 || !IsWoTBootstrapWorldReady()) return;
+	// WOTZoneInfo.uc:160-222: Toggle flips; Control and Timed select the
+	// opposite of the authored initial state, and Timed (re)arms its timer.
+	// In any other state the zone ignores the trigger.
+	if (InitialState == TEXT("TriggerToggle"))
+		SetTriggeredCurrent(TriggeredCurrent != EWoTTriggeredCurrent::On);
+	else if (InitialState == TEXT("TriggerControl") || InitialState == TEXT("TriggerTimed"))
+	{
+		SetTriggeredCurrent(!bTrigZoneVelo2InitiallyOn);
+		if (InitialState == TEXT("TriggerTimed"))
+			GetWorldTimerManager().SetTimer(TriggerCurrentTimer, this,
+				&AWoTZoneVolume::RestoreTriggeredCurrent, TriggerDuration, false);
+	}
+}
+
+void AWoTZoneVolume::WoTUnTrigger(AActor*, APawn*)
+{
+	// WOTZoneInfo.uc:195-201: only TriggerControl restores on UnTrigger.
+	if (InitialState == TEXT("TriggerControl")) RestoreTriggeredCurrent();
 }
 
 void AWoTZoneVolume::EndPlay(const EEndPlayReason::Type Reason)
 {
 	if (UWorld* World = GetWorld())
 	{
+		World->GetTimerManager().ClearTimer(TriggerCurrentTimer);
+		if (UWoTEventSubsystem* Events = World->GetSubsystem<UWoTEventSubsystem>())
+			Events->UnregisterActor(this);
 		if (UWoTZoneIndex* Index = World->GetSubsystem<UWoTZoneIndex>())
 		{
 			Index->Zones.Remove(this);
@@ -418,7 +523,7 @@ void AWoTZoneVolume::ReconcileOwnerLocalFOV(AWoTCharacter* Player)
 	if (!IsValid(Player) || Player->IsNPCPawn()) return;
 	TArray<UWoTSmoothRandFOVLeech*> Existing;
 	Player->GetComponents<UWoTSmoothRandFOVLeech>(Existing);
-	if (!Player->IsLocallyControlled())
+	if (!WoTIsLocalHumanPawn(Player))
 	{
 		for (UWoTSmoothRandFOVLeech* Leech : Existing)
 		{
@@ -801,8 +906,11 @@ void AWoTZoneVolume::Tick(float DeltaTime)
 							if (C->Health > 0 && C->Health < 100)
 							{
 								UWorld* World = GetWorld();
+								// The player body plays the heal sound
+								// (WOTPlayer.uc:3091-3105) whoever drives it;
+								// an NPC heals silently (WOTPawn.uc:505-517).
 								if (!HealSoundPath.IsNone() && IsValid(World)
-									&& IsValid(Cast<APlayerController>(Pawn->GetController())))
+									&& WoTIsPlayerBody(C))
 								{
 									// WOTPlayer.uc PainTimer: the player's SLOT_Interact.
 									WoTSound::PlayReplicatedFrom(*C, HealSoundPath,

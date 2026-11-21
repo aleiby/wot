@@ -1,4 +1,5 @@
 #include "WoTTeleporter.h"
+#include "Testing/WoTSoakEvents.h"
 #include "WoTRandom.h"
 #include "WoTCharacter.h"
 #include "Projectiles/WoTSeekingProjectile.h"
@@ -42,9 +43,29 @@ void AWoTTeleporter::SetUE1CollisionSize(float Radius, float HalfHeight)
 {
 	UE1CollisionRadius = FMath::Max(0.0f, Radius);
 	UE1CollisionHalfHeight = FMath::Max(0.0f, HalfHeight);
+	bUE1CollisionSized = true;
 	Collision->SetCapsuleSize(UE1CollisionRadius,
 		WoTUE1Collision::ContainingCapsuleHalfHeight(
 			UE1CollisionRadius, UE1CollisionHalfHeight), false);
+}
+
+void AWoTTeleporter::PostLoad()
+{
+	Super::PostLoad();
+	if (bUE1CollisionSized || !Collision
+		|| HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		return;
+	}
+	// A map imported before the exact cylinder existed kept the authored
+	// CollisionRadius/CollisionHeight on the capsule only (import_map.py), so
+	// the touch test ran against the 18/40 class default: Arena_06's 80/80
+	// pads only fired within 18 uu of their centre, which the player never
+	// reached. UE's capsule keeps HalfHeight >= Radius, so a pad authored
+	// wider than tall reads back its radius as its height until the map is
+	// restamped (Tools/import/import_teleporter_fx.py).
+	SetUE1CollisionSize(Collision->GetUnscaledCapsuleRadius(),
+		Collision->GetUnscaledCapsuleHalfHeight());
 }
 
 bool AWoTTeleporter::IsWithinUE1Cylinder(const AActor* Other) const
@@ -177,16 +198,31 @@ void AWoTTeleporter::NotifyActorEndOverlap(AActor* Other)
 
 bool AWoTTeleporter::MoveIncoming(AActor& Incoming, const FVector& Destination)
 {
-	if (!Incoming.SetActorLocation(Destination, false, nullptr, ETeleportType::TeleportPhysics))
+	FVector Spot = Destination;
+	const UPrimitiveComponent* Root = Cast<UPrimitiveComponent>(Incoming.GetRootComponent());
+	// exports/script/Legend/TriggeredAreaTeleporter.uc:60-82 relies on
+	// SetLocation fitting the body or refusing the destination. Reuse the same
+	// level fitting path as spawn and swap; a pad's authored height is not the
+	// incoming body's half-height.
+	if (Root && Root->IsQueryCollisionEnabled()
+		&& Root->GetCollisionResponseToChannel(ECC_WorldStatic) == ECR_Block)
+	{
+		if (!WoTUE1Collision::FindSpotLevelOnly(*GetWorld(),
+			Incoming.GetSimpleCollisionCylinderExtent(), Spot, false)
+			|| WoTUE1Collision::FindEncroachedMoverAt(Incoming, Spot)) return false;
+	}
+	if (!Incoming.SetActorLocation(Spot, false, nullptr, ETeleportType::TeleportPhysics))
 	{
 		return false;
 	}
+	WOT_SOAK_BODY_EVENT(&Incoming, "teleporter placed");
 	UWoTZoneIndex::RefreshAfterRelocation(&Incoming);
 	return true;
 }
 
 bool AWoTTeleporter::Accept(AActor* Incoming)
 {
+	WOT_SOAK_BODY_SCOPE("teleporter Accept");
 	// Teleporter.Accept, pawn path.
 	if (!IsValid(Incoming))
 	{
@@ -208,10 +244,10 @@ bool AWoTTeleporter::Accept(AActor* Incoming)
 	}
 
 	const bool bMoved = MoveIncoming(*Incoming, GetActorLocation());
-	if (!IncomingPawn && !bMoved)
+	if (!bMoved)
 	{
 		JustAccepted = nullptr;
-		return false;
+		if (!IncomingPawn) { return false; }
 	}
 	if (bChangesYaw)
 	{

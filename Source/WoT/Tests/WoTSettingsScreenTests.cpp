@@ -10,6 +10,7 @@
 #include "../WoTMenuStyle.h"
 #include "../WoTOnboardingSeams.h"
 #include "../WoTPreferencesSubsystem.h"
+#include "../WoTZoneReverb.h"
 #include "../Payload/WoTPayloadActivation.h"
 #include "../Online/WoTInstallerSharingSubsystem.h"
 #include "../Online/WoTLocalNetworkAccess.h"
@@ -1124,6 +1125,83 @@ bool FWoTInstallerShareSettingsHintSpec::RunTest(const FString&)
 	TestEqual(TEXT("and the hint follows it"),
 		UWoTInstallerSharingSubsystem::NothingToShareHint(),
 		PLATFORM_MAC ? MacHint : DefaultHint);
+	return !HasAnyErrors();
+}
+
+// The Hardware page's "Room reverb" row (FWoTGameSettings::bRoomReverb): on by
+// default, heard at once when toggled, dropped by Back like the volume
+// preview, kept by Save.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsRoomReverbRowSpec,
+	"WoT.FrontEnd.Settings.RoomReverbRow", ScreenFlags)
+
+bool FWoTSettingsRoomReverbRowSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const bool bWasEnabled = WoTZoneReverb::IsRoomReverbEnabled();
+	ON_SCOPE_EXIT { WoTZoneReverb::SetRoomReverbEnabled(bWasEnabled); };
+	const TSharedRef<FWoTFrontEndPresentationAuthority> Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	TSharedRef<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	const TSharedPtr<SCheckBox> Box = Screen->RoomReverbCheckBoxForTesting();
+	if (!TestTrue(TEXT("the Hardware page has the room reverb row"), Box.IsValid())) return false;
+	TestTrue(TEXT("the row shows on by default"), Box->IsChecked());
+	TestTrue(TEXT("and room reverb is in use"), WoTZoneReverb::IsRoomReverbEnabled());
+	Box->ToggleCheckedState();
+	TestFalse(TEXT("toggling turns the draft off"), Screen->DraftForTesting().bRoomReverb);
+	TestFalse(TEXT("and is heard at once"), WoTZoneReverb::IsRoomReverbEnabled());
+	TestTrue(TEXT("the change counts as unsaved"), Screen->HasUnsavedChanges());
+	Screen->BackForTesting();
+	TestTrue(TEXT("leaving without saving turns it back on"), WoTZoneReverb::IsRoomReverbEnabled());
+	TestTrue(TEXT("and saves nothing"), Fixture.Owner->GetGameSettings().bRoomReverb);
+
+	FScreenCallbacks SaveCallbacks;
+	TSharedRef<SWoTSettingsScreen> Saving = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, SaveCallbacks);
+	Saving->RoomReverbCheckBoxForTesting()->ToggleCheckedState();
+	Saving->SaveForTesting();
+	TestEqual(TEXT("Save closes the screen"), SaveCallbacks.SavedCount, 1);
+	TestFalse(TEXT("Save keeps room reverb off"), Fixture.Owner->GetGameSettings().bRoomReverb);
+	TestFalse(TEXT("and off it stays"), WoTZoneReverb::IsRoomReverbEnabled());
+
+	FScreenCallbacks ControlsCallbacks;
+	TSharedRef<SWoTSettingsScreen> ControlsScreen = MakeScreen(
+		EWoTSettingsPage::Controls, Fixture.Owner, Authority, ControlsCallbacks);
+	TestFalse(TEXT("Controls has no room reverb row"),
+		ControlsScreen->RoomReverbCheckBoxForTesting().IsValid());
+	return !HasAnyErrors();
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWoTSettingsRoomReverbTeardownSpec,
+	"WoT.FrontEnd.Settings.RoomReverbForcedTeardown", ScreenFlags)
+
+bool FWoTSettingsRoomReverbTeardownSpec::RunTest(const FString&)
+{
+	FActivatedPreferencesFixture Fixture;
+	if (!TestTrue(TEXT("preferences fixture activates"), Fixture.bReady)) return false;
+	const bool bWasEnabled = WoTZoneReverb::IsRoomReverbEnabled();
+	ON_SCOPE_EXIT { WoTZoneReverb::SetRoomReverbEnabled(bWasEnabled); };
+	const auto Authority = MakeSettingsAuthority();
+	FScreenCallbacks Callbacks;
+	TSharedPtr<SWoTSettingsScreen> Screen = MakeScreen(
+		EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	Screen->RoomReverbCheckBoxForTesting()->ToggleCheckedState();
+	TestFalse(TEXT("the unsaved off preview is audible"), WoTZoneReverb::IsRoomReverbEnabled());
+	Screen.Reset();
+	TestTrue(TEXT("forced teardown restores confirmed on"), WoTZoneReverb::IsRoomReverbEnabled());
+	TestEqual(TEXT("teardown did not navigate Back"), Callbacks.BackCount, 0);
+	TestTrue(TEXT("teardown did not save"), Fixture.Owner->GetGameSettings().bRoomReverb);
+	Screen = MakeScreen(EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	Screen->RoomReverbCheckBoxForTesting()->ToggleCheckedState();
+	Screen->SaveForTesting();
+	Screen.Reset();
+	TestFalse(TEXT("teardown after Save preserves confirmed off"), WoTZoneReverb::IsRoomReverbEnabled());
+	Screen = MakeScreen(EWoTSettingsPage::Hardware, Fixture.Owner, Authority, Callbacks);
+	Screen->RoomReverbCheckBoxForTesting()->ToggleCheckedState();
+	TestTrue(TEXT("an unsaved on preview is audible"), WoTZoneReverb::IsRoomReverbEnabled());
+	Screen.Reset();
+	TestFalse(TEXT("forced teardown restores confirmed off"), WoTZoneReverb::IsRoomReverbEnabled());
 	return !HasAnyErrors();
 }
 

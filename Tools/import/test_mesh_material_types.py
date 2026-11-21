@@ -7,6 +7,8 @@ from mesh_material_types import (
     actor_style_suffix,
     effective_material_type_suffix,
     material_type_suffix,
+    procedural_skin_identity,
+    procedural_skin_slug,
     slot_zero_skin_reference,
     split_slot_name,
 )
@@ -84,6 +86,25 @@ class MeshMaterialTypeTests(unittest.TestCase):
             "MultiSkins(0)": "WaveTexture'JHPFireEng.RiverWave01'",
         }), "WaveTexture'JHPFireEng.RiverWave01'")
         self.assertIsNone(slot_zero_skin_reference({"Style": "STY_Masked"}))
+
+    def test_procedural_skins_resolve_to_their_fractal_identity(self):
+        # Arena_06's teleporter shimmer quads (twotriangles0-3).
+        self.assertEqual(
+            procedural_skin_identity("WetTexture'ScottT.S_Tele_effect'"),
+            ("ScottT", "S_Tele_effect"))
+        self.assertEqual(
+            procedural_skin_identity("FireTexture'Pkg.Group.Flame-01'"),
+            ("Pkg", "Flame-01"))
+        self.assertEqual(procedural_skin_slug("Pkg", "Flame-01"), "Pkg__Flame_01")
+        self.assertEqual(
+            procedural_skin_identity("IceTexture'Angreal.RedIce'"),
+            ("Angreal", "RedIce"))
+        # WaveTexture skins keep their imported still frame; plain textures
+        # are ordinary skins.
+        self.assertIsNone(
+            procedural_skin_identity("WaveTexture'JHPFireEng.RiverWave01'"))
+        self.assertIsNone(procedural_skin_identity("Texture'Pkg.Skin'"))
+        self.assertIsNone(procedural_skin_identity(None))
 
 
 if __name__ == "__main__":

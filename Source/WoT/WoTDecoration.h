@@ -79,6 +79,16 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void ConfigureRuntimeCollision(bool bInCollideActors, bool bInBlockActors,
 		bool bInBlockPlayers, float Radius, float HalfHeight);
+	// ConfigureRuntimeCollision for the editor import (Tools/import), which
+	// otherwise leaves every placed decoration on the class-default blocking
+	// cylinder: Arena_06's teleporter shimmer quads turn bCollideActors off.
+	UFUNCTION(BlueprintCallable, Category = "WoT|Collision")
+	void SetUE1Collision(bool bInCollideActors, bool bInBlockActors,
+		bool bInBlockPlayers, float Radius, float HalfHeight)
+	{
+		ConfigureRuntimeCollision(bInCollideActors, bInBlockActors, bInBlockPlayers,
+			Radius, HalfHeight);
+	}
 	void ConfigureRuntimePhysics(uint8 Physics, const FRotator& RotationRate,
 		bool bFixedRotationDir);
 	void ConfigureRuntimeVisualPresentation(
@@ -88,10 +98,14 @@ public:
 		float TextureHeight, float MinFrameRate, float MaxFrameRate);
 	void ConfigureRuntimeDistanceFade(float VisibilityRadius,
 		float VisibilityHeight);
+	// UE1 ENetRole values a placed decoration's Actor.RemoteRole can take.
+	static constexpr uint8 UE1RoleNone = 0;
+	static constexpr uint8 UE1RoleDumbProxy = 1;
 	// The network setup of a placed decoration, made once its static flag is
 	// known and before it finishes spawning, the same on the server and on
-	// every client.
-	void ConfigureRuntimeReplication();
+	// every client. InRemoteRole and bInTemporary are the decoration's
+	// Actor.RemoteRole and Actor.bNetTemporary, its class's own or the map's.
+	void ConfigureRuntimeReplication(uint8 InRemoteRole, bool bInTemporary);
 	bool IsRuntimeSprite() const { return bRuntimeSprite; }
 	bool ConfigureRuntimeClassDefaultVisuals(
 		FStringView ClassIdentity, FString& OutError);

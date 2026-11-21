@@ -4,6 +4,16 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 
 ## Gameplay
 
+### Character rotation during relocation
+- **Original:** Collision cylinders never turned with an actor's rotation.
+- **Port:** Swap Places, jumpers, rotators and the citadel edit restore give character bodies only the incoming yaw. The view keeps the full rotation.
+- **Why:** Copying another actor's pitch or roll onto a character would tilt its collision capsule and prevent reliable landing.
+
+### Bots fill Arena matches
+- **Original:** The game shipped bot classes but never added bots to any multiplayer mode or menu.
+- **Port:** a host can set "Fill with bots to N players". Bots play by player rules (player body and health, the starting kit, artifacts from pickups), using each faction's artifact preferences from the shipped bot classes, and leave as humans join. The feature is the optional `WoTBots` plugin; without it, play is unchanged.
+- **Why:** With a small community, an empty server is the onboarding problem (#11).
+
 ### Tossed weapons have a terminal speed while bouncing
 - **Original:** `WotWeapon.uc:129-135` creates a bounceable decoration, and `BounceableDecoration.uc:33-34,130` enables bouncing. The original engine caps non-bouncing falling actors at the zone terminal speed (2500 units per second by default), but skips that cap while bouncing remains enabled.
 - **Port:** Tossed weapons use the same 2500-unit total-speed bound while bouncing as well.
@@ -28,6 +38,11 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Original:** The server applies zone current and gravity directly to pawn velocity.
 - **Port:** Current, gravity, ground friction and swim mode are computed inside the movement component, the same way on the server and on the controlling client. As a side effect, an idle pawn that nobody controls no longer drifts in a current.
 - **Why:** With UE5 client prediction, server-only forces make the player rubber-band.
+
+### A triggered zone current is steady
+- **Original:** A zone with a triggerable current (`WOTZoneInfo.uc:104-128`) moves its current toward its maximum or minimum by `(MaxZoneVelocity2 - MinZoneVelocity2) / TransitionTime2` once per server tick, without scaling by the frame time, and a zone that is on and already at its maximum takes the other branch back toward the minimum. Arena_11's updraft (maximum (-256, 0, 768), minimum zero, transition .5, the only such zone in the multiplayer maps) therefore alternated between full and zero current on every server tick while on, and players rose with the average: half strength.
+- **Port:** While on, the zone applies that average as a steady current, (-128, 0, 384) for Arena_11, which gives the same rise: a jump from the shaft pedestal just clears the ring (a measured 258-unit rise against a 240-256 unit ring; full strength would carry a body about 630). While off, it applies the minimum. Trigger and UnTrigger switch it at once, as the original's one-tick step did, and the trigger states (`TriggerControl`, `TriggerToggle`, `TriggerTimed`, `WOTZoneInfo.uc:160-222`) are unchanged. A zone whose step does not span the whole range (a transition longer than one second; none ships) applies the average of its two-tick cycle, the maximum less half a step, and switches at once instead of ramping over several ticks. Only the on/off state replicates; every machine derives the current from it.
+- **Why:** A per-tick alternation depends on the frame rate and cannot be predicted on the client without rubber-banding, while the steady average keeps the tuned height players relied on.
 
 ### Water currents move swimmers after the swim step
 - **Original:** The zone current is folded into the swimming move before velocity is worked out from the distance moved.
@@ -170,9 +185,9 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Why:** The swap keeps the original's own case of landing in a frozen target's ice (`SwapPlacesEffect.uc:60-64`). The shift uses the same placement check as player starts; it differs only when the nudge carries the body into another pawn or a decoration. A lifted creature differs only when the nudge carries it into another pawn; the check for blocking actors before each step (`Util.uc:400`) already refuses most steps into one.
 
 ### Clients see a swapped mover, decoration or ice where the server put it
-- **Original:** A swap moves a door or lift, a decoration that is not static (`HangingLight.uc:20`, `HangingLightChain.uc:20`) or a frozen pawn's ice, an actor of its own (`IceLeech.uc:205-236`), to where the caster stood (`SwapPlacesEffect.uc:178-206`). These are replicated actors, so every client sees the far end where the server put it. A few decorations that are not static are sent to clients only when they appear (`SeaweedA.uc:24`) or never (`Fish.uc:65`), so a swap moves one of those on the server alone.
-- **Port:** Every machine builds the map itself, and a mover replicates as its keyframe state rather than as a moving actor. The pose a swap leaves a mover in is part of that state: every machine holds it until the mover next runs along its keys. Every decoration that is not static replicates its movement, asleep until something moves it, so clients see a swapped weed or fish move too. Where a swap leaves the ice is part of its frozen pawn's replicated effect, and the ice's look stays with it.
-- **Why:** A blocker that stands in one place on the server and in another on a client gets every client that walks into either corrected; showing it where the server has it costs nothing while nothing moves it.
+- **Original:** A swap moves a door or lift, a decoration that is not static (`HangingLight.uc:20`, `HangingLightChain.uc:20`) or a frozen pawn's ice, an actor of its own (`IceLeech.uc:205-236`), to where the caster stood (`SwapPlacesEffect.uc:178-206`). These are replicated actors, so every client sees the far end where the server put it. A few decorations that are not static are sent to clients only when they appear (`SeaweedA.uc:24-25`) or never (`Fish.uc:65`, and the dragonflies and hanging lights some battle maps set to `ROLE_None`), so a swap moves one of those on the server alone.
+- **Port:** Every machine builds the map itself, and a mover replicates as its keyframe state rather than as a moving actor. The pose a swap leaves a mover in is part of that state: every machine holds it until the mover next runs along its keys. A decoration that is not static replicates as its network role says, its class's own or the map's. One the original never sends stays on each machine, so a swap moves it on the server alone. A weed is sent to each client once, as soon as the client connects, and never updated after. Every other one replicates its movement, asleep until something moves it. Where a swap leaves the ice is part of its frozen pawn's replicated effect, and the ice's look stays with it.
+- **Why:** A blocker that stands in one place on the server and in another on a client gets every client that walks into either corrected; showing it where the server has it costs nothing while nothing moves it. The original sends a weed when it first comes into a client's view; the port sends it when the client connects, so a weed swapped after a client connected, but before that client saw it, stays where it was for that client.
 
 ### Wall of Air collision and knock-down
 - **Original:** The wall uses a collision cylinder. Knocked-down weaves fall under UE1 gravity.
@@ -1004,6 +1019,16 @@ WoT Reborn is a multiplayer port of the original 1999 game to Unreal Engine 5. T
 - **Original:** A SoundDispatcher can choose the slot its sounds play in and look sounds up from a sound table.
 - **Port:** Its sounds always play in the default slot, and sound tables are not supported. A warning is logged once if a table is used.
 - **Why:** No multiplayer map chooses another slot or uses a sound table.
+
+### Room reverb on processors without SSE
+- **Original:** The room reverb that reverb zones select had a second, fixed-point version, used only on processors without SSE (Pentium II and K6 era machines). Every processor with SSE, which is every machine that runs the game today, used the floating-point version.
+- **Port:** Only the floating-point version is reproduced. The exact sound of the fixed-point version is not.
+- **Why:** It is the reverb every current machine plays.
+
+### Room reverb sample rate and speakers
+- **Original:** The room reverb ran on the stereo mix at the original's 44.1 kHz output rate.
+- **Port:** The reverb runs at the audio device's rate, usually 48 kHz. Its echo times and treble damping are worked out for that rate, so they match the original's up to rounding to a whole sample. On an output with more than two channels, the reverb takes the sounds folded down to stereo and plays from the front left and right speakers.
+- **Why:** UE5 mixes at the device's rate and channel layout.
 
 ## Install & updates
 

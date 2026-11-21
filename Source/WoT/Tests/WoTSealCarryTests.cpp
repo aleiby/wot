@@ -7,6 +7,7 @@
 
 #if WITH_AUTOMATION_TESTS
 
+#include "WoTTestAIClasses.h"
 #include "WoTTestBattleClasses.h"
 #include "../Inventory/WoTInventoryComponent.h"
 #include "../Inventory/WoTSeal.h"
@@ -280,10 +281,10 @@ bool FWoTSealAltarHandBackTest::RunTest(const FString&)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	APawn* Controllerless = World->SpawnActor<AWoTCharacter>(
+	APawn* NPC = World->SpawnActor<AWoTTestNPCCharacter>(
 		AltarSpot, FRotator::ZeroRotator, Params);
-	Altar->TouchedByPawn(Controllerless);
-	TestTrue(TEXT("controllerless touch left the altar active"),
+	Altar->TouchedByPawn(NPC);
+	TestTrue(TEXT("an NPC touch left the altar active"),
 		!Altar->bInactive);
 
 	WoTTest::DestroySpecWorld(World);

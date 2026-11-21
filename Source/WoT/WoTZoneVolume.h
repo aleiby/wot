@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "WoTEvents.h"
 #include "WoTZoneVolume.generated.h"
 
 // Per-world index of the placed zone volumes. The CMC's predicted path queries the
@@ -99,7 +100,7 @@ private:
 // of AWoTZoneVolume consumed by UWoTCharacterMovement's predicted path. Plain struct
 // (not replicated/reflected): computed each frame from the zone actors, which are
 // present on both client and server (map-placed zones are level actors on both sides,
-// so no replication is needed for the fix to be live in real gameplay).
+// with triggered current state replicated onto the matching local zone).
 struct FWoTZoneMovement
 {
 	FVector Current = FVector::ZeroVector;   // summed ZoneVelocity of the point's zones
@@ -108,6 +109,20 @@ struct FWoTZoneMovement
 	float GroundFriction = 8.0f;              // the point's zone ZoneGroundFriction
 	float FluidFriction = 1.2f;               // current ZoneFluidFriction (LevelInfo default)
 	bool bWater = false;                      // a water zone here -> swim
+};
+
+// The on/off state of a zone's triggered current (WOTZoneInfo.bTrigZoneVeloOn).
+// Unset is only the class default. Every live state differs from it, so the
+// server's first replication of the zone always carries the state, also to a
+// client that joins after the current was switched (UE 5.8 seeds a new
+// connection's comparison state from the archetype: NetConnection.cpp,
+// DataReplication.cpp FObjectReplicator::InitWithObject).
+UENUM()
+enum class EWoTTriggeredCurrent : uint8
+{
+	Unset,
+	Off,
+	On,
 };
 
 // Port of Engine.ZoneInfo's gameplay effects (WOT.WOTZoneInfo) as an explicit
@@ -127,7 +142,7 @@ struct FWoTZoneMovement
 // box with the faithful per-zone convex geometry reconstructed from the compiled
 // .wot BSP (Nodes[].iZone + Zones[].ZoneActor), placed by import_map.py.
 UCLASS()
-class AWoTZoneVolume : public AActor
+class WOT_API AWoTZoneVolume : public AActor, public IWoTTriggerable
 {
 	GENERATED_BODY()
 
@@ -187,6 +202,29 @@ public:
 	// ZoneVelocity: a constant current/wind TRANSPORTING occupants — it displaces the move
 	// (UWoTCharacterMovement's transport model), never accumulates into velocity.
 	UPROPERTY(EditAnywhere, Category = "WoT|Zone") FVector ZoneVelocity = FVector::ZeroVector;
+
+	// The triggerable current (WOTZoneInfo.uc:52-60 TrigVelo2, the trigger states
+	// at :160-222). While on, the zone applies SteadyTriggeredVelocity; while off,
+	// MinZoneVelocity2. Only the server changes the state; it replicates to every
+	// machine, which derives ZoneVelocity from it for movement prediction.
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") bool bTrigZoneVelo2 = false;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") bool bTrigZoneVelo2InitiallyOn = false;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") FVector MaxZoneVelocity2 = FVector::ZeroVector;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") FVector MinZoneVelocity2 = FVector::ZeroVector;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") float TransitionTime2 = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") float TriggerDuration = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") FName InitialState;
+	UPROPERTY(EditAnywhere, Category = "WoT|Zone|Trigger") FName TagName;
+	virtual FName GetUE1Tag() const override { return TagName; }
+	virtual void WoTTrigger(AActor* Other, APawn* EventInstigator) override;
+	virtual void WoTUnTrigger(AActor* Other, APawn* EventInstigator) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// The current an "on" triggered zone applies: the average the shipped Tick
+	// produces over its repeating cycle (WOTZoneInfo.uc:104-128). PORT_NOTES:
+	// "A triggered zone current is steady".
+	static FVector SteadyTriggeredVelocity(const FVector& Max, const FVector& Min,
+		float TransitionTime);
 
 	// ZoneGravity: overrides gravity for occupants (arbitrary direction).
 	// (Named bOverrideGravity, not bZoneGravity, so it doesn't collide with
@@ -300,6 +338,13 @@ public:
 	static FVector GetGravityAt(const UWorld* World, const FVector& Point);
 
 private:
+	UPROPERTY(ReplicatedUsing = OnRep_TriggeredCurrent)
+	EWoTTriggeredCurrent TriggeredCurrent = EWoTTriggeredCurrent::Unset;
+	UFUNCTION() void OnRep_TriggeredCurrent();
+	void SetTriggeredCurrent(bool bOn);
+	void RestoreTriggeredCurrent();   // UnTrigger (TriggerControl) and Timer (TriggerTimed)
+	void ApplyTriggeredCurrent();     // ZoneVelocity from the state
+	FTimerHandle TriggerCurrentTimer;
 	friend class UWoTZoneIndex;
 	void RemoveCountedPlayer(class AWoTCharacter* Player);
 	// Per-occupant state: the UE1 pain/heal timer only (Pawn.PainTime — armed by the feet, not

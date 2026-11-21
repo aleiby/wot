@@ -115,9 +115,9 @@ void AWoTSealAltar::TouchedByPawn(APawn* Other)
 		return;
 	}
 	// SealAltar.uc:214-217: only players interact — every NPC touch is ignored
-	// (Player = WOTPlayer(Other)).
-	AController* Controller = Other->GetController();
-	if (!Controller || !Controller->IsPlayerController())
+	// (Player = WOTPlayer(Other)). The test is the body's class, so an AI-driven
+	// player body banks and takes seals like a person's.
+	if (!WoTIsPlayerBody(Other))
 	{
 		return;
 	}

@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "WoT Arena Bots",
+	"Description": "Optional Arena participants with player bodies, class preferences and server fill lifecycle management.",
+	"Category": "WoT",
+	"CreatedBy": "WoT Reborn contributors",
+	"CreatedByURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Plugins": [
+		{ "Name": "OnlineSubsystem", "Enabled": true },
+		{ "Name": "OnlineSubsystemUtils", "Enabled": true }
+	],
+	"Modules": [
+		{
+			"Name": "WoTBots",
+			"Type": "Runtime",
+			"LoadingPhase": "PostDefault"
+		}
+	]
+}

@@ -2,9 +2,12 @@
 
 #include "WoTAmbientSound.h"
 #include "WoTSound.h"
+#include "WoTZoneReverbSubsystem.h"
 
 #include "AudioDefines.h"
+#include "AudioDevice.h"
 #include "Components/AudioComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
@@ -19,6 +22,36 @@ namespace
 		const float Duration = Sound.GetDuration();
 		const float EnginePitch = FMath::Clamp(Pitch, MIN_PITCH, MAX_PITCH);
 		return Now + static_cast<double>(Duration / EnginePitch);
+	}
+
+	// UGameplayStatics::SpawnSoundAtLocation for a world context, without its
+	// Play (GameplayStatics.cpp): the caller adds the room reverb send first,
+	// so the voice reaches the reverb from its first sample. Like the engine
+	// call it creates no voice for a short sound out of every listener's range.
+	UAudioComponent* CreateVoiceAt(UWorld* World, USoundBase* Sound,
+		const FVector& Location, float Volume, float Pitch, USoundAttenuation* Attenuation)
+	{
+		if (!Sound || !GEngine || !GEngine->UseSound() || !World
+			|| !World->bAllowAudioPlayback || World->IsNetMode(NM_DedicatedServer))
+		{
+			return nullptr;
+		}
+		FAudioDevice::FCreateComponentParams Params(World, nullptr);
+		Params.SetLocation(Location);
+		Params.AttenuationSettings = Attenuation;
+		UAudioComponent* Voice = FAudioDevice::CreateComponent(Sound, Params);
+		if (Voice)
+		{
+			Voice->SetWorldLocationAndRotation(Location, FRotator::ZeroRotator);
+			Voice->SetVolumeMultiplier(Volume);
+			Voice->SetPitchMultiplier(Pitch);
+			Voice->bAllowSpatialization = Params.ShouldUseAttenuation();
+			Voice->bIsUISound = !World->IsGameWorld();
+			Voice->bAutoDestroy = true;
+			Voice->SubtitlePriority = Sound->GetSubtitlePriority();
+			Voice->bStopWhenOwnerDestroyed = false;
+		}
+		return Voice;
 	}
 }
 
@@ -164,11 +197,17 @@ UAudioComponent* UWoTSoundChannels::Start(const WoTSound::FPlayParams& Params, b
 	}
 	UWorld* World = GetWorld();
 	UAudioComponent* Voice = bInterface
-		? UGameplayStatics::SpawnSound2D(World, Params.Sound,
+		? UGameplayStatics::CreateSound2D(World, Params.Sound,
 			WoTSound::NormalizedUISoundVoiceGain(Volume), Pitch)
-		: UGameplayStatics::SpawnSoundAtLocation(World, Params.Sound,
-			Params.Location, FRotator::ZeroRotator, WoTSound::VoiceVolume(Volume),
-			Pitch, 0.0f, WoTSound::LinearAttenuation(Radius, Volume));
+		: CreateVoiceAt(World, Params.Sound, Params.Location,
+			WoTSound::VoiceVolume(Volume), Pitch,
+			WoTSound::LinearAttenuation(Radius, Volume));
+	if (Voice)
+	{
+		// Every effects voice, interface sounds included, feeds the room reverb.
+		UWoTZoneReverbSubsystem::AddSend(World, *Voice);
+		Voice->Play();
+	}
 	if (!Voice || !Voice->IsPlaying())
 	{
 		// The engine started no voice (no audio device, audio off in this
