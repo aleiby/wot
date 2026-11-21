@@ -3483,17 +3483,23 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 	// fire/lava WOTZoneInfo instances set that flag but retain ViewFlash=(0,0,0).
 	if (bWaterZone) ViewFlash = FVector(-0.078f);
 	bool TrigVelocity=false, TrigInitiallyOn=false;
+	FVector MaxVelocity = FVector::ZeroVector, MinVelocity = FVector::ZeroVector;
+	float TransitionTime = 0.0f, TriggerDuration = 0.0f;
+	FName InitialState, Tag;
 	if (!ReadBool(D,A,TEXT("bTrigZoneVelo2"),TrigVelocity)
-		|| !ReadBool(D,A,TEXT("bTrigZoneVelo2InitiallyOn"),TrigInitiallyOn))
-	{ Error = TEXT("a zone trigger velocity flag is malformed"); return false; }
-	if (TrigVelocity)
-	{
-		FVector SelectedVelocity = FVector::ZeroVector;
-		if (!ReadVector(D,A, TrigInitiallyOn
-			? TEXT("MaxZoneVelocity2") : TEXT("MinZoneVelocity2"), SelectedVelocity))
-		{ Error = TEXT("a zone trigger velocity is malformed"); return false; }
-		Velocity = SelectedVelocity;
-	}
+		|| !ReadBool(D,A,TEXT("bTrigZoneVelo2InitiallyOn"),TrigInitiallyOn)
+		|| !ReadVector(D,A,TEXT("MaxZoneVelocity2"),MaxVelocity)
+		|| !ReadVector(D,A,TEXT("MinZoneVelocity2"),MinVelocity)
+		|| !ReadFloat(D,A,TEXT("TransitionTime2"),TransitionTime)
+		|| !ReadFloat(D,A,TEXT("TriggerDuration"),TriggerDuration)
+		|| !ReadName(D,A,TEXT("InitialState"),InitialState)
+		|| !ReadName(D,A,TEXT("Tag"),Tag))
+	{ Error = TEXT("a zone trigger velocity property is malformed"); return false; }
+	// WOTZoneInfo.uc:78-92 replaces ZoneVelocity with the triggered current; an
+	// "on" zone applies the steady average of the shipped per-tick cycle.
+	if (TrigVelocity) Velocity = TrigInitiallyOn
+		? AWoTZoneVolume::SteadyTriggeredVelocity(MaxVelocity, MinVelocity, TransitionTime)
+		: MinVelocity;
 	const FWoTRuntimeWorldProperty* AuthoredGravity =
 		WoTRuntimeWorldFindProperty(A, TEXT("ZoneGravity"));
 	if (AuthoredGravity && AuthoredGravity->Type != EWoTRuntimeWorldPropertyType::Struct)
@@ -3502,7 +3508,7 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 		[](float Value){ return Value > 0.0f; });
 	const bool Effect = Water || Pit || Pain || Heal || Fog || FOV || Leech
 		|| !ZonePlayerEvent.IsNone()
-		|| Destructive || bTimer || !Velocity.IsNearlyZero()
+		|| Destructive || bTimer || TrigVelocity || !Velocity.IsNearlyZero()
 		|| !Gravity.Equals(FVector(0,0,-950)) || !FMath::IsNearlyEqual(GroundFriction,8)
 		|| !FMath::IsNearlyEqual(FluidFriction,1.2f) || !ViewFog.IsNearlyZero()
 		|| !ViewFlash.IsNearlyZero();
@@ -3512,7 +3518,13 @@ bool ProjectZone(UWorld& World, const FWoTRuntimeWorldZone& Z, int32 ZoneIndex,
 	AWoTZoneVolume* Volume = SpawnDeferred<AWoTZoneVolume>(World, RecordIndex, ZoneRule,
 		FTransform((Min + Max) * .5));
 	if (!Volume) { Error = TEXT("a zone projection could not be allocated"); return false; }
-	Volume->SetReplicates(false); Volume->Collision->SetBoxExtent(((Max-Min)*.5).ComponentMax(FVector(1)), false);
+	Volume->SetReplicates(TrigVelocity);
+	if (TrigVelocity) Volume->SetNetAddressable();
+	Volume->Collision->SetBoxExtent(((Max-Min)*.5).ComponentMax(FVector(1)), false);
+	Volume->bTrigZoneVelo2=TrigVelocity; Volume->bTrigZoneVelo2InitiallyOn=TrigInitiallyOn;
+	Volume->MaxZoneVelocity2=MaxVelocity; Volume->MinZoneVelocity2=MinVelocity;
+	Volume->TransitionTime2=TransitionTime; Volume->TriggerDuration=TriggerDuration;
+	Volume->InitialState=InitialState; Volume->TagName=Tag;
 	Volume->bWaterZone=Water; Volume->bPitZone=Pit; Volume->bPainZone=Pain; Volume->bHealZone=Heal; Volume->bFogZone=Fog;
 	Volume->ProjectedZoneIndex=ZoneIndex;
 	Volume->bFOVZone=FOV; Volume->ZoneFOV=ZoneFOV; Volume->bLeechZone=Leech;
