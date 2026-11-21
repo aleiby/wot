@@ -4261,6 +4261,56 @@ def place_spawnpools(eas):
     return placed
 
 
+def _set_zone_trigger_velocity(act, actor):
+    """Project trigger velocity config from T3D and inherited script defaults."""
+    props = actor.get("props", {})
+    cls = actor["cls"]
+
+    def value(key, default):
+        return props.get(key, _ml_class_prop(cls, key, default))
+
+    # Struct assignments can override a single component at any inheritance
+    # level; preserve the remaining components from the base class.
+    chain, current, seen = [], cls, set()
+    while current and current.lower() not in seen:
+        seen.add(current.lower())
+        parent, lines = _sprayer_uc(current)
+        chain.append({key.strip(): value.strip() for key, value in
+                      (line.split("=", 1) for line in lines)})
+        current = parent
+    chain.reverse()
+    chain.append(props)
+    vectors = {}
+    for key in ("MaxZoneVelocity2", "MinZoneVelocity2"):
+        components = dict(X=0.0, Y=0.0, Z=0.0)
+        for fields in chain:
+            for axis, number in re.findall(
+                    r"([XYZ])\s*=\s*([-+0-9.eE]+)", str(fields.get(key, ""))):
+                components[axis] = float(number)
+        vectors[key] = tuple(components[axis] for axis in "XYZ")
+
+    enabled = _ml_bool(value("bTrigZoneVelo2", "False"))
+    initially_on = _ml_bool(value("bTrigZoneVelo2InitiallyOn", "False"))
+    transition = float(value("TransitionTime2", 0.0))
+    maximum, minimum = vectors["MaxZoneVelocity2"], vectors["MinZoneVelocity2"]
+    act.set_editor_property("trig_zone_velo2", enabled)
+    act.set_editor_property("trig_zone_velo2_initially_on", initially_on)
+    act.set_editor_property("max_zone_velocity2", unreal.Vector(*maximum))
+    act.set_editor_property("min_zone_velocity2", unreal.Vector(*minimum))
+    act.set_editor_property("transition_time2", transition)
+    act.set_editor_property("trigger_duration", float(value("TriggerDuration", 0.0)))
+    act.set_editor_property("initial_state", unreal.Name(value("InitialState", "None")))
+    act.set_editor_property("tag_name", unreal.Name(value("Tag", cls)))
+    if enabled:
+        # An "on" zone applies the steady average of the shipped per-tick
+        # cycle, as AWoTZoneVolume::SteadyTriggeredVelocity does (PORT_NOTES).
+        fraction = 1.0 / transition if transition > 1.0 else 1.0
+        steady = tuple(hi - (hi - lo) * 0.5 * fraction
+                       for hi, lo in zip(maximum, minimum))
+        act.set_editor_property("zone_velocity", unreal.Vector(
+            *(steady if initially_on else minimum)))
+
+
 def place_zones(eas):
     """Place gameplay zone volumes (water/pain/heal/gravity/current/friction) as
     AWoTZoneVolume actors, extracted from the compiled BSP by Tools/convert/
@@ -4271,6 +4321,13 @@ def place_zones(eas):
         return 0
     placed = 0
     gameplay_zones, _, _ = _zone_export_sections()
+    # The compact zones export contains only the folded startup velocity.
+    # Read complete properties so existing conversions retain trigger wiring.
+    actors = {}
+    tf = CONV / f"{MAP}.t3d.json"
+    if tf.exists():
+        actors = {actor["name"]: actor
+                  for actor in json.loads(tf.read_text())["actors"]}
     for z in gameplay_zones:
         lo, hi = z["aabb"]
         center = [(lo[i] + hi[i]) / 2.0 for i in range(3)]
@@ -4316,6 +4373,8 @@ def place_zones(eas):
         vel = z.get("velocity") or []
         if any(vel):
             act.set_editor_property("zone_velocity", unreal.Vector(*vel))
+        if z["actor"] in actors:
+            _set_zone_trigger_velocity(act, actors[z["actor"]])
         grav = z.get("gravity") or []
         if any(grav):
             act.set_editor_property("override_gravity", True)
