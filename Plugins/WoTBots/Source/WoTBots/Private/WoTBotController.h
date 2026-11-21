@@ -13,6 +13,7 @@ namespace WoTBotLinks { struct FDistantTeleport; }
 class AWoTAngrealInventory;
 class AWoTAngrealSpawnPool;
 class AWoTResourceSpawnerInv;
+struct FNavPathPoint;
 #if WITH_AUTOMATION_TESTS
 namespace WoTBotTest
 {
@@ -24,9 +25,18 @@ struct FWoTBotTraversalAccess;
 struct FWoTBotRosterAccess;
 struct FWoTBotPoolAccess;
 struct FWoTBotSeekingAccess;
+struct FWoTBotWardAccess;
 struct FWoTBotMoverAccess;
 }
 #endif
+
+struct FBotWardBelief
+{
+	FVector Position = FVector::ZeroVector;
+	float LastSeen = -1e9f, VisibleSince = -1, NextNotice = 0;
+	float Radius = 120;
+	bool bKnown = false, bFriendly = false;
+};
 
 enum class EWoTBotState : uint8 { Roam, SeekItem, Engage, Dead, Frozen };
 
@@ -103,6 +113,7 @@ private:
 	friend struct WoTBotTest::FWoTBotRosterAccess;
 	friend struct WoTBotTest::FWoTBotPoolAccess;
 	friend struct WoTBotTest::FWoTBotSeekingAccess;
+	friend struct WoTBotTest::FWoTBotWardAccess;
 	friend struct WoTBotTest::FWoTBotMoverAccess;
 #endif
 	void InventoryPulse();
@@ -115,6 +126,27 @@ private:
 	bool CanAct() const;
 	bool IsHostile(const AWoTCharacter* Candidate) const;
 	void Perceive();
+	void PerceiveWards();
+	bool GuardWardRoute();
+	// While stopped short of a known ward: after a bounded wait (none inside a
+	// known ward's zone), take another goal or route clear of known wards.
+	void UpdateWardWait();
+	bool LeaveWard();
+	// A known ward whose zone the segment enters. When leaving, a segment that
+	// starts inside a zone may still move straight away from that ward.
+	AActor* KnownWardOnSegment(const FVector& From, const FVector& To, bool bLeaving = false) const;
+	AActor* KnownWardOnRoute(const TArray<FNavPathPoint>& Points, int32 First, FVector From) const;
+	// Whether detonating Ward could, through the wards this bot knows, blast
+	// this body or a teammate in view.
+	bool WardShotSafe(AActor* Ward) const;
+	bool CastAtWard();
+	TMap<TWeakObjectPtr<AActor>, FBotWardBelief> WardBeliefs;
+	TArray<TWeakObjectPtr<AActor>> PerceptionWards;
+	TWeakObjectPtr<AActor> BlockingWard, AimingWard;
+	FRandomStream WardRandom;
+	float NextWardShot = 0;
+	float WardWaitSince = 0, NextWardLeave = 0, WardDetourUntil = -1;
+	bool bWardWaiting = false;
 	void SetTarget(AWoTCharacter* NewTarget, bool bVisible);
 	void DamageApplied(AWoTCharacter* Victim, AController* InstigatorController, AActor* Causer, float Amount);
 	UFUNCTION()

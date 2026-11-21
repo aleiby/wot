@@ -107,12 +107,13 @@ struct FLogCapture : FOutputDevice
 
 inline FString SummaryHeader()
 {
-	return TEXT("| Map | Result | Kills | Deaths | Ensures/errors | Invalid/runaway | Recoveries/respawns | Upright feet/shape warnings | Unvisited pools | Tick avg/p95/max ms | Frag end/restart request |\n|---|---|---:|---:|---|---|---|---|---:|---|---|\n");
+	return TEXT("| Map | Result | Kills | Deaths | Pickups | Wards placed/killed bots/shot by bots | Ensures/errors | Invalid/runaway | Recoveries/respawns | Upright feet/shape warnings | Unvisited pools | Tick avg/p95/max ms | Frag end/restart request |\n|---|---|---:|---:|---:|---|---|---|---|---|---:|---|---|\n");
 }
 inline FString SummaryRow(const FObject& M)
 {
-	return FString::Printf(TEXT("| %s | %s | %.0f | %.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f | %.2f/%.2f/%.2f | %s/%s |\n"),
+	return FString::Printf(TEXT("| %s | %s | %.0f | %.0f | %.0f | %.0f/%.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f/%.0f | %.0f | %.2f/%.2f/%.2f | %s/%s |\n"),
 		*M->GetStringField(TEXT("map")), *M->GetStringField(TEXT("result")), Number(M,TEXT("kills")), Number(M,TEXT("deaths")),
+		Number(M,TEXT("pickups")), Number(M,TEXT("wards_placed")), Number(M,TEXT("bots_killed_by_wards")), Number(M,TEXT("wards_shot_by_bots")),
 		Number(M,TEXT("ensures")), Number(M,TEXT("errors")), Number(M,TEXT("non_finite")), Number(M,TEXT("runaway")),
 		Number(M,TEXT("recoveries")), Number(M,TEXT("silent_respawns")), Number(M,TEXT("inside_floor_count")), Number(M,TEXT("geometry_penetration_count")), Number(M,TEXT("unvisited_pools")),
 		Number(M,TEXT("tick_avg_ms")), Number(M,TEXT("tick_p95_ms")), Number(M,TEXT("tick_max_ms")),

@@ -189,6 +189,7 @@ void AWoTBotController::Think()
 	++ThinkCount;
 	ObserveCastUse();
 	InventoryPulse();
+	PerceiveWards();
 	Perceive();
 	if (!CanAct()) return;
 	UpdateAim();
@@ -320,6 +321,7 @@ void AWoTBotController::Hop(const AWoTAngrealSpawnPool* Pool)
 	bWantsMovement = true;
 	NextRepathTime = Now + 1.0f;
 	MoveToLocation(Through, 5.0f, false, false, false, false, nullptr, true);
+	if (GuardWardRoute()) return;
 	Body->Jump();
 	++Hops;
 	LastJumpTime = Now;
@@ -713,15 +715,17 @@ void AWoTBotController::CastArtifacts()
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (AActor* Incoming = FindVisibleIncomingProjectile())
 		if (AWoTAngrealInventory* Defence = SelectArtifact(Incoming, true))
-		{ CastItem(Defence); return; }
+		{ AimingWard.Reset(); CastItem(Defence); return; }
 	if (Body->Health < Body->MaxHealth * GetDefault<UWoTBotSettings>()->HealBelowHealth
 		&& Now > LastDefensiveCastTime + Caster->MinDefensiveUsageInterval)
 	{
 		for (AWoTInventory* Held : Body->InventoryComponent->Items)
 			if (AWoTAngrealInvHeal* Heal = Cast<AWoTAngrealInvHeal>(Held);
 				Heal && Heal->HaveEnoughCharges() && Heal->GetPriority() > Heal->PriorityUnusable)
-			{ Heal->SetVictim(Body); Heal->InitChargeGroup(); CastItem(Heal); return; }
+			{ AimingWard.Reset(); Heal->SetVictim(Body); Heal->InitChargeGroup(); CastItem(Heal); return; }
 	}
+	if (CastAtWard()) return;
+	if (!CanAct()) return;
 	if (!bTargetVisible || !Target.IsValid())
 	{ Caster->Release(); Caster->ResetAdaptation(); return; }
 	if (Now < VisibleSince + GetDefault<UWoTBotSettings>()->ReactionSeconds) return;
@@ -736,8 +740,10 @@ void AWoTBotController::CastArtifacts()
 
 float AWoTBotController::GetAimErrorLimit() const
 {
+	const auto* Ward = WardBeliefs.Find(AimingWard);
+	const float Since = Ward ? Ward->VisibleSince : bTargetVisible ? VisibleSince : -1;
 	return FMath::Max(0.0f, GetDefault<UWoTBotSettings>()->AimErrorDegrees)
-		/ (1.0f + (bTargetVisible ? FMath::Max(0.0f, GetWorld()->GetTimeSeconds() - VisibleSince) : 0.0f));
+		/ (1.0f + (Since >= 0 ? FMath::Max(0.0f, GetWorld()->GetTimeSeconds() - Since) : 0.0f));
 }
 
 void AWoTBotController::UpdateAim()
@@ -750,14 +756,21 @@ void AWoTBotController::UpdateAim()
 	const bool bDamageSearch = GetWorld()->GetTimeSeconds() < DamageSearchUntil || DamageSightCandidate.IsValid();
 	if (bDamageSearch) AimPoint = Body->GetPawnViewLocation() + DamageSearchDirection * 100;
 	FRotator Aim = (AimPoint - Body->GetPawnViewLocation()).Rotation();
-	if (!bDamageSearch && bTargetVisible && Target.IsValid())
+	AActor* AimTarget = AimingWard.IsValid() ? AimingWard.Get() : bTargetVisible ? Target.Get() : nullptr;
+	if (!bDamageSearch && AimTarget)
 	{
-		Aim = (Target->GetActorLocation() - Body->GetPawnViewLocation()).Rotation();
+		Aim = (AimTarget->GetActorLocation() - Body->GetPawnViewLocation()).Rotation();
 		if (AWoTProjectileLauncher* Launcher = Cast<AWoTProjectileLauncher>(AimingItem.Get());
-			Launcher && Launcher->bOffensive && Launcher->IsLeadable())
+			Launcher && Launcher->bOffensive && (AimingWard.IsValid() || Launcher->IsLeadable()))
 		{
-			Launcher->SetVictim(Target.Get());
-			Aim = Launcher->GetBestTrajectory();
+			Launcher->SetVictim(AimTarget);
+			if (AimingWard.IsValid())
+			{
+				FVector Source = Launcher->GetTrajectorySource();
+				if (Launcher->ProjectileClass) Source += FRotator(0,Aim.Yaw,0).RotateVector(Launcher->ProjectileClass.GetDefaultObject()->LaunchOffset);
+				Aim = (AimTarget->GetActorLocation() - Source).Rotation();
+			}
+			else if (Launcher->IsLeadable()) Aim = Launcher->GetBestTrajectory();
 		}
 		const FVector Forward = Aim.Vector();
 		const FVector Right = FRotationMatrix(Aim).GetUnitAxis(EAxis::Y);
@@ -843,6 +856,7 @@ const WoTBotLinks::FDistantTeleport* AWoTBotController::DistantTeleportRoute(con
 	for (int32 I = 0; I < Teleports.Num(); ++I)
 	{
 		if (Legs[I] < 0.0f || (Best && Legs[I] >= Length)) continue;
+		if (KnownWardOnSegment(Teleports[I].Exit, Teleports[I].Exit)) continue;
 		const float Out = Leg(Teleports[I].Exit, To);
 		if (Out < 0.0f || (Best && Legs[I] + Out >= Length)) continue;
 		Best = &Teleports[I];
@@ -900,8 +914,10 @@ bool AWoTBotController::NavigateTo(const FVector& Point)
 	++RepathCount;
 	// A failed request (no complete route) leaves the body idle with movement
 	// still wanted, so the stuck rule replaces the goal unless the caller does.
-	return MoveToLocation(Destination, 20.0f, false, true, false, false, nullptr, false)
+	const bool Accepted = MoveToLocation(Destination, 20.0f, false, true, false, false, nullptr, false)
 		!= EPathFollowingRequestResult::Failed;
+	GuardWardRoute();
+	return Accepted;
 }
 
 void AWoTBotController::ChooseDestination(bool bForce)
@@ -916,6 +932,8 @@ void AWoTBotController::ChooseDestination(bool bForce)
 		RecoveryPools.Add(SeekingPool, Now);
 		ReleasePoolGoal();
 	}
+	// A route taken clear of a known ward is walked before a new goal replaces it.
+	if (!bForce && bWantsMovement && Now < WardDetourUntil) return;
 	if (!bForce && Now < NextRepathTime) return;
 	NextRepathTime = Now + FMath::Max(.1f, GetDefault<UWoTBotSettings>()->StrafeRepathSeconds);
 	APawn* Body = GetPawn();
@@ -1011,6 +1029,8 @@ void AWoTBotController::ChooseDestination(bool bForce)
 		Destination = Landing.Location;
 		bWantsMovement = true;
 		bNavigationUnavailable = false;
+		// A landing whose walk crosses a ward this bot knows is no escape; try the next.
+		if (GuardWardRoute()) return false;
 		return true;
 	};
 	FNavLocation Nearest;
@@ -1107,6 +1127,14 @@ void AWoTBotController::Tick(float DeltaSeconds)
 		NextRepathTime = 0.0f;
 		LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
 		ProgressPosition = LastBodyLocation = Here;
+		return;
+	}
+	if (GuardWardRoute())
+	{
+		// The stuck rule is suppressed while waiting; the wait itself is bounded.
+		LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
+		LastBodyLocation = Here;
+		UpdateWardWait();
 		return;
 	}
 	UpdateClimb();
