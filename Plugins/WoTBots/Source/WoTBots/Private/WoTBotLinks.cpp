@@ -1,4 +1,5 @@
 #include "WoTBotLinks.h"
+#include "WoTBotMoverLink.h"
 #include "WoTBotNavigation.h"
 #include "AI/WoTPathNode.h"
 #include "WoTMover.h"
@@ -86,8 +87,8 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 		}
 		return Ends.Add(Node, End);
 	};
-	// Doors and other movers: the reach was recorded through them open, and a
-	// bot body does not open a door its player-proximity trigger is waiting for.
+	// Ordinary reaches through movers stay rejected. Qualified body-operated
+	// traversals get their own directed smart link and movement handler below.
 	TArray<FBox> Movers;
 	for (TActorIterator<AWoTMover> It(&World); It; ++It) Movers.Add(It->GetComponentsBoundingBox(true));
 	const auto ThroughMover = [&Movers](const FVector& A, const FVector& B)
@@ -165,6 +166,6 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 			++Added;
 		}
 	}
-	return Added;
+	return Added + WoTBotMoverLinks::Build(World, *Nav, *Mesh, Agent);
 }
 }

@@ -8,6 +8,7 @@
 
 class UWoTCasterComponent;
 class UWoTBotRoster;
+class AWoTBotMoverLink;
 namespace WoTBotLinks { struct FDistantTeleport; }
 class AWoTAngrealInventory;
 class AWoTAngrealSpawnPool;
@@ -23,6 +24,7 @@ struct FWoTBotTraversalAccess;
 struct FWoTBotRosterAccess;
 struct FWoTBotPoolAccess;
 struct FWoTBotSeekingAccess;
+struct FWoTBotMoverAccess;
 }
 #endif
 
@@ -72,6 +74,10 @@ public:
 	float GetLastJumpTime() const { return LastJumpTime; }
 	float GetAimErrorLimit() const;
 	bool CanSee(const AWoTCharacter* Candidate) const;
+	// Whether a lift or door handler owns this body's movement now.
+	bool IsTraversingMover() const { return ActiveMoverLink.IsValid(); }
+	// False while this bot is cooling down after failing that link.
+	bool CanPlanThroughMoverLink(const AWoTBotMoverLink* Link) const;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void UpdateControlRotation(float DeltaTime, bool bUpdatePawn = true) override;
 	virtual void OnParticipantPawnDied(AWoTCharacter* DeadPawn, float RespawnDelaySeconds) override;
@@ -81,6 +87,13 @@ protected:
 	virtual void OnUnPossess() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
+	friend class AWoTBotMoverLink;
+	bool BeginMoverTraversal(AWoTBotMoverLink* Link);
+	void FinishMoverTraversal(AWoTBotMoverLink* Link, bool bSuccess);
+	void CancelMoverTraversal();
+	TWeakObjectPtr<AWoTBotMoverLink> ActiveMoverLink;
+	// When each recently failed mover link may be planned through again.
+	TMap<TWeakObjectPtr<const AWoTBotMoverLink>, float> MoverLinkRetryTimes;
 #if WITH_AUTOMATION_TESTS
 	friend struct WoTBotTest::FWoTBotRegressionAccess;
 	friend struct WoTBotTest::FWoTBotCastCompletionAccess;
@@ -90,6 +103,7 @@ private:
 	friend struct WoTBotTest::FWoTBotRosterAccess;
 	friend struct WoTBotTest::FWoTBotPoolAccess;
 	friend struct WoTBotTest::FWoTBotSeekingAccess;
+	friend struct WoTBotTest::FWoTBotMoverAccess;
 #endif
 	void InventoryPulse();
 	void ResetBehaviour(AWoTCharacter* Body);

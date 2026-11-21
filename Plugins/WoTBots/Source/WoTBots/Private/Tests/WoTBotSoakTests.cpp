@@ -2,6 +2,7 @@
 #if WITH_AUTOMATION_TESTS && !WOT_GUARDED_BOOTSTRAP
 #include "WoTBotMapFixture.h"
 #include "WoTBotSoakReport.h"
+#include "WoTBotMoverLink.h"
 #include "WoTBotNavProbe.h"
 #include "WoTBotSoakServer.h"
 #include "Testing/WoTSoakEvents.h"
@@ -52,6 +53,52 @@ FObject NewReport(const FString& Map, int32 Fill, double Seconds)
 	return R;
 }
 
+// Reuse #112's actual ArenaBot tile callbacks. Motion is observed from poses,
+// and outstanding work after motion is reported separately from quiet time.
+struct FSteadyNavigation
+{
+	UWorld* World;
+	FNavProbe& Probe;
+	FObject Report;
+	TMap<TWeakObjectPtr<AWoTMover>, FTransform> Poses;
+	int32 PreviousTiles = 0;
+	bool bDrainingMotion = false;
+	FSteadyNavigation(UWorld* W, FNavProbe& P, const FObject& R) : World(W), Probe(P), Report(R)
+	{
+		for (const TCHAR* Key : {TEXT("navigation_steady_tile_updates"), TEXT("navigation_steady_seconds"),
+			TEXT("navigation_motion_tile_updates"), TEXT("navigation_motion_seconds"),
+			TEXT("navigation_settling_tile_updates"), TEXT("navigation_settling_seconds")}) Report->SetNumberField(Key, 0);
+	}
+	void Sample(double Time, double Delta)
+	{
+		const double Started = FPlatformTime::Seconds();
+		ON_SCOPE_EXIT { Increment(Report, TEXT("navigation_steady_probe_ms"), (FPlatformTime::Seconds() - Started) * 1000); };
+		bool bMoved = false;
+		for (TActorIterator<AWoTMover> It(World); It; ++It)
+		{
+			const FTransform Pose = It->GetActorTransform();
+			if (const FTransform* Previous = Poses.Find(*It)) bMoved |= !Previous->Equals(Pose, .001);
+			Poses.Add(*It, Pose);
+		}
+		const int32 Tiles = Probe.Tiles - PreviousTiles;
+		PreviousTiles = Probe.Tiles;
+		bDrainingMotion |= bMoved;
+		if (Time > 30)
+		{
+			const TCHAR* TileKey = bMoved ? TEXT("navigation_motion_tile_updates")
+				: bDrainingMotion ? TEXT("navigation_settling_tile_updates") : TEXT("navigation_steady_tile_updates");
+			const TCHAR* TimeKey = bMoved ? TEXT("navigation_motion_seconds")
+				: bDrainingMotion ? TEXT("navigation_settling_seconds") : TEXT("navigation_steady_seconds");
+			Increment(Report, TileKey, Tiles); Increment(Report, TimeKey, Delta);
+		}
+		const auto* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+		if (Nav && !Nav->HasDirtyAreasQueued() && Nav->GetNumRemainingBuildTasks() == 0) bDrainingMotion = false;
+		const double Seconds = Number(Report, TEXT("navigation_steady_seconds"));
+		Report->SetBoolField(TEXT("navigation_steady_observed"), Seconds > 0);
+		if (Seconds > 0) Report->SetNumberField(TEXT("navigation_steady_tiles_per_second"), Number(Report, TEXT("navigation_steady_tile_updates")) / Seconds);
+	}
+};
+
 struct FObserver
 {
 	struct FBodyHistory
@@ -64,6 +111,11 @@ struct FObserver
 		TSharedPtr<FJsonObject> ActiveEvent;
 	};
 	TMap<TWeakObjectPtr<AWoTCharacter>, FBodyHistory> BodyHistories;
+	TMap<TWeakObjectPtr<AWoTCharacter>, FVector> SpawnFeet;
+	TMap<TWeakObjectPtr<AWoTCharacter>, FObject> Lives;
+	TArray<TPair<FVector, FVector>> LiftFloors;
+	TMap<TWeakObjectPtr<AWoTBotMoverLink>, FObject> MoverLinks;
+	TArray<TSharedPtr<FJsonValue>> LowerSpawnCollections;
 	TArray<TSharedPtr<FJsonValue>> FloorEvents;
 	TArray<TSharedPtr<FJsonValue>> SwapEvents;
 	TSet<FString> ObservedSwaps;
@@ -97,16 +149,24 @@ struct FObserver
 	{
 		Report->SetNumberField(TEXT("inside_floor_count"), 0);
 		Report->SetNumberField(TEXT("geometry_penetration_count"), 0);
+		Report->SetNumberField(TEXT("lower_spawn_lives"), 0);
+		Report->SetNumberField(TEXT("casts_during_mover_traversal"), 0);
 		Report->SetObjectField(TEXT("swap_targets_by_class"), Object());
 		Report->SetObjectField(TEXT("non_pawn_swap_targets_by_class"), Object());
 		SpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([this](AActor* A)
 		{
-			if (AWoTCharacter* Body = Cast<AWoTCharacter>(A)) Remember(Body, TEXT("spawn"));
+			if (AWoTCharacter* Body = Cast<AWoTCharacter>(A))
+			{
+				SpawnFeet.Add(Body, Body->GetActorLocation() - FVector(0, 0, Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+				Remember(Body, TEXT("spawn"));
+			}
 		}));
 		BodyHandle = WoTSoakEvents::BodyEvents().AddLambda([this](AActor* A, const TCHAR* Source)
 		{
 			if (A && A->GetWorld() == World)
 			{
+				if (AWoTCharacter* Body = Cast<AWoTCharacter>(A); Body && FCString::Strcmp(Source, TEXT("spawn/respawn fitted")) == 0)
+					SpawnFeet.Add(Body, Body->GetActorLocation() - FVector(0, 0, Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
 				// Existing swap scopes name the actual far end, including lost-lock
 				// impacts. Count once even when a failed placement rolls back.
 				if (FCString::Strcmp(Source, TEXT("swap source placed or rolled back")) == 0)
@@ -151,7 +211,27 @@ struct FObserver
 			if (AWoTAngrealSpawnPool* P = Cast<AWoTAngrealSpawnPool>(Subject))
 			{
 				if (Kind == WoTSoakEvents::EKind::PoolStock) Increment(Pool(P), TEXT("stocked"));
-				if (Kind == WoTSoakEvents::EKind::PoolCollect) Increment(Pool(P), TEXT("collected"));
+				if (Kind == WoTSoakEvents::EKind::PoolCollect)
+				{
+					Increment(Pool(P), TEXT("collected"));
+					if (B)
+						if (AWoTCharacter* Body = Cast<AWoTCharacter>(Participant))
+						{
+							const FObject Life = ObserveLife(B, Body);
+							if (Life->GetBoolField(TEXT("lower_spawn")))
+							{
+								Increment(Pool(P), TEXT("collected_from_lower_spawn"));
+								FObject Event = Object();
+								Event->SetStringField(TEXT("bot"), B->GetName());
+								Event->SetStringField(TEXT("pawn"), Body->GetName());
+								Event->SetStringField(TEXT("pool"), P->GetName());
+								Event->SetStringField(TEXT("spawn_feet"), Life->GetStringField(TEXT("spawn_feet")));
+								Event->SetNumberField(TEXT("seconds"), Time);
+								Event->SetBoolField(TEXT("middle_pool"), IsMiddlePool(P));
+								LowerSpawnCollections.Add(Value(Event));
+							}
+						}
+				}
 			}
 			if (!B) return;
 			FObject Row = Bot(B);
@@ -160,6 +240,12 @@ struct FObserver
 			{
 				const auto Casts = Row->GetObjectField(TEXT("casts"));
 				Increment(Casts.ToSharedRef(), *Subject->GetClass()->GetPathName());
+				// Charge use while a lift or door handler owns the caster's movement.
+				if (B->IsTraversingMover())
+				{
+					Increment(Row, TEXT("casts_during_mover_traversal"));
+					Increment(Report, TEXT("casts_during_mover_traversal"));
+				}
 			}
 			if (Kind == WoTSoakEvents::EKind::Recovery || Kind == WoTSoakEvents::EKind::SilentRespawn)
 			{
@@ -640,8 +726,59 @@ struct FObserver
 		R->SetNumberField(TEXT("stocked"), 0); R->SetNumberField(TEXT("collected"), 0);
 		Pools.Add(P, R); return R;
 	}
+	bool IsMiddlePool(const AWoTAngrealSpawnPool* P) const
+	{
+		const double Z = P->GetActorLocation().Z;
+		return LiftFloors.ContainsByPredicate([Z](const auto& Floors)
+		{
+			return FMath::Abs(Z - Floors.Value.Z) <= 120 && FMath::Abs(Z - Floors.Value.Z) < FMath::Abs(Z - Floors.Key.Z);
+		});
+	}
+	void ObserveMoverLinks()
+	{
+		for (TActorIterator<AWoTBotMoverLink> It(World); It; ++It)
+		{
+			FObject* Found = MoverLinks.Find(*It);
+			if (!Found)
+			{
+				FObject Row = Object();
+				Row->SetStringField(TEXT("id"), It->GetName());
+				Row->SetStringField(TEXT("mover"), GetNameSafe(It->GetMover()));
+				Row->SetBoolField(TEXT("lift"), It->IsLiftLink());
+				Row->SetStringField(TEXT("entry_feet"), Position(It->GetEntryLocation()));
+				Row->SetStringField(TEXT("exit_feet"), Position(It->GetExitLocation()));
+				MoverLinks.Add(*It, Row); Found = MoverLinks.Find(*It);
+				if (It->IsLiftLink()) LiftFloors.Emplace(It->GetEntryLocation(), It->GetExitLocation());
+			}
+			(*Found)->SetNumberField(TEXT("lift_rides"), It->GetLiftRides());
+			(*Found)->SetNumberField(TEXT("door_exits"), It->GetDoorExits());
+			(*Found)->SetNumberField(TEXT("abandons"), It->GetAbandons());
+			(*Found)->SetNumberField(TEXT("waiting_spots"), It->GetHoldLocations().Num());
+		}
+	}
+	FObject ObserveLife(AWoTBotController* B, AWoTCharacter* Body)
+	{
+		if (const FObject* Found = Lives.Find(Body)) return *Found;
+		if (LiftFloors.IsEmpty()) ObserveMoverLinks();
+		const FVector* Spawn = SpawnFeet.Find(Body);
+		const FVector Feet = Spawn ? *Spawn : Body->GetActorLocation() - FVector(0, 0, Body->GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+		const bool bLower = LiftFloors.ContainsByPredicate([&Feet](const auto& Floors)
+		{
+			return FMath::Abs(Feet.Z - Floors.Key.Z) <= 120 && FMath::Abs(Feet.Z - Floors.Key.Z) < FMath::Abs(Feet.Z - Floors.Value.Z);
+		});
+		FObject Life = Object();
+		Life->SetStringField(TEXT("bot"), B->GetName()); Life->SetStringField(TEXT("pawn"), Body->GetName());
+		Life->SetStringField(TEXT("spawn_feet"), Position(Feet));
+		Life->SetBoolField(TEXT("spawn_event_observed"), Spawn != nullptr);
+		Life->SetBoolField(TEXT("lower_spawn"), bLower);
+		Life->SetNumberField(TEXT("first_observed_seconds"), Time);
+		Lives.Add(Body, Life);
+		if (bLower) Increment(Report, TEXT("lower_spawn_lives"));
+		return Life;
+	}
 	void Sample()
 	{
+		ObserveMoverLinks();
 		const double Delta = Time - LastSampleTime;
 		LastSampleTime = Time;
 		ProbeBodies(Delta);
@@ -654,8 +791,9 @@ struct FObserver
 			Increment(R, States[int32(It->GetBehaviourState())], Delta);
 			Increment(Report, States[int32(It->GetBehaviourState())], Delta);
 			Increment(Report, TEXT("bot_seconds"), Delta);
-			if (const AWoTCharacter* Body = Cast<AWoTCharacter>(It->GetPawn()); Body && Body->IsAlive())
+			if (AWoTCharacter* Body = Cast<AWoTCharacter>(It->GetPawn()); Body && Body->IsAlive())
 			{
+				ObserveLife(*It, Body);
 				// A body falling through a gap in a floor can be far below the arena;
 				// count its time, but keep it out of the arena's spacing samples.
 				if (Body->GetCharacterMovement()->IsFalling())
@@ -744,14 +882,52 @@ struct FObserver
 	{
 		Report->SetNumberField(TEXT("simulated_seconds"), Time);
 		Report->SetArrayField(TEXT("body_geometry_events"), FloorEvents);
+		TArray<TSharedPtr<FJsonValue>> MoverRows;
+		for (TActorIterator<AWoTMover> It(World); It; ++It)
+		{
+			FObject Row = Object();
+			Row->SetStringField(TEXT("id"), It->GetName());
+			Row->SetStringField(TEXT("class"), It->GetClass()->GetPathName());
+			Row->SetStringField(TEXT("position"), Position(It->GetActorLocation()));
+			MoverRows.Add(Value(Row));
+		}
+		Report->SetNumberField(TEXT("projected_movers"), MoverRows.Num());
+		Report->SetArrayField(TEXT("movers"), MoverRows);
+		TArray<TSharedPtr<FJsonValue>> LinkRows;
+		int32 LiftLinks = 0, DoorLinks = 0, LiftRides = 0, DoorExits = 0, MoverAbandons = 0;
+		for (const auto& Link : MoverLinks)
+		{
+			LinkRows.Add(Value(Link.Value));
+			if (Link.Value->GetBoolField(TEXT("lift"))) ++LiftLinks; else ++DoorLinks;
+			LiftRides += int32(Number(Link.Value, TEXT("lift_rides")));
+			DoorExits += int32(Number(Link.Value, TEXT("door_exits")));
+			MoverAbandons += int32(Number(Link.Value, TEXT("abandons")));
+		}
+		Report->SetArrayField(TEXT("mover_links"), LinkRows);
+		Report->SetNumberField(TEXT("lift_links"), LiftLinks); Report->SetNumberField(TEXT("door_links"), DoorLinks);
+		Report->SetNumberField(TEXT("lift_rides"), LiftRides); Report->SetNumberField(TEXT("door_exits"), DoorExits);
+		Report->SetNumberField(TEXT("mover_abandons"), MoverAbandons);
 		int32 Kills = 0, Deaths = 0, Unvisited = 0;
-		TArray<TSharedPtr<FJsonValue>> BotRows, PoolRows;
+		TArray<TSharedPtr<FJsonValue>> BotRows, PoolRows, NeverCollected, MiddleNeverFromLower, LifeRows;
 		for (const auto& P : Bots) { BotRows.Add(Value(P.Value)); Kills += int32(Number(P.Value,TEXT("kills"))); Deaths += int32(Number(P.Value,TEXT("deaths"))); }
 		for (const auto& P : Pools)
 		{
 			if (const double* Closest = ClosestApproach.Find(P.Key)) P.Value->SetNumberField(TEXT("closest_approach"), *Closest);
 			PoolRows.Add(Value(P.Value)); Unvisited += Number(P.Value,TEXT("collected")) == 0;
+			if (Number(P.Value,TEXT("collected")) == 0) NeverCollected.Add(MakeShared<FJsonValueString>(P.Value->GetStringField(TEXT("id"))));
+			if (P.Key.IsValid())
+			{
+				const bool bMiddle = IsMiddlePool(P.Key.Get());
+				P.Value->SetBoolField(TEXT("middle_landing_pool"), bMiddle);
+				if (bMiddle && Number(P.Value, TEXT("collected_from_lower_spawn")) == 0)
+					MiddleNeverFromLower.Add(MakeShared<FJsonValueString>(P.Value->GetStringField(TEXT("id"))));
+			}
 		}
+		for (const auto& Life : Lives) LifeRows.Add(Value(Life.Value));
+		Report->SetArrayField(TEXT("pawn_lives"), LifeRows);
+		Report->SetArrayField(TEXT("lower_spawn_collection_events"), LowerSpawnCollections);
+		Report->SetArrayField(TEXT("never_collected_pool_ids"), NeverCollected);
+		Report->SetArrayField(TEXT("middle_pool_ids_never_collected_from_lower_spawn"), MiddleNeverFromLower);
 		Report->SetArrayField(TEXT("bots"), BotRows); Report->SetArrayField(TEXT("pools"), PoolRows);
 		Report->SetArrayField(TEXT("actor_anomalies"), Anomalies); Report->SetArrayField(TEXT("recovery_events"), Recoveries);
 		Report->SetNumberField(TEXT("kills"), Kills); Report->SetNumberField(TEXT("deaths"), Deaths);
@@ -867,6 +1043,8 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 	ObserverState->SetIsOnlyASpectator(true);
 	W->GetSubsystem<UWoTBotRoster>()->Evaluate();
 	Observer.Sample();
+	FSteadyNavigation SteadyNavigation(W, NavProbe, Report);
+	SteadyNavigation.Sample(0, 0);
 	const int32 Steps = FMath::CeilToInt(Number(Report,TEXT("requested_seconds")) * 30.0);
 	for (int32 Index = 0; Index < Steps; ++Index)
 	{
@@ -874,12 +1052,15 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 		const double TickStart = FPlatformTime::Seconds();
 		W->Tick(LEVELTICK_All, Step); ++GFrameCounter;
 		Observer.TickTimes.Add((FPlatformTime::Seconds() - TickStart) * 1000);
+		SteadyNavigation.Sample(Observer.Time, Step);
 		Observer.Sample();
 		if ((Index + 1) % 900 == 0)
 		{
 			Observer.Snapshot();
 			if (!Save(Report, Output)) { Error = TEXT("Could not persist worker checkpoint"); return false; }
-			UE_LOG(LogTemp, Display, TEXT("BOT_SOAK_PROGRESS map=%s seconds=%.0f kills=%.0f"), *Map, Observer.Time, Number(Report,TEXT("kills")));
+			UE_LOG(LogTemp, Display, TEXT("BOT_SOAK_PROGRESS map=%s seconds=%.0f kills=%.0f lift_rides=%.0f door_exits=%.0f steady_tiles=%.0f steady_seconds=%.2f"),
+				*Map, Observer.Time, Number(Report,TEXT("kills")), Number(Report,TEXT("lift_rides")), Number(Report,TEXT("door_exits")),
+				Number(Report,TEXT("navigation_steady_tile_updates")), Number(Report,TEXT("navigation_steady_seconds")));
 		}
 	}
 	Observer.Snapshot();
@@ -891,7 +1072,9 @@ bool RunMap(const FObject& Report, const FString& Output, FString& Error)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotArenaNavChurnSpec, "WoT.Bots.Navigation.Churn.ArenaMatch", Flags)
 bool FBotArenaNavChurnSpec::RunTest(const FString&)
 {
-	const FString Directory = FPaths::ProjectSavedDir() / TEXT("BotSoak/NavChurnSpec");
+	FString Root = FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_BOT_SOAK_DIRECTORY"));
+	FParse::Value(FCommandLine::Get(), TEXT("WotBotSoakDirectory="), Root);
+	const FString Directory = Root.IsEmpty() ? FPaths::ProjectSavedDir() / TEXT("BotSoak/NavChurnSpec") : Root / TEXT("NavChurnSpec");
 	IFileManager::Get().MakeDirectory(*Directory, true);
 	FObject R = NewReport(TEXT("Arena_01"), 8, 60);
 	FString Error;
@@ -945,6 +1128,32 @@ bool FBotSoakEscalationSpec::RunTest(const FString&)
 	return !HasAnyErrors();
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotSoakSpawnProvenanceSpec, "WoT.Bots.SoakDiagnostics.LowerSpawnCollectionProvenance", Flags)
+bool FBotSoakSpawnProvenanceSpec::RunTest(const FString&)
+{
+	UWorld* W = World();
+	ON_SCOPE_EXIT { WoTTest::DestroySpecWorld(W); };
+	FObject R = NewReport(TEXT("observer fixture"), 1, 1);
+	FLogCapture Logs; FObserver Observer(W, R, Logs);
+	// Synthetic heights test reporting only; real traversal specs use map geometry.
+	Observer.LiftFloors.Emplace(FVector::ZeroVector, FVector(0, 0, 300));
+	AWoTBotController* Controller = WoTBotTest::Bot(W, FVector(0, 0, 46));
+	// A pool with nothing to spawn shuts itself down on BeginPlay; give it an item.
+	AWoTAngrealSpawnPool* Pool = WoTBotTest::Pool(W, FVector(0, 0, 330), TEXT("/Script/WoT.WoTAngrealInvFireball"));
+	if (!TestNotNull(TEXT("observed pool"), Pool)) return false;
+	WoTSoakEvents::Events().Broadcast(WoTSoakEvents::EKind::PoolCollect, Pool, Controller->GetPawn());
+	TestEqual(TEXT("lower-origin collection recorded"), Number(Observer.Pool(Pool), TEXT("collected_from_lower_spawn")), 1.0);
+	TestTrue(TEXT("pool belongs to middle landing height"), Observer.IsMiddlePool(Pool));
+	AWoTCharacter* Replacement = WoTBotTest::Body(W, FVector(200, 0, 346));
+	Controller->Possess(Replacement);
+	WoTSoakEvents::Events().Broadcast(WoTSoakEvents::EKind::PoolCollect, Pool, Replacement);
+	TestEqual(TEXT("all collections preserved"), Number(Observer.Pool(Pool), TEXT("collected")), 2.0);
+	TestEqual(TEXT("replacement pawn does not inherit lower spawn"), Number(Observer.Pool(Pool), TEXT("collected_from_lower_spawn")), 1.0);
+	TestEqual(TEXT("one observed lower-floor life"), Number(R, TEXT("lower_spawn_lives")), 1.0);
+	TestEqual(TEXT("separate provenance for each pawn"), Observer.Lives.Num(), 2);
+	return !HasAnyErrors();
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBotSoakSpec, "WoT.Bots.Soak.AllArenaMaps", Flags)
 bool FBotSoakSpec::RunTest(const FString&)
 {
@@ -974,8 +1183,9 @@ bool FBotSoakSpec::RunTest(const FString&)
 		return !bFailed && !HasAnyErrors();
 	}
 	const double Started = FPlatformTime::Seconds();
-	FString Directory;
-	if (!FParse::Value(FCommandLine::Get(), TEXT("WotBotSoakDirectory="), Directory))
+	FString Directory = FPlatformMisc::GetEnvironmentVariable(TEXT("WOT_BOT_SOAK_DIRECTORY"));
+	FParse::Value(FCommandLine::Get(), TEXT("WotBotSoakDirectory="), Directory);
+	if (Directory.IsEmpty())
 		Directory = FPaths::ProjectSavedDir() / TEXT("BotSoak") / FDateTime::UtcNow().ToString(TEXT("%Y%m%d-%H%M%S"));
 	Directory = FPaths::ConvertRelativePathToFull(Directory);
 	IFileManager::Get().MakeDirectory(*Directory,true);

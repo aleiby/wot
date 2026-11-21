@@ -122,15 +122,49 @@ inline bool Materialize(UWorld* W, FMapSet& Maps, const FWoTWorldDescriptor& Des
   {}, nullptr, nullptr, nullptr, nullptr, EWoTRuntimeSkyStageFault::None, nullptr, SurfaceFlags, &InvisibleCollision)) return false;
  Geometry->FinishSpawning(FTransform::Identity, true);
  FWoTWorldProjectionSource Source;
+ // Project the same authenticated mover inputs as the production materializer.
+ // Baked movers require their atlas even in a headless collision fixture; an
+ // omitted atlas makes the projector skip the actor rather than an unlit mesh.
+ TArray<UTexture2D*> MoverResponses;
+ if (Resource.MoverAtlasWidth() != 0 || Resource.MoverAtlasHeight() != 0
+  || !Resource.MoverAtlasBGRA().IsEmpty())
+ {
+  Source.MoverLightmap = WoTRuntimeBSPMaterializeLightmap(Resource.MoverAtlasWidth(),
+   Resource.MoverAtlasHeight(), Resource.MoverAtlasBGRA());
+  if (!Source.MoverLightmap) { Error = TEXT("Fixture could not materialize authenticated mover light-map"); return false; }
+  Geometry->RuntimeTextures.Add(Source.MoverLightmap);
+  for (const FWoTRuntimeMoverAnimationTerm& Term : Resource.MoverAnimationTerms())
+  {
+   UTexture2D* Response = WoTRuntimeBSPMaterializeLightmap(Resource.MoverAtlasWidth(),
+    Resource.MoverAtlasHeight(), Term.ResponseBGRA);
+   if (!Response) { Error = TEXT("Fixture could not materialize authenticated mover light-map response"); return false; }
+   Geometry->RuntimeTextures.Add(Response);
+   MoverResponses.Add(Response);
+  }
+  Source.MoverLightResponses = MoverResponses;
+  if (!MoverResponses.IsEmpty())
+  {
+   Source.MoverBlackLightResponse = WoTRuntimeBSPMaterializeSolidBlackTexture();
+   if (!Source.MoverBlackLightResponse) { Error = TEXT("Fixture could not materialize mover black response"); return false; }
+   Geometry->RuntimeTextures.Add(Source.MoverBlackLightResponse);
+  }
+ }
  Source.MapIdentity = Descriptor.MapIdentity; Source.Records = Resource.Actors();
  Source.Points = Resource.Points(); Source.Nodes = Resource.Nodes(); Source.Vertices = Resource.Vertices();
  Source.Zones = Resource.Zones(); Source.Surfaces = Resource.Surfaces(); Source.Leaves = Resource.Leaves();
  Source.ModelLights = Resource.ModelLights(); Source.MoverModels = Resource.MoverModels();
+ Source.bHasDedicatedMoverCollision = Resource.FormatVersion() >= 4;
  Source.MoverAnimationGroups = Resource.MoverAnimationGroups(); Source.MoverAnimationTerms = Resource.MoverAnimationTerms();
  Source.SemanticObjects = Resource.SemanticObjects(); Source.ReachSpecs = Resource.ReachSpecs();
  Source.bBSPRootOutside = Resource.BSPRootOutside();
  FWoTWorldProjectionResult Projected;
  if (!FWoTWorldProjector::ProjectDeferred(*W, Source, Maps.Defaults, Projected, Error)) return false;
+ if (Projected.SkippedRuleCount(TEXT("Mover")) > 0)
+ {
+  Error = FString::Printf(TEXT("%s fixture skipped %u authored movers: %s"),
+   *Descriptor.MapIdentity, Projected.SkippedRuleCount(TEXT("Mover")), *FString::Join(Projected.SkippedSamples, TEXT("; ")));
+  return false;
+ }
  if (OutTable) *OutTable = Projected.MapLightTable;
  for (AActor* Actor : Projected.DeferredActors) if (IsValid(Actor)) Actor->FinishSpawning(Actor->GetActorTransform());
  return true;
