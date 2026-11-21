@@ -119,6 +119,14 @@ inline FString SummaryRow(const FObject& M)
 		M->GetBoolField(TEXT("frag_limit_end")) ? TEXT("yes") : TEXT("no"),
 		M->GetBoolField(TEXT("restart_requested")) ? TEXT("yes") : TEXT("no"));
 }
+inline FString PoolNames(const FObject& M, const TCHAR* Key)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Rows = nullptr;
+	if (!M->TryGetArrayField(Key, Rows)) return TEXT("not measured");
+	TArray<FString> Names;
+	for (const auto& Row : *Rows) Names.Add(Row->AsString());
+	return Names.IsEmpty() ? TEXT("none") : FString::Join(Names, TEXT(", "));
+}
 inline FString Markdown(const TArray<FObject>& Maps, double WallSeconds)
 {
 	FString Text = FString::Printf(TEXT("# Bot soak\n\nWall time: %.2f seconds. Fixed simulation step: 1/30 second.\n\n"), WallSeconds);
@@ -128,6 +136,21 @@ inline FString Markdown(const TArray<FObject>& Maps, double WallSeconds)
 	Text += TEXT("Body floor warnings count independent entries of the movement component's expected upright feet below a walkable floor. Shape warnings count actual rotated collision penetration. These differ when a relocation tilts a body; history includes its collision axis and vertical extent, and geometry records actual rotated-bottom clearance. Each combined episode retains first history and latest geometry/state.\n\n");
 	Text += SummaryHeader();
 	for (const FObject& M : Maps) Text += SummaryRow(M);
+	Text += TEXT("\n| Map | Projected movers | Lift rides | Door exits | Abandoned traversals | Casts during traversals | Pools never collected | Middle pools never collected from lower spawns | Lower-spawn lives | Recoveries/silent respawns | Steady tiles/seconds | Motion tiles/settling tiles |\n|---|---:|---:|---:|---:|---:|---|---|---:|---|---|---|\n");
+	for (const FObject& M : Maps)
+	{
+		Text += FString::Printf(TEXT("| %s | %.0f | %.0f | %.0f | %.0f | %.0f | %s | %s | %.0f | %.0f/%.0f | %.0f/%.2f | %.0f/%.0f |\n"),
+			*M->GetStringField(TEXT("map")), Number(M, TEXT("projected_movers")), Number(M, TEXT("lift_rides")), Number(M, TEXT("door_exits")),
+			Number(M, TEXT("mover_abandons")), Number(M, TEXT("casts_during_mover_traversal")),
+			*PoolNames(M, TEXT("never_collected_pool_ids")),
+			Number(M, TEXT("lift_links")) > 0 ? *PoolNames(M, TEXT("middle_pool_ids_never_collected_from_lower_spawn")) : TEXT("no lift link"),
+			Number(M, TEXT("lower_spawn_lives")), Number(M, TEXT("recoveries")), Number(M, TEXT("silent_respawns")),
+			Number(M, TEXT("navigation_steady_tile_updates")), Number(M, TEXT("navigation_steady_seconds")),
+			Number(M, TEXT("navigation_motion_tile_updates")), Number(M, TEXT("navigation_settling_tile_updates")));
+	}
+	Text += TEXT("\nMover counts are completed smart-link traversals. Middle pools and lower-spawn lives are classified within 120 units vertically of discovered lift exit and entry floor heights, respectively; spawn feet must be nearer the entry, and pool positions nearer the exit. Collection provenance retains the same pawn's spawn and pickup event. These are observations of natural matches, not forced traversal trials; zero lower-spawn lives means that route was not exercised.\n\n");
+	Text += TEXT("Steady navigation starts after 30 simulated seconds and excludes ticks with observed mover pose changes and ticks draining their outstanding navigation work. Motion and settling tile counts and seconds are retained separately in JSON; the original #112 source-attribution probe remains intact, including unrelated sources. A zero steady duration is unmeasured, not proof of zero churn. Counts are actual ArenaBot tile callbacks, not sums of overlapping source attribution.\n\n");
+	Text += TEXT("The steady probe reads mover transforms once per fixed step and reuses tile counters; it performs no extra path queries, navigation builds or waits. Its measured monitoring cost is navigation_steady_probe_ms (outside World::Tick), while navigation_probe_callback_ms reports the original source probe callbacks. Mover inventory is explicit: zero movers cannot certify a lift or door trial.\n\n");
 	Text += TEXT("\nVisits mean a living bot within 120 units; unvisited in the original table means never collected. Pickups include loose items and bags. Rates and state shares use observed controller seconds (including dead/frozen). Falling is the share of those seconds a living body spent falling, in any state. Clustering samples once per simulated second, over living bodies that are not falling: any three with all pair distances <= 600. Pair distances cover every such pair in those samples; the mean is sensitive to a few bodies far from the rest, the median is not.\n\n");
 	Text += TEXT("| Map | Pool count | Pickups/bot/min | Unique pools visited/collected | Roam/Seek/Engage/Dead/Frozen % | Falling % | Cluster % | Median/mean pair distance |\n|---|---:|---:|---|---|---:|---:|---|\n");
 	for (const FObject& M : Maps)

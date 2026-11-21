@@ -1,4 +1,5 @@
 #include "WoTBotController.h"
+#include "WoTBotMoverLink.h"
 #include "Testing/WoTSoakEvents.h"
 #include "WoTBotFactionProfile.h"
 #include "WoTBotSettings.h"
@@ -193,6 +194,10 @@ void AWoTBotController::Think()
 	UpdateAim();
 	UpdateCastCompletion();
 	if (!CanAct()) return;
+	// A lift or door handler owns the body's movement, not its hands: keep
+	// attacking, defending and healing, as a body in the air does below.
+	// Casting issues no movement; the route choice waits for the handler.
+	if (ActiveMoverLink.IsValid()) { CastArtifacts(); return; }
 	RememberNearbyPools();
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (State == EWoTBotState::Engage && !bTargetVisible
@@ -322,6 +327,7 @@ void AWoTBotController::Hop(const AWoTAngrealSpawnPool* Pool)
 
 void AWoTBotController::UpdateClimb()
 {
+	if (ActiveMoverLink.IsValid()) return;
 	// The navigation mesh climbs steps of up to its voxel-rounded step height,
 	// a little more than the body's own. Where a route rises into such a step
 	// (out of a sunken floor, onto a pedestal), a blocked body jumps it, as the
@@ -881,6 +887,7 @@ float AWoTBotController::StandoffRange() const
 
 bool AWoTBotController::NavigateTo(const FVector& Point)
 {
+	if (ActiveMoverLink.IsValid()) return true;
 	const AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn());
 	UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
 	const ANavigationData* Data = Nav ? Nav->GetNavDataForProps(Body->GetNavAgentPropertiesRef()) : nullptr;
@@ -899,6 +906,7 @@ bool AWoTBotController::NavigateTo(const FVector& Point)
 
 void AWoTBotController::ChooseDestination(bool bForce)
 {
+	if (ActiveMoverLink.IsValid()) return;
 	WOT_SOAK_BODY_SCOPE("bot route/off-mesh rescue request");
 	if (!CanAct()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
@@ -992,6 +1000,7 @@ void AWoTBotController::ChooseDestination(bool bForce)
 
 void AWoTBotController::UpdateStuck()
 {
+	if (ActiveMoverLink.IsValid()) return;
 	const float Now = GetWorld()->GetTimeSeconds();
 	// A body falling through a gap in a floor's collision can fall until KillZ,
 	// minutes away; that fall is not path progress, so the stuck rule ends it.
@@ -1036,6 +1045,16 @@ void AWoTBotController::Tick(float DeltaSeconds)
 	UpdateCastCompletion();
 	if (!CanAct()) return;
 	const FVector Here = GetPawn()->GetActorLocation();
+	if (AWoTBotMoverLink* Link = ActiveMoverLink.Get())
+	{
+		// Intentional waiting and based vertical travel have their own deadline.
+		// Neither the generic hop nor the off-mesh/stuck rescue owns this body.
+		ClimbBlockedSince = -1.0f;
+		LastProgressTime = LastRecoveryTime = GetWorld()->GetTimeSeconds();
+		ProgressPosition = LastBodyLocation = Here;
+		Link->UpdateTraversal(this, DeltaSeconds);
+		return;
+	}
 	if (IsHeldByWhirlwind())
 	{
 		// The whirlwind holds the body with its movement disabled (WhirlwindLeech.uc
@@ -1063,4 +1082,50 @@ void AWoTBotController::Tick(float DeltaSeconds)
 	}
 	LastBodyLocation = Here;
 	UpdateStuck();
+}
+
+bool AWoTBotController::BeginMoverTraversal(AWoTBotMoverLink* Link)
+{
+	if (!CanAct() || ActiveMoverLink.IsValid()) return false;
+	ActiveMoverLink = Link;
+	// UE's smart-link callback identifies the action. Explicitly pause the
+	// follower as well: tile invalidation must not resume world-space steering.
+	GetPathFollowingComponent()->PauseMove();
+	CastChecked<AWoTCharacter>(GetPawn())->GetCharacterMovement()->StopMovementImmediately();
+	return true;
+}
+
+void AWoTBotController::CancelMoverTraversal()
+{
+	AWoTBotMoverLink* Link = ActiveMoverLink.Get();
+	ActiveMoverLink.Reset();
+	if (Link) Link->Cancel(this);
+}
+
+void AWoTBotController::FinishMoverTraversal(AWoTBotMoverLink* Link, bool bSuccess)
+{
+	if (ActiveMoverLink != Link) return;
+	ActiveMoverLink.Reset();
+	const float Now = GetWorld()->GetTimeSeconds();
+	for (auto It = MoverLinkRetryTimes.CreateIterator(); It; ++It)
+		if (!It.Key().IsValid() || It.Value() <= Now) It.RemoveCurrent();
+	// Not straight back into the same wait: the replanning below, and every route
+	// until the cooldown ends, leaves this link out (CanPlanThroughMoverLink).
+	if (!bSuccess) MoverLinkRetryTimes.Add(Link, Now + WoTBotDecision::MoverLinkRetrySeconds);
+	StopMovement();
+	NextRepathTime = 0;
+	LastProgressTime = LastRecoveryTime = Now;
+	if (!CanAct()) return;
+	ProgressPosition = LastBodyLocation = GetPawn()->GetActorLocation();
+	// Keep the original destination, but find a fresh path after mover tiles
+	// changed. A failed action abandons its pool and chooses another route.
+	if (bSuccess) NavigateTo(Destination);
+	else ChooseDestination(true);
+}
+
+bool AWoTBotController::CanPlanThroughMoverLink(const AWoTBotMoverLink* Link) const
+{
+	const float* RetryAt = MoverLinkRetryTimes.Find(Link);
+	const UWorld* World = GetWorld();
+	return !RetryAt || !World || World->GetTimeSeconds() >= *RetryAt;
 }
