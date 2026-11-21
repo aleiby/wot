@@ -14,6 +14,14 @@ constexpr float RevisitBlockSeconds = 3.0f;
 constexpr float ArrivalRadius = 120.0f;
 // A pool with no complete path is not searched for again until this has passed.
 constexpr float UnreachableRetrySeconds = 5.0f;
+// A failed lift or door traversal (a contended deck, a blocked exit, a missed
+// boarding, a displaced body) leaves that link out of this bot's planning for
+// this long. A returning lift goes round in its two moves plus its stay open
+// (MoveTime, StayOpenTime: 5 s for Arena_04's): three rounds give a rider ahead,
+// a body at the exit or a crowd at the entry time to clear, instead of queuing
+// straight back behind the same deck. It is well inside VisitMemory, which keeps
+// the abandoned pool out of this bot's choices for 45 s anyway.
+constexpr float MoverLinkRetrySeconds = 15.0f;
 // Spread: another bot's claim leaves a pool this share of its value.
 constexpr float ClaimedWeight = .15f;
 // Running the map with nothing worth collecting competes at this share.

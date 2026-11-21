@@ -1,4 +1,5 @@
 #include "WoTBotController.h"
+#include "WoTBotMoverLink.h"
 #include "Testing/WoTSoakEvents.h"
 #include "WoTBotFactionProfile.h"
 #include "WoTBotRoster.h"
@@ -149,6 +150,7 @@ void AWoTBotController::StartThinking()
 
 void AWoTBotController::OnUnPossess()
 {
+	CancelMoverTraversal();
 	ReleasePoolGoal();
 	if (Target.IsValid()) Target->OnDamageApplied.RemoveAll(this);
 	CastHold.Clear();
@@ -218,6 +220,7 @@ void AWoTBotController::SpawnBody()
 
 void AWoTBotController::OnParticipantPawnDied(AWoTCharacter* DeadPawn, float RespawnDelaySeconds)
 {
+	CancelMoverTraversal();
 	if (Caster.IsValid()) Caster->Release();
 	GetWorldTimerManager().ClearTimer(ThinkTimer);
 	if (DeadPawn)
@@ -273,6 +276,7 @@ void AWoTBotController::SetIdle(bool bNewIdle)
 
 void AWoTBotController::SuspendMovement()
 {
+	CancelMoverTraversal();
 	if (AWoTCharacter* Body = Cast<AWoTCharacter>(GetPawn()))
 	{
 		UCharacterMovementComponent* Movement = Body->GetCharacterMovement();
@@ -358,6 +362,7 @@ void AWoTBotController::Retire()
 
 void AWoTBotController::OnMatchEnded()
 {
+	CancelMoverTraversal();
 	if (bFrozen) return;
 	bFrozen = true;
 	ReleasePoolGoal();
@@ -396,6 +401,7 @@ void AWoTBotController::CancelCasting()
 
 void AWoTBotController::EndPlay(const EEndPlayReason::Type Reason)
 {
+	CancelMoverTraversal();
 	if (GetWorld() && PoolSpawnHandle.IsValid()) GetWorld()->RemoveOnActorSpawnedHandler(PoolSpawnHandle);
 	PendingPoolSounds.Reset();
 	ReleasePoolGoal();
