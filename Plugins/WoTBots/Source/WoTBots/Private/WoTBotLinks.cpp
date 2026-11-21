@@ -1,4 +1,5 @@
 #include "WoTBotLinks.h"
+#include "WoTBotMoverLink.h"
 #include "WoTBotNavigation.h"
 #include "AI/WoTPathNode.h"
 #include "WoTMover.h"
@@ -86,8 +87,8 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 		}
 		return Ends.Add(Node, End);
 	};
-	// Doors and other movers: the reach was recorded through them open, and a
-	// bot body does not open a door its player-proximity trigger is waiting for.
+	// Ordinary reaches through movers stay rejected. Qualified body-operated
+	// traversals get their own directed smart link and movement handler below.
 	TArray<FBox> Movers;
 	for (TActorIterator<AWoTMover> It(&World); It; ++It) Movers.Add(It->GetComponentsBoundingBox(true));
 	const auto ThroughMover = [&Movers](const FVector& A, const FVector& B)
@@ -110,8 +111,14 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 			// A teleporter's reach to its destination (Teleporter URL) is walked
 			// into; any other reach is walked off, or jumped up when it rises.
 			const bool bTeleport = It->IsTeleporter() && Edge.Other->IsTeleporter();
-			const float Rise = To.Location.Z - From.Location.Z;
-			if (!bTeleport && (Rise > MaxRise || Rise < -MaxDrop || ThroughMover(From.Location, To.Location))) continue;
+			// On land the projected floors are what a body stands on. In water,
+			// projection attaches an end to the submerged floor, below the height
+			// the body swims at, so the authored reach's own rise also qualifies.
+			// The projected ends still attach the link to the mesh.
+			const auto WithinReach = [](float Rise) { return Rise <= MaxRise && Rise >= -MaxDrop; };
+			const bool bReachable = WithinReach(To.Location.Z - From.Location.Z)
+				|| WithinReach(Edge.Other->GetActorLocation().Z - It->GetActorLocation().Z);
+			if (!bTeleport && (!bReachable || ThroughMover(From.Location, To.Location))) continue;
 			// The mesh joins a link's far end only within the neighbouring tiles; a
 			// longer link would never carry a route.
 			int32 FromX, FromY, ToX, ToY;
@@ -159,6 +166,6 @@ int32 Build(UWorld& World, TArray<FDistantTeleport>* Distant)
 			++Added;
 		}
 	}
-	return Added;
+	return Added + WoTBotMoverLinks::Build(World, *Nav, *Mesh, Agent);
 }
 }
