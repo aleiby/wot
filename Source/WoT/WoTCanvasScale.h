@@ -6,6 +6,7 @@
 class UCanvas;
 class UFont;
 class UTexture2D;
+enum ESimpleElementBlendMode : int;
 
 struct FWoTCanvasDimensions
 {
@@ -46,4 +47,50 @@ struct FWoTCanvasScale
 		const FLinearColor& Tint = FLinearColor::White,
 		EWoTTextAlignment Alignment = EWoTTextAlignment::Left,
 		float TextScale = 1.0f) const;
+
+	/** The one place the HUD submits a texture tile to a canvas: Size in
+	 * canvas units, Blend as the HUD styles map it. */
+	static void SubmitTile(UCanvas* CanvasObject, UTexture2D* Texture,
+		const FVector2D& Position, const FVector2D& Size, const FLinearColor& Color,
+		EWoTHUDStyle Style);
+	/** The one place the HUD submits a text run to a canvas: a canvas text
+	 * item at Position, masked or translucent, Scale times its face's size;
+	 * bCentreX centres it by the item's own whole-pixel rule. */
+	static void SubmitText(UCanvas* CanvasObject, const FString& Text, const UFont* Font,
+		const FVector2D& Position, const FLinearColor& Color, EWoTHUDStyle Style,
+		float Scale, bool bCentreX);
+	/** The blend SubmitTile and SubmitText give Style now: Normal opaque,
+	 * Masked masked, Translucent SE_BLEND_Translucent, or SE_BLEND_AlphaComposite
+	 * while an FWoTCanvasAlphaScope is open. */
+	static WOT_API ESimpleElementBlendMode BlendModeFor(EWoTHUDStyle Style);
+
+#if WITH_AUTOMATION_TESTS
+	/** Test-only: sees every icon the HUD asks DrawIconAt for (drawable or
+	 * not) and every text run it submits, one line each, with the canvas
+	 * size and transform it lands on. */
+	static WOT_API TFunction<void(const FString&)>& SubmissionObserverForTesting();
+#endif
+};
+
+/** While one is open (game thread only), the HUD's translucent style submits
+ * with SE_BLEND_AlphaComposite instead of SE_BLEND_Translucent.
+ * SE_BLEND_Translucent blends colour by the source alpha but writes colour
+ * only, leaving the target's alpha as it was (SetBlendState in the engine's
+ * BatchedElements.cpp). A headset panel is cleared to transparent and its
+ * stereo layer is composited as unpremultiplied colour by the texture's own
+ * alpha, so it needs straight colour plus that alpha: SE_BLEND_AlphaComposite
+ * (colour One/InvSrcAlpha, alpha One/InvSrcAlpha) stores exactly (colour,
+ * alpha) over the clear, and the layer then shows colour * alpha over the
+ * world as the flat HUD does over the scene. SE_BLEND_AlphaBlend would store
+ * colour * alpha, which the layer multiplies by alpha again (fades darker).
+ * The HUD's translucent elements do not overlap each other on the panel. The
+ * flat HUD never opens one, so its draw stream is unchanged. */
+class WOT_API FWoTCanvasAlphaScope
+{
+public:
+	FWoTCanvasAlphaScope();
+	~FWoTCanvasAlphaScope();
+	FWoTCanvasAlphaScope(const FWoTCanvasAlphaScope&) = delete;
+	FWoTCanvasAlphaScope& operator=(const FWoTCanvasAlphaScope&) = delete;
+	static bool IsOpen();
 };

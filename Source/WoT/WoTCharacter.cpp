@@ -1,4 +1,5 @@
 #include "WoTCharacter.h"
+#include "WoTLocalPlayerHooks.h"
 #include "Testing/WoTSoakEvents.h"
 #include "WoTRandom.h"
 #include "Assets/WoTRuntimeAssets.h"
@@ -903,6 +904,10 @@ void AWoTCharacter::TeleportSucceeded(bool bIsATest)
 	if (!bIsATest && !IsNPCPawn())
 	{
 		ExitPlayerMovementConstraint();
+	}
+	if (!bIsATest)
+	{
+		FWoTLocalPlayerHooks::PawnRelocated(this);
 	}
 }
 
@@ -2639,7 +2644,11 @@ void AWoTCharacter::Tick(float DeltaSeconds)
 		}
 		if (bCenterViewHeld && !bFreeLookHeld) { bKeyboardLook = false; }
 		const UCharacterMovementComponent* Movement = GetCharacterMovement();
-		const bool bExplicitLook = bExplicitLookInputThisFrame
+		// A local aim provider counts as explicit look every frame, even when its
+		// pose is still: centering, look-spring and stair look never write its
+		// pitch, and the preferences themselves are left as they are.
+		const bool bExplicitLook = FWoTLocalPlayerHooks::OwnsAim(Cast<APlayerController>(Controller))
+			|| bExplicitLookInputThisFrame
 			|| bFreeLookHeld || IsLookActive();
 		if (!bCenterViewHeld)
 		{
@@ -4509,23 +4518,32 @@ void AWoTCharacter::SetupPlayerInputComponent(UInputComponent* Input)
 		FInputActionBinding Binding(
 			FName(*FString::Printf(TEXT("SelectHand%d"), DisplayDigit)), IE_Pressed);
 		Binding.ActionDelegate.GetDelegateForManualSet().BindWeakLambda(
-			this, [this, HandIndex]()
-			{
-				const AWoTPlayerController* WoTController =
-					Cast<AWoTPlayerController>(GetController());
-				AWoTHUD* WoTHUD = WoTController
-					? Cast<AWoTHUD>(WoTController->GetHUD()) : nullptr;
-				if (!WoTHUD || !WoTHUD->HandleTeamSelectDigit(HandIndex))
-				{
-					SelectHand(HandIndex);
-				}
-			});
+			this, [this, HandIndex]() { SelectHandPressed(HandIndex); });
 		Input->AddActionBinding(MoveTemp(Binding));
+	}
+}
+
+void AWoTCharacter::SelectHandPressed(int32 HandIndex)
+{
+	// The team prompt takes the digit first (BattleHUD.KeyEvent), then the hand.
+	const AWoTPlayerController* WoTController =
+		Cast<AWoTPlayerController>(GetController());
+	AWoTHUD* WoTHUD = WoTController
+		? Cast<AWoTHUD>(WoTController->GetHUD()) : nullptr;
+	if (!WoTHUD || !WoTHUD->HandleTeamSelectDigit(HandIndex))
+	{
+		SelectHand(HandIndex);
 	}
 }
 
 void AWoTCharacter::UseAngreal()
 {
+	// Every branch below (casts, seals, the editor click, the RPC's rotation)
+	// reads the aim a local provider supplies now.
+	if (AWoTPlayerController* AimController = Cast<AWoTPlayerController>(GetController()))
+	{
+		AimController->RefreshLocalAim();
+	}
 	if (IsHardLanding())
 	{
 		return;
@@ -4684,6 +4702,20 @@ void AWoTCharacter::SelectHand(int32 Index)
 	const bool bNewHand = Index != CurrentHandSet->Selected;
 	CurrentHandSet->Select(Index);
 	DriveHandSelection(bNewHand);
+}
+
+void AWoTCharacter::SelectSlot(int32 Index)
+{
+	EnsureAngrealHands();
+	UWoTHandInfo* Hand = CurrentHandSet ? CurrentHandSet->GetSelectedHand() : nullptr;
+	// Only a held slot: GetClassName reads none for an empty or unheld slot, as
+	// NextItem's own scan skips them.
+	if (!Hand || Index < 0 || Index >= UWoTHandInfo::NumSlots || Hand->GetClassName(Index).IsNone())
+	{
+		return;
+	}
+	Hand->Select(Index);
+	DriveHandSelection(/*bNewHand*/ false);
 }
 
 void AWoTCharacter::NextHand()
@@ -5515,6 +5547,15 @@ bool AWoTCharacter::IsSwimmingForInput() const
 	return Move != nullptr && Move->IsSwimming() && Move->GetMaxAcceleration() > 0.0f;
 }
 
+float AWoTCharacter::GetFullStickInputScale() const
+{
+	// AddForwardInput's own scale for a full deflection; the movement clamp
+	// limits every input to 1.
+	return IsSwimmingForInput()
+		? FMath::Min(1.0f, RetailSwimForwardAccel / GetCharacterMovement()->GetMaxAcceleration())
+		: 1.0f;
+}
+
 void AWoTCharacter::AddForwardInput(float Value)
 {
 	if (!IsPlayerMovementConstrained() && !FMath::IsNearlyZero(Value))
@@ -5527,7 +5568,10 @@ void AWoTCharacter::AddForwardInput(float Value)
 					/ GetCharacterMovement()->GetMaxAcceleration());
 			return;
 		}
-		AddMovementInput(FRotator(0, GetControlRotation().Yaw, 0).Vector(), Value);
+		// Ground movement follows the control yaw, or a local movement basis.
+		const double Yaw = FWoTLocalPlayerHooks::GroundYaw(
+			Cast<APlayerController>(Controller), GetControlRotation().Yaw);
+		AddMovementInput(FRotator(0, Yaw, 0).Vector(), Value);
 	}
 }
 
@@ -5535,8 +5579,12 @@ void AWoTCharacter::AddStrafeInput(float Value)
 {
 	if (!IsPlayerMovementConstrained() && !FMath::IsNearlyZero(Value))
 	{
-		// The ViewRotation Y axis is horizontal (no roll), as in walking.
-		const FVector Right = FRotationMatrix(FRotator(0, GetControlRotation().Yaw, 0))
+		// The ViewRotation Y axis is horizontal (no roll), as in walking. Swimming
+		// keeps the view's yaw; ground movement may use a local movement basis.
+		const double Yaw = IsSwimmingForInput() ? GetControlRotation().Yaw
+			: FWoTLocalPlayerHooks::GroundYaw(
+				Cast<APlayerController>(Controller), GetControlRotation().Yaw);
+		const FVector Right = FRotationMatrix(FRotator(0, Yaw, 0))
 			.GetScaledAxis(EAxis::Y);
 		const float Scale = IsSwimmingForInput()
 			? RetailSwimSideAccel / GetCharacterMovement()->GetMaxAcceleration()

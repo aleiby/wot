@@ -56,6 +56,8 @@ class UWoTCharacterMovement : public UCharacterMovementComponent
 	GENERATED_BODY()
 
 public:
+	/** Adds a local extra movement source (WoTLocalPlayerHooks.h) to the stick input. */
+	virtual FVector ConsumeInputVector() override;
 	// Pure retail ladder-direction seam for specs. Caller invokes it only when
 	// Acceleration is nonzero: ViewRotation gets the +4096 UE1-unit (+22.5 deg)
 	// pitch bias, Z comes from GroundSpeed, and positive biased pitch damps XY.
@@ -137,6 +139,14 @@ public:
 		const FVector& Accel, const FVector& RelativeClientLocation,
 		FMovementBaseInterfaceData* ClientMovementBaseInterfaceData,
 		FName ClientBaseBoneName, uint8 ClientMovementMode) override;
+
+protected:
+	using UCharacterMovementComponent::OnClientCorrectionReceived;
+	virtual void OnClientCorrectionReceived(FNetworkPredictionData_Client_Character& ClientData,
+		float TimeStamp, FVector NewLocation, FVector NewVelocity,
+		FMovementBaseInterfaceData* NewMovementBaseInterfaceData, FName NewBaseBoneName,
+		bool bHasBase, bool bBaseRelativePosition, uint8 ServerMovementMode,
+		FVector ServerGravityDirection) override;
 
 private:
 	int32 ClientCorrectionCountForTest = 0;

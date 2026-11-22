@@ -1,4 +1,5 @@
 #include "WoTPlayerController.h"
+#include "WoTLocalPlayerHooks.h"
 #include "Gamepad/WoTGamepadLayer.h"
 #include "EnhancedInputComponent.h"
 #include "WoTRandom.h"
@@ -974,12 +975,18 @@ void AWoTPlayerController::ApplyRetailViewFlash(FMinimalViewInfo& OutResult) con
 
 void AWoTPlayerController::ApplyRetailViewEffects(FMinimalViewInfo& OutResult) const
 {
-	OutResult.Location += UE1WalkBob;
-	if (const AWoTCharacter* PawnCharacter = Cast<AWoTCharacter>(GetPawn()))
+	// A local view owner may remove the synthetic motion (walk bob, smoothed eye
+	// height, vertical shake); their state keeps running. The flash is a gameplay
+	// effect and always applies.
+	if (!FWoTLocalPlayerHooks::SuppressSyntheticMotion(this))
 	{
-		OutResult.Location.Z += UE1EyeHeight - PawnCharacter->BaseEyeHeight;
+		OutResult.Location += UE1WalkBob;
+		if (const AWoTCharacter* PawnCharacter = Cast<AWoTCharacter>(GetPawn()))
+		{
+			OutResult.Location.Z += UE1EyeHeight - PawnCharacter->BaseEyeHeight;
+		}
+		OutResult.Location.Z += UE1ShakeVert;
 	}
-	OutResult.Location.Z += UE1ShakeVert;
 	ApplyRetailViewFlash(OutResult);
 }
 
@@ -992,7 +999,10 @@ void AWoTPlayerController::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResu
 		CalculateCitadelOrbitView(CitadelEditZone->GetActorLocation(),
 			CitadelEditZone->EditViewAngle, CitadelEditZone->EditViewDistance,
 			OutResult.Location, OutResult.Rotation, CitadelOrbitViewOffset);
-		OutResult.Location.Z += UE1ShakeVert;
+		if (!FWoTLocalPlayerHooks::SuppressSyntheticMotion(this))
+		{
+			OutResult.Location.Z += UE1ShakeVert;
+		}
 		ApplyViewFlash();
 		return;
 	}
@@ -1010,7 +1020,10 @@ void AWoTPlayerController::CalcCamera(float DeltaTime, FMinimalViewInfo& OutResu
 			OutResult.Location = CalcEndCamLocation(
 				CameraTarget->GetActorLocation(), OutResult.Rotation,
 				bUseExternalTarget ? ExternalEndCamDistance : EndCamDistance);
-			OutResult.Location.Z += UE1ShakeVert;
+			if (!FWoTLocalPlayerHooks::SuppressSyntheticMotion(this))
+			{
+				OutResult.Location.Z += UE1ShakeVert;
+			}
 			ApplyViewFlash();
 			return;
 		}
@@ -1808,8 +1821,28 @@ void AWoTPlayerController::Jump()
 
 void AWoTPlayerController::UpdateRotation(float DeltaTime)
 {
-	if (CitadelEditCameraMode == EWoTCitadelEditCameraMode::Orbit
-		&& IsValid(CitadelEditZone.Get()))
+	// A local aim provider (WoTLocalPlayerHooks.h) replaces mouse and stick look:
+	// its absolute yaw plus the gameplay yaw is taken directly, and its pitch
+	// enters as this frame's look input so the view limits and the sign-dependent
+	// pitch constraint below treat it as an ordinary look change. The citadel
+	// orbit view is not aim: look input turns its camera and the provider is not
+	// sampled there.
+	const bool bProviderAim = FWoTLocalPlayerHooks::BeginAimUpdate(*this);
+	const bool bOrbitView = CitadelEditCameraMode == EWoTCitadelEditCameraMode::Orbit
+		&& IsValid(CitadelEditZone.Get());
+	if (bProviderAim && !bOrbitView)
+	{
+		FRotator Aim = GetControlRotation();
+		const FRotator Current = Aim;
+		const bool bSampled = FWoTLocalPlayerHooks::SampleAim(*this, Aim);
+		RotationInput = FRotator::ZeroRotator;
+		if (bSampled)
+		{
+			SetControlRotation(FRotator(Current.Pitch, Aim.Yaw, Current.Roll));
+			RotationInput.Pitch = FMath::FindDeltaAngleDegrees(Current.Pitch, Aim.Pitch);
+		}
+	}
+	if (bOrbitView)
 	{
 		// PlayerTickEdit replaces the view update: look input (aTurn/aLookUp,
 		// decelerated x0.3) turns ViewOffset instead of the ghosted body.
@@ -1819,7 +1852,27 @@ void AWoTPlayerController::UpdateRotation(float DeltaTime)
 	// Capture the real, scaled input before the base applies it to ControlRotation.
 	// Impaled.UpdateRotation chooses its 3000/8000 boundary from this sign.
 	const float AppliedPitchInput = RotationInput.Pitch;
-	Super::UpdateRotation(DeltaTime);
+	if (bProviderAim)
+	{
+		// APlayerController::UpdateRotation without its implicit tracked-device
+		// rotation step, which would replace the provider's aim: the view limits
+		// and the pawn's facing still apply.
+		FRotator DeltaRotation(RotationInput);
+		FRotator ViewRotation = GetControlRotation();
+		if (PlayerCameraManager)
+		{
+			PlayerCameraManager->ProcessViewRotation(DeltaTime, ViewRotation, DeltaRotation);
+		}
+		SetControlRotation(ViewRotation);
+		if (APawn* const ViewPawn = GetPawnOrSpectator())
+		{
+			ViewPawn->FaceRotation(ViewRotation, DeltaTime);
+		}
+	}
+	else
+	{
+		Super::UpdateRotation(DeltaTime);
+	}
 	if (AWoTCharacter* WoTPawn = Cast<AWoTCharacter>(GetPawn()))
 	{
 		if (WoTPawn->GetEffectivePlayerMovementConstraint()
@@ -1834,6 +1887,35 @@ void AWoTPlayerController::UpdateRotation(float DeltaTime)
 			WoTPawn->ClearCreaturePitchAfterNormalViewUpdate();
 		}
 	}
+	if (bProviderAim)
+	{
+		// After the view limits, the pawn's facing and the constraints: any later
+		// yaw change is gameplay's, and keeps applying to the provider's aim.
+		FWoTLocalPlayerHooks::EndAimUpdate(*this);
+	}
+}
+
+void AWoTPlayerController::RefreshLocalAim()
+{
+	// Without a local aim provider the control rotation is already current.
+	if (!FWoTLocalPlayerHooks::OwnsAim(this))
+	{
+		return;
+	}
+	UpdateRotation(0.0f);
+	RotationInput = FRotator::ZeroRotator;
+}
+
+void AWoTPlayerController::FlushPressedKeys()
+{
+	// A key flush (focus loss, a window taking input) ends every held input.
+	FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::InputContextChanged);
+	Super::FlushPressedKeys();
+}
+
+bool AWoTPlayerController::IsMoveInputIgnored() const
+{
+	return Super::IsMoveInputIgnored() || FWoTLocalPlayerHooks::IsMovementHeld(this);
 }
 
 #if WITH_AUTOMATION_TESTS
@@ -1967,6 +2049,21 @@ void AWoTPlayerController::ApplyPlayerStateEntryPresentation(
 		bShowScores = true;
 		break;
 	case EWoTPlayerStateMachineState::Playing:
+	default:
+		break;
+	}
+	// Local-player hooks hear each state boundary after its presentation applies.
+	switch (NewState)
+	{
+	case EWoTPlayerStateMachineState::Dying:
+		FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::Death);
+		break;
+	case EWoTPlayerStateMachineState::Playing:
+		FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::Respawn);
+		break;
+	case EWoTPlayerStateMachineState::GameEnded:
+		FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::MatchEnded);
+		break;
 	default:
 		break;
 	}
@@ -3361,8 +3458,8 @@ void AWoTPlayerController::CreateChatInputWidget()
 	}
 
 	ChatInputViewport = GEngine->GameViewport;
-	FVector2D ChatViewportSize = FVector2D::ZeroVector;
-	ChatInputViewport->GetViewportSize(ChatViewportSize);
+	// The viewport's size, or a local player's UI host's surface (H6).
+	const FVector2D ChatViewportSize = FWoTLocalPlayerHooks::UIScreenSize(*ChatInputViewport);
 	ChatInputPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ChatInputWidget = SNew(SWoTChatInputOverlay)
 		.PlayerController(this)
@@ -4032,8 +4129,8 @@ void AWoTPlayerController::CreateHelpWidget(const FWoTHelpContent& Content)
 	}
 	const FWoTManagedKeyBinding* HelpKeys =
 		Settings.FindBinding(EWoTManagedBinding::ShowHelp);
-	FVector2D HelpViewportSize = FVector2D::ZeroVector;
-	HelpViewport->GetViewportSize(HelpViewportSize);
+	// The viewport's size, or a local player's UI host's surface (H6).
+	const FVector2D HelpViewportSize = FWoTLocalPlayerHooks::UIScreenSize(*HelpViewport);
 	// The game layer applies the UI DPI curve for the viewport size (the
 	// native DPI factor is extracted by SGameLayerManager).
 	const float HelpDpiScale = GetDefault<UUserInterfaceSettings>()->GetDPIScaleBasedOnSize(
@@ -4204,8 +4301,8 @@ void AWoTPlayerController::CreateItemInfoWidget(AWoTInventory* Item)
 		return;
 	}
 	ItemInfoViewport = GEngine->GameViewport;
-	FVector2D ItemInfoViewportSize = FVector2D::ZeroVector;
-	ItemInfoViewport->GetViewportSize(ItemInfoViewportSize);
+	// The viewport's size, or a local player's UI host's surface (H6).
+	const FVector2D ItemInfoViewportSize = FWoTLocalPlayerHooks::UIScreenSize(*ItemInfoViewport);
 	ItemInfoPresentationAuthority = FWoTFrontEndPresentationAuthority::Create(this);
 	ItemInfoWidget = SNew(SWoTItemInfoOverlay)
 		.PlayerController(this)
@@ -4364,6 +4461,7 @@ void AWoTPlayerController::ClearTravelProgressOnArrival()
 void AWoTPlayerController::PreClientTravel(const FString& PendingURL,
 	ETravelType TravelType, bool bIsSeamlessTravel)
 {
+	FWoTLocalPlayerHooks::Notify(*this, EWoTLocalPlayerEvent::Travel);
 	// FInputModeUIOnly leaves the shared game viewport ignoring input, and no
 	// later controller re-applies game input on a game-to-game travel.
 	RemoveChatInputWidget(/*bRestoreGameInput*/ true);
@@ -4400,6 +4498,7 @@ void AWoTPlayerController::NotifyLoadedWorld(
 
 void AWoTPlayerController::EndPlay(const EEndPlayReason::Type Reason)
 {
+	FWoTLocalPlayerHooks::ControllerEnded(*this, Reason);
 	UnbindProgressFailureDelegates();
 	if (IsLocalController())
 	{
@@ -4438,6 +4537,9 @@ void AWoTPlayerController::OnPossess(APawn* InPawn)
 	{
 		GamepadLayer->OnPawnChanged();
 	}
+	// The same possession rule for local-player hook commands: release toward
+	// the pawn that is still possessed.
+	FWoTLocalPlayerHooks::PawnChanging(*this);
 	if (IsLocalController() && GetWorld() && !GetWorld()->IsEditorWorld())
 	{
 		const FVector Where = InPawn ? InPawn->GetActorLocation() : FVector::ZeroVector;
@@ -4507,6 +4609,7 @@ void AWoTPlayerController::OnPossess(APawn* InPawn)
 void AWoTPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+	FWoTLocalPlayerHooks::PrepareInput(*this, InputComponent);
 	if (IsLocalController() && PlayerInput && GetGameInstance())
 	{
 		if (UWoTPreferencesSubsystem* Preferences =
@@ -4610,6 +4713,7 @@ void AWoTPlayerController::OnUnPossess()
 	{
 		GamepadLayer->OnPawnChanged();
 	}
+	FWoTLocalPlayerHooks::PawnChanging(*this);
 	ReconcileOwnerLocalZoneFOVPawn(nullptr);
 	RemoveHelpWidget();
 	RemoveItemInfoWidget();
@@ -4626,6 +4730,7 @@ void AWoTPlayerController::SetPawn(APawn* InPawn)
 		ResetRetailCameraState(InPawn);
 	}
 	Super::SetPawn(InPawn);
+	FWoTLocalPlayerHooks::Reconcile(*this);
 	ReconcileOwnerLocalZoneFOVPawn(InPawn);
 }
 
@@ -4636,6 +4741,7 @@ void AWoTPlayerController::OnRep_Pawn()
 	ReconcileOwnerLocalZoneFOVPawn(nullptr);
 	RemoveItemInfoWidget();
 	Super::OnRep_Pawn();
+	FWoTLocalPlayerHooks::Reconcile(*this);
 	ResetRetailCameraState(GetPawn());
 	ReconcileOwnerLocalZoneFOVPawn(GetPawn());
 }
@@ -4694,6 +4800,11 @@ void AWoTPlayerController::Destroyed()
 
 void AWoTPlayerController::PlayerTick(float DeltaTime)
 {
+	// Local-player hooks: deliver pending notifications (a relocation since the
+	// last tick), then take a local aim provider's pose before input and actors
+	// read the aim this frame.
+	FWoTLocalPlayerHooks::Reconcile(*this);
+	RefreshLocalAim();
 	if (GamepadLayer)
 	{
 		GamepadLayer->Tick(DeltaTime);
@@ -5035,8 +5146,16 @@ float AWoTPlayerController::GetCameraFOVForTest() const
 void AWoTPlayerController::ClientSetForcedViewYaw_Implementation(
 	bool bEnable, float YawRateUnitsPerSecond)
 {
+	const bool bWasForced = bForcedViewYaw;
 	bForcedViewYaw = bEnable;
 	ForcedViewYawRateUnits = bEnable ? YawRateUnitsPerSecond : 0.0f;
+	if (bWasForced != bEnable)
+	{
+		// Local-player hooks: the aim's gameplay yaw grows while the view is
+		// forced round, and a consumer re-aligns once the turn ends.
+		FWoTLocalPlayerHooks::Notify(*this, bEnable
+			? EWoTLocalPlayerEvent::ForcedTurnStarted : EWoTLocalPlayerEvent::ForcedTurnEnded);
+	}
 }
 
 void AWoTPlayerController::ClientShakeView_Implementation(
@@ -5311,7 +5430,18 @@ void AWoTPlayerController::TickUE1ViewShake(float DeltaTime)
 		}
 	}
 	View.Roll = RollUnits * 360.0f / 65536.0f;
-	SetControlRotation(View);
+	if (!FWoTLocalPlayerHooks::SuppressSyntheticMotion(this))
+	{
+		SetControlRotation(View);
+	}
+	else if (!FMath::IsNearlyZero(GetControlRotation().Roll))
+	{
+		// A local view owner removes the cosmetic roll; the shake timers above
+		// keep running, and the roll resumes from level once the owner leaves.
+		FRotator Level = GetControlRotation();
+		Level.Roll = 0.0f;
+		SetControlRotation(Level);
+	}
 }
 
 // --- MP session console verbs. Thin wrappers so a test run drives sessions

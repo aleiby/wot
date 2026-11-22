@@ -10,6 +10,7 @@
 #include "WoTMapLightTable.h"
 #include "WoTGameMode.h"
 #include "WoTEvents.h"
+#include "WoTLocalPlayerHooks.h"
 #include "WoTSoundTable.h"
 #include "Payload/WoTPayloadActivation.h"
 #include "Inventory/WoTAngrealInvLightning.h"
@@ -141,6 +142,10 @@ void UWoTZoneIndex::RefreshAfterRelocation(AActor* Actor)
 	{
 		Zones->UpdateActorZones(Actor);
 	}
+	// Every gameplay relocation (teleporters, swaps, pits) passes here; a local
+	// player's pawn reports it to the local-player hooks, which announce a jump
+	// beyond their teleport distance (inert without them).
+	FWoTLocalPlayerHooks::PawnRelocated(Actor);
 }
 
 AWoTZoneVolume* UWoTZoneIndex::GetFootRegion(const APawn* Pawn) const

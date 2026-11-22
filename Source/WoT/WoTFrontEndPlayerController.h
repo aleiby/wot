@@ -47,6 +47,9 @@ public:
 	UFUNCTION(Exec) void WoTJoin(int32 Index = 0);
 	UFUNCTION(Exec) void WoTLeave();
 
+	virtual void PreClientTravel(const FString& PendingURL, ETravelType TravelType,
+		bool bIsSeamlessTravel) override;
+
 #if WITH_AUTOMATION_TESTS
 	bool RunFrontEndHandoffForTesting(EWoTFrontEndHandoffPath Path,
 		const FWoTBootstrapSnapshot& ReadySnapshot);
@@ -58,6 +61,7 @@ public:
 #endif
 
 protected:
+	virtual void SetupInputComponent() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 

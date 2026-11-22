@@ -952,6 +952,15 @@ public:
 	void NextInventory();
 	void PrevInventory();
 	UFUNCTION(Exec) void SelectHand(int32 Index);
+	/** A hand key's press (SelectHand1..0): while the team prompt is up, a neutral
+	 * player's digit chooses a team instead of selecting the hand. */
+	void SelectHandPressed(int32 HandIndex);
+	/** Selects a held slot of the selected hand through SelectHand's own feedback
+	 * path (selection RPC, sound and hand message); other slots are ignored. */
+	void SelectSlot(int32 Index);
+	/** The movement input length a full forward stick produces in the current
+	 * state: 1, except in water, where the strokes stay below the clamp. */
+	float GetFullStickInputScale() const;
 	UFUNCTION(Exec) void NextHand();
 	UFUNCTION(Exec) void PrevHand();
 	UFUNCTION(Exec) void NextItem();
